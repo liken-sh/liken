@@ -1,18 +1,16 @@
 package main
 
-// The set-up and take-down verbs. A person confirms that they set a
-// resource up, such as a portable telescope carried out and polar
-// aligned, by writing the SetUp condition into the resource's status,
-// and a spec.requires that names SetUp holds a reservation until then.
-// The CLI shares no code with the operator, so it names the group, the
-// kinds, and the fields it writes here.
+// The set-up and take-down verbs write the SetUp condition into a
+// resource's status, so a person can say that a portable telescope was
+// carried out and polar aligned. A reservation whose resources list
+// SetUp in spec.requires waits for it. The CLI shares no code with the
+// operator, so this file repeats the API group, the kinds, and the
+// fields it writes.
 //
 // The write is a server-side apply to the status subresource. The CRD
-// lists the conditions as a map keyed by type, so the apply touches
-// the SetUp condition and status.setUpUntil and nothing the operator
-// writes, and the API server records the CLI as their manager. The
-// operator's status writer keeps both as they are, until SetUp
-// expires.
+// lists conditions as a map keyed by type, so the apply changes only
+// the SetUp condition and status.setUpUntil. The operator's status
+// writer leaves both as they are until SetUp expires.
 
 import (
 	"context"
@@ -34,25 +32,22 @@ const (
 	group      = "observatory.liken.sh"
 	apiVersion = group + "/v1alpha1"
 
-	// fieldManager names the CLI in the managedFields of the status it
-	// writes.
 	fieldManager = "kubectl-liken-observatory"
 
-	// The condition and its reasons, as the operator's observatory
-	// package names them.
+	// These match the operator's observatory package.
 	conditionSetUp  = "SetUp"
 	reasonSetUp     = "SetUp"
 	reasonTakenDown = "TakenDown"
 )
 
-// A kind that a person can set up: each kind with procedures, whose
-// spec.requires can name SetUp, and whose status has setUpUntil.
+// confirmable is a kind that a person can set up: a kind with
+// procedures, whose status has setUpUntil.
 type confirmable struct {
 	kind, plural string
 }
 
-// confirmables are the kinds the verbs accept, in the order of the
-// operator's tree.
+// confirmables lists the kinds the verbs accept, in the order of the
+// operator's kinds, which a test checks.
 var confirmables = []confirmable{
 	{"Observatory", "observatories"},
 	{"Telescope", "telescopes"},
@@ -71,8 +66,8 @@ var confirmables = []confirmable{
 	{"Receiver", "receivers"},
 }
 
-// kindNamed finds a kind the way kubectl does: by its name, its
-// singular, or its plural, in any case.
+// kindNamed finds a kind the way kubectl does, by its singular name
+// or its plural, in any letter case.
 func kindNamed(word string) (confirmable, error) {
 	lower := strings.ToLower(word)
 	for _, c := range confirmables {
@@ -80,10 +75,9 @@ func kindNamed(word string) (confirmable, error) {
 			return c, nil
 		}
 	}
-	return confirmable{}, fmt.Errorf("%q is not a kind that can be set up; use one of %s", word, strings.Join(kindWords(), ", "))
+	return confirmable{}, fmt.Errorf("%q is not a kind that can be set up, the kinds are %s", word, strings.Join(kindWords(), ", "))
 }
 
-// kindWords lists the kinds as a person types them.
 func kindWords() []string {
 	var words []string
 	for _, c := range confirmables {
@@ -96,7 +90,6 @@ func (c confirmable) resource() schema.GroupVersionResource {
 	return schema.GroupVersionResource{Group: group, Version: "v1alpha1", Resource: c.plural}
 }
 
-// The verbs' flags and their two positional arguments.
 type setUpOptions struct {
 	// Up is true for set-up and false for take-down.
 	Up         bool
@@ -106,8 +99,8 @@ type setUpOptions struct {
 	Now        time.Time
 }
 
-// parseUntil reads --until as a time in RFC 3339, or as a duration
-// from now, and answers nil when it is empty.
+// parseUntil reads --until as an RFC 3339 time or as a duration from
+// now. It returns nil when text is empty.
 func parseUntil(text string, now time.Time) (*time.Time, error) {
 	if text == "" {
 		return nil, nil
@@ -123,19 +116,20 @@ func parseUntil(text string, now time.Time) (*time.Time, error) {
 	return nil, fmt.Errorf("--until %q is neither a time such as 2026-10-13T04:30:00Z nor a duration such as 6h", text)
 }
 
-// setUpCondition answers the condition a verb writes. The transition
-// time moves when the status or the reason changes, so a take-down
-// after the operator expired the condition counts as the person's
-// answer to a notify action, and a second set-up in one night keeps
-// the time of the first, and so its dawn.
-func setUpCondition(up bool, who string, held map[string]any, now time.Time) map[string]any {
+// setUpCondition returns the condition a verb writes. It keeps the
+// current lastTransitionTime unless the status or the reason changes. The
+// operator expires SetUp at the first dawn after that time, so a second
+// set-up in one night does not extend it. A take-down after the
+// operator expired SetUp changes the reason, so it gets a new time, and
+// the operator reads that as the person's answer to a notify action.
+func setUpCondition(up bool, who string, current map[string]any, now time.Time) map[string]any {
 	status, reason, message := "True", reasonSetUp, "Set up by "+who
 	if !up {
 		status, reason, message = "False", reasonTakenDown, "Taken down by "+who
 	}
 	since := now.UTC().Truncate(time.Second).Format(time.RFC3339)
-	if held["status"] == status && held["reason"] == reason {
-		if was, ok := held["lastTransitionTime"].(string); ok {
+	if current["status"] == status && current["reason"] == reason {
+		if was, ok := current["lastTransitionTime"].(string); ok {
 			since = was
 		}
 	}
@@ -145,10 +139,9 @@ func setUpCondition(up bool, who string, held map[string]any, now time.Time) map
 	}
 }
 
-// setUpApply answers the object the verb applies: the SetUp condition,
-// and status.setUpUntil when the person gave one. A later apply with no
-// until removes the one an earlier apply wrote, because the CLI is its
-// manager.
+// setUpApply returns the object the verb applies. An apply without
+// --until removes the setUpUntil that an earlier apply wrote, because
+// the CLI manages that field.
 func setUpApply(c confirmable, namespace, name string, condition map[string]any, until *time.Time) *unstructured.Unstructured {
 	status := map[string]any{"conditions": []any{condition}}
 	if until != nil {
@@ -162,9 +155,7 @@ func setUpApply(c confirmable, namespace, name string, condition map[string]any,
 	}}
 }
 
-// heldSetUp answers the SetUp condition that the resource holds now,
-// or nil.
-func heldSetUp(object *unstructured.Unstructured) map[string]any {
+func currentSetUp(object *unstructured.Unstructured) map[string]any {
 	list, _, _ := unstructured.NestedSlice(object.Object, "status", "conditions")
 	for _, item := range list {
 		if c, ok := item.(map[string]any); ok && c["type"] == conditionSetUp {
@@ -174,8 +165,6 @@ func heldSetUp(object *unstructured.Unstructured) map[string]any {
 	return nil
 }
 
-// runSetUp checks the arguments, builds the clients, and writes the
-// condition.
 func runSetUp(ctx context.Context, getter genericclioptions.RESTClientGetter, opts setUpOptions, stdout, stderr io.Writer) error {
 	verb := takeDownVerb
 	if opts.Up {
@@ -202,9 +191,8 @@ func runSetUp(ctx context.Context, getter genericclioptions.RESTClientGetter, op
 	return writeSetUp(ctx, c, kind, opts, until, stdout, stderr)
 }
 
-// writeSetUp reads the operator's version and warns or refuses on
-// drift, reads the resource for the condition it holds, and applies
-// the new one.
+// writeSetUp warns or refuses when the operator's version differs from
+// the CLI's, then applies the new SetUp condition.
 func writeSetUp(ctx context.Context, c clients, kind confirmable, opts setUpOptions, until *time.Time, stdout, stderr io.Writer) error {
 	operator, err := operatorVersion(ctx, c.typed)
 	if err != nil {
@@ -224,10 +212,9 @@ func writeSetUp(ctx context.Context, c clients, kind confirmable, opts setUpOpti
 	if err != nil {
 		return err
 	}
-	condition := setUpCondition(opts.Up, person(ctx, c, opts.By), heldSetUp(object), opts.Now)
-	// The apply forces, because the operator's write of an expiry
-	// makes it a manager of the condition's fields, and the person's
-	// word replaces it.
+	condition := setUpCondition(opts.Up, person(ctx, c, opts.By), currentSetUp(object), opts.Now)
+	// Force takes the condition's fields back from the operator, which
+	// manages them after it writes an expiry.
 	if _, err := resources.Apply(ctx, opts.Name, setUpApply(kind, c.namespace, opts.Name, condition, until),
 		metav1.ApplyOptions{FieldManager: fieldManager, Force: true}, "status"); err != nil {
 		return err

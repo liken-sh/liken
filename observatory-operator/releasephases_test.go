@@ -1,8 +1,8 @@
 package main
 
-// A device that a release stops reports Disconnecting from its
-// disconnect until its pod is gone, and then Idle. Starting would say
-// that something brings it up.
+// When a release stops a device, the device reports Disconnecting from
+// its disconnect until its pod is gone, and then Idle. It never reports
+// Starting, because nothing is starting it.
 
 import (
 	"slices"
@@ -14,8 +14,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// holdPod gives a pod a finalizer, so a delete leaves it terminating,
-// as a kubelet does while the containers stop.
+// holdPod adds a finalizer to a pod, so that a delete leaves it
+// terminating, as a real pod is while the kubelet stops its containers.
 func (w *world) holdPod(name string) {
 	object, _ := w.api.object(podsCollection, name)
 	object["metadata"].(map[string]any)["finalizers"] = []any{"test.liken.sh/hold"}
@@ -24,7 +24,7 @@ func (w *world) holdPod(name string) {
 	w.api.mu.Unlock()
 }
 
-// releasePod removes a held pod that a delete left terminating.
+// releasePod removes a pod that holdPod kept terminating.
 func (w *world) releasePod(name string) {
 	object, _ := w.api.object(podsCollection, name)
 	w.api.mu.Lock()
@@ -32,9 +32,10 @@ func (w *world) releasePod(name string) {
 	w.api.mu.Unlock()
 }
 
-// The camera's driver stops on the server that keeps running for the
-// Switch, 10 seconds after the operator asks, and the dome's pod
-// stops at StopSite, terminating for 10 seconds.
+// The shim applies each driver change 10 seconds late, so the camera's
+// driver stops 10 seconds after the operator asks, on a server that
+// keeps running for the Switch. The dome's pod stays terminating for
+// 10 seconds after StopSite deletes it.
 func TestAReleasedDeviceIsNeverStarting(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -67,11 +68,12 @@ func TestAReleasedDeviceIsNeverStarting(t *testing.T) {
 	})
 }
 
-// A device that its server no longer runs names no server and no INDI
-// device: a client that reads the endpoint of an Idle device would
-// dial a server that is gone. The filter wheel that the camera serves
-// leaves with the camera's pod.
-func TestAReleasedDeviceNamesNoServer(t *testing.T) {
+// After a release, a device reports no endpoint, INDI device, pod, or
+// node, because a client that dialed the endpoint of an Idle device
+// would reach a server that no longer exists. The filter wheel is
+// served by the camera's pod, so it loses them when that pod is
+// deleted.
+func TestAReleasedDeviceHasNoServer(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
@@ -81,21 +83,20 @@ func TestAReleasedDeviceNamesNoServer(t *testing.T) {
 		w.settle()
 		camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
 		if s := camera.Status; s.Phase != observatory.DeviceIdle || s.Endpoint != nil || s.IndiDevice != "" || s.Pod != "" || s.Node != "" {
-			t.Errorf("the released camera = %s on %q at %+v, pod %q on %q", s.Phase, s.IndiDevice, s.Endpoint, s.Pod, s.Node)
+			t.Errorf("the released camera has phase %s, INDI device %q, endpoint %+v, pod %q, node %q, want Idle with none of the others", s.Phase, s.IndiDevice, s.Endpoint, s.Pod, s.Node)
 		}
 		wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
 		if s := wheel.Status; s.Phase != observatory.DeviceIdle || s.Endpoint != nil || s.IndiDevice != "" || s.Slot != nil {
-			t.Errorf("the released filter wheel = %s on %q at %+v, slot %+v", s.Phase, s.IndiDevice, s.Endpoint, s.Slot)
+			t.Errorf("the released filter wheel has phase %s, INDI device %q, endpoint %+v, slot %+v, want Idle with none of the others", s.Phase, s.IndiDevice, s.Endpoint, s.Slot)
 		}
 	})
 }
 
-// A device names the server whose pod holds it while that pod runs,
-// and no server once the pod stops, because its driver stopped on that
-// server before the delete. The hold keeps the pod of the deleted
-// focuser terminating, and the finalizer keeps the focuser until the
-// pod is gone.
-func TestADeviceWhosePodStopsNamesNoServer(t *testing.T) {
+// A device reports no endpoint once its pod is terminating, because its
+// driver stopped before the operator deleted the pod. The focuser's
+// finalizer keeps it in the API while holdPod keeps its pod
+// terminating.
+func TestADeviceWhosePodStopsHasNoServer(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
@@ -109,16 +110,17 @@ func TestADeviceWhosePodStopsNamesNoServer(t *testing.T) {
 
 		focuser, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), "east")
 		if s := focuser.Status; s.Endpoint != nil {
-			t.Errorf("the focuser = %s at %+v, want no endpoint", s.Phase, s.Endpoint)
+			t.Errorf("the focuser in phase %s has endpoint %+v, want none", s.Phase, s.Endpoint)
 		}
 	})
 }
 
 // A person deletes the reservation and its OpticalTrain in one
-// command. The devices of the train stay, and their pods are the only
-// record of the server they ran on. The Disconnect step disconnects
-// them there, and each one reads Disconnecting from then until its pod
-// is gone, and Idle after that, with no Starting phase or Event.
+// command. The train's devices remain, and their pods are the only
+// record of which server they ran on, so the Disconnect step
+// disconnects them there. Each device reports Disconnecting until its
+// pod is gone and Idle after that, with no Starting phase and no
+// Starting Event.
 func TestADeviceWhoseTrainIsDeletedIsNeverStarting(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

@@ -1,36 +1,40 @@
 package main
 
-// An operator runs the observatory of one namespace, and the process
-// runs one for each namespace that holds one (namespaces.go). Each runs
-// five kinds of goroutine on the stores of the watches (watch.go):
+// An operator runs the observatory of one namespace. namespaces.go
+// starts one for each namespace that has objects. Each operator runs
+// these goroutines, which read the stores that the watches fill
+// (watch.go):
 //
-//   - The supervisor below starts a runner for each Reservation that
-//     has work left, opens an INDI connection to each server pod
-//     (indiconn.go) and a connection to each guider's PHD2
+//   - The supervisor (run and supervise below) starts a runner for each
+//     Reservation that has work left, opens an INDI connection to each
+//     server pod (indiconn.go) and a connection to each guider's PHD2
 //     (guiderconn.go), and deletes the pods of a server that no
-//     reservation holds.
-//   - One runner for each Reservation runs its steps in order
+//     Reservation holds.
+//   - A runner for each Reservation executes its steps in order
 //     (reservation.go).
 //   - The status writer writes the status of every other resource
 //     (status.go).
-//   - The lock relay sends each park state that a lock policy needs to
+//   - The lock relay copies the park state that a lock policy needs to
 //     the other INDI servers (locks.go).
-//   - The trigger controller runs the procedures of every trigger in
+//   - The trigger controller runs the procedures of the triggers in
 //     spec.triggers (triggers.go).
 //
-// They wait on two bells. changed rings on every watch event, every
-// INDI event, and every change a guider's PHD2 reports. structure rings
-// on the same events except an INDI property's update and a device's
-// message, which a mount that tracks sends several times a second, and
-// except a PHD2 change other than its connection or its equipment, such
-// as a guide step each second. The status writer, the lock relay, and
-// the steps that wait for a property's value wait on changed. The
-// supervisor, a runner that keeps a Ready telescope, and a runner that
-// waits for its turn, its retry, or its end read only the stores and
-// the devices that each server defines, so they wait on structure.
-// The trigger controller reads only the stored conditions and the
-// records of runs and activity, and each change of a record rings
-// structure, so it waits on structure too.
+// Each goroutine waits on one of two change notifiers (watch.go) and
+// reads the stores again when it is notified. changed is notified on
+// every watch event, every INDI event, and every change that a
+// guider's PHD2 reports. structure is notified on the same events
+// except the ones that arrive often: an update to an INDI property, an
+// INDI message, and a PHD2 change that leaves the connection and the
+// equipment as they were, such as a guide step. Each notification of
+// structure also notifies changed.
+//
+// The status writer, the lock relay, and a step that waits for a
+// property value wait on changed, because they show or test property
+// values. The supervisor, the trigger controller, and a runner that
+// waits for a turn, a retry, an end, or a Ready telescope wait on
+// structure, because nothing they read changes on a property update.
+// So a tracking mount that reports its position many times a second
+// does not wake them.
 
 import (
 	"context"
@@ -52,87 +56,86 @@ type operator struct {
 	namespace string
 	client    *apiclient.Client
 	stores    *stores
-	changed   *bell
-	// structure also rings changed.
-	structure *bell
-	// dialer opens each INDI connection and each connection to a
+	changed   *changeNotifier
+	structure *changeNotifier
+	// dialer opens the INDI connections and the connections to each
 	// guider's PHD2. Nil dials the network.
 	dialer indi.Dialer
 	// logs receives the operator's log (logs.go): standard error in a
-	// pod, and a buffer in a test that reads what the log says.
+	// pod, a buffer in a test.
 	logs io.Writer
 	// recorder posts the Events (events.go). Nil posts none.
 	recorder *events.Recorder
 	// series sets the namespace's Prometheus series (series.go).
 	series *namespaceSeries
 
-	servers *servers
-	// guiderConns holds the connection to each guider's PHD2.
+	servers     *servers
 	guiderConns *guiderConns
 	claims      *claims
-	// versions records the version of each reservation that the
-	// operator wrote or read last, so a runner never acts on an older
-	// copy from a store (informer.ReadOne).
+	// versions records the newest version of each reservation that the
+	// operator wrote or read, so a runner never acts on an older copy
+	// from a store (informer.ReadOne).
 	versions *memo.Versions
-	// serverDrivers records the devices that the operator wrote last on
-	// each server's pod (serverdrivers.go).
+	// serverDrivers records the devices that the operator last wrote
+	// to each server's pod (serverdrivers.go).
 	serverDrivers driversMemo
 
-	// locks records what the lock relay sent (locks.go).
+	// locks records what the lock relay last sent (locks.go).
 	locks lockMemo
 
-	// runs records the runs of every procedure (runs.go), and activity
-	// the Active state of each Telescope and Observatory (activity.go).
+	// runs records the runs of every procedure (runs.go). activity
+	// records the Active state of each Telescope and Observatory
+	// (activity.go).
 	runs     *runRecords
 	activity *activity
-	// seeded is set once the claims, the runs, and the activity are
-	// read from the stored statuses. The status writer writes no status
-	// before then, so it never writes an empty record over a stored
-	// one.
-	seeded atomic.Bool
+	// loaded is set once claims, runs, and activity are loaded from the
+	// stored statuses. The status writer and the trigger controller
+	// wait for it, so the status writer never overwrites a stored
+	// record with an empty one.
+	loaded atomic.Bool
 
 	mu      sync.Mutex
 	runners map[string]*runner
 	// running counts the runners' goroutines, so a stop waits for each.
 	running sync.WaitGroup
-	// faults holds the last failure of each device by its key, such as
-	// Camera/east-main, for the device's status.
+	// faults holds the last failure of each device, by device key such
+	// as Camera/east-main, for the device's status.
 	faults map[string]string
-	// verdicts holds, by the key of each resource, the last verdict on
-	// whether its INDI device serves the resource's interface
-	// (interfaces.go). It is a cache of what the device defined, and of
-	// what the operator wrote to it.
-	verdicts map[string]verdict
-	// sites serializes the work on each observatory's server, which
-	// the runners of several telescopes share.
+	// interfaceChecks caches, by resource key, whether the resource's INDI
+	// device serves the resource's interface (interfaces.go). The
+	// cache is built from what the device defined and from what the
+	// operator wrote to it.
+	interfaceChecks map[string]interfaceCheck
+	// sites holds one lock for each observatory's server, so that the
+	// runners of several telescopes work on the shared server one at a
+	// time.
 	sites map[string]lock
 
 	// snapshotMu guards last, the tree that snapshot built, and
-	// lastVersion, the version of the stores it read.
+	// lastVersion, the stores version that the tree was built from.
 	snapshotMu  sync.Mutex
 	last        *tree
 	lastVersion uint64
 }
 
 func newOperator(namespace string, client *apiclient.Client, dialer indi.Dialer) *operator {
-	changed := newBell(nil)
+	changed := newChangeNotifier(nil)
 	o := &operator{
-		namespace: namespace,
-		client:    client,
-		changed:   changed,
-		structure: newBell(changed),
-		dialer:    dialer,
-		logs:      os.Stderr,
-		claims:    newClaims(),
-		versions:  memo.New(),
-		runners:   map[string]*runner{},
-		faults:    map[string]string{},
-		verdicts:  map[string]verdict{},
-		sites:     map[string]lock{},
+		namespace:       namespace,
+		client:          client,
+		changed:         changed,
+		structure:       newChangeNotifier(changed),
+		dialer:          dialer,
+		logs:            os.Stderr,
+		claims:          newClaims(),
+		versions:        memo.New(),
+		runners:         map[string]*runner{},
+		faults:          map[string]string{},
+		interfaceChecks: map[string]interfaceCheck{},
+		sites:           map[string]lock{},
 	}
-	// A run or an activity that changes rings structure, which also
-	// rings changed, so the trigger controller wakes on structure and
-	// an INDI reading does not wake it.
+	// The trigger controller waits on structure, so a change to a run or
+	// to activity notifies structure.
 	o.runs = newRunRecords(o.structure)
 	o.activity = newActivity(o.structure)
 	o.servers = newServers(o)
@@ -140,16 +143,13 @@ func newOperator(namespace string, client *apiclient.Client, dialer indi.Dialer)
 	return o
 }
 
-// snapshot reads the stores. Every goroutine wakes on each ring of its
-// bell and reads the stores, but most rings come from INDI events,
-// which change no store. So the goroutines share one tree until a
-// store changes (stores.version). A tree reads every object of 22
-// collections, and a tree for each ring would repeat that work about
-// ten times a second while a mount tracks.
+// snapshot returns a tree of every object in the stores. Most
+// notifications come from INDI events, which change no store, so snapshot caches the
+// tree and builds it again only when stores.version changes.
 func (o *operator) snapshot() *tree {
-	// The version is read before the stores. A change that lands
-	// between the two moves the version, so the next call reads the
-	// stores again.
+	// Read the version before the stores. A store change between the
+	// two reads moves the version, so the next call builds the tree
+	// again.
 	version := o.stores.version.Load()
 	o.snapshotMu.Lock()
 	defer o.snapshotMu.Unlock()
@@ -159,7 +159,7 @@ func (o *operator) snapshot() *tree {
 	return o.last
 }
 
-// siteLock answers the lock of one observatory's server.
+// siteLock returns the lock for the server of the named observatory.
 func (o *operator) siteLock(name string) lock {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -187,9 +187,9 @@ func (o *operator) faultOf(d *device) string {
 	return o.faults[d.key()]
 }
 
-// run supervises the namespace's observatory until ctx ends. The
-// stores belong to the process, which rings structure on each change
-// (namespaces.go).
+// run supervises the namespace's observatory until ctx ends.
+// namespaces.go owns the stores and notifies structure on each store
+// change.
 func (o *operator) run(ctx context.Context, s *stores) {
 	o.stores = s
 	var group sync.WaitGroup
@@ -203,21 +203,21 @@ func (o *operator) run(ctx context.Context, s *stores) {
 		o.running.Wait()
 		o.series.forget()
 	}()
-	seeded := false
+	loaded := false
 	for {
 		wake := o.structure.wait()
 		if o.stores.ready() {
 			t := o.snapshot()
-			if !seeded {
-				// The holders of each telescope come from the status of
-				// each reservation, before any runner can take one, and
-				// the runs and the activity come from the stored
-				// statuses, before any runner or trigger runs.
-				o.claims.seed(t)
-				o.runs.seed(t)
-				o.activity.seed(t, o.claims)
-				seeded = true
-				o.seeded.Store(true)
+			if !loaded {
+				// Load the telescope holders from the reservation statuses
+				// before any runner can claim a telescope, and load the
+				// runs and activity from the stored statuses before any
+				// runner or trigger runs.
+				o.claims.load(t)
+				o.runs.load(t)
+				o.activity.load(t, o.claims)
+				loaded = true
+				o.loaded.Store(true)
 				o.changed.notify()
 			}
 			began := time.Now()
@@ -232,9 +232,10 @@ func (o *operator) run(ctx context.Context, s *stores) {
 	}
 }
 
-// supervise starts the runners and the INDI connections that the tree
-// needs, and stops the pods that no reservation holds. It logs each
-// failure, and answers the failures for the pass's metrics.
+// supervise starts the runners, the INDI connections, and the PHD2
+// connections that the tree needs, and deletes the objects of servers
+// that no reservation holds. It logs each failure and returns them
+// joined, so that run counts the pass as failed.
 func (o *operator) supervise(ctx context.Context, t *tree) error {
 	for _, r := range t.reservations {
 		if finished(r) && r.Status.ObservedGeneration == r.Metadata.Generation {
@@ -248,7 +249,7 @@ func (o *operator) supervise(ctx context.Context, t *tree) error {
 	o.servers.sync(ctx, t)
 	o.guiderConns.sync(ctx, t)
 	held := o.heldServers(t)
-	problems := []error{o.sweep(t, held), o.releaseDevices(t, held), o.keepParents(t)}
+	problems := []error{o.sweep(t, held), o.releaseDevices(t, held), o.syncParentFinalizers(t)}
 	for _, err := range problems {
 		if err != nil {
 			o.logf("%v", err)
@@ -257,11 +258,10 @@ func (o *operator) supervise(ctx context.Context, t *tree) error {
 	return joinErrors(problems)
 }
 
-// finished reports whether a reservation has no steps left: it is
-// Released and holds no finalizer, or it is gone from the API server
-// apart from its finalizer-free deletion. A finished reservation that a
-// person edits still gets a runner, which records the edit's
-// generation and stops (runner.run).
+// finished reports whether a reservation has no steps left: its phase
+// is Released and it has no finalizer. supervise still starts a runner
+// for a finished reservation that a person edited, so that the runner
+// records the new observedGeneration and stops (runner.run).
 func finished(r *observatory.Reservation) bool {
 	return r.Status.Phase == observatory.ReservationReleased && !hasFinalizer(r)
 }
@@ -279,20 +279,20 @@ func (o *operator) startRunner(ctx context.Context, r *observatory.Reservation) 
 		o.mu.Lock()
 		delete(o.runners, r.Metadata.UID)
 		o.mu.Unlock()
-		// The next pass starts a runner again if the reservation still
-		// has work, such as after a retry.
+		// The next pass starts a new runner if the reservation still has
+		// work, such as after a retry.
 		o.structure.notify()
 	})
 }
 
 // sweep deletes the pods, claims, Services, and ConfigMaps of each
-// server that no reservation holds. A runner deletes them itself at the
-// end of deactivation, so the sweep finds them only when a reservation
-// went away without deactivation, such as one whose finalizer a person
-// removed. The deletes go out in stopServer's order, the objects of the
-// devices before the servers' own, so no device's container starts
-// again while its server stops. A delete that the API server refuses is
-// not sent again here: the next pass finds the object and sends it.
+// server that no reservation holds. A runner deletes them at the end
+// of deactivation, so sweep finds objects only when a reservation went
+// away without deactivating, such as when a person removed its
+// finalizer. Like stopServer, it deletes the device objects before the
+// server's own, so that no device container restarts while its server
+// stops. It does not retry a refused delete, because the next pass
+// finds the object again.
 func (o *operator) sweep(t *tree, held map[string]bool) error {
 	unheld := func(l map[string]string) bool { return !held[l[labelServer]] }
 	servers := func(l map[string]string) bool { return unheld(l) && l[labelRole] == roleServer }
@@ -303,8 +303,9 @@ func (o *operator) sweep(t *tree, held map[string]bool) error {
 	return joinErrors(problems)
 }
 
-// heldServers answers the names of the servers that a reservation
-// holds: the server of each held telescope and of its observatory.
+// heldServers returns the names of the servers that a reservation
+// holds: the server of each held telescope and of that telescope's
+// observatory.
 func (o *operator) heldServers(t *tree) map[string]bool {
 	held := map[string]bool{}
 	for telescope := range o.claims.held() {
@@ -316,18 +317,18 @@ func (o *operator) heldServers(t *tree) map[string]bool {
 	return held
 }
 
-// The pause before a refused write is sent again. It is a backoff
-// clock, the one timer around a write: it spaces the tries while the API
-// server refuses them, such as while it restarts, and it reads no state.
-// It doubles from writeFirst to writeLimit.
+// After a refused write, send waits writeFirst, and doubles the wait up
+// to writeLimit for each further refusal. The wait only spaces the
+// retries while the API server refuses writes, such as during its
+// restart, and reads no state.
 const (
 	writeFirst = time.Second
 	writeLimit = 30 * time.Second
 )
 
-// send sends one write until the API server takes it, or until ctx
-// ends. report receives each refusal, so the step's message names it,
-// and the step's deadline ends the tries.
+// send calls write until it succeeds or ctx ends. When ctx ends first,
+// it returns the last error, prefixed with what. report, when not nil,
+// receives each retry message so that the step's status shows it.
 func (o *operator) send(ctx context.Context, report func(string), what string, write func() error) error {
 	pause := writeFirst
 	for {
@@ -351,10 +352,11 @@ func (o *operator) send(ctx context.Context, report func(string), what string, w
 	}
 }
 
-// waitFor waits until check reports done, rereading the stores after
-// each change of a watch or of an INDI server, or until ctx ends. It
-// holds no timer: each wait ends on an event. report receives what
-// check says it waits for, each time that text changes.
+// waitFor calls check on a fresh snapshot each time changed is notified,
+// until check reports done or an error, or ctx ends. It sets no timer
+// of its own, so a deadline comes from ctx. report, when not nil,
+// receives check's description of what it waits for, each time that
+// description changes.
 func (o *operator) waitFor(ctx context.Context, report func(string), check func(*tree) (bool, string, error)) error {
 	last := ""
 	for {
@@ -375,8 +377,9 @@ func (o *operator) waitFor(ctx context.Context, report func(string), check func(
 	}
 }
 
-// sleepUntil waits until a time, or until a change, or until ctx ends.
-// The timer is a clock: the moment that a reservation's spec names.
+// sleepUntil waits until when, until structure is notified, or until ctx
+// ends. The timer is a clock for a time that a reservation's spec
+// sets.
 func (o *operator) sleepUntil(ctx context.Context, when time.Time) {
 	wake := o.structure.wait()
 	timer := time.NewTimer(time.Until(when))
@@ -388,9 +391,9 @@ func (o *operator) sleepUntil(ctx context.Context, when time.Time) {
 	}
 }
 
-// awaitChangeOr waits for a ring of the bell that wake came from, for
-// ctx to end, or for a time, when the time is not zero. The timer is a
-// clock: the dawn that ends a gate's wait (requires.go).
+// awaitChangeOr waits for wake to fire, for ctx to end, or for when to
+// pass. A zero when sets no time limit. The timer is a clock for the
+// dawn that ends a gate's wait (requires.go).
 func awaitChangeOr(ctx context.Context, wake <-chan struct{}, when time.Time) {
 	var at <-chan time.Time
 	if !when.IsZero() {

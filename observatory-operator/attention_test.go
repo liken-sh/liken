@@ -11,11 +11,11 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The deactivation asks a person to cover the telescope and goes on at
-// once: the reservation releases, the telescope's AttentionNeeded turns
-// True with the request, and its transition posts one Warning. When
-// the person takes the telescope down, the condition clears.
-func TestANotifyAsksAPersonAndNeverWaits(t *testing.T) {
+// A notify action does not wait for the person. The reservation
+// releases at once, the telescope's AttentionNeeded turns True with the
+// request, and that transition posts one Warning Event. When the person
+// takes the telescope down, the condition turns False.
+func TestANotifyDoesNotWaitForThePerson(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -29,18 +29,18 @@ func TestANotifyAsksAPersonAndNeverWaits(t *testing.T) {
 		time.Sleep(time.Hour)
 		r := w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
 		if s := stepOf(r, observatory.StepDeactivation); !slices.ContainsFunc(s.Actions, func(a observatory.StepAction) bool {
-			return a.Kind == observatory.TelescopeKind.Name && a.Action == "notify: "+request && a.State == observatory.StepDone && a.Summary == "Asked: "+request
+			return a.Kind == observatory.TelescopeKind.Name && a.Action == "notify: "+request && a.State == observatory.StepDone && a.Summary == "Notified: "+request
 		}) {
-			t.Errorf("Deactivation = %s", stepText(s))
+			t.Errorf("the Deactivation step is %s, want a done notify action that reports %q", stepText(s), "Notified: "+request)
 		}
 		time.Sleep(2 * statusWindow)
 		synctest.Wait()
 		if c := w.conditionOn(observatory.TelescopeKind, "east", observatory.ConditionAttentionNeeded); c.Status != observatory.ConditionTrue ||
 			c.Reason != observatory.ReasonNotified || c.Message != request {
-			t.Errorf("AttentionNeeded = %+v", c)
+			t.Errorf("AttentionNeeded is %+v, want True Notified with the message %q", c, request)
 		}
 		if got, want := w.eventsWith(observatory.TelescopeKind, "east", observatory.ReasonNotified), []string{"Warning Notified: " + request + " x1"}; !slices.Equal(got, want) {
-			t.Errorf("Events = %v, want %v", got, want)
+			t.Errorf("the Events are %v, want %v", got, want)
 		}
 
 		time.Sleep(time.Minute)
@@ -49,15 +49,16 @@ func TestANotifyAsksAPersonAndNeverWaits(t *testing.T) {
 		synctest.Wait()
 		if c := w.conditionOn(observatory.TelescopeKind, "east", observatory.ConditionAttentionNeeded); c.Status != observatory.ConditionFalse ||
 			c.Reason != observatory.ReasonAcknowledged || c.Message != "Taken down by stargazer" {
-			t.Errorf("AttentionNeeded after the take-down = %+v", c)
+			t.Errorf("after the take-down, AttentionNeeded is %+v, want False Acknowledged with the message \"Taken down by stargazer\"", c)
 		}
 	})
 }
 
 // A telescope whose only procedure is the deactivation's notify has no
-// activation run, so its next activation clears the request from the
-// telescope's Active condition. The deactivation that follows asks
-// again.
+// activation run, so the status writer takes the start of the next
+// activation from the telescope's Active condition, and that start
+// turns the request False. The deactivation that follows sends the
+// request again.
 func TestTheNextActivationClearsARequest(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -81,28 +82,28 @@ func TestTheNextActivationClearsARequest(t *testing.T) {
 		time.Sleep(time.Hour)
 		w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
 		if got := attention(); got != "True Notified" {
-			t.Errorf("AttentionNeeded after the first night = %s", got)
+			t.Errorf("after the first night, AttentionNeeded is %q, want \"True Notified\"", got)
 		}
 		night("east-again")
 		if got := attention(); got != "False Activated" {
-			t.Errorf("AttentionNeeded after the next activation = %s", got)
+			t.Errorf("after the next activation, AttentionNeeded is %q, want \"False Activated\"", got)
 		}
 		time.Sleep(time.Hour)
 		w.phase("east-again", observatory.ReservationReleased, 10*time.Minute)
 		if got := attention(); got != "True Notified" {
-			t.Errorf("AttentionNeeded after the second night = %s", got)
+			t.Errorf("after the second night, AttentionNeeded is %q, want \"True Notified\"", got)
 		}
 	})
 }
 
-// A person who takes the telescope down and sets it up again answers
-// the request, and the next activation clears it. When that activity
-// ends, the older answer is no news. The mount's deactivation runs
-// before the telescope's, so while the mount's Job runs, the telescope
-// is not Active and its notify has not asked yet. AttentionNeeded keeps
-// the reason Activated until the notify asks again, and each change
-// posts one Event.
-func TestTheEndOfAnActivityIsNoAnswer(t *testing.T) {
+// A person takes the telescope down and sets it up again, which
+// acknowledges the request, and then the next activation clears it.
+// When that activity ends, the older SetUp must not post a new
+// Acknowledged transition. The mount's deactivation runs before the
+// telescope's. While the mount's Job runs, the telescope is not Active
+// and its notify has not run yet, so AttentionNeeded keeps the reason
+// Activated until the notify runs again. Each change posts one Event.
+func TestTheEndOfAnActivityIsNotAnAcknowledgment(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -136,12 +137,12 @@ func TestTheEndOfAnActivityIsNoAnswer(t *testing.T) {
 		w.api.holdJobs()
 		time.Sleep(time.Hour)
 		if got := attention(); got != "False Activated" {
-			t.Errorf("AttentionNeeded while the deactivation runs = %s", got)
+			t.Errorf("while the deactivation runs, AttentionNeeded is %q, want \"False Activated\"", got)
 		}
 		w.api.completeJob(jobNamed(t, w, "mount-east-deactivation-").Metadata.Name)
 		w.phase("east-again", observatory.ReservationReleased, 10*time.Minute)
 		if got := attention(); got != "True Notified" {
-			t.Errorf("AttentionNeeded after the second night = %s", got)
+			t.Errorf("after the second night, AttentionNeeded is %q, want \"True Notified\"", got)
 		}
 		got := w.eventsWith(observatory.TelescopeKind, "east",
 			observatory.ReasonNotified, observatory.ReasonAcknowledged, observatory.ReasonActivated)
@@ -152,19 +153,19 @@ func TestTheEndOfAnActivityIsNoAnswer(t *testing.T) {
 			"Warning Notified: " + request + " x1",
 		}
 		if !slices.Equal(got, want) {
-			t.Errorf("Events = %v, want %v", got, want)
+			t.Errorf("the Events are %v, want %v", got, want)
 		}
 	})
 }
 
-// at answers a pointer to a time, for the records below.
+// at returns a pointer to a time on one day, at the given hour.
 func at(hour int) *time.Time {
 	t := time.Date(2026, 10, 12, hour, 0, 0, 0, time.UTC)
 	return &t
 }
 
-// notified is the record of a deactivation run that asked a person to
-// cover the telescope at an hour.
+// notified returns a deactivation run whose notify action finished at
+// the given hour.
 func notified(hour int) observatory.ProcedureRun {
 	return observatory.ProcedureRun{Trigger: observatory.TriggerDeactivation, StartTime: at(hour), Actions: []observatory.ActionRun{
 		{Action: "notify: Cover the telescope", State: observatory.StepDone, StartTime: at(hour), StopTime: at(hour)},
@@ -179,20 +180,22 @@ func setUpAt(hour int, reason string) []observatory.Condition {
 	return []observatory.Condition{{Type: observatory.ConditionSetUp, Status: observatory.ConditionTrue, Reason: reason, LastTransitionTime: *at(hour)}}
 }
 
-// takenDownAt is a person's take-down at an hour, with the message the
-// plugin writes, or with none.
+// takenDownAt returns a SetUp condition that a person turned False at
+// the given hour, with the message that the CLI in cli/setup.go writes,
+// or with none.
 func takenDownAt(hour int, message string) []observatory.Condition {
 	return []observatory.Condition{{Type: observatory.ConditionSetUp, Status: observatory.ConditionFalse, Reason: observatory.ReasonTakenDown,
 		Message: message, LastTransitionTime: *at(hour)}}
 }
 
-// clearedAt is a stored AttentionNeeded that turned False at an hour.
+// clearedAt returns a stored AttentionNeeded that turned False at the
+// given hour.
 func clearedAt(hour int) observatory.Condition {
 	return observatory.Condition{Type: observatory.ConditionAttentionNeeded, Status: observatory.ConditionFalse,
 		Reason: observatory.ReasonActivated, Message: "The activation began after the request", LastTransitionTime: *at(hour)}
 }
 
-func TestAttentionClearsWhenAPersonAnswersOrTheNextActivationBegins(t *testing.T) {
+func TestAttentionClearsWhenAPersonAcknowledgesOrTheNextActivationBegins(t *testing.T) {
 	cases := []struct {
 		name   string
 		runs   []observatory.ProcedureRun
@@ -217,7 +220,7 @@ func TestAttentionClearsWhenAPersonAnswersOrTheNextActivationBegins(t *testing.T
 			"False Activated The activation began after the request"},
 		{"a request that an activity cleared before it ended", []observatory.ProcedureRun{notified(5)}, []observatory.Condition{clearedAt(20)}, nil,
 			"False Activated The activation began after the request"},
-		{"an answer before the activity that cleared the request", []observatory.ProcedureRun{notified(2)},
+		{"a set-up before the activity that cleared the request", []observatory.ProcedureRun{notified(2)},
 			append(setUpAt(6, observatory.ReasonSetUp), clearedAt(3)), nil,
 			"False Activated The activation began after the request"},
 		{"a request after the condition cleared", []observatory.ProcedureRun{notified(21)}, []observatory.Condition{clearedAt(20)}, nil,

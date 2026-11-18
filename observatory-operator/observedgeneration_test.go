@@ -1,8 +1,8 @@
 package main
 
 // A reservation's status.observedGeneration follows each edit of its
-// spec, in every phase where the runner runs no step, so a client such
-// as `kubectl wait` can tell that the operator read the edit.
+// spec in every phase where no step runs, so a client such as
+// `kubectl wait` can tell that the operator read the edit.
 
 import (
 	"testing"

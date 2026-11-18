@@ -220,7 +220,7 @@ runner for each `Reservation` (`reservation.go`, `activation.go`,
 `leaves.go`, `finish.go`, `editspending.go`, the guider's
 `guidersteps.go` and `guidersteady.go`, and the gates of
 `spec.requires` in `requires.go`, which end at the dawn of `dawn.go`),
-the status writer (`status.go`, `statustree.go`, `standing.go`,
+the status writer (`status.go`, `statustree.go`, `serveruse.go`,
 `readings.go`, `guiderstatus.go`, and `devicesplit.go` and
 `typedstatus.go`, which give each property of an INDI device to one
 resource's status, and `setup.go` and `attention.go`, which keep a
@@ -239,9 +239,10 @@ a device that another resource's driver serves, `interfaces.go` what
 the operator does with each INDI interface and how it detects one,
 `settings.go` the Configure step's write of each setting in a
 spec, and `fitskeywords.go` its write of the declared FITS keywords
-that the session recorded. Each of them waits on a bell and reads the watches' stores again. `changed`
-rings on every watch event, every INDI event, and every change that a
-PHD2 reports, and `structure` on the same events except an INDI
+that the session recorded. Each goroutine waits on a `changeNotifier`
+(`watch.go`) and reads the watches' stores again when it is notified.
+`changed` is notified on every watch event, every INDI event, and every
+change that a PHD2 reports, and `structure` on the same events except an INDI
 property's update or message, and except a PHD2 change other than its
 connection or its equipment. The
 status writer, the lock relay, and the waits for a property's value

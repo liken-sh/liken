@@ -7,11 +7,11 @@ import (
 	"testing/synctest"
 )
 
-// INDI::CCD writes the FILTER keyword from the slot and the names that
-// it snoops from the device that ACTIVE_FILTER names. The CCD simulator
-// names itself there, and indiserver routes a snooped property to the
-// driver that sent it, so a camera with its own wheel names its filter
-// in each frame.
+// INDI::CCD writes the FILTER keyword from FILTER_SLOT and from the
+// FILTER_NAME that it snoops from the device named in ACTIVE_FILTER.
+// The CCD simulator names itself there, and indiserver delivers a
+// driver's snooped property back to that driver, so a camera that has
+// its own filter wheel writes the filter name into each frame.
 func TestCameraFrameNamesTheFilterOfItsOwnWheel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server := connectedDevice(t, "ccd")
@@ -20,7 +20,7 @@ func TestCameraFrameNamesTheFilterOfItsOwnWheel(t *testing.T) {
 			t.Fatalf("ACTIVE_FILTER = %q, want the camera itself, %q", filter.Text, server.device)
 		}
 		if err := c.EnableBLOB(server.device, "CCD1", BLOBAlso); err != nil {
-			t.Fatal(err)
+			t.Fatalf("enabling BLOBs of CCD1: %v", err)
 		}
 		// An 8 by 8 frame keeps the recorded BLOB small.
 		mustSettle(t, c, server.device, "CCD_FRAME", map[string]float64{"X": 0, "Y": 0, "WIDTH": 8, "HEIGHT": 8})
@@ -30,7 +30,7 @@ func TestCameraFrameNamesTheFilterOfItsOwnWheel(t *testing.T) {
 		defer cancel()
 		events := c.Subscribe(ctx)
 		if _, err := c.SetNumbers(server.device, "CCD_EXPOSURE", map[string]float64{"CCD_EXPOSURE_VALUE": 0.1}); err != nil {
-			t.Fatal(err)
+			t.Fatalf("starting the exposure: %v", err)
 		}
 		frame := next(t, events, func(e Event) bool { return len(e.BLOBs) > 0 })
 		names, _ := c.Property(server.device, "FILTER_NAME")
@@ -45,16 +45,16 @@ func mustSettle(t *testing.T, c *Client, device, property string, values map[str
 	t.Helper()
 	sent, err := c.SetNumbers(device, property, values)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting %s.%s: %v", device, property, err)
 	}
 	if _, err := settle(t, c, sent); err != nil {
-		t.Fatal(err)
+		t.Fatalf("waiting for %s.%s to settle: %v", device, property, err)
 	}
 }
 
-// fitsHeader reads the keywords of a FITS file's primary header: cards
-// of 80 bytes, up to the END card. It keeps a string value's text
-// without its quotes and padding, which is all this test compares.
+// fitsHeader returns the keywords of a FITS file's primary header, which
+// is a series of 80-byte cards up to the END card. It strips the quotes
+// and padding from string values, which is all this test compares.
 func fitsHeader(t *testing.T, blob BLOB) map[string]string {
 	t.Helper()
 	if blob.Format != ".fits" {
@@ -72,6 +72,6 @@ func fitsHeader(t *testing.T, blob BLOB) map[string]string {
 		value, _, _ := strings.Cut(string(card[10:80]), "/")
 		header[keyword] = strings.TrimSpace(strings.Trim(strings.TrimSpace(value), "'"))
 	}
-	t.Fatal("the FITS header has no END card")
+	t.Fatal("the FITS header has no END card, want one after the last keyword")
 	return nil
 }

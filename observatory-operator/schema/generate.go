@@ -13,10 +13,10 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// generate writes every output of the schema, by its path from the
-// component's directory, root: the CRD of each template in dir, and
-// the Go types of each fields file in dir. The standard sets come from
-// indi/standard/ and the simulator transcripts from indi/inditest/testdata/.
+// generate returns the content of every generated file, keyed by its
+// path under root: the CRD of each template in schema/, the Go types of
+// each fields file in schema/, and the shared generated_elements.go and
+// generated_standard.go.
 func generate(root string) (map[string][]byte, error) {
 	dir := filepath.Join(root, "schema")
 	sets, _, err := standard.Load(filepath.Join(root, "indi", "standard"), filepath.Join(root, "indi", "inditest", "testdata"))
@@ -50,7 +50,7 @@ func generate(root string) (map[string][]byte, error) {
 			}
 			hand, err := handWritten(dir, plural)
 			if err != nil {
-				return nil, fmt.Errorf("%s: %w", path, err)
+				return nil, fmt.Errorf("reading the hand-written fields of %s: %w", plural, err)
 			}
 			if err := collisions(k.Kind, hand, map[string][]field{"spec": settings, "status": status}); err != nil {
 				return nil, err
@@ -63,11 +63,11 @@ func generate(root string) (map[string][]byte, error) {
 		}
 		crd, err := renderCRD(dir, plural, fieldsYAML(settings), fieldsYAML(status))
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			return nil, fmt.Errorf("rendering the CRD of %s: %w", plural, err)
 		}
 		var parsed map[string]any
 		if err := yaml.UnmarshalStrict([]byte(crd), &parsed); err != nil {
-			return nil, fmt.Errorf("the CRD of %s: %w", plural, err)
+			return nil, fmt.Errorf("parsing the CRD of %s: %w", plural, err)
 		}
 		text, err := os.ReadFile(path)
 		if err != nil {
@@ -88,7 +88,7 @@ func generate(root string) (map[string][]byte, error) {
 }
 
 // loadKinds reads the standard sets and every fields file in schema/,
-// and answers the disagreements that Load found.
+// and also returns the disagreements that standard.Load reported.
 func loadKinds(root string) (map[string]standard.Interface, []string, []kind, error) {
 	sets, report, err := standard.Load(filepath.Join(root, "indi", "standard"), filepath.Join(root, "indi", "inditest", "testdata"))
 	if err != nil {
@@ -109,8 +109,9 @@ func loadKinds(root string) (map[string]standard.Interface, []string, []kind, er
 	return sets, report, kinds, nil
 }
 
-// crdHeader names the sources of a generated CRD: fitsTemplate only
-// for a kind that declares FITS keywords.
+// crdHeader returns the comment that heads a generated CRD and lists
+// its source files. fitsTemplate is listed only for a kind that
+// declares FITS keywords.
 func crdHeader(plural string, hasFields, fits bool) string {
 	sources := []string{plural + templateSuffix}
 	if hasFields {
@@ -132,11 +133,10 @@ func crdHeader(plural string, hasFields, fits bool) string {
 	return b.String() + "#\n"
 }
 
-// standardGo writes the table of each kind's interfaces: the captures
-// of its interfaces, the properties that show that a device serves
-// them, and the standard properties that its typed fields hold. A
-// numbered family appears as a pattern, such as DIGITAL_OUTPUT_*, and
-// a named family as the property whose members name it.
+// standardGo returns the Go source of the Standards table. A numbered
+// family of properties is written as a pattern, such as
+// DIGITAL_OUTPUT_*, and a named family as the property whose members
+// name it.
 func standardGo(kinds []kind) ([]byte, error) {
 	var b bytes.Buffer
 	b.WriteString(`// Standard is the standard set of a device kind: the INDI interfaces
@@ -158,12 +158,12 @@ type Standard struct {
 	// property, such as WEATHER_PARAMETERS, whose WEATHER_TEMPERATURE
 	// names the property of that parameter's limits.
 	NamedBy []string
-	// Settings answers a new value of the kind's settings, such as a
+	// Settings returns a new value of the kind's settings, such as a
 	// *CameraSettings, which a spec decodes into. It is nil for a kind
 	// with no settings. Each field's indi tag names the property that
 	// the operator writes the field to.
 	Settings func() any
-	// Status answers a new value of the kind's typed status fields,
+	// Status returns a new value of the kind's typed status fields,
 	// such as a *CameraStandard, which the status writer fills. Each
 	// field's indi tag names the property that the field holds.
 	Status func() any

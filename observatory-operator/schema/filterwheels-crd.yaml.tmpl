@@ -70,10 +70,12 @@ spec:
           x-kubernetes-validations:
             - rule: size(self.metadata.name) <= 32
               message: >-
-                a FilterWheel name is at most 32 characters, because
-                observatory-operator names its pod and Service
-                <name>-filterwheel, and a Service name holds at most 63
-                characters
+                a FilterWheel name is at most 32 characters.
+                observatory-operator names the FilterWheel's pod and
+                Service <name>-filterwheel, and Kubernetes limits those
+                names to 63 characters. Every observatory.liken.sh kind
+                has the same limit of 32, which leaves room for a suffix
+                longer than any that the operator adds.
           description: >-
             A `FilterWheel` holds the filters in front of a camera: an
             INDI device that serves `FILTER_INTERFACE`.
@@ -94,8 +96,8 @@ spec:
                     The name of the `OpticalTrain` that the device is
                     on. The train's members set what each camera on it
                     snoops.
-                    Optional. With no `opticalTrain`, the device is on
-                    the shelf, and the operator creates nothing for it.
+                    Optional. With no `opticalTrain`, the device is
+                    not installed, and the operator creates nothing for it.
 {{ include "device spec" . | indent 16 }}
 {{ settings | indent 16 }}
 {{ include "procedure spec" . | indent 16 }}

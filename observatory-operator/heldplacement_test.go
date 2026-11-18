@@ -1,8 +1,8 @@
 package main
 
-// While a session holds a server, the server runs the devices it
-// started. A spec edit that places one of them elsewhere takes effect
-// when the session ends, and a device placed on a held server after it
+// While a session holds a server, the server keeps running the devices
+// that it started. A spec edit that moves one of them takes effect when
+// the session ends, and a device placed on a held server after it
 // started waits for the server's next session.
 
 import (
@@ -15,8 +15,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// moveDevice replaces a device's parent field, or removes it when
-// parent is "", and keeps the rest of its spec.
+// moveDevice sets a device's parent field to parent, or removes the
+// parent when parent is "", and keeps the rest of its spec.
 func (w *world) moveDevice(kind observatory.Kind, name, field, parent string) {
 	object, _ := w.api.object(kindCollection(kind), name)
 	spec := object["spec"].(map[string]any)
@@ -29,10 +29,11 @@ func (w *world) moveDevice(kind observatory.Kind, name, field, parent string) {
 	w.put(kind, name, spec)
 }
 
-// heldWorld runs the example with the east focuser powered from output
-// 1 of an observatory Switch lab, which no other device names and both
-// telescopes reach, and with east-tonight Ready. With west, a
-// reservation west-tonight of the west telescope is Ready too.
+// heldWorld starts the example with the east focuser powered from
+// output 1 of an observatory Switch named lab, which no other device
+// names and both telescopes can reach, and with east-tonight Ready.
+// When west is true, a reservation west-tonight of the west telescope
+// is Ready too.
 func heldWorld(t *testing.T, west bool) *world {
 	w := startWorld(t)
 	w.put(observatory.SwitchKind, "lab", map[string]any{"observatory": "lab", "driver": map[string]any{"name": "indi_simulator_io"}})
@@ -47,8 +48,8 @@ func heldWorld(t *testing.T, west bool) *world {
 	return w
 }
 
-// touches answers the changes that a client sent to an INDI device
-// from the index from of the record of changes.
+// touches returns the changes that a client sent to an INDI device,
+// starting at index from of the recorded changes.
 func touches(w *world, from int, device string) []string {
 	return slices.DeleteFunc(slices.Clone(w.indi.changes()[from:]), func(c string) bool {
 		return !strings.Contains(c, " "+device+".")
@@ -56,11 +57,12 @@ func touches(w *world, from int, device string) []string {
 }
 
 // A spec edit that would move the focuser while east-tonight holds it
-// changes nothing that runs: the focuser stays connected on east in the
+// changes nothing that runs. The focuser stays connected on east in the
 // same pod, its output stays on, and west does not start it. Its
-// ParentFound condition says where it goes, and posts one Event. A
-// train deleted under it leaves it the same way, and ParentFound names
-// the missing train.
+// ParentFound condition says where it moves to when the session ends,
+// and the operator posts one Event. When a person deletes the focuser's
+// train, the focuser also keeps running, and ParentFound names the
+// missing train.
 func TestASessionKeepsADeviceThatASpecEditMoves(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -70,8 +72,8 @@ func TestASessionKeepsADeviceThatASpecEditMoves(t *testing.T) {
 		reason  string
 		message string
 	}{
-		{"to the shelf", false, func(w *world) { w.moveDevice(observatory.FocuserKind, "east", "", "") },
-			"MovePending", "Moves to the shelf when Reservation east-tonight ends"},
+		{"out of every telescope", false, func(w *world) { w.moveDevice(observatory.FocuserKind, "east", "", "") },
+			"MovePending", "Moves to inventory when Reservation east-tonight ends"},
 		{"to an idle telescope's train", false, func(w *world) { w.moveDevice(observatory.FocuserKind, "east", "opticalTrain", "west-imaging") },
 			"MovePending", "Moves to OpticalTrain west-imaging when Reservation east-tonight ends"},
 		{"to a Ready telescope's train", true, func(w *world) { w.moveDevice(observatory.FocuserKind, "east", "opticalTrain", "west-imaging") },
@@ -99,14 +101,14 @@ func TestASessionKeepsADeviceThatASpecEditMoves(t *testing.T) {
 				}
 				after, running := w.api.object(podsCollection, "east-focuser")
 				if !running || podUID(after) != podUID(before) || after["metadata"].(map[string]any)["labels"].(map[string]any)[labelServer] != "east-telescope" {
-					t.Errorf("the focuser's pod changed or went: %v", after)
+					t.Errorf("the focuser's pod is %v, want the same pod, still running on east-telescope", after)
 				}
 				if got := w.indi.connected("west-telescope"); slices.Contains(got, "Focuser Simulator") {
 					t.Errorf("west connected %q, want no focuser", got)
 				}
 				focuser, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), "east")
 				if s := focuser.Status; s.Phase != observatory.DeviceConnected || s.Endpoint == nil || s.Endpoint.Service != "east-telescope" {
-					t.Errorf("focuser status = phase %s, endpoint %+v", s.Phase, s.Endpoint)
+					t.Errorf("focuser status is phase %s, endpoint %+v, want Connected on east-telescope", s.Phase, s.Endpoint)
 				}
 				parent := conditionOf(focuser.Status.Conditions, observatory.ConditionParentFound)
 				if parent.Reason != c.reason || parent.Message != c.message {
@@ -121,16 +123,16 @@ func TestASessionKeepsADeviceThatASpecEditMoves(t *testing.T) {
 	}
 }
 
-// The release of east-tonight treats the focuser that a spec edit moved
-// to west as its own: it disconnects the focuser, switches its output
-// off, and deletes its pod. The next session of west starts it there,
-// whether west was idle or held by a session of its own.
+// When east-tonight ends, its release still stops the focuser that a
+// spec edit moved to west: it disconnects the focuser, switches its
+// output off, and deletes its pod. The next session of west starts the
+// focuser there, whether west was idle or held by a session of its own.
 func TestAMovedDeviceLeavesWithItsSessionAndStartsInTheNext(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
 		west bool
-		// free ends what holds west before the next session.
+		// free deletes west's reservation, when there is one.
 		free func(w *world)
 	}{
 		{"west idle", false, func(*world) {}},
@@ -158,7 +160,7 @@ func TestAMovedDeviceLeavesWithItsSessionAndStartsInTheNext(t *testing.T) {
 					}
 				}
 				if slices.Contains(w.api.names(podsCollection), "east-focuser") {
-					t.Error("the focuser's pod stays after the release")
+					t.Error("the focuser's pod still exists after the release, want it deleted")
 				}
 
 				c.free(w)
@@ -171,7 +173,7 @@ func TestAMovedDeviceLeavesWithItsSessionAndStartsInTheNext(t *testing.T) {
 				}
 				focuser, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), "east")
 				if s := focuser.Status; s.Phase != observatory.DeviceConnected || s.Endpoint == nil || s.Endpoint.Service != "west-telescope" {
-					t.Errorf("focuser status = phase %s, endpoint %+v", s.Phase, s.Endpoint)
+					t.Errorf("focuser status is phase %s, endpoint %+v, want Connected on west-telescope", s.Phase, s.Endpoint)
 				}
 				if parent := conditionOf(focuser.Status.Conditions, observatory.ConditionParentFound); parent.Reason != "Found" {
 					t.Errorf("ParentFound = %s %q, want Found", parent.Reason, parent.Message)
@@ -181,44 +183,45 @@ func TestAMovedDeviceLeavesWithItsSessionAndStartsInTheNext(t *testing.T) {
 	}
 }
 
-// A served device that a spec edit puts on the shelf during a session
-// stays with its owner: it reads the camera's wheel and holds the
-// finalizer until the release, which lets it go.
+// A filter wheel that the camera's driver serves stays connected when a
+// spec edit removes it from its telescope during a session. It keeps
+// reading the wheel's properties from the camera's INDI device, and
+// keeps its finalizer until the release removes it.
 func TestASessionKeepsAServedDeviceThatASpecEditMoves(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
-		shelveWheel(w)
+		putUninstalledWheel(w)
 		time.Sleep(time.Minute)
 		synctest.Wait()
 
 		wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
 		parent := conditionOf(wheel.Status.Conditions, observatory.ConditionParentFound)
-		if s := wheel.Status; s.Phase != observatory.DeviceConnected || s.Slot == nil || !holdsFinalizer(wheel.Metadata) ||
-			parent.Message != "Moves to the shelf when Reservation east-tonight ends" {
-			t.Errorf("during the session, filter wheel = %s, slot %+v, finalizers %v, ParentFound %q", s.Phase, s.Slot, wheel.Metadata.Finalizers, parent.Message)
+		if s := wheel.Status; s.Phase != observatory.DeviceConnected || s.Slot == nil || !hasOperatorFinalizer(wheel.Metadata) ||
+			parent.Message != "Moves to inventory when Reservation east-tonight ends" {
+			t.Errorf("during the session, the filter wheel is %s with slot %+v, finalizers %v, and ParentFound %q, want Connected, a slot, the finalizer, and the message about moving to inventory", s.Phase, s.Slot, wheel.Metadata.Finalizers, parent.Message)
 		}
 
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
 		w.gone(observatory.ReservationKind, "east-tonight", 10*time.Minute)
-		w.until(time.Minute, "the shelved filter wheel keeps its finalizer", func() bool {
+		w.until(time.Minute, "the uninstalled filter wheel keeps its finalizer", func() bool {
 			wheel, _ = decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
-			return !holdsFinalizer(wheel.Metadata)
+			return !hasOperatorFinalizer(wheel.Metadata)
 		})
 		w.settle()
 		wheel, _ = decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
 		if wheel.Status.Phase != observatory.DeviceInventory {
-			t.Errorf("after the release, filter wheel = %s", wheel.Status.Phase)
+			t.Errorf("after the release, the filter wheel is %s, want %s", wheel.Status.Phase, observatory.DeviceInventory)
 		}
 	})
 }
 
-// The pod of a device that a spec edit moved keeps the device on the
-// server in its label, also when that server's pod is gone: the
-// runner creates the server again with the device, and the other
-// server, which the spec names, never takes the pod. Here the operator
-// is down while a node's eviction deletes east's server pod and a
-// person moves the focuser to west.
+// The pod of a device that a spec edit moved keeps the label of the
+// server that started it, even when that server's pod is gone. The
+// runner creates the server pod again with the device, and the server
+// that the spec names never takes over the device's pod. Here the
+// operator is down while a node eviction deletes east's server pod and
+// a person moves the focuser to west.
 func TestAServerCreatedAgainKeepsADeviceThatASpecEditMoved(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -238,7 +241,7 @@ func TestAServerCreatedAgainKeepsADeviceThatASpecEditMoved(t *testing.T) {
 		server, _ := w.api.object(podsCollection, "east-telescope")
 		after, running := w.api.object(podsCollection, "east-focuser")
 		if !running || podUID(after) != podUID(before) || !slices.Contains(links(server), "east-focuser") {
-			t.Errorf("east runs %v, and the focuser's pod changed or went: %v", links(server), after)
+			t.Errorf("east runs %v and the focuser's pod is %v, want east to run east-focuser in the same pod", links(server), after)
 		}
 		if got := w.indi.connected("west-telescope"); slices.Contains(got, "Focuser Simulator") {
 			t.Errorf("west connected %q, want no focuser", got)
@@ -246,8 +249,8 @@ func TestAServerCreatedAgainKeepsADeviceThatASpecEditMoved(t *testing.T) {
 	})
 }
 
-// westReadyWorld runs the example with the west telescope reserved and
-// Ready, and the east telescope free.
+// westReadyWorld starts the example with the west telescope reserved
+// and Ready, and the east telescope unreserved.
 func westReadyWorld(t *testing.T) *world {
 	w := startWorld(t)
 	w.reserve("west-tonight", map[string]any{"telescope": "west", "holder": "desktop"})
@@ -256,16 +259,16 @@ func westReadyWorld(t *testing.T) *world {
 }
 
 // A focuser placed in west's train while west-tonight holds the server
-// does not start: it gets no pod, its driver does not start, and it
-// reads Idle with a message that names the session it waits for. The
-// next session of west starts it.
+// does not start. It gets no pod, its driver does not start, and its
+// phase is Idle with a message that names the session it waits for.
+// The next session of west starts it.
 func TestADevicePlacedOnAHeldServerWaitsForItsNextSession(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name, device, pod string
 		place             func(w *world)
 	}{
-		{"taken off the shelf", "spare", "spare-focuser", func(w *world) {
+		{"taken from inventory", "spare", "spare-focuser", func(w *world) {
 			w.moveDevice(observatory.FocuserKind, "spare", "opticalTrain", "west-imaging")
 		}},
 		{"created", "extra", "extra-focuser", func(w *world) {
@@ -292,8 +295,8 @@ func TestADevicePlacedOnAHeldServerWaitsForItsNextSession(t *testing.T) {
 				focuser, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), c.device)
 				ready := conditionOf(focuser.Status.Conditions, observatory.ConditionReady)
 				want := "Starts at the next reservation, after Reservation west-tonight ends"
-				if focuser.Status.Phase != observatory.DeviceIdle || ready.Message != want || holdsFinalizer(focuser.Metadata) {
-					t.Errorf("focuser = %s %q, finalizers %v; want Idle %q and no finalizer", focuser.Status.Phase, ready.Message, focuser.Metadata.Finalizers, want)
+				if focuser.Status.Phase != observatory.DeviceIdle || ready.Message != want || hasOperatorFinalizer(focuser.Metadata) {
+					t.Errorf("focuser is %s with Ready message %q and finalizers %v, want Idle with %q and no finalizer", focuser.Status.Phase, ready.Message, focuser.Metadata.Finalizers, want)
 				}
 
 				w.api.deleteNamed(kindCollection(observatory.ReservationKind), "west-tonight")
@@ -310,10 +313,10 @@ func TestADevicePlacedOnAHeldServerWaitsForItsNextSession(t *testing.T) {
 }
 
 // A Switch that moves to another telescope while its telescope's
-// release runs still runs on the server it left until its pod is gone,
-// so the release switches its outputs off there, whether or not the
-// other telescope's server runs. The mount's park holds the release in
-// its Deactivation step while the Switch moves.
+// release runs keeps running on the server it left until its pod is
+// gone. So the release switches its outputs off there, whether or not
+// the other telescope's server runs. The mount's park keeps the
+// release in its Deactivation step while the Switch moves.
 func TestASwitchMovedAwayDuringAReleaseSwitchesItsOutputsOff(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -357,8 +360,8 @@ func TestASwitchMovedAwayDuringAReleaseSwitchesItsOutputsOff(t *testing.T) {
 	}
 }
 
-// parked answers a held park: the mount reports itself parked, as the
-// driver would have.
+// parked reports the mount as parked, as the driver would after the
+// held park finishes.
 func parked(w *world, device string) {
 	w.indi.report(device, "TELESCOPE_PARK", "PARK", "On")
 	w.indi.report(device, "TELESCOPE_PARK", "UNPARK", "Off")

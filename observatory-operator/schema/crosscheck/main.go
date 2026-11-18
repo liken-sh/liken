@@ -1,8 +1,8 @@
-// Command crosscheck fetches the standard properties page of
-// indilib/docs and writes the report of the disagreements between the
-// sources of the standard properties, schema/disagreements.txt. It
-// reaches GitHub, so it runs on a workstation through make crosscheck,
-// never in a test.
+// Command crosscheck downloads the standard properties page of
+// indilib/docs and writes schema/disagreements.txt, which lists where
+// the page, the captures, the conventions, and the simulators disagree,
+// for a person to review. It makes requests to GitHub, so no test runs it.
+// Run it on a workstation with make crosscheck.
 package main
 
 import (
@@ -19,7 +19,6 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/schema"
 )
 
-// The page's source is in the indilib/docs repository.
 const (
 	repository = "indilib/docs"
 	page       = "drivers/standard-properties.md"
@@ -50,7 +49,7 @@ func main() {
 	}
 }
 
-// pageURL answers the address of the page's source at a commit.
+// pageURL returns the URL of the page's source at the given commit.
 func pageURL(commit string) string {
 	return "https://raw.githubusercontent.com/" + repository + "/" + commit + "/" + page
 }
@@ -69,7 +68,7 @@ func get(client *http.Client, url, accept string) ([]byte, error) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", url, response.Status)
+		return nil, fmt.Errorf("reading %s: the server answered %s", url, response.Status)
 	}
 	return io.ReadAll(response.Body)
 }

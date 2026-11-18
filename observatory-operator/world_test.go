@@ -1,8 +1,8 @@
 package main
 
-// The world a test runs the operator in: the fake API server, the fake
-// INDI servers, and the operator's loop, all in one synctest bubble, so
-// a wait of minutes takes no real time.
+// The fixture that runs the operator for a test: the fake API server,
+// the fake INDI servers, and the operator's loop, all in one synctest
+// bubble, so a wait of minutes takes no real time.
 
 import (
 	"bytes"
@@ -29,7 +29,7 @@ type world struct {
 	indi *indiWorld
 	// guiders runs a fake PHD2 in each guider pod.
 	guiders *guiderWorld
-	// n is the copy of the operator's process that runs now.
+	// n is the copy of the operator process that runs now.
 	n    *namespaces
 	stop func()
 	done chan struct{}
@@ -37,8 +37,8 @@ type world struct {
 	logs *logBuffer
 }
 
-// logBuffer collects the operator's log. The operator's goroutines
-// write to it at once, so a lock guards it.
+// logBuffer collects the operator's log. Several goroutines write to
+// it at once.
 type logBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -56,23 +56,23 @@ func (b *logBuffer) String() string {
 	return b.buf.String()
 }
 
-// example answers the resources of examples/simulators.yaml, by kind,
-// with the Reservation left out: each test makes its own.
+// example returns the resources of examples/simulators.yaml except the
+// Reservation, because each test creates its own.
 func example(t *testing.T) []map[string]any {
 	t.Helper()
 	raw, err := os.ReadFile("examples/simulators.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading examples/simulators.yaml: %v", err)
 	}
 	var out []map[string]any
 	for _, document := range bytes.Split(raw, []byte("\n---\n")) {
 		body, err := yaml.YAMLToJSON(document)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("converting a document of examples/simulators.yaml to JSON: %v", err)
 		}
 		var object map[string]any
 		if err := json.Unmarshal(body, &object); err != nil {
-			t.Fatal(err)
+			t.Fatalf("decoding a document of examples/simulators.yaml: %v", err)
 		}
 		if object == nil || object["kind"] == observatory.ReservationKind.Name {
 			continue
@@ -92,7 +92,7 @@ func kindNamed(name string) observatory.Kind {
 }
 
 // startWorld runs the operator on the example's resources until the
-// test ends. It runs in a synctest bubble.
+// test ends. The caller must be inside a synctest bubble.
 func startWorld(t *testing.T) *world {
 	api := startFakeAPI(t)
 	for _, object := range example(t) {
@@ -109,12 +109,12 @@ func startWorld(t *testing.T) *world {
 	return w
 }
 
-// start runs a new copy of the operator.
+// start starts the operator.
 func (w *world) start() {
 	client := apiclient.New(apiservertest.Host, w.api.server.Client(), "")
 	watcher, err := dynamic.NewForConfig(w.api.server.Config())
 	if err != nil {
-		w.t.Fatal(err)
+		w.t.Fatalf("creating the dynamic client: %v", err)
 	}
 	ctx, cancel := context.WithCancel(w.t.Context())
 	n := newNamespaces(client.WithContext(ctx), dialers{w.indi, w.guiders})
@@ -125,13 +125,14 @@ func (w *world) start() {
 	done := w.done
 	go func() {
 		defer close(done)
-		n.run(ctx, func(ctx context.Context, changed *bell) *stores {
+		n.run(ctx, func(ctx context.Context, changed *changeNotifier) *stores {
 			return startWatches(ctx, watcher, changed, n.metrics)
 		})
 	}()
 }
 
-// operator answers the operator of the test's namespace, once it runs.
+// operator returns the operator of the test's namespace, waiting until
+// it runs.
 func (w *world) operator() *operator {
 	w.t.Helper()
 	w.until(time.Minute, "the operator of "+testNamespace+" does not run", func() bool {
@@ -140,11 +141,12 @@ func (w *world) operator() *operator {
 	return w.n.operatorOf(testNamespace)
 }
 
-// ring answers the bell that wakes until: the operator's of the test's
-// namespace, which every watch event and every INDI event rings, or
-// the process's, which every watch event rings, before that operator
-// runs.
-func (w *world) ring() <-chan struct{} {
+// nextChange returns a channel that closes at the next change the
+// operator is notified of. Once the operator of the test's namespace
+// runs, the channel is that operator's changed notifier, which every
+// watch event and every INDI event notifies. Before then it is the
+// process's notifier, which only watch events notify.
+func (w *world) nextChange() <-chan struct{} {
 	if o := w.n.operatorOf(testNamespace); o != nil {
 		return o.changed.wait()
 	}
@@ -162,14 +164,13 @@ func (w *world) halt() {
 	w.stop = nil
 }
 
-// restart stops the operator and runs a new copy, which reads only
-// what the API server holds.
+// restart stops the operator and starts it again. The restarted
+// operator has only the state that the API server stores.
 func (w *world) restart() {
 	w.halt()
 	w.start()
 }
 
-// reserve creates a Reservation of the east telescope.
 func (w *world) reserve(name string, spec map[string]any) {
 	w.api.put(kindCollection(observatory.ReservationKind), map[string]any{
 		"apiVersion": observatory.APIVersion, "kind": observatory.ReservationKind.Name,
@@ -182,18 +183,16 @@ func (w *world) reservation(name string) (observatory.Reservation, bool) {
 	return decode[observatory.Reservation](w.t, w.api, kindCollection(observatory.ReservationKind), name)
 }
 
-// until waits until check holds, and fails the test after limit on the
-// fake clock. It checks again after each change of the fake API server
-// and each ring of the operator's bell, which every watch event and
-// every INDI event rings, so it observes each state the operator
-// passes through, and the clock moves only when the bubble waits for a
-// timer.
+// until waits until check returns true, and fails the test after limit
+// on the fake clock. It checks again after each change in the fake API
+// server and each notification of the operator's changed notifier, so it sees each
+// state that the operator passes through.
 func (w *world) until(limit time.Duration, what string, check func() bool) {
 	w.t.Helper()
 	deadline := time.NewTimer(limit)
 	defer deadline.Stop()
 	for {
-		ring := w.ring()
+		next := w.nextChange()
 		w.api.mu.Lock()
 		changed := w.api.changed
 		w.api.mu.Unlock()
@@ -202,7 +201,7 @@ func (w *world) until(limit time.Duration, what string, check func() bool) {
 			return
 		}
 		select {
-		case <-ring:
+		case <-next:
 		case <-changed:
 		case <-deadline.C:
 			synctest.Wait()
@@ -214,7 +213,7 @@ func (w *world) until(limit time.Duration, what string, check func() bool) {
 	}
 }
 
-// phase waits until a reservation reaches a phase.
+// phase waits until the reservation reaches the phase, and returns it.
 func (w *world) phase(name string, phase observatory.ReservationPhase, limit time.Duration) observatory.Reservation {
 	w.t.Helper()
 	var r observatory.Reservation

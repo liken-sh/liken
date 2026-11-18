@@ -1,8 +1,8 @@
 package main
 
 // The record runs Docker, which no test may do, so these tests cover
-// the decisions it makes without a container. The capture package
-// holds the rest, with its own tests.
+// only the decisions it makes without a container. The capture package
+// has its own tests for the rest.
 
 import (
 	"errors"
@@ -14,8 +14,8 @@ import (
 	"testing"
 )
 
-// A connection that Docker's port forward closes before indiserver
-// listens is dialed again. Any other failure ends the record.
+// A connection that Docker's port forward closes before indiserver is
+// listening is retried. Any other failure ends the record.
 func TestRefused(t *testing.T) {
 	cases := []struct {
 		name string

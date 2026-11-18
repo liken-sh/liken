@@ -1,36 +1,29 @@
 package main
 
-// A device that a person deletes leaves its running server while its
-// Telescope or Observatory is Active. Its driver then stops
-// (serverdrivers.go), and a dust cap left open would stay open. So
-// before the driver stops, the operator runs the device's deactivation
-// through that driver. The finalizer keeps the deleted device's object,
-// and so its spec, until its pod is gone (finalizers.go). The run ends
-// the device's part in the activity that its activation began, so its
-// since is the time its parent turned Active, the same as the since of
-// its activation. An operator restart during the run finds the device
-// still in the server's annotation, and resumes the run from its
-// record.
+// When a device leaves a server while its Telescope or Observatory is
+// Active, because a person deleted it or moved it to another server,
+// setDrivers in serverdrivers.go stops its driver. The operator first
+// runs the device's deactivation through that driver, so that a dust
+// cap, for example, is not left open.
 //
-// The run acts on the device where it was: a reference in an action
-// resolves against its parent, and the action reaches the device
-// through the server. A device that is not connected skips each
-// action, as in the Deactivation step. A failure posts
-// ProcedureFailed, and the driver stops anyway after the run ends,
-// because the device is out of the operator's care.
+// The device's finalizer keeps its object until its pod is gone, so the
+// spec is still readable. The run uses the time the parent turned
+// Active as its since, the same as the activation. References in the
+// actions resolve against the server the device left, and an action on
+// a device that is not connected is skipped. When the run fails, the
+// operator posts ProcedureFailed and stops the driver anyway.
 //
-// A device with an activation runs its deactivation only when its
-// activation ran for the same transition: a dust cap deleted during
-// activation, before the Activation step reached it, was never opened,
-// and goes with no procedure. A device with no activation runs its
-// deactivation whenever its parent is Active, because a person can
-// change it during the session, such as a flat panel lit by hand.
+// A deleted device that has an activation runs its deactivation only
+// if that activation ran in the current Active period, because a dust
+// cap deleted before the Activation step reached it was never opened.
+// A device with no activation always runs its deactivation, because a
+// person may have changed it by hand during the session, such as
+// turning on a flat panel.
 //
-// A device deleted together with its reservation, as `kubectl delete
-// -f` of a whole observatory deletes them, runs its deactivation in
-// the reservation's Deactivation step instead. The Ready runner that
-// would find it leaving has stopped, and the step reaches it through
-// the server its pod runs on (tree.runningOn).
+// When a person deletes a device together with its reservation, as
+// `kubectl delete -f` on a whole observatory does, the reservation's
+// Deactivation step runs the device's deactivation instead, through the
+// server its pod runs on (tree.runningOn).
 
 import (
 	"context"
@@ -40,10 +33,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// leavers answers the devices of the pods that left a server whose
-// objects still exist: the same object, by UID, that the server no
-// longer runs, because a person deleted it. A pod whose device the
-// step stops, and the pod of a device that is gone, are not leavers.
+// leavers returns the devices of pods that left the server ref. It
+// leaves out a pod whose device object is gone or was created again
+// with a new UID, and a device that is still placed on ref.
 func leavers(t *tree, ref serverRef, pods []string) []resource {
 	var out []resource
 	for _, name := range pods {
@@ -64,8 +56,8 @@ func leavers(t *tree, ref serverRef, pods []string) []resource {
 	return out
 }
 
-// leaver answers a device that left a server as a resource in the place
-// it left, so its run acts there.
+// leaver returns the device as a resource that belongs to the server it
+// left, so that references in its actions resolve against that parent.
 func leaver(t *tree, d *device, ref serverRef) resource {
 	r := t.ofDevice(d)
 	r.telescope, r.observatory = "", ref.name
@@ -78,15 +70,13 @@ func leaver(t *tree, d *device, ref serverRef) resource {
 	return r
 }
 
-// deactivateLeavers runs the deactivation of each device whose pod
-// left an Active server (deactivateLeft).
 func (o *operator) deactivateLeavers(ctx context.Context, t *tree, ref serverRef, pods []string) {
 	o.deactivateLeft(ctx, ref, leavers(t, ref, pods))
 }
 
-// deactivateLeft runs, in parallel, the deactivation of each device
-// that left an Active server, and returns when every run has ended.
-// Each action's timeout bounds its run.
+// deactivateLeft runs the deactivations of the devices in left in
+// parallel and returns when every run has ended. It does nothing
+// unless ref is Active.
 func (o *operator) deactivateLeft(ctx context.Context, ref serverRef, left []resource) {
 	key := telescopeKey(ref.name)
 	if ref.kind == observatory.ObservatoryKind {
@@ -112,9 +102,9 @@ func (o *operator) deactivateLeft(ctx context.Context, ref serverRef, left []res
 	group.Wait()
 }
 
-// activated reports whether a device's activation ran for the
-// transition of Active that began at since.
+// activated reports whether the device's activation ran in the Active
+// period that began at since.
 func (o *operator) activated(r resource, since time.Time) bool {
 	run, ok := o.runs.get(r.record(), observatory.TriggerActivation)
-	return ok && answers(run, since, time.Time{})
+	return ok && isRunFor(run, since, time.Time{})
 }

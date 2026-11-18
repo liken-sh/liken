@@ -1,6 +1,7 @@
-# A `Reservation` gives one holder the use of one `Telescope`. Device
-# resources are inventory, and the operator starts a telescope's pods
-# only while a `Reservation` of it is active.
+# A `Reservation` gives one holder the use of one `Telescope`. The
+# other resources only describe equipment. The operator starts a
+# telescope's pods only while a `Reservation` of that telescope is
+# active.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -22,8 +23,8 @@ spec:
       subresources:
         status: {}
       # A holder that is a program, such as astrophotography-operator,
-      # lists and watches only the reservations it holds, with the
-      # field selector spec.holder=<its name>.
+      # lists and watches only its own reservations, with the field
+      # selector spec.holder=<its name>.
       selectableFields:
         - jsonPath: .spec.telescope
         - jsonPath: .spec.holder
@@ -68,24 +69,30 @@ spec:
           x-kubernetes-validations:
             - rule: size(self.metadata.name) <= 32
               message: >-
-                a Reservation name is at most 32 characters, because
-                observatory-operator builds the names of its pods,
-                Services, and Job labels from the names of observatory
-                resources, and Kubernetes limits those to 63 characters
+                a Reservation name is at most 32 characters, the limit
+                of every observatory.liken.sh kind. observatory-operator
+                builds the names of pods and Services, and the values of
+                Job labels, from the names of observatory.liken.sh
+                resources, and Kubernetes limits each of those to 63
+                characters. The limit of 32 leaves room for a suffix
+                longer than any that the operator adds.
           description: >-
-            A `Reservation` gives one holder the use of one `Telescope`.
-            Activation runs when `spec.start` arrives, or at once with no
-            start. Deactivation runs when `spec.end` arrives, or when the
-            `Reservation` is deleted, and it runs the deactivation procedures,
-            such as parking the mount, warming the cameras, and closing the
-            dust caps, before it stops the pods. `status.steps` lists every
+            A `Reservation` gives one holder, the person or program that
+            `spec.holder` names, the use of one `Telescope`.
+            At `spec.start`, or at once when there is no start, the
+            operator starts the telescope's equipment. At `spec.end`, or
+            when you delete the `Reservation`, it runs the deactivation
+            procedures, such as parking the mount, warming the cameras,
+            and closing the dust caps, and then stops the pods. The
+            reservation holds the telescope from the end of its `Wait`
+            step until its phase is `Released`. `status.steps` lists each
             step and its state.
           required: [spec]
           properties:
             spec:
               type: object
               required: [telescope, holder]
-              description: "The telescope, the holder, the times, the outbox, and the FITS keywords."
+              description: "Which telescope to use, who uses it, when, where the frames are written, and the FITS keywords to add."
               x-kubernetes-validations:
                 - rule: "!has(self.start) || !has(self.end) || self.end > self.start"
                   message: "spec.end must be after spec.start"
@@ -106,8 +113,11 @@ spec:
                   minLength: 1
                   maxLength: 253
                   description: >-
-                    Who uses the telescope: a person's desktop client,
-                    or `astrophotography-operator`.
+                    Who uses the telescope, such as `desktop` for a
+                    person at KStars. The operator shows it in messages
+                    such as `In use by desktop`. `astrophotography-operator`
+                    acts only on the reservations whose holder is
+                    `astrophotography-operator`.
                 start:
                   type: string
                   format: date-time
@@ -129,17 +139,16 @@ spec:
                     The volume that the telescope's imaging cameras write
                     their frames to. Optional. Each `Camera` of the
                     telescope mounts the claim at `/outbox`, except a
-                    camera that a `Guider` guides with, and the
-                    `Configure` step sets the driver's `UPLOAD_DIR` to
-                    the directory of the camera's name in the outbox,
-                    such as `/outbox/east-main`, and its `UPLOAD_MODE` to
-                    `UPLOAD_BOTH`, so each frame lands in the outbox and
-                    a desktop client still receives it. A camera's name
-                    is unique in its namespace, so no two drivers write
-                    to one directory. With no outbox, the operator leaves
-                    the upload settings alone, and a driver that a client
-                    sets to keep frames writes them to the pod's `/tmp`,
-                    which the pod loses when it stops. An edit takes
+                    camera that a `Guider` guides with. The `Configure`
+                    step sets the driver's `UPLOAD_DIR` to the directory
+                    that has the camera's name, such as
+                    `/outbox/east-main`, and its `UPLOAD_MODE` to
+                    `UPLOAD_BOTH`, so the driver saves each frame in the
+                    outbox and also sends it to a desktop client. Without
+                    an outbox, the operator leaves the upload settings
+                    alone, and a driver that a client tells to save
+                    frames writes them to the pod's `/tmp`, which
+                    Kubernetes deletes when the pod stops. An edit takes
                     effect at the next session.
                   properties:
                     claimName:
@@ -153,11 +162,12 @@ spec:
                         when it does not exist. A claim that exists and
                         cannot be mounted on the camera's node, such as a
                         `ReadWriteOnce` volume bound on another node,
-                        leaves the camera's pod `Pending`, and
-                        `StartDevices` gives the scheduler's message.
-                        A `ReadWriteOncePod` claim lets one pod mount
-                        it, so a second imaging camera, or the worker
-                        of `astrophotography-operator` as the holder,
+                        leaves the camera's pod `Pending`, and the
+                        `StartDevices` step reports the scheduler's
+                        message. A `ReadWriteOncePod` claim can be
+                        mounted by one pod only, so a second imaging
+                        camera, or the worker of
+                        `astrophotography-operator` as the holder,
                         cannot start beside the first camera.
                 fitsKeywords:
                   type: array
@@ -243,8 +253,7 @@ spec:
             status:
               type: object
               description: >-
-                What the operator observes. The operator writes it, and
-                a person reads it.
+                What the operator observes.
               properties:
                 observedGeneration:
                   type: integer
@@ -256,39 +265,41 @@ spec:
                   type: string
                   enum: [Scheduled, Activating, Ready, Deactivating, Released, Failed]
                   description: >-
-                    The reservation's state in one word. `Scheduled`:
-                    waiting for `spec.start`. `Activating`: the
-                    activation steps run. `Ready`: the telescope is
-                    ready, and `endpoint` names its server.
-                    `Deactivating`: the deactivation steps run.
-                    `Released`: the deactivation steps are done, and the
-                    devices are safe to power off. `Failed`: a step
-                    failed, and the `Ready` condition names it.
+                    The phase of the reservation. `Scheduled`: waiting
+                    for `spec.start`. `Activating`: the activation
+                    steps are running. `Ready`: the telescope is ready,
+                    and `status.endpoint` has the address of its
+                    server. `Deactivating`: the deactivation steps are
+                    running. `Released`: the deactivation steps are
+                    done, and the devices are safe to power off.
+                    `Failed`: a step failed, and the message of the
+                    `Ready` condition names it.
                 step:
                   type: string
                   enum: [Wait, StartSite, Requires, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, StopWork, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite, Abort]
                   description: >-
-                    The step that runs now, or the step that failed.
+                    The step that is running, or the step that failed.
                     It is empty while the phase is `Ready` or
                     `Released`.
                 steps:
                   type: array
                   description: >-
-                    Every step, in the order it runs. The activation
-                    steps are `Wait`, `StartSite`, `Requires`,
-                    `PowerOn`, `StartDevices`, `Connect`, `Configure`,
-                    `Activation`, and `StartGuider`, and the list holds
-                    them from the start. `Wait` and `Requires` wait for
-                    the `spec.requires` of the resources that the
-                    session starts, and a reservation that still waits
-                    in either one at the next astronomical dawn ends
-                    there: the step is `Skipped`, and its summary names
-                    the conditions it waited for. The deactivation steps are
-                    `StopWork`, `Deactivation`, `StopGuider`, `Disconnect`,
-                    `StopDevices`, `PowerOff`, and `StopSite`, and the
-                    list holds them from when
-                    deactivation begins. A step starts only when the
-                    step before it is `Done` or `Skipped`.
+                    Every step, in the order it runs. The list starts
+                    with the activation steps: `Wait`, `StartSite`,
+                    `Requires`, `PowerOn`, `StartDevices`, `Connect`,
+                    `Configure`, `Activation`, and `StartGuider`. The
+                    operator adds the deactivation steps when
+                    deactivation begins: `StopWork`, `Deactivation`,
+                    `StopGuider`, `Disconnect`, `StopDevices`,
+                    `PowerOff`, and `StopSite`. A step starts only when
+                    the step before it is `Done` or `Skipped`. `Wait`
+                    and `Requires` wait until the conditions in the
+                    `spec.requires` of the equipment are true. When
+                    either step is still waiting at the next
+                    astronomical dawn, it becomes `Skipped` with the
+                    conditions it waited for in its summary, and the
+                    reservation ends without powering on the
+                    telescope's equipment.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [name]
                   items:
@@ -303,11 +314,10 @@ spec:
                         type: string
                         enum: [Wait, StartSite, Requires, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, StopWork, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite, Abort]
                         description: >-
-                          The step's name. `Abort` is the name that an
-                          earlier operator gave `StopWork`. A stored
-                          reservation can still hold it, and the
-                          operator reads it as `StopWork` and writes
-                          `StopWork` in its place.
+                          The step's name. A stored reservation can
+                          still have the name `Abort`. The operator
+                          reads it as `StopWork` and writes `StopWork`
+                          in its place.
                       state:
                         type: string
                         enum: [Pending, Running, Done, Failed, Skipped]
@@ -326,15 +336,16 @@ spec:
                       summary:
                         type: string
                         description: >-
-                          What the step waits for or did. It names the
-                          device when one device holds the step up.
+                          What the step is waiting for, or what it did.
+                          When one device is delaying the step, the
+                          summary names it.
                       actions:
                         type: array
                         description: >-
                           The actions of the procedures that the
-                          `Activation` or `Deactivation` step waited on,
+                          `Activation` or `Deactivation` step waited for,
                           each with the resource it belongs to. The
-                          resource's `status.procedures` holds the same
+                          resource's `status.procedures` has the same
                           record.
                         items:
                           type: object
@@ -353,7 +364,7 @@ spec:
                             action:
                               type: string
                               description: >-
-                                The action as its YAML reads, such as
+                                The action as the resource's YAML writes it, such as
                                 `state: Parked` or `cool: -10 °C within
                                 0.5 °C`.
                             state:
@@ -397,22 +408,23 @@ spec:
                 session:
                   type: object
                   description: >-
-                    What the reservation's session started with. `StartSite`
-                    writes `observatory` and `site`, and `PowerOn` writes the
-                    rest, each once and before it creates a pod. The
-                    `observatory.liken.sh/retry` annotation on a failed
-                    activation step writes the parts again from the specs as
-                    they are then, before the step runs again, and nothing
-                    else changes them. While the reservation holds its
-                    telescope, the operator reads this record in place of the
-                    specs of the resources it names, so an edit of a device's
-                    parents, driver, power, or claim, of the `Telescope`'s
-                    `spec.observatory`, of an `OpticalTrain`, of an
-                    `OpticalTube`, of a `Guider`, of the reservation's
-                    `spec.outbox`, or of any `spec.fitsKeywords` takes
-                    effect at the next session. The record is in the reservation, so an eviction
-                    of every pod of a server leaves it, and the operator
-                    creates the pods again from it.
+                    A copy of the specs that the session started with.
+                    While the reservation holds its telescope, the
+                    operator reads this copy in place of the resources'
+                    current specs, so an edit to the equipment during
+                    the session takes effect at the next session. That
+                    covers a device's `spec.telescope`,
+                    `spec.opticalTrain`, `spec.observatory`, driver,
+                    power, and claim, the `Telescope`'s
+                    `spec.observatory`, each `OpticalTrain`,
+                    `OpticalTube`, and `Guider`, the reservation's
+                    `spec.outbox`, and every `spec.fitsKeywords`. The
+                    `StartSite` step writes `observatory` and `site`, and
+                    `PowerOn` writes the rest, before the operator creates
+                    any pod. When you set the `observatory.liken.sh/retry`
+                    annotation on a failed activation step, the operator
+                    writes the copy again from the current specs before
+                    it runs the step again. Nothing else changes it.
                   properties:
                     observatory:
                       type: string
@@ -422,14 +434,13 @@ spec:
                       description: >-
                         The devices of the observatory's server, by kind and
                         name, such as `Dome/lab`, as the server ran them when
-                        this reservation's `StartSite` began. The reservations
-                        of several telescopes in one observatory share its
-                        server, and while any of them holds its telescope, the
-                        operator reads the union of their records. Absent when
-                        the observatory has no devices. Then `observatory`
-                        alone records that the session started the
-                        observatory with none, and a device created there
-                        during the session waits for the next one.
+                        this reservation's `StartSite` began. The telescopes
+                        of one observatory share its server, and the server
+                        runs the devices in the `site` of every reservation
+                        that holds one of them. Absent when the observatory
+                        had no devices. A device that you create on the
+                        observatory during the session does not run until
+                        the next session.
                       additionalProperties:
                         type: object
                         description: >-
@@ -438,10 +449,9 @@ spec:
                           uid:
                             type: string
                             description: >-
-                              The device's `metadata.uid`. A device that a
-                              person deletes and creates again with the same
-                              name during the session has another UID, and the
-                              record does not apply to it.
+                              The device's `metadata.uid`. A device deleted and created again with the
+                              same name has another UID, so the record does not
+                              apply to it.
                           telescope:
                             type: string
                             description: "The device's `spec.telescope`."
@@ -509,10 +519,9 @@ spec:
                           uid:
                             type: string
                             description: >-
-                              The device's `metadata.uid`. A device that a
-                              person deletes and creates again with the same
-                              name during the session has another UID, and the
-                              record does not apply to it.
+                              The device's `metadata.uid`. A device deleted and created again with the
+                              same name has another UID, so the record does not
+                              apply to it.
                           telescope:
                             type: string
                             description: "The device's `spec.telescope`."
@@ -577,10 +586,9 @@ spec:
                           uid:
                             type: string
                             description: >-
-                              The train's `metadata.uid`. A train that a
-                              person deletes and creates again with the same
-                              name during the session has another UID, and the
-                              record does not apply to it.
+                              The train's `metadata.uid`. A train deleted and created again with the
+                              same name has another UID, so the record does not
+                              apply to it.
                           telescope:
                             type: string
                             description: "The train's `spec.telescope`."
@@ -591,8 +599,9 @@ spec:
                       type: object
                       description: >-
                         The spec of each `OpticalTube` of those trains, by
-                        name. A camera whose driver comes back gets the
-                        `SCOPE_INFO` of these lengths.
+                        name. When a camera's driver restarts during the
+                        session, the operator writes its `SCOPE_INFO` again
+                        from these lengths.
                       additionalProperties:
                         type: object
                         required: [telescope, aperture, focalLength]
@@ -601,10 +610,9 @@ spec:
                           uid:
                             type: string
                             description: >-
-                              The tube's `metadata.uid`. A tube that a
-                              person deletes and creates again with the same
-                              name during the session has another UID, and the
-                              record does not apply to it.
+                              The tube's `metadata.uid`. A tube deleted and created again with the
+                              same name has another UID, so the record does not
+                              apply to it.
                           telescope:
                             type: string
                             description: "The tube's `spec.telescope`."
@@ -625,10 +633,9 @@ spec:
                           uid:
                             type: string
                             description: >-
-                              The `Guider`'s `metadata.uid`. A `Guider` that a
-                              person deletes and creates again with the same
-                              name during the session has another UID, and the
-                              record does not apply to it.
+                              The `Guider`'s `metadata.uid`. A `Guider` deleted and created again with the
+                              same name has another UID, so the record does not
+                              apply to it.
                           telescope:
                             type: string
                             description: "The `Guider`'s `spec.telescope`."
@@ -653,12 +660,13 @@ spec:
                       type: object
                       description: >-
                         The merged `spec.fitsKeywords` of each `Camera` of
-                        the session that no `Guider` guides with, by the
-                        camera's key, such as `Camera/east-main`, from the
+                        the session that no `Guider` guides with, from the
                         `Observatory`, the `Telescope`, the `Camera`, and
-                        the reservation. A camera whose merged list is
-                        empty has no entry. The `Configure` step writes
-                        each list to its camera's `FITS_HEADER`.
+                        the reservation. Each entry is keyed by the
+                        camera's kind and name, such as `Camera/east-main`.
+                        A camera whose merged list is empty has no entry.
+                        The `Configure` step writes each list to its
+                        camera's `FITS_HEADER`.
                       additionalProperties:
                         type: array
                         description: "The keywords of one camera, in the order of the header."
@@ -681,15 +689,15 @@ spec:
                   description: >-
                     `Ready` is `True` while the phase is `Ready`, so
                     `kubectl wait --for=condition=Ready` waits for the
-                    telescope. When a step fails, it is `False` and its
-                    message names the step and the device.
+                    telescope. When a step fails, `Ready` is `False` and
+                    its message names the step and the device.
                     `SafeToPowerOff` is `True` when the deactivation
-                    steps are done. `EditsPending` is `True` with the
-                    reason `EditPending` while an edit of `spec.outbox`
-                    or of a `spec.fitsKeywords` waits for the next
-                    session, and its message names each change. The
-                    reservation has it from the `PowerOn` step until it
-                    is `Released`.
+                    steps are done. `EditsPending` is present from the
+                    `PowerOn` step until the phase is `Released`. It is
+                    `True` with the reason `EditPending` while an edit
+                    of `spec.outbox` or of a `spec.fitsKeywords` waits
+                    for the next session, and its message names each
+                    change.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

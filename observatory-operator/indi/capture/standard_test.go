@@ -23,27 +23,28 @@ func TestDefinitions(t *testing.T) {
 
 	defs, err := Definitions(replies)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the definitions: %v", err)
 	}
 
 	want := []Definition{
-		// A set changes no definition.
+		// A set message does not change a definition.
 		{"CONNECTION", "baseline", []byte(`<defSwitchVector device="Bare Telescope" name="CONNECTION"><defSwitch name="DISCONNECT">On</defSwitch></defSwitchVector>`)},
 		// The last definition wins, in the phase of the first.
 		{"ACTIVE_DEVICES", "baseline", []byte(`<defSwitchVector device="Bare Telescope" name="ACTIVE_DEVICES"><defSwitch name="B">On</defSwitch></defSwitchVector>`)},
-		// A deleted property stays, and one with no name is left out.
+		// A deleted property stays in the result, and a definition with
+		// no name is left out.
 		{"TELESCOPE_PIER_SIDE", "connect", []byte(`<defSwitchVector device="Bare Telescope" name="TELESCOPE_PIER_SIDE"><defSwitch name="PIER_EAST">On</defSwitch></defSwitchVector>`)},
 	}
 	if !slices.EqualFunc(defs, want, func(a, b Definition) bool {
 		return a.Name == b.Name && a.Phase == b.Phase && bytes.Equal(a.XML, b.XML)
 	}) {
-		t.Errorf("definitions =\n%q\nwant\n%q", defs, want)
+		t.Errorf("definitions are\n%q\nwant\n%q", defs, want)
 	}
 }
 
 func TestDefinitionsRefuseAReplyThatEndsInsideATag(t *testing.T) {
 	if _, err := Definitions([]Reply{{"connect", []byte(`<defSwitchVector name="A`)}}); err == nil {
-		t.Error("Definitions read a reply that ends inside a tag")
+		t.Error("Definitions accepted a reply that ends inside a tag, want an error")
 	}
 }
 
@@ -66,7 +67,7 @@ func TestWriteGroupsByPhaseAndLeavesOutTheExcluded(t *testing.T) {
 	var out bytes.Buffer
 
 	if err := Write(&out, header, defs, map[string]bool{"DRIVER_INFO": true}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the capture: %v", err)
 	}
 
 	want := `<capture driver="indi_bare_ccd" device="Bare &#34;CCD&#34;" indi="2.2.5" interface="22">
@@ -83,10 +84,10 @@ func TestWriteGroupsByPhaseAndLeavesOutTheExcluded(t *testing.T) {
 	}
 	c, err := Read(&out)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the capture: %v", err)
 	}
 	if c.Header != header || !c.Defines("CCD_EXPOSURE") || c.Defines("DRIVER_INFO") {
-		t.Errorf("Read gave %+v", c)
+		t.Errorf("Read = %+v, want the header %+v, defining CCD_EXPOSURE and not DRIVER_INFO", c, header)
 	}
 }
 
@@ -111,7 +112,7 @@ func TestInterfaceIsEmptyWithNoDriverInfo(t *testing.T) {
 func TestWriteWithNoDefinitions(t *testing.T) {
 	var out bytes.Buffer
 	if err := Write(&out, Header{}, nil, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the capture: %v", err)
 	}
 	if !strings.HasSuffix(out.String(), "\">\n</capture>\n") {
 		t.Errorf("capture = %q, want a root with no phase", out.String())

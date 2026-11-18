@@ -1,8 +1,9 @@
 package main
 
-// The Kubernetes side of the steps: the pods and Services that a step
-// creates, the waits for them to be Ready, the wait for each driver to
-// define its device on its server, and the deletes at the end.
+// The steps create the pods, Services, and claim templates of the INDI
+// servers and their devices, wait for the pods to be Ready and for each
+// driver to define its device, and delete the objects when a session
+// ends.
 
 import (
 	"context"
@@ -14,28 +15,28 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// ensure creates a pod and its Service and claim template, or replaces a
-// running pod whose spec or server differs from the one built now
-// (current). A pod that
-// stops must be gone before the new one of the same name can be
-// created. A write that the API server refuses is sent again (send),
-// and the step's deadline bounds the tries. created reports whether
-// the API server created the pod, so a Ready reservation's runner can
-// record an Event for each pod that it creates.
+// ensure creates a pod, its Service, and its claim template, or
+// replaces a running pod whose spec or server differs from built
+// (current). The new pod has the old pod's name, so ensure waits until
+// the old pod is gone. send retries a write that the API server
+// refuses, until the step's deadline. created reports whether the API
+// server created the pod, so the runner of a Ready reservation can post
+// an Event for each pod that it creates.
 func (o *operator) ensure(ctx context.Context, report func(string), built *pod, svc *service, template *claimTemplate) (created bool, err error) {
 	name := built.Metadata.Name
 	err = o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
 		if template != nil {
-			// A template's spec cannot change, and one that exists is the
-			// one the operator created. The create answers 409 then.
+			// A claim template's spec is immutable, and an existing one is
+			// the operator's own, so create treats the 409 Conflict for it
+			// as success.
 			if err := o.send(ctx, report, fmt.Sprintf("creating ResourceClaimTemplate %s", name), func() error {
 				return o.create("/apis/resource.k8s.io/v1/namespaces/"+o.namespace+"/resourceclaimtemplates", template)
 			}); err != nil {
 				return false, "", err
 			}
 		}
-		// A Service's spec follows from its name alone, so a Service
-		// that exists is current.
+		// A Service's spec depends only on its name, so an existing
+		// Service is current.
 		if _, ok := t.services[svc.Metadata.Name]; !ok {
 			if err := o.send(ctx, report, fmt.Sprintf("creating Service %s", name), func() error { return o.create("/api/v1/namespaces/"+o.namespace+"/services", svc) }); err != nil {
 				return false, "", err
@@ -65,8 +66,7 @@ func (o *operator) ensure(ctx context.Context, report func(string), built *pod, 
 }
 
 // startServer creates the pod and the Service of one INDI server, and
-// sets the server's drivers to the devices. created reports whether the
-// API server created the pod.
+// sets the server's drivers to the drivers of the devices.
 func (o *operator) startServer(ctx context.Context, report func(string), ref serverRef, ownerUID string, devices []*device) (created bool, err error) {
 	created, err = o.ensureServer(ctx, report, ref, ownerUID, devices)
 	if err != nil {
@@ -77,8 +77,8 @@ func (o *operator) startServer(ctx context.Context, report func(string), ref ser
 }
 
 // ensureServer creates the pod and the Service of one INDI server, with
-// the devices in its annotation, when the pod is gone. A running
-// server's pod keeps its devices: setDrivers changes them.
+// the devices in its annotation, when the pod is gone. setDrivers
+// changes the devices of a running server.
 func (o *operator) ensureServer(ctx context.Context, report func(string), ref serverRef, ownerUID string, devices []*device) (created bool, err error) {
 	built, svc, err := serverPod(o.namespace, ref, ownerUID, devices)
 	if err != nil {
@@ -87,10 +87,10 @@ func (o *operator) ensureServer(ctx context.Context, report func(string), ref se
 	return o.ensure(ctx, report, built, svc, nil)
 }
 
-// startDevices gives each device that runs a driver the finalizer,
-// with each device that it serves, creates its pod, its Service, and
-// its claim template, and answers the devices whose pod it created. A served
-// device has no pod of its own.
+// startDevices adds the finalizer to each device that runs a driver and
+// to each device that the driver serves, then creates the pod, Service,
+// and claim template of the device that runs the driver. It returns the
+// devices whose pod it created.
 func (o *operator) startDevices(ctx context.Context, report func(string), ref serverRef, devices []*device) ([]*device, error) {
 	t := o.snapshot()
 	var started []*device
@@ -100,10 +100,10 @@ func (o *operator) startDevices(ctx context.Context, report func(string), ref se
 			o.fault(d, err)
 			return started, fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)
 		}
-		if err := o.holdDevice(ctx, report, d); err != nil {
+		if err := o.addDeviceFinalizer(ctx, report, d); err != nil {
 			return started, err
 		}
-		if err := o.holdServed(ctx, report, t, d); err != nil {
+		if err := o.addServedFinalizers(ctx, report, t, d); err != nil {
 			return started, err
 		}
 		created, err := o.ensure(ctx, report, built, svc, template)
@@ -117,10 +117,10 @@ func (o *operator) startDevices(ctx context.Context, report func(string), ref se
 	return started, nil
 }
 
-// waitReady waits until the pod of each device is Ready. For real
-// hardware, a pod with a claim stays Pending until its device appears,
-// so this is where activation waits for a person or a Switch to power
-// the device on.
+// waitReady waits until the pod of each device is Ready. A pod with a
+// claim for real hardware stays Pending until its device appears, so
+// activation waits here until a person or a Switch powers the device
+// on.
 func (o *operator) waitReady(ctx context.Context, report func(string), devices []*device) error {
 	return o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
 		for _, d := range driverDevices(devices) {
@@ -142,7 +142,7 @@ func (o *operator) waitReady(ctx context.Context, report func(string), devices [
 }
 
 // waitServer waits until the operator's INDI connection to a server is
-// open, and answers the server.
+// open.
 func (o *operator) waitServer(ctx context.Context, report func(string), ref serverRef) (*indiServer, error) {
 	var server *indiServer
 	err := o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
@@ -156,8 +156,9 @@ func (o *operator) waitServer(ctx context.Context, report func(string), ref serv
 	return server, err
 }
 
-// waitDefined waits until the driver of each device defines its device
-// on the server, and answers a handle for each, by the device's key.
+// waitDefined waits until the driver of each device defines its INDI
+// device on the server, and returns a handle for each, keyed by device
+// key.
 func (o *operator) waitDefined(ctx context.Context, report func(string), ref serverRef, devices []*device) (map[string]handle, error) {
 	server, err := o.waitServer(ctx, report, ref)
 	if err != nil {
@@ -172,11 +173,11 @@ func (o *operator) waitDefined(ctx context.Context, report func(string), ref ser
 			}
 			runner, ok := t.runnerOf(d)
 			if !ok {
-				err := fmt.Errorf("%s %s: %s", d.kind.Name, d.name(), firstNonEmpty(t.verdict(d).refusal, "spec.device names no resource that runs a driver"))
+				err := fmt.Errorf("%s %s: %s", d.kind.Name, d.name(), firstNonEmpty(t.ownershipOf(d).refusal, "spec.device names no resource that runs a driver"))
 				o.fault(d, err)
 				return false, "", err
 			}
-			if holder, taken := t.driverTakenBy(runner); taken {
+			if holder, taken := t.driverHolder(runner); taken {
 				err := fmt.Errorf("%s %s: %s", d.kind.Name, d.name(), sharedDriver(holder, ref))
 				o.fault(d, err)
 				return false, "", err
@@ -193,17 +194,17 @@ func (o *operator) waitDefined(ctx context.Context, report func(string), ref ser
 	return handles, err
 }
 
-// handlesOf answers a handle for each device whose driver has defined
-// its device on the server now, with no wait. A step that ends a
-// reservation acts on the devices that are there.
+// handlesOf returns a handle for each device whose driver has already
+// defined its INDI device on the server, without waiting, for a step
+// that ends a reservation.
 //
-// The client's store changes while handlesOf reads it, because a
-// driver that restarts defines its device at any moment. So the name
-// of each driver's device is read once, and a served device gets the
-// answer that its owner gets. Without that, a served filter wheel
-// that comes before its camera in the order can miss a device that
-// the camera then finds, and the camera's configuration names no
-// filter wheel in ACTIVE_FILTER.
+// A restarting driver can define its device while handlesOf reads the
+// INDI client's store. So handlesOf looks up the INDI name once for each
+// driver, and a served device gets the name of its owner's lookup. With
+// a lookup for each device, a served filter wheel listed before its
+// camera could find no INDI device while the camera, a moment later,
+// found one, and the camera's configuration would have no filter wheel
+// in ACTIVE_FILTER.
 func (o *operator) handlesOf(t *tree, ref serverRef, devices []*device) []handle {
 	server, ok := o.servers.get(ref.String())
 	if !ok || !server.client.Connected() {
@@ -212,13 +213,11 @@ func (o *operator) handlesOf(t *tree, ref serverRef, devices []*device) []handle
 	names := map[*device]string{}
 	var out []handle
 	for _, d := range devices {
-		// A device whose driver another device runs would find that
-		// device's name.
 		runner, ok := t.runnerOf(d)
 		if !ok {
 			continue
 		}
-		if _, taken := t.driverTakenBy(runner); taken {
+		if _, taken := t.driverHolder(runner); taken {
 			continue
 		}
 		name, read := names[runner]
@@ -233,9 +232,9 @@ func (o *operator) handlesOf(t *tree, ref serverRef, devices []*device) []handle
 	return out
 }
 
-// stopPods deletes the pods, the Services, the ConfigMaps, and the
-// claims that select returns true for, and waits until the pods are gone. A delete that
-// the API server refuses is sent again (send).
+// stopPods deletes the pods, Services, ConfigMaps, and claim templates
+// whose labels selected accepts, and waits until the pods are gone. It
+// returns the names of the pods that it stopped.
 func (o *operator) stopPods(ctx context.Context, report func(string), selected func(labels map[string]string) bool) ([]string, error) {
 	stopped := o.snapshot().podNames(selected)
 	err := o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
@@ -248,8 +247,8 @@ func (o *operator) stopPods(ctx context.Context, report func(string), selected f
 	return stopped, err
 }
 
-// podNames answers the sorted names of the pods that select returns
-// true for.
+// podNames returns the sorted names of the pods whose labels selected
+// accepts.
 func (t *tree) podNames(selected func(labels map[string]string) bool) []string {
 	var names []string
 	for name, p := range t.pods {
@@ -261,9 +260,8 @@ func (t *tree) podNames(selected func(labels map[string]string) bool) []string {
 	return names
 }
 
-// deleteSelected sends the deletes of the pods, the Services, the
-// ConfigMaps, and the claim templates that select returns true for
-// (selectedObjects), and does not wait for them.
+// deleteSelected sends the deletes for the objects that selectedObjects
+// finds, and does not wait for them to finish.
 func (o *operator) deleteSelected(ctx context.Context, report func(string), t *tree, selected func(labels map[string]string) bool) error {
 	for _, object := range t.selectedObjects(o.namespace, selected) {
 		if err := o.send(ctx, report, "deleting "+object.what, func() error { return o.deleteObject(object.path) }); err != nil {
@@ -273,19 +271,19 @@ func (o *operator) deleteSelected(ctx context.Context, report func(string), t *t
 	return nil
 }
 
-// selectedObject is one object to delete: what a person reads, such as
-// "pod east-mount", and its path.
+// selectedObject is an object to delete. what is its kind and name for
+// a message, such as "pod east-mount".
 type selectedObject struct{ what, path string }
 
-// selectedObjects answers the objects that select returns true for, in
-// a fixed order: each pod by name with its claim template, then the
-// Services, each device's with its claim template, then the ConfigMaps.
-// A device's pod, Service, and claim template share one name and one
-// set of labels. The claim that the pod made from the template ends
-// with the pod. The operator watches no templates, so a template is
-// found by its pod or by its Service: a pod that is terminating already
-// needs no second delete, but a pod that an eviction deleted before a
-// release still leaves its Service, and so its template, to delete.
+// selectedObjects returns the objects whose labels selected accepts:
+// each pod followed by its claim template, then the Services, each
+// device Service preceded by its claim template, then the ConfigMaps.
+//
+// A device's pod, Service, and claim template share one name, and the
+// claim that the pod made from the template is deleted with the pod.
+// The operator does not watch claim templates, so it finds a template
+// through the pod or the Service of the same name. The Service matters
+// when an eviction deleted the pod before a release.
 func (t *tree) selectedObjects(namespace string, selected func(labels map[string]string) bool) []selectedObject {
 	var out []selectedObject
 	claimed := map[string]bool{}
@@ -320,18 +318,19 @@ func (t *tree) selectedObjects(namespace string, selected func(labels map[string
 	return out
 }
 
-// stopServer deletes the pods and objects of a server's devices, then
-// the server's pod, and waits until every pod is gone. The order keeps
-// each device's container from starting again. A device pod runs socat
-// with the restart policy Always, and socat exits when the shim's
-// connection ends. When the server stops first, socat exits in a pod
-// that is not terminating yet, so the kubelet starts the container
-// again before its delete arrives. The kubelet starts no container in a
-// pod that is terminating. When a device pod stops first, indiserver
-// sees its shim exit and starts the shim again, and the new shim finds
-// no ready endpoint behind the device's Service. That shim ends with
-// indiserver when the server's delete arrives, and no driver starts.
-// Every caller disconnects the server's devices before the stop.
+// stopServer deletes the pods and other objects of a server's devices,
+// then the server's pod, and waits until every pod is gone. It returns
+// the names of the pods that it stopped. Every caller disconnects the
+// server's devices first.
+//
+// The device pods go first because a device pod runs socat with the
+// restart policy Always, and socat exits when the shim's connection
+// ends. If the server stopped first, the kubelet would restart socat in
+// a device pod that is not yet terminating. The kubelet restarts no
+// container in a terminating pod. When a device pod stops first,
+// indiserver restarts its shim, the shim finds no ready endpoint behind
+// the device's Service, and it ends with indiserver, so no driver
+// starts.
 func (o *operator) stopServer(ctx context.Context, report func(string), ref serverRef) ([]string, error) {
 	devices := withoutServers(func(l map[string]string) bool { return l[labelServer] == ref.String() })
 	t := o.snapshot()
@@ -345,14 +344,15 @@ func (o *operator) stopServer(ctx context.Context, report func(string), ref serv
 	return slices.Compact(stopped), err
 }
 
-// withoutServers narrows a selection to the objects that are not a
-// server's own: the pods and objects of its devices and its guider,
-// which stopServer and the sweep delete before the server's pod.
+// withoutServers narrows a selection to the objects of the devices and
+// the guider, which stopServer and the supervisor's sweep delete before
+// the server's pod.
 func withoutServers(selected func(labels map[string]string) bool) func(map[string]string) bool {
 	return func(l map[string]string) bool { return selected(l) && l[labelRole] != roleServer }
 }
 
-// onServer selects the objects of one server whose kind passes keep.
+// onServer selects the objects of one server whose kind label keep
+// accepts.
 func onServer(ref serverRef, keep func(kind string) bool) func(map[string]string) bool {
 	return func(l map[string]string) bool {
 		return l[labelServer] == ref.String() && keep(l[labelKind])
@@ -367,11 +367,10 @@ func names(devices []*device) string {
 	return strings.Join(out, ", ")
 }
 
-// partition splits devices into the ones that power the others and the
-// rest. A device powers the others when its INDI device serves a
-// Switch: a Switch that runs its driver, or the owner of a served
-// Switch, such as a power box that a Focuser owns. Each served device
-// goes with its owner, because the two are one INDI device.
+// partition splits devices into switches, whose INDI device serves a
+// Switch, and others. That includes the owner of a served Switch, such
+// as a Focuser with a power box, and every other device that owner
+// serves, because they are all one INDI device.
 func (t *tree) partition(devices []*device) (switches, others []*device) {
 	for _, d := range devices {
 		owner, _ := t.ownerOf(d)
@@ -384,7 +383,7 @@ func (t *tree) partition(devices []*device) (switches, others []*device) {
 	return switches, others
 }
 
-// powers reports whether an owner's INDI device serves a Switch.
+// powers reports whether the INDI device of an owner serves a Switch.
 func (t *tree) powers(owner *device) bool {
 	if owner == nil {
 		return false

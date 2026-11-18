@@ -1,8 +1,7 @@
 package main
 
-// A device whose activation runs after its parent's Activation step,
-// because its interface arrived late and it healed, answers the same
-// transition of Active. served_test.go holds the heal itself.
+// served_test.go covers a device whose interface properties arrive
+// after its parent's Activation step.
 
 import (
 	"testing"
@@ -12,8 +11,6 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// A late activation that fails runs again through the retry annotation
-// on the device, with its Done actions skipped.
 func TestTheRetryAnnotationRerunsALateActivationThatFailed(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

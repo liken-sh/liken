@@ -1,8 +1,5 @@
 package main
 
-// A reference in a procedure names resources by kind and name, from the
-// resource that holds it.
-
 import (
 	"fmt"
 	"strings"
@@ -12,7 +9,7 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-func TestAReferenceNamesResourcesFromWhereItIs(t *testing.T) {
+func TestResolveAReference(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -20,7 +17,7 @@ func TestAReferenceNamesResourcesFromWhereItIs(t *testing.T) {
 		from := func(kind observatory.Kind, name string) resource {
 			r, ok := tr.resource(kind, name)
 			if !ok {
-				t.Fatalf("no %s %s", kind.Name, name)
+				t.Fatalf("the world has no %s %s", kind.Name, name)
 			}
 			return r
 		}
@@ -48,7 +45,7 @@ func TestAReferenceNamesResourcesFromWhereItIs(t *testing.T) {
 			{"the telescope of a train's device", from(observatory.CameraKind, "east-main"), "Telescope", "", false, "Telescope east"},
 			{"the telescope of a telescope", from(observatory.TelescopeKind, "west"), "Telescope", "", false, "Telescope west"},
 			{"the telescope of an observatory's device", dome, "Telescope", "", false, "f: Dome lab belongs to no Telescope"},
-			{"the observatory of a device on the shelf", from(observatory.FocuserKind, "spare"), "Observatory", "", false,
+			{"the observatory of a device that is not installed", from(observatory.FocuserKind, "spare"), "Observatory", "", false,
 				"f: Focuser spare belongs to no Observatory"},
 			{"a device kind with no name, where one is needed", dome, "Mount", "", false, "f: a Mount reference needs a name"},
 			{"every mount in the observatory", dome, "Mount", "", true, "Mount east, Mount west"},

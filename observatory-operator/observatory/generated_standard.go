@@ -21,12 +21,12 @@ type Standard struct {
 	// property, such as WEATHER_PARAMETERS, whose WEATHER_TEMPERATURE
 	// names the property of that parameter's limits.
 	NamedBy []string
-	// Settings answers a new value of the kind's settings, such as a
+	// Settings returns a new value of the kind's settings, such as a
 	// *CameraSettings, which a spec decodes into. It is nil for a kind
 	// with no settings. Each field's indi tag names the property that
 	// the operator writes the field to.
 	Settings func() any
-	// Status answers a new value of the kind's typed status fields,
+	// Status returns a new value of the kind's typed status fields,
 	// such as a *CameraStandard, which the status writer fills. Each
 	// field's indi tag names the property that the field holds.
 	Status func() any

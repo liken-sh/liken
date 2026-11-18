@@ -27,12 +27,12 @@ func connectedDevice(t *testing.T, simulator string) (*Client, *replayServer) {
 	defer cancel()
 	events := c.Subscribe(ctx)
 	if err := connectDevice(t, c, server.device); err != nil {
-		t.Fatal(err)
+		t.Fatalf("connecting the device: %v", err)
 	}
 	awaitDefinitions(t, events, len(definedNames(transcript(t, simulator, "connect"))))
-	// The updates after the last definition are still on their way.
-	// A test that sends a change reads its answer from the updates
-	// after the send, so each of these must arrive before it.
+	// The updates that follow the last definition may still be in
+	// transit. A test reads the reply to its change from the updates
+	// after the send, so each of these must arrive before the send.
 	synctest.Wait()
 	return c, server
 }
@@ -51,11 +51,11 @@ func TestSettleWaitsUntilBusyEnds(t *testing.T) {
 		c, server := connectedDevice(t, "dome")
 		sent, err := c.SetNumbers(server.device, "ABS_DOME_POSITION", map[string]float64{"DOME_ABSOLUTE_POSITION": 30})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("sending the change: %v", err)
 		}
 		p, err := settle(t, c, sent)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("waiting for the device to settle: %v", err)
 		}
 		position, _ := p.Member("DOME_ABSOLUTE_POSITION")
 		if p.State != Ok || position.Number != 30 {
@@ -64,17 +64,17 @@ func TestSettleWaitsUntilBusyEnds(t *testing.T) {
 	})
 }
 
-// The dome simulator reports its position with the state Ok on each
-// poll, and a poll can arrive after a change was sent and before the
-// dome starts to turn. That report does not carry the position sent,
-// so it does not answer the change.
+// The dome simulator sends its position with the state Ok on each
+// poll. A poll can arrive after the change was sent and before the
+// dome starts to turn. That update does not have the position sent, so
+// Settle does not treat it as the reply.
 func TestSettleWaitsPastAReportOfTheOldValue(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server := connectedDevice(t, "dome")
 		server.mute()
 		sent, err := c.SetNumbers(server.device, "ABS_DOME_POSITION", map[string]float64{"DOME_ABSOLUTE_POSITION": 30})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("sending the change: %v", err)
 		}
 		result := make(chan error, 1)
 		go func() {
@@ -105,11 +105,11 @@ func TestSettleAfterAnImmediateOk(t *testing.T) {
 		c, server := connectedDevice(t, "focus")
 		sent, err := c.SetNumbers(server.device, "ABS_FOCUS_POSITION", map[string]float64{"FOCUS_ABSOLUTE_POSITION": 52000})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("sending the change: %v", err)
 		}
 		p, err := settle(t, c, sent)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("waiting for the device to settle: %v", err)
 		}
 		position, _ := p.Member("FOCUS_ABSOLUTE_POSITION")
 		if p.State != Ok || position.Number != 52000 {
@@ -133,17 +133,17 @@ func TestSettleReportsAnAlert(t *testing.T) {
 	})
 }
 
-// INDI's telescope base answers TRACK_ON with TELESCOPE_TRACK_STATE
-// Busy, and keeps it Busy for as long as the mount tracks. Accepted
-// ends on that answer, and on no update that came before it or does not
-// carry the change.
-func TestAcceptedEndsOnABusyAnswer(t *testing.T) {
+// INDI's telescope base replies to TRACK_ON with TELESCOPE_TRACK_STATE
+// Busy, and keeps it Busy while the mount tracks. Accepted ends on that
+// reply. It ignores an update that arrived before the send or does not
+// have the values sent.
+func TestAcceptedEndsOnABusyReply(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server := connectedDevice(t, "telescope")
 		server.mute()
 		sent, err := c.SetSwitches(server.device, "TELESCOPE_TRACK_STATE", map[string]bool{"TRACK_ON": true})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("sending the change: %v", err)
 		}
 		result := make(chan error, 1)
 		go func() {
@@ -178,7 +178,7 @@ func TestAcceptedReportsAnAlert(t *testing.T) {
 		server.mute()
 		sent, err := c.SetSwitches(server.device, "TELESCOPE_TRACK_STATE", map[string]bool{"TRACK_ON": true})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("sending the change: %v", err)
 		}
 		server.await("TELESCOPE_TRACK_STATE")
 		server.send(`<setSwitchVector device="Telescope Simulator" name="TELESCOPE_TRACK_STATE" state="Alert"/>`)
@@ -194,11 +194,11 @@ func TestAcceptedReportsAnAlert(t *testing.T) {
 func TestSettleFailsWhenTheConnectionEnds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server := connectedDevice(t, "focus")
-		// No transcript answers this position, so the property stays as
-		// it was until the connection ends.
+		// The transcript has no reply to this position, so the property
+		// keeps its old value until the connection ends.
 		sent, err := c.SetNumbers(server.device, "ABS_FOCUS_POSITION", map[string]float64{"FOCUS_ABSOLUTE_POSITION": 1000})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("sending the change: %v", err)
 		}
 		server.drop()
 		if _, err := settle(t, c, sent); !errors.Is(err, ErrDisconnected) {
@@ -212,7 +212,7 @@ func TestSettleFailsWhenThePropertyIsDeleted(t *testing.T) {
 		c, server := connectedDevice(t, "focus")
 		sent, err := c.SetNumbers(server.device, "ABS_FOCUS_POSITION", map[string]float64{"FOCUS_ABSOLUTE_POSITION": 1000})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("sending the change: %v", err)
 		}
 		// indiserver sends this for every device of a driver that exits.
 		server.send(`<delProperty device="Focuser Simulator"/>`)
@@ -229,7 +229,7 @@ func TestSetNumbersSendsEveryMember(t *testing.T) {
 			"ALIGNMENT_POINT_ENTRY_RA":  5.588,
 			"ALIGNMENT_POINT_ENTRY_DEC": -5.39,
 		}); err != nil {
-			t.Fatal(err)
+			t.Fatalf("sending the change: %v", err)
 		}
 		got := values(server.await("ALIGNMENT_POINT_MANDATORY_NUMBERS"))
 		want := []string{
@@ -241,7 +241,7 @@ func TestSetNumbersSendsEveryMember(t *testing.T) {
 			"ALIGNMENT_POINT_ENTRY_VECTOR_Z=0",
 		}
 		if !slices.Equal(got, want) {
-			t.Errorf("sent %v, want %v", got, want)
+			t.Errorf("the request sets %v, want %v", got, want)
 		}
 	})
 }
@@ -251,7 +251,7 @@ func TestSetTextsSendsEveryMember(t *testing.T) {
 		c, server := connectedBaseline(t, "ccd")
 		p, _ := c.Property(server.device, "ACTIVE_DEVICES")
 		if _, err := c.SetTexts(server.device, "ACTIVE_DEVICES", map[string]string{"ACTIVE_TELESCOPE": "Mount <east> & \"west\""}); err != nil {
-			t.Fatal(err)
+			t.Fatalf("sending the change: %v", err)
 		}
 		var want []string
 		for _, m := range p.Members {
@@ -262,7 +262,7 @@ func TestSetTextsSendsEveryMember(t *testing.T) {
 			want = append(want, m.Name+"="+value)
 		}
 		if got := values(server.await("ACTIVE_DEVICES")); !slices.Equal(got, want) {
-			t.Errorf("sent %v, want %v", got, want)
+			t.Errorf("the request sets %v, want %v", got, want)
 		}
 	})
 }
@@ -284,10 +284,10 @@ func TestSetSwitchesFollowsTheRule(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				c, server := connectedDevice(t, tc.simulator)
 				if _, err := c.SetSwitches(server.device, tc.property, tc.change); err != nil {
-					t.Fatal(err)
+					t.Fatalf("sending the change: %v", err)
 				}
 				if got := values(server.await(tc.property)); !slices.Equal(got, tc.want) {
-					t.Errorf("sent %v, want %v", got, tc.want)
+					t.Errorf("the request sets %v, want %v", got, tc.want)
 				}
 			})
 		})
@@ -324,7 +324,7 @@ func TestSetRefusesWhatTheDefinitionForbids(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				c, server := connectedBaseline(t, "telescope")
 				if _, err := tc.send(c, server.device); !errors.Is(err, tc.want) {
-					t.Errorf("err = %v, want %v", err, tc.want)
+					t.Errorf("the change returns %v, want an error that is %v", err, tc.want)
 				}
 			})
 		})
@@ -341,15 +341,15 @@ func TestSetRefusesWithNoConnection(t *testing.T) {
 }
 
 // CONFIG_PROCESS turns CONFIG_SAVE Off again when the save ends, so
-// its answer never carries the change. Answered accepts it, and Settle
-// does not.
+// its reply never has the values sent. Answered returns on that reply,
+// and Settle keeps waiting.
 func TestAnsweredAcceptsAnActionThatTurnsItsSwitchOff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server := connectedDevice(t, "telescope")
 		server.mute()
 		sent, err := c.SetSwitches(server.device, "CONFIG_PROCESS", map[string]bool{"CONFIG_SAVE": true})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("sending the change: %v", err)
 		}
 		settled := make(chan error, 1)
 		go func() {
@@ -364,10 +364,10 @@ func TestAnsweredAcceptsAnActionThatTurnsItsSwitchOff(t *testing.T) {
 		defer cancel()
 		p, err := c.Answered(ctx, sent)
 		if err != nil || p.State != Ok {
-			t.Fatalf("Answered = %s, %v, want Ok", p.State, err)
+			t.Fatalf("Answered returns %s, %v, want Ok and no error", p.State, err)
 		}
 		if err := <-settled; err == nil {
-			t.Error("Settle accepted an answer that does not carry CONFIG_SAVE On")
+			t.Error("Settle returned no error for an answer without CONFIG_SAVE On, want an error")
 		}
 	})
 }

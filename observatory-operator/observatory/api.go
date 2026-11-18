@@ -1,23 +1,18 @@
-// Package observatory holds the resources of the API group
-// observatory.liken.sh, version v1alpha1, as Go types.
-// observatory-operator reads and writes them, and
-// astrophotography-operator imports them to read a telescope's state
-// and to create a Reservation.
+// Package observatory defines the Go types of the API group
+// observatory.liken.sh/v1alpha1. observatory-operator reads and writes
+// them, and astrophotography-operator imports them to read a
+// telescope's state and to create a Reservation.
 //
-// The types are written by hand, the way liken and the other operators
-// write theirs. The operators speak to the API server with net/http
-// through the shared kubernetes module, so a generated client and
+// The types are written by hand. The operators call the API server with
+// net/http through the kubernetes module, and a generated client with
 // k8s.io/apimachinery would add a large dependency tree for a few
-// structs. ObjectMeta and Condition copy only the fields that an
-// operator reads or writes, and they keep the wire format of
-// metav1.ObjectMeta and metav1.Condition. The typed fields of INDI's
-// standard properties are the exception: schema/ generates them in the
-// generated_*.go files, with the CRDs that hold them, from the standard
-// properties of each INDI interface.
+// structs. So ObjectMeta has only the fields that an operator reads or
+// writes, in the wire format of metav1.ObjectMeta. schema/ generates the typed fields of INDI's
+// standard properties into the generated_*.go files, together with the
+// CRDs that declare them.
 //
-// The CRDs in deploy/ are the schema that the API server enforces. A
-// test compares each type here with its CRD, field by field, so the
-// two cannot drift apart.
+// The CRDs in deploy/ are the schema that the API server enforces, and
+// drift_test.go fails when a type here and its CRD differ in any field.
 package observatory
 
 import (
@@ -29,21 +24,18 @@ import (
 const (
 	// Group is the API group of every kind in this package.
 	Group = "observatory.liken.sh"
-	// Finalizer holds a deleted resource while the operator still runs
-	// something for it: a Reservation until its deactivation steps are
+	// Finalizer keeps a deleted resource in the API until the operator
+	// has deactivated it: a Reservation until its deactivation steps are
 	// done, a device until its pod is gone, and a Telescope or an
-	// Observatory while a reservation holds it or one of its
-	// telescopes.
+	// Observatory while a Reservation holds it or one of its telescopes.
 	Finalizer = Group + "/deactivate"
-	// Version is the one version that the CRDs serve.
+	// Version is the only version that the CRDs serve.
 	Version = "v1alpha1"
 	// APIVersion is the value of apiVersion in every object.
 	APIVersion = Group + "/" + Version
 )
 
-// ObjectMeta is the part of an object's metadata that the operators
-// use. Every kind is namespaced, so the namespace is part of each
-// object's key. Labels and annotations are here so that an object the
+// ObjectMeta has the labels and annotations so that an object the
 // operator reads and writes back keeps them.
 type ObjectMeta struct {
 	Name              string            `json:"name"`
@@ -58,10 +50,8 @@ type ObjectMeta struct {
 	Annotations       map[string]string `json:"annotations,omitempty"`
 }
 
-// Meta is the part of the metadata that a watch's store reads. It is
-// the same interface literal as the shared kubernetes module's
-// memo.Meta, so the types satisfy that interface with no import of the
-// module.
+// Meta has the same method set as memo.Meta in the kubernetes module,
+// so these types satisfy it without importing memo.
 type Meta = interface {
 	GetNamespace() string
 	GetName() string
@@ -72,16 +62,15 @@ func (m *ObjectMeta) GetName() string            { return m.Name }
 func (m *ObjectMeta) GetNamespace() string       { return m.Namespace }
 func (m *ObjectMeta) GetResourceVersion() string { return m.ResourceVersion }
 
-// ListMeta is the metadata of a list. Its resourceVersion is the
-// version that a watch starts from.
+// ListMeta is the metadata of a list. A watch starts from its
+// resourceVersion.
 type ListMeta struct {
 	ResourceVersion string `json:"resourceVersion,omitempty"`
 }
 
-// Object is one resource of a kind: the metadata, the spec that a
-// person writes, and the status that the operator writes. Each kind in
-// this package is an alias of Object with its own spec and status, so
-// every kind has the same envelope and the same methods.
+// Object is one resource. Each kind in this package is an alias of
+// Object with its own Spec and Status types, so every kind has the same
+// metadata fields and methods.
 type Object[Spec, Status any] struct {
 	APIVersion string     `json:"apiVersion,omitempty"`
 	Kind       string     `json:"kind,omitempty"`
@@ -90,19 +79,15 @@ type Object[Spec, Status any] struct {
 	Status     Status     `json:"status,omitzero"`
 }
 
-// GetObjectMeta answers the metadata, for the shared module's watch
-// and its memo of the operator's own writes.
+// GetObjectMeta returns the metadata for the kubernetes module's watch
+// and memo.
 func (o *Object[Spec, Status]) GetObjectMeta() Meta { return &o.Metadata }
 
-// List is the answer to a list request for one kind.
 type List[T any] struct {
 	Metadata ListMeta `json:"metadata"`
 	Items    []T      `json:"items"`
 }
 
-// ConditionStatus is a condition's verdict. Unknown is a third state:
-// the operator cannot tell yet. It is the status type that every
-// liken component shares.
 type ConditionStatus = conditions.Status
 
 const (
@@ -111,22 +96,16 @@ const (
 	ConditionUnknown = conditions.Unknown
 )
 
-// Condition has the shape of metav1.Condition, so `kubectl describe`
-// and `kubectl wait --for=condition=Ready` read it the way they read a
-// Pod's conditions. ObservedGeneration records which
-// metadata.generation the condition judged. It is the condition type
-// that every liken component shares, so one setter keeps its
-// lastTransitionTime and posts an Event for each transition.
 type Condition = conditions.Condition
 
 // The condition types that more than one kind reports.
 const (
-	// Ready is True when the resource does its job: a device is
-	// connected, a telescope or a reservation is ready for its holder.
+	// Ready is True when the resource can do its job: a device is
+	// connected, or a Telescope or a Reservation is ready for its
+	// holder.
 	ConditionReady = "Ready"
 	// ParentFound is True when every resource that the spec names, up
-	// to the Observatory, exists. A resource whose parent is missing
-	// stays in place, and this condition states which parent is
-	// missing.
+	// to the Observatory, exists. When one is missing, the condition is
+	// False and its message gives the missing resource.
 	ConditionParentFound = "ParentFound"
 )

@@ -1,8 +1,8 @@
 package main
 
-// The spec.requires of a session's resources: the Observatory's hold
-// the Wait step, the Telescope's hold the Requires step, and dawn ends
-// a wait that never ended.
+// Tests of spec.requires: the Observatory's requirements block the
+// Wait step, the Telescope's block the Requires step, and dawn ends a
+// wait.
 
 import (
 	"slices"
@@ -14,7 +14,6 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// require sets the spec.requires of one of the example's resources.
 func (w *world) require(kind observatory.Kind, name string, requires ...map[string]any) {
 	w.t.Helper()
 	w.amend(kind, name, func(spec map[string]any) {
@@ -26,7 +25,6 @@ func (w *world) require(kind observatory.Kind, name string, requires ...map[stri
 	})
 }
 
-// stepWaits waits until a reservation's step runs with a summary.
 func (w *world) stepWaits(name string, step observatory.StepName, summary string) {
 	w.t.Helper()
 	var r observatory.Reservation
@@ -38,16 +36,17 @@ func (w *world) stepWaits(name string, step observatory.StepName, summary string
 }
 
 // telescopeTouched reports whether the operator sent any change to the
-// east telescope's INDI server, which runs only from PowerOn.
+// east telescope's INDI server. The operator starts that server's
+// devices only in the PowerOn step.
 func (w *world) telescopeTouched() bool {
 	return slices.ContainsFunc(w.indi.changes(), func(change string) bool { return strings.HasPrefix(change, "east-telescope ") })
 }
 
 var setUpRequired = map[string]any{"type": observatory.ConditionSetUp}
 
-// A portable telescope's SetUp holds the Requires step: the
-// observatory's server runs, and the telescope's stays off until a
-// person confirms.
+// A portable telescope's SetUp requirement blocks the Requires step.
+// The observatory's server runs, and the telescope's server sends
+// nothing until a person sets the telescope up.
 func TestATelescopesRequirementHoldsPowerOn(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -61,19 +60,19 @@ func TestATelescopesRequirementHoldsPowerOn(t *testing.T) {
 			t.Errorf("the telescope's server ran before the person confirmed: %v", w.indi.changes())
 		}
 		if pods := w.api.names(podsCollection); slices.ContainsFunc(pods, func(p string) bool { return strings.HasPrefix(p, "east-") }) {
-			t.Errorf("pods of the telescope = %v", pods)
+			t.Errorf("pods of the telescope are %v, want none", pods)
 		}
 
 		w.setUp(observatory.TelescopeKind, "east", true, time.Time{})
 		r := w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		if got := stepOf(r, observatory.StepRequires).Summary; got != "Found Telescope east SetUp=True" {
-			t.Errorf("Requires = %q", got)
+			t.Errorf("Requires summary is %q, want the found conditions", got)
 		}
 	})
 }
 
-// The Observatory's requirement holds the Wait step, before the
-// reservation takes its telescope, so nothing starts and the telescope
+// The Observatory's requirement blocks the Wait step, before the
+// reservation takes the telescope, so no pod starts and the telescope
 // stays Idle.
 func TestAnObservatorysRequirementHoldsStartSite(t *testing.T) {
 	t.Parallel()
@@ -85,10 +84,10 @@ func TestAnObservatorysRequirementHoldsStartSite(t *testing.T) {
 		time.Sleep(time.Hour)
 		synctest.Wait()
 		if pods := w.api.names(podsCollection); len(pods) != 0 {
-			t.Errorf("pods = %v", pods)
+			t.Errorf("pods are %v, want none while the Observatory requirement waits", pods)
 		}
 		if east, _ := decode[observatory.Telescope](t, w.api, kindCollection(observatory.TelescopeKind), "east"); east.Status.Phase != observatory.PhaseIdle {
-			t.Errorf("the telescope is %s while its reservation waits", east.Status.Phase)
+			t.Errorf("the telescope is %s while its reservation waits, want Idle", east.Status.Phase)
 		}
 
 		w.setUp(observatory.ObservatoryKind, "lab", true, time.Time{})
@@ -96,9 +95,9 @@ func TestAnObservatorysRequirementHoldsStartSite(t *testing.T) {
 	})
 }
 
-// A requirement on a WeatherStation's Safe holds the telescope while
-// the station that the observatory's server runs reports bad weather,
-// and each condition that the step waits for is in its message.
+// A requirement on a WeatherStation's Safe keeps the telescope off
+// while the station, on the observatory's server, reports bad weather.
+// The step's message lists each condition it waits for.
 func TestAWeatherStationsSafeHoldsTheTelescope(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -120,20 +119,20 @@ func TestAWeatherStationsSafeHoldsTheTelescope(t *testing.T) {
 		w.weather("Ok")
 		r := w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		if got := stepOf(r, observatory.StepRequires).Summary; got != "Found Telescope east SetUp=True, WeatherStation lab Safe=True" {
-			t.Errorf("Requires = %q", got)
+			t.Errorf("Requires summary is %q, want the found conditions", got)
 		}
 	})
 }
 
-// labDawn is the first astronomical dawn at the example's observatory
-// after a time.
+// labDawn returns the first astronomical dawn after a time at the
+// example observatory's location.
 func labDawn(after time.Time) time.Time {
 	return dawnAfter(after, observatory.Location{Latitude: -30.169, Longitude: -70.806, Elevation: 2207})
 }
 
-// A reservation that still waits at dawn ends with the telescope's
-// equipment never powered on, from either gate, and its status and its
-// Events say why.
+// A reservation that still waits at dawn ends without powering on the
+// telescope's equipment, in either step, and its status and Events
+// give the reason.
 func TestAReservationStillWaitingAtDawnEnds(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -172,12 +171,12 @@ func TestAReservationStillWaitingAtDawnEnds(t *testing.T) {
 					t.Errorf("the telescope's server ran: %v", w.indi.changes())
 				}
 				if pods := w.api.names(podsCollection); len(pods) != 0 {
-					t.Errorf("pods after the release = %v", pods)
+					t.Errorf("pods after the release are %v, want none", pods)
 				}
 				if got := eventsAbout(w.api, observatory.ReservationKind, "east-tonight", c.event); !slices.ContainsFunc(got, func(m string) bool {
 					return strings.HasSuffix(m, ": dawn came at "+dawn.Format(time.RFC3339)+" while waiting for "+c.waited+", so the session did not start")
 				}) {
-					t.Errorf("%s Events = %v", c.event, got)
+					t.Errorf("%s Events are %v, want one that ends with the dawn message", c.event, got)
 				}
 			})
 		})

@@ -1,24 +1,25 @@
 package main
 
-// One INDI device can serve several resources (served.go), and each of
-// its properties is in the status of one resource, so an update to a
-// property costs one status write. A standard property is a typed field
-// of the resource whose interface defines it: a camera's FILTER_SLOT is
-// a field of the FilterWheel that the camera serves, and the camera's
-// status does not hold it. Every other property is in status.properties
-// of the resource that runs the driver: a vendor's own properties, the
-// properties of INDI's DefaultDevice, such as DEBUG, and the standard
-// properties of an interface that no resource on the device is, such as
-// the FILTER_SLOT of a camera that serves no FilterWheel. So a person
-// still reads every property with kubectl.
+// One INDI device can back several resources (served.go). For example,
+// a camera's driver can also provide a filter wheel. The operator writes
+// each property of the device to the status of exactly one of those
+// resources, so a property update costs one status write.
 //
-// Some names are in the standard sets of two interfaces, such as
-// GEOGRAPHIC_COORD, which a mount and a GPS both define. Such a property
-// goes to the first resource whose set holds it: the served resources
-// in the order of the tree, then the one that runs the driver. A served
-// resource exists only to show its interface, and the resource that runs
-// the driver keeps everything else, so a mount that serves a GPS gives
-// GEOGRAPHIC_COORD to the GPS.
+// A standard property goes to a typed field of a resource whose kind's
+// standard set contains it. The camera's FILTER_SLOT goes to the
+// FilterWheel that the camera serves, and the camera's status does not
+// repeat it. Every other property goes to status.properties of the
+// resource that runs the driver. That covers vendor-specific
+// properties, the properties of INDI's DefaultDevice such as DEBUG, and
+// standard properties of a kind that has no resource on the device,
+// such as FILTER_SLOT when the camera serves no FilterWheel. So
+// kubectl still shows every property.
+//
+// When the standard sets of two kinds contain the same name, such as
+// GEOGRAPHIC_COORD for Mount and GPS, the property goes to the served
+// resource before the resource that runs the driver (resourcesOf). A
+// served resource exists to show its interface, so when a mount serves a
+// GPS, GEOGRAPHIC_COORD goes to the GPS.
 
 import (
 	"strings"
@@ -27,15 +28,13 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// standardSet is the standard set of one kind, as the names of its
-// properties.
 type standardSet struct {
 	names map[string]bool
-	// prefixes are the numbered families, such as DIGITAL_OUTPUT_ for
-	// DIGITAL_OUTPUT_1 and the rest.
+	// prefixes are numbered families, such as DIGITAL_OUTPUT_, which
+	// matches DIGITAL_OUTPUT_1, DIGITAL_OUTPUT_2, and so on.
 	prefixes []string
-	// namedBy are the properties whose members name a property of the
-	// set, such as WEATHER_PARAMETERS.
+	// namedBy are properties whose member names are themselves standard
+	// property names, such as WEATHER_PARAMETERS.
 	namedBy []string
 }
 
@@ -55,10 +54,10 @@ var standardSets = func() map[observatory.Kind]standardSet {
 	return out
 }()
 
-// holds reports whether a property of a device is in the set. defined
-// answers the device's other properties, for a name that a member of
-// one of them gives.
-func (s standardSet) holds(name string, defined map[string]*indi.Property) bool {
+// contains reports whether a property is in the set. defined is the
+// device's properties by name, which the set reads to match a name that
+// is a member of one of its namedBy properties.
+func (s standardSet) contains(name string, defined map[string]*indi.Property) bool {
 	if s.names[name] {
 		return true
 	}
@@ -77,8 +76,9 @@ func (s standardSet) holds(name string, defined map[string]*indi.Property) bool 
 	return false
 }
 
-// familyNumber answers the number at the end of a property of a
-// numbered family, such as 2 for DIGITAL_OUTPUT_2.
+// familyNumber returns the number at the end of a numbered family's
+// property name, such as 2 for DIGITAL_OUTPUT_2, and false when name does
+// not have the prefix followed by one to nine digits.
 func familyNumber(name, prefix string) (int32, bool) {
 	digits, ok := strings.CutPrefix(name, prefix)
 	if !ok || digits == "" || len(digits) > 9 {
@@ -94,22 +94,23 @@ func familyNumber(name, prefix string) (int32, bool) {
 	return n, true
 }
 
-// sharers answers the resources that one INDI device serves, in the
-// order that they take a property that two standard sets hold: each
-// device that the tree serves on it, in the order of the tree, then each
-// device that left its server and still holds the finalizer (shares),
-// then the device that runs its driver. A device that left reads the
-// owner's device while its deactivation runs (status.go), and one that
-// the tree serves takes the properties from it, so the FilterWheel that
-// a camera serves reads the wheel at once.
-func (t *tree) sharers(owner *device) []*device {
+// resourcesOf returns the resources that back owner's INDI device, in
+// the order in which they take a property that two standard sets
+// contain:
+//  1. the served devices that the tree places on the owner, in tree
+//     order,
+//  2. the served devices that left their server but still hold the
+//     finalizer, so they read the owner's INDI device while their
+//     deactivation runs,
+//  3. the owner.
+func (t *tree) resourcesOf(owner *device) []*device {
 	var served, leaving []*device
 	for _, d := range t.devices {
-		if d.runsDriver() || t.verdict(d).refusal != "" || !t.shares(d) {
+		if d.runsDriver() || t.ownershipOf(d).refusal != "" || !t.shares(d) {
 			continue
 		}
 		switch named, _ := t.named(d); {
-		case t.verdict(d).owner == owner:
+		case t.ownershipOf(d).owner == owner:
 			served = append(served, d)
 		case named == owner:
 			leaving = append(leaving, d)
@@ -118,18 +119,19 @@ func (t *tree) sharers(owner *device) []*device {
 	return append(append(served, leaving...), owner)
 }
 
-// holders answers the resource whose typed field holds each property of
-// an INDI device, by name. A property that no typed field holds has no
-// entry, and is in status.properties of the device that runs the driver.
-func holders(sharers []*device, properties []indi.Property) map[string]*device {
+// fieldOwners returns, for each property name, the first of resources
+// whose standard set contains it. A property that no set contains has
+// no entry, and goes to status.properties of the device that runs the
+// driver.
+func fieldOwners(resources []*device, properties []indi.Property) map[string]*device {
 	defined := make(map[string]*indi.Property, len(properties))
 	for i := range properties {
 		defined[properties[i].Name] = &properties[i]
 	}
 	out := map[string]*device{}
 	for _, p := range properties {
-		for _, d := range sharers {
-			if standardSets[d.kind].holds(p.Name, defined) {
+		for _, d := range resources {
+			if standardSets[d.kind].contains(p.Name, defined) {
 				out[p.Name] = d
 				break
 			}
@@ -138,22 +140,23 @@ func holders(sharers []*device, properties []indi.Property) map[string]*device {
 	return out
 }
 
-// split answers the properties of an INDI device that a resource holds
-// in its typed fields, and the ones that no typed field holds, each in
-// the driver's order.
-func (t *tree) split(d *device, all []indi.Property) (held, rest []indi.Property) {
+// split divides the properties of d's INDI device into the ones that
+// belong in d's typed fields and the ones that belong in
+// status.properties, each in the driver's order. The caller writes rest
+// only when d runs the driver.
+func (t *tree) split(d *device, all []indi.Property) (typed, rest []indi.Property) {
 	runner, ok := t.runnerOf(d)
 	if !ok {
 		return nil, nil
 	}
-	holder := holders(t.sharers(runner), all)
+	owner := fieldOwners(t.resourcesOf(runner), all)
 	for _, p := range all {
-		switch holder[p.Name] {
+		switch owner[p.Name] {
 		case d:
-			held = append(held, p)
+			typed = append(typed, p)
 		case nil:
 			rest = append(rest, p)
 		}
 	}
-	return held, rest
+	return typed, rest
 }

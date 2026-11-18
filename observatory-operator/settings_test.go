@@ -1,10 +1,5 @@
 package main
 
-// Configure writes each setting that a spec states to the property its
-// field names, in the shape of that property: a switch's member, a
-// switch's members that are on, an object of a property's members, a
-// list of the driver's elements, and one property of a family.
-
 import (
 	"maps"
 	"strings"
@@ -54,9 +49,8 @@ func TestConfigureWritesEachSettingInItsPropertysShape(t *testing.T) {
 	}
 }
 
-// A setting goes once, when the reservation configures the device: a
-// client that changes it later, such as a sequencer that sets the gain
-// for one frame, keeps its change.
+// A client that changes a setting after the Configure step, such as a
+// sequencer that sets the gain for one frame, keeps its change.
 func TestASettingIsWrittenOnceForAReservation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -70,8 +64,6 @@ func TestASettingIsWrittenOnceForAReservation(t *testing.T) {
 	})
 }
 
-// A setting that names a property or a member that the driver does not
-// define is noted in the step's summary, and the step goes on.
 func TestASettingTheDriverLacksIsNoted(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

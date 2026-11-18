@@ -8,11 +8,11 @@ toc: true
 
 # `Guider`
 
-A `Guider` runs PHD2 for one `Telescope`, as a client of the telescope's INDI server, and guides with the camera of one `OpticalTrain`. A guide scope is a train with its own small tube, and an off-axis guider is a train on the imaging train's tube. While a `Reservation` holds the telescope, the operator runs PHD2, connects it to the guide camera and the mount, and leaves it idle. The holder calibrates and guides through PHD2's event server at `status.endpoint`.
+A `Guider` runs PHD2 for one `Telescope`, as a client of the telescope's INDI server, and guides with the camera of one `OpticalTrain`. A guide scope is a train with its own small tube, and an off-axis guider is a train on the imaging train's tube. While a `Reservation` holds the telescope, the operator runs PHD2 and connects it to the guide camera and the mount, but does not start guiding. The client that the reservation's `spec.holder` names, such as a person at KStars or `astrophotography-operator`, calibrates and guides through PHD2's event server at `status.endpoint`.
 
 ## spec
 
-What the guider guides, and how.
+The telescope to guide, the train whose camera guides, and where PHD2 sends its corrections.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -22,28 +22,28 @@ What the guider guides, and how.
 
 ## status
 
-What the operator observes. The operator writes it, and a person reads it.
+What the operator observes.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="status--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the operator last acted on. |
-| <span id="status--endpoint"></span>`endpoint` | [object](#statusendpoint) | no | PHD2's event server, while the guider's pod exists. KStars and `astrophotography-operator` drive PHD2 at its `host` and `port`. |
+| <span id="status--endpoint"></span>`endpoint` | [object](#statusendpoint) | no | PHD2's event server, while the guider's pod exists. KStars and `astrophotography-operator` connect to PHD2 at its `host` and `port`. |
 | <span id="status--pod"></span>`pod` | string | no | The name of the guider's pod. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the guider's pod. |
-| <span id="status--state"></span>`state` | string | no | PHD2's state, as its event server names it, while the operator's connection to that server is open. `Stopped`: no exposures run. `Selected`: a star is selected, and no exposures run. `Looping`: PHD2 takes exposures and does not guide. `Calibrating`, `Guiding`, and `Paused` name what PHD2 does. `LostLock`: PHD2 guides and lost its star. One of: `Stopped`, `Selected`, `Calibrating`, `Guiding`, `LostLock`, `Paused`, `Looping`. |
-| <span id="status--calibrated"></span>`calibrated` | boolean | no | `true` while PHD2 holds a calibration of the mount. |
-| <span id="status--pixelscale"></span>`pixelScale` | number | no | The guide camera's scale in arc-seconds per pixel, from the camera's pixel size and the guide tube's focal length. It is absent while PHD2 does not know one of them. |
-| <span id="status--rms"></span>`rms` | [object](#statusrms) | no | The root mean square of the star's distance from the lock position over the last guide steps, in arc-seconds, along the mount's axes and in total. It covers at most the last 100 steps that the operator received since guiding started, and `since` gives the time of the first of them. PHD2 sends a new connection no earlier steps, so the window also starts again when the operator restarts. It is absent while PHD2's pixel scale is not known. |
+| <span id="status--state"></span>`state` | string | no | PHD2's state, as its event server reports it, while the operator's connection to that server is open. `Stopped`: PHD2 takes no exposures. `Selected`: a star is selected, and PHD2 takes no exposures. `Looping`: PHD2 takes exposures and does not guide. `Calibrating`, `Guiding`, `Paused`: PHD2 is calibrating, guiding, or paused. `LostLock`: PHD2 is guiding and has lost its star. One of: `Stopped`, `Selected`, `Calibrating`, `Guiding`, `LostLock`, `Paused`, `Looping`. |
+| <span id="status--calibrated"></span>`calibrated` | boolean | no | `true` while PHD2 has a calibration of the mount. |
+| <span id="status--pixelscale"></span>`pixelScale` | number | no | The guide camera's scale in arc-seconds per pixel, from the camera's pixel size and the guide tube's focal length. It is absent while PHD2 has no value for one of them. |
+| <span id="status--rms"></span>`rms` | [object](#statusrms) | no | The root mean square of the star's distance from the lock position over the last guide steps, in arc-seconds, along the mount's axes and in total. It covers at most the last 100 steps that the operator received since guiding started, and `since` is the time of the first of them. PHD2 does not send earlier steps to a new connection, so the window also starts again when the operator restarts. It is absent until PHD2 has a pixel scale and has sent a guide step. |
 | <span id="status--star"></span>`star` | [object](#statusstar) | no | The guide star, as PHD2 measured it in the last guide step. |
 | <span id="status--laststeptime"></span>`lastStepTime` | string | no | When PHD2 sent the last guide step. |
 | <span id="status--alert"></span>`alert` | [object](#statusalert) | no | The last alert that PHD2 showed, or the last calibration that failed. |
 | <span id="status--display"></span>`display` | [object](#statusdisplay) | no | What the printer columns show. |
-| <span id="status--phase"></span>`phase` | string | no | The state in one word. `Idle`: no reservation needs it, and nothing runs. `Activating`: a reservation's activation steps run. `Ready`: everything it needs runs and is connected. `Deactivating`: a reservation's deactivation steps run. `Error`: a step failed, and the `Ready` condition gives the reason. One of: `Idle`, `Activating`, `Ready`, `Deactivating`, `Error`. |
+| <span id="status--phase"></span>`phase` | string | no | The phase of the guider. `Idle`: no reservation holds the telescope. `Activating`: the reservation is activating, or PHD2 is not yet connected to its camera and mount. `Ready`: PHD2 runs, and its camera and mount are connected. `Deactivating`: the reservation's deactivation steps are running. `Error`: the reservation failed, or the operator failed to run or connect PHD2. The message of the `Ready` condition says which. One of: `Idle`, `Activating`, `Ready`, `Deactivating`, `Error`. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Ready` is `True` while PHD2 runs and its camera and mount are connected. `ParentFound` is `False` when the `Telescope` or the `OpticalTrain` does not exist. |
 
 ### status.endpoint
 
-PHD2's event server, while the guider's pod exists. KStars and `astrophotography-operator` drive PHD2 at its `host` and `port`.
+PHD2's event server, while the guider's pod exists. KStars and `astrophotography-operator` connect to PHD2 at its `host` and `port`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -53,7 +53,7 @@ PHD2's event server, while the guider's pod exists. KStars and `astrophotography
 
 ### status.rms
 
-The root mean square of the star's distance from the lock position over the last guide steps, in arc-seconds, along the mount's axes and in total. It covers at most the last 100 steps that the operator received since guiding started, and `since` gives the time of the first of them. PHD2 sends a new connection no earlier steps, so the window also starts again when the operator restarts. It is absent while PHD2's pixel scale is not known.
+The root mean square of the star's distance from the lock position over the last guide steps, in arc-seconds, along the mount's axes and in total. It covers at most the last 100 steps that the operator received since guiding started, and `since` is the time of the first of them. PHD2 does not send earlier steps to a new connection, so the window also starts again when the operator restarts. It is absent until PHD2 has a pixel scale and has sent a guide step.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

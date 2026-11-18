@@ -62,10 +62,12 @@ spec:
           x-kubernetes-validations:
             - rule: size(self.metadata.name) <= 32
               message: >-
-                a Observatory name is at most 32 characters, because
-                observatory-operator builds the names of its pods,
-                Services, and Job labels from the names of observatory
-                resources, and Kubernetes limits those to 63 characters
+                an Observatory name is at most 32 characters.
+                observatory-operator names the Observatory's pod and
+                Service <name>-observatory, and Kubernetes limits those
+                names to 63 characters. Every observatory.liken.sh kind
+                has the same limit of 32, which leaves room for a suffix
+                longer than any that the operator adds.
           description: >-
             An `Observatory` is the building and the site: the roof, the
             weather, and the location. `observatory-operator` runs one

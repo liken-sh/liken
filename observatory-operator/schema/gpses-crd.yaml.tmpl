@@ -71,10 +71,12 @@ spec:
           x-kubernetes-validations:
             - rule: size(self.metadata.name) <= 32
               message: >-
-                a GPS name is at most 32 characters, because
-                observatory-operator names its pod and Service
-                <name>-gps, and a Service name holds at most 63
-                characters
+                a GPS name is at most 32 characters.
+                observatory-operator names the GPS's pod and Service
+                <name>-gps, and Kubernetes limits those names to 63
+                characters. Every observatory.liken.sh kind has the same
+                limit of 32, which leaves room for a suffix longer than
+                any that the operator adds.
           description: >-
             A `GPS` gives a telescope its place and time: an INDI device
             that serves `GPS_INTERFACE`. The mount snoops it on the telescope's
@@ -95,8 +97,8 @@ spec:
                   description: >-
                     The name of the `Telescope` that the device belongs
                     to.
-                    Optional. With no `telescope`, the device is on the
-                    shelf, and the operator creates nothing for it.
+                    Optional. With no `telescope`, the device is not
+                    installed, and the operator creates nothing for it.
 {{ include "device spec" . | indent 16 }}
 {{ settings | indent 16 }}
 {{ include "procedure spec" . | indent 16 }}

@@ -1,10 +1,10 @@
 // Package standard reads the standard properties of each INDI
-// interface and merges them from two sources: the captures of the
-// bare drivers beside this file, which give the structure of what
-// libindi defines, and the table of properties that drivers share by
-// convention, which libindi does not define. The structure is the
-// type, the permission, the rule, and the members. Where two sources
-// differ, the package reports the place and takes no side.
+// interface from two sources and merges them. The captures of bare
+// drivers in this directory give the properties that libindi defines,
+// with their type, permission, rule, and members. conventions.yaml
+// lists the properties that several drivers define the same way and
+// libindi does not. Where the two sources differ, the package reports
+// the difference and keeps the capture's definition.
 package standard
 
 import (
@@ -23,7 +23,7 @@ type Property struct {
 	Perm  indi.Permission
 	Rule  indi.Rule
 	Label string
-	// Members are in the order that the definition gives them.
+	// Members are in the order of the definition.
 	Members []Member
 	// Convention is true for a property of the conventions table,
 	// which libindi does not define.
@@ -37,7 +37,7 @@ type Member struct {
 	Format string `json:"format,omitempty"`
 }
 
-// Member answers the member of a name.
+// Member returns the member with the given name.
 func (p Property) Member(name string) (Member, bool) {
 	for _, m := range p.Members {
 		if m.Name == name {
@@ -47,12 +47,12 @@ func (p Property) Member(name string) (Member, bool) {
 	return Member{}, false
 }
 
-// definitions reads every def*Vector in an INDI stream, at any depth,
-// so it reads a capture file and a transcript of a server alike. A
-// property defined twice keeps its first place and gains the members
-// of the second definition, because a capture keeps every definition
-// that it saw. Values are left out: they belong to one driver at one
-// moment, and the time in TIME_UTC changes on every capture.
+// definitions reads every def*Vector element in an INDI stream, at any
+// depth, so it reads a capture file and a server transcript the same
+// way. When a property is defined more than once, the first definition
+// keeps its position in the result and later ones add their new
+// members. It reads no values, because a value comes from one driver at
+// one moment, such as the time in TIME_UTC.
 func definitions(r io.Reader) ([]Property, error) {
 	decoder := xml.NewDecoder(r)
 	var out []Property
@@ -106,7 +106,6 @@ func definitions(r io.Reader) ([]Property, error) {
 	}
 }
 
-// definitionsOf reads the definitions in a byte slice.
 func definitionsOf(data []byte) ([]Property, error) {
 	return definitions(bytes.NewReader(data))
 }

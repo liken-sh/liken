@@ -1,8 +1,5 @@
 package main
 
-// The two ends of a reservation's record: a failed step, which waits
-// for a person, and the release, which gives the telescope back.
-
 import (
 	"context"
 	"strings"
@@ -10,15 +7,16 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// failed waits while a step is Failed. A failed activation step waits
-// for the reservation to end, and deactivation then runs from StopWork,
-// which stops what activation started. A failed deactivation step
-// keeps the finalizer, because the devices may not be safe to power
-// off, and the Ready and SafeToPowerOff conditions name the step. In
-// both cases the annotation observatory.liken.sh/retry runs the failed
-// step again: the operator removes the annotation, records a failed
-// activation's session again from the specs (recordAgain), and sets the
-// step Pending.
+// failed waits while a step of the reservation is Failed. A failed
+// activation step waits only until spec.end, and then stage() starts
+// deactivation to stop what activation started. A failed deactivation
+// step waits with the finalizer in place, because the devices may not
+// be safe to power off.
+//
+// A person retries with the annotation observatory.liken.sh/retry.
+// failed then removes the annotation, sets each Failed step to
+// Pending, records the session again from the current specs, and
+// returns.
 func (r *runner) failed(ctx context.Context) {
 	for ctx.Err() == nil {
 		wake := r.o.structure.wait()
@@ -54,13 +52,14 @@ func (r *runner) failed(ctx context.Context) {
 			return
 		}
 		r.observe(ctx)
-		r.keepWaiting(ctx, wake)
+		r.waitForChange(ctx, wake)
 	}
 }
 
-// released gives the telescope back and removes the finalizer, so a
-// deleted reservation goes away. A reservation that reached spec.end
-// stays, Released, until a person deletes it.
+// released frees the telescope for other reservations and removes the
+// finalizer, so a reservation that a person deleted goes away. A
+// reservation that reached spec.end stays, Released, until a person
+// deletes it.
 func (r *runner) released(ctx context.Context) {
 	r.o.claims.release(r.res)
 	r.o.structure.notify()
@@ -72,9 +71,10 @@ func (r *runner) released(ctx context.Context) {
 	})
 }
 
-// awaitStore waits until the store's copy of the reservation meets
-// check, after a write of the operator's own, so the next read does not
-// act on the copy from before the write.
+// awaitStore waits until the operator's cached copy of the reservation
+// satisfies check, or the reservation is gone. Call it after a write,
+// so the next read of the cache does not return the copy from before
+// the write.
 func (r *runner) awaitStore(ctx context.Context, check func(*observatory.Reservation) bool) {
 	_ = r.o.waitFor(ctx, nil, func(t *tree) (bool, string, error) {
 		res, ok := t.reservations[r.name]

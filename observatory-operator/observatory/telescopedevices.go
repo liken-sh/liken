@@ -1,8 +1,8 @@
 package observatory
 
 // The devices that belong to a Telescope as a whole: the mount that
-// points it, the GPS that gives the mount its place and time, and the
-// polar aligner that adjusts the mount's axis.
+// points it, the GPS that gives the mount its location and time, and
+// the polar aligner that adjusts the mount's axis.
 
 type (
 	Mount        = Object[MountSpec, MountStatus]
@@ -11,8 +11,8 @@ type (
 )
 
 // MountSpec describes a device with INDI's TELESCOPE_INTERFACE. The
-// operator writes the observatory's location to the mount when it
-// configures it, so the spec holds no location.
+// spec has no location field, because the operator writes the
+// Observatory's location to the mount when it configures the mount.
 type MountSpec struct {
 	TelescopeDevice
 	Procedures[ParkAction]
@@ -26,33 +26,33 @@ type MountStatus struct {
 	Display  MountDisplay  `json:"display,omitzero"`
 }
 
-// MountDisplay holds the coordinates as a person reads them, for the
-// printer columns. RightAscension is in hours, minutes, and seconds,
-// such as 19h17m21s, and Declination in degrees, arcminutes, and
-// arcseconds, such as +12°34′56″.
+// MountDisplay holds the coordinates formatted for the printer
+// columns. RightAscension is in hours, minutes, and seconds, such as
+// 19h17m21s. Declination is in degrees, arcminutes, and arcseconds,
+// such as +12°34′56″.
 type MountDisplay struct {
 	RightAscension string `json:"rightAscension,omitempty"`
 	Declination    string `json:"declination,omitempty"`
 }
 
-// MountState names what a mount does. A mount does one thing at a
-// time, so one field names it, where INDI reports two switches and a
-// light.
+// MountState is what the mount is doing. A mount does one thing at a
+// time, so the status has one field, where INDI spreads it over the
+// properties that MountReadings lists.
 type MountState string
 
 const (
 	MountParked    MountState = "Parked"
 	MountParking   MountState = "Parking"
 	MountUnparking MountState = "Unparking"
-	// Stopped is a mount that is unparked and does not move.
+	// Stopped is a mount that is not parked, slewing, or tracking.
 	MountStopped  MountState = "Stopped"
 	MountSlewing  MountState = "Slewing"
 	MountTracking MountState = "Tracking"
 )
 
-// MountReadings hold what the mount does, which no typed field holds
-// alone: the operator reads it from TELESCOPE_PARK,
-// TELESCOPE_TRACK_STATE, and the state of EQUATORIAL_EOD_COORD.
+// MountReadings holds values that the operator derives from several
+// INDI properties: TELESCOPE_PARK, TELESCOPE_TRACK_STATE, and the
+// state of EQUATORIAL_EOD_COORD.
 type MountReadings struct {
 	// State is absent until the driver defines EQUATORIAL_EOD_COORD.
 	State MountState `json:"state,omitempty"`

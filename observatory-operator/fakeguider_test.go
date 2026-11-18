@@ -1,11 +1,12 @@
 package main
 
-// The fake guiders: one fake PHD2 from phd2/phd2test for each guider
-// pod that is Ready, as the kubelet would start PHD2 in it. A new pod,
-// or the same name with a new UID, starts a new PHD2 with nothing
-// connected, and a pod that stops ends every connection to its PHD2.
-// A PHD2 whose INDI server's pod changes loses its INDI connection: its
-// equipment disconnects and it shows an alert, as the real PHD2 does.
+// The fake guiders run one fake PHD2 from phd2/phd2test for each guider
+// pod that is Ready, as if the kubelet had started PHD2 in the pod. A
+// new pod, or a pod with the same name and a new UID, starts a new PHD2
+// with no equipment connected. When a pod stops, every connection to
+// its PHD2 closes. When the INDI server's pod is replaced, the PHD2
+// disconnects its equipment and sends an Alert, as the real PHD2 does
+// when it loses its INDI connection.
 
 import (
 	"context"
@@ -35,8 +36,8 @@ type guiderWorld struct {
 type fakeGuider struct {
 	uid  string
 	phd2 *phd2test.Server
-	// server is the UID of the INDI server's pod that PHD2 reached
-	// last, or "" while the pod is gone.
+	// server is the UID of the INDI server's pod at the last catchUp,
+	// or "" while that pod is gone.
 	server string
 }
 
@@ -65,9 +66,9 @@ func startGuiderWorld(ctx context.Context, api *fakeAPI) *guiderWorld {
 
 // catchUp starts a PHD2 for each Ready guider pod, and stops the PHD2
 // of each pod that is gone or not Ready. The watch loop and each dial
-// both catch up, so each one reads the pods under w.mu. A catch-up that
-// read the pods before it held the lock could apply them after a newer
-// one, and stop the PHD2 of a pod that still runs.
+// both call it, so it reads the pods while it holds w.mu. Otherwise a
+// call could apply an older list after a newer call, and stop the PHD2
+// of a pod that still runs.
 func (w *guiderWorld) catchUp() {
 	var stopped []string
 	w.mu.Lock()
@@ -114,7 +115,7 @@ func (w *guiderWorld) catchUp() {
 	}
 }
 
-// phd2 answers the PHD2 that runs in a guider's pod now, or nil.
+// phd2 returns nil when no PHD2 runs in the named guider pod.
 func (w *guiderWorld) phd2(name string) *phd2test.Server {
 	w.catchUp()
 	w.mu.Lock()
@@ -125,16 +126,15 @@ func (w *guiderWorld) phd2(name string) *phd2test.Server {
 	return nil
 }
 
-// starts answers how many PHD2s a guider's pod name has started.
 func (w *guiderWorld) starts(name string) int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.started[name]
 }
 
-// DialContext answers a pipe to the PHD2 of the pod that an address
-// names, such as east-guider.observatory.svc:4400, while the pod is
-// Ready, and refuses the dial otherwise, as a closed port does.
+// DialContext connects to the PHD2 of the pod in address, such as
+// east-guider.observatory.svc:4400, while the pod is Ready. Otherwise
+// it refuses the dial, as a closed port does.
 func (w *guiderWorld) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	name, _, _ := strings.Cut(address, ".")
 	if s := w.phd2(name); s != nil {
@@ -143,8 +143,8 @@ func (w *guiderWorld) DialContext(ctx context.Context, network, address string) 
 	return nil, &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
 }
 
-// dialers sends a dial to a guider's PHD2 or to an INDI server, by the
-// port it names.
+// dialers sends a dial for port 4400 to a guider's PHD2, and any other
+// dial to an INDI server.
 type dialers struct {
 	indi    *indiWorld
 	guiders *guiderWorld

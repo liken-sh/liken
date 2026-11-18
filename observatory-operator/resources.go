@@ -1,9 +1,9 @@
 package main
 
-// The resources that state procedures: the 13 device kinds, the
-// Telescope, and the Observatory. One type reads them all, with the
-// place of each in the tree, so a procedure resolves its references
-// the same way on every kind.
+// The device kinds, Telescope, and Observatory have procedures in their
+// spec. The resource type wraps any of them with the names of its
+// Telescope and Observatory, so a reference in a procedure resolves the
+// same way for every kind.
 
 import (
 	"fmt"
@@ -11,8 +11,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// resource is one resource with procedures, as one reading of the tree
-// holds it.
+// resource is a device, a Telescope, or an Observatory, read from one
+// snapshot of the tree.
 type resource struct {
 	kind       observatory.Kind
 	meta       observatory.ObjectMeta
@@ -20,23 +20,24 @@ type resource struct {
 	conditions []observatory.Condition
 	// device is nil for a Telescope or an Observatory.
 	device *device
-	// telescope is the resource's own Telescope, or "" for the
-	// Observatory and the devices of the observatory's server.
+	// telescope is the Telescope that the resource is, or whose INDI
+	// server the device runs on. Otherwise it is "".
 	telescope string
-	// observatory is the resource's own Observatory, or "" while a
-	// parent is missing.
+	// observatory is the Observatory that the resource is or belongs
+	// to. It is "" for a device on no INDI server, and for a Telescope
+	// with no spec.observatory.
 	observatory string
 }
 
 func (r resource) name() string { return r.meta.Name }
 
-// key names the resource across kinds, such as Dome/lab, the same way
-// device.key does.
+// key identifies the resource across kinds, such as Dome/lab, in the
+// same format as device.key.
 func (r resource) key() string { return r.kind.Name + "/" + r.meta.Name }
 
 func (r resource) String() string { return r.kind.Name + " " + r.meta.Name }
 
-// actionsOf answers the actions of a lifecycle trigger.
+// actionsOf returns the actions of the named lifecycle trigger.
 func (r resource) actionsOf(name string) []action {
 	switch name {
 	case observatory.TriggerActivation:
@@ -47,7 +48,6 @@ func (r resource) actionsOf(name string) []action {
 	return nil
 }
 
-// ofDevice answers a device as a resource.
 func (t *tree) ofDevice(d *device) resource {
 	r := resource{kind: d.kind, meta: d.object.Metadata, procedures: d.object.Spec.Procedures,
 		conditions: d.object.Status.Conditions, device: d}
@@ -74,7 +74,6 @@ func ofObservatory(site *observatory.Observatory) resource {
 		observatory: site.Metadata.Name}
 }
 
-// resource answers the resource of one kind and name.
 func (t *tree) resource(kind observatory.Kind, name string) (resource, bool) {
 	switch kind {
 	case observatory.TelescopeKind:
@@ -93,8 +92,8 @@ func (t *tree) resource(kind observatory.Kind, name string) (resource, bool) {
 	return resource{}, false
 }
 
-// conditionsOf answers the stored conditions of any resource that a
-// reference can name, and whether it exists.
+// conditionsOf returns the status conditions of a resource of any kind
+// that a reference can point to, and whether the resource exists.
 func (t *tree) conditionsOf(kind observatory.Kind, name string) ([]observatory.Condition, bool) {
 	switch kind {
 	case observatory.OpticalTubeKind:
@@ -117,8 +116,8 @@ func (t *tree) conditionsOf(kind observatory.Kind, name string) ([]observatory.C
 	return r.conditions, ok
 }
 
-// observatoryOf answers the Observatory of any resource that a
-// reference can name.
+// observatoryOf returns the Observatory that a resource of any kind
+// belongs to, or "" when it belongs to none.
 func (t *tree) observatoryOf(kind observatory.Kind, name string) string {
 	telescope := ""
 	switch kind {
@@ -144,7 +143,7 @@ func (t *tree) observatoryOf(kind observatory.Kind, name string) string {
 	return ""
 }
 
-// target is one resource that a reference names.
+// target is one resource that a reference points to.
 type target struct {
 	kind observatory.Kind
 	name string
@@ -154,13 +153,18 @@ func (g target) String() string { return g.kind.Name + " " + g.name }
 
 func (g target) key() string { return g.kind.Name + "/" + g.name }
 
-// resolve answers the resources that a reference names, from the
-// resource that holds the reference. field names the reference in
-// the spec, such as after[0], so a reference that names nothing fails
-// with a message that a person can find. With no kind, the reference
-// names the resource itself. With no name, a kind of Observatory or
-// Telescope names the resource's own, and any other kind names every
-// resource of the kind in the observatory when many allows it.
+// resolve returns the resources that a reference in a procedure points
+// to. from is the resource whose procedure holds the reference, and
+// field is the reference's path in the spec, such as after[0], which
+// the error message quotes. The reference is resolved by its parts:
+//
+//   - With no kind, it points to from itself.
+//   - With a kind and a name, it points to that resource, which must
+//     exist.
+//   - With an Observatory or a Telescope kind and no name, it points to
+//     the one that from belongs to.
+//   - With any other kind and no name, it points to every resource of
+//     that kind in from's Observatory, but only when many is true.
 func (t *tree) resolve(from resource, field, kindName, name string, many bool) ([]target, error) {
 	if kindName == "" {
 		return []target{{from.kind, from.name()}}, nil
@@ -194,7 +198,7 @@ func (t *tree) resolve(from resource, field, kindName, name string, many bool) (
 	return out, nil
 }
 
-// namesOf answers the names of the resources of a kind, in order.
+// namesOf returns the names of the resources of a kind, sorted by name.
 func (t *tree) namesOf(kind observatory.Kind) []string {
 	switch kind {
 	case observatory.TelescopeKind:

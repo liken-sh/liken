@@ -1,9 +1,9 @@
 package main
 
-// The writes of objects other than a status: the creates and deletes of
-// pods, Services, ConfigMaps, and ResourceClaimTemplates, the finalizer of a
-// Reservation, and the annotation that asks for a retry. finalizers.go
-// holds the finalizer of every other resource.
+// The writes of objects other than a status: pods, Services,
+// ConfigMaps, and ResourceClaimTemplates, and a Reservation's finalizer
+// and retry annotation. finalizers.go writes the finalizers of every
+// other resource.
 
 import (
 	"encoding/json"
@@ -37,16 +37,17 @@ func objectPath(kind observatory.Kind, namespace, name string) string {
 	return kind.Path(namespace) + "/" + name
 }
 
-// create posts an object to its collection. An object that exists
-// already is no error: a pass that read a store before the watch
-// delivered the operator's own create sends the create again.
+// create posts an object to its collection. An object that already
+// exists is not an error, because a pass can read the store before the
+// watch delivers the operator's own earlier create, and then create the
+// object again.
 func (o *operator) create(collection string, object any) error {
 	_, err := o.post(collection, object)
 	return err
 }
 
-// post creates an object as create does, and reports whether the API
-// server created it, not answered that it exists.
+// post is create, and also returns false when the object already
+// existed.
 func (o *operator) post(collection string, object any) (bool, error) {
 	body, err := json.Marshal(object)
 	if err != nil {
@@ -59,8 +60,6 @@ func (o *operator) post(collection string, object any) (bool, error) {
 	return err == nil, err
 }
 
-// writeJSON sends one object to a path with a method, such as the PUT
-// that replaces a ConfigMap.
 func (o *operator) writeJSON(method, path string, object any) error {
 	body, err := json.Marshal(object)
 	if err != nil {
@@ -69,8 +68,7 @@ func (o *operator) writeJSON(method, path string, object any) error {
 	return o.client.RequestJSON(method, path, body, nil)
 }
 
-// deleteObject deletes one object. An object that is gone already is no
-// error.
+// deleteObject treats an object that does not exist as deleted.
 func (o *operator) deleteObject(path string) error {
 	err := o.client.RequestJSON(http.MethodDelete, path, nil, nil)
 	if errors.Is(err, apiclient.ErrNotFound) {
@@ -80,14 +78,14 @@ func (o *operator) deleteObject(path string) error {
 }
 
 func hasFinalizer(r *observatory.Reservation) bool {
-	return holdsFinalizer(r.Metadata)
+	return hasOperatorFinalizer(r.Metadata)
 }
 
-// setFinalizer adds or removes the reservation's finalizer with a merge
-// patch that states the resourceVersion, so the API server refuses it
-// with a 409 when another writer changed the list since the read. The
-// caller reads the reservation again and calls once more. A removal
-// that finds the reservation gone is done: the finalizer went with it.
+// setFinalizer adds or removes the reservation's finalizer. The patch
+// includes the resourceVersion, so the API server refuses it with 409
+// when another writer changed the reservation after the caller read
+// it. The callers then read the reservation again and retry. Removing
+// the finalizer from a reservation that is already gone succeeds.
 func (o *operator) setFinalizer(r *observatory.Reservation, present bool) error {
 	err := o.patchMetadata(r, map[string]any{"finalizers": finalizersWith(r.Metadata, present)})
 	if !present && errors.Is(err, apiclient.ErrNotFound) {
@@ -96,16 +94,18 @@ func (o *operator) setFinalizer(r *observatory.Reservation, present bool) error 
 	return err
 }
 
-// annotationRetry asks the operator to run a failed step again. The
-// operator removes the annotation when it starts the step.
+// A person adds annotationRetry to a Reservation to run its failed
+// step again, or to another resource to run its failed triggers again
+// (retry.go). The operator removes the annotation when it acts on it.
 const annotationRetry = Group + "/retry"
 
 func (o *operator) clearRetry(r *observatory.Reservation) error {
 	return o.patchMetadata(r, map[string]any{"annotations": map[string]any{annotationRetry: nil}})
 }
 
-// patchMetadata sends a merge patch of the reservation's metadata, and
-// notes the version that the API server answers.
+// patchMetadata records the resourceVersion that the API server
+// returns, so that a read of the reservation does not use the watch's
+// copy from before this patch.
 func (o *operator) patchMetadata(r *observatory.Reservation, fields map[string]any) error {
 	fields["resourceVersion"] = r.Metadata.ResourceVersion
 	body, err := json.Marshal(map[string]any{"metadata": fields})
@@ -120,8 +120,6 @@ func (o *operator) patchMetadata(r *observatory.Reservation, fields map[string]a
 	return err
 }
 
-// joinErrors joins the errors that are not nil, and answers nil when
-// none is.
 func joinErrors(problems []error) error {
 	return errors.Join(problems...)
 }

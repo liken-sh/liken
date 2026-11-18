@@ -20,7 +20,7 @@ You need:
 * A `liken` cluster. The simulators need no device, so any node can
   run them.
 * `kubectl` with cluster-admin access, because the install creates
-  20 CRDs.
+  CRDs.
 * KStars on your desktop, for the last part. Any INDI client works
   the same way.
 
@@ -52,21 +52,21 @@ The base creates:
 
 * the CRDs of the `observatory.liken.sh` group
 * a `ServiceAccount`, a `ClusterRole`, and a `ClusterRoleBinding`
-* a `Role` and a `RoleBinding` that let the operator hold its `Lease`,
-  `observatory-operator` in `liken-system`
+* a `Role` and a `RoleBinding` that let the operator use its `Lease`,
+  `observatory-operator` in `liken-system`, for leader election
 * the operator, a `Deployment` with one replica in `liken-system`, the
   namespace of every `liken` operator. Its label
   `cli.liken.sh/plugin: observatory` lets `liken plugins sync` find it
   and install the `kubectl liken observatory` plugin of the same
   version, from the image `ghcr.io/liken-sh/observatory-operator-cli`.
 
-The operator watches every namespace. You choose the namespace your
-observatory goes in, and the operator runs the observatory's pods,
-`Service`s, and `Job`s in that namespace, beside its resources. So
-your `ResourceQuota`, `NetworkPolicy`, Pod Security level, and RBAC
-grants in that namespace cover the observatory. Every resource of one
-observatory goes in one namespace, because the resources name each
-other. This guide uses `observatory`:
+The operator watches every namespace. You choose the namespace for
+your observatory, and the operator creates the observatory's pods,
+`Service`s, and `Job`s in that namespace, next to its resources. So
+the `ResourceQuota`, `NetworkPolicy`, Pod Security level, and RBAC
+grants of that namespace apply to the observatory. All the resources
+of one observatory go in one namespace, because they refer to each
+other by name. This guide uses `observatory`:
 
 ```sh
 kubectl create namespace observatory
@@ -99,10 +99,10 @@ observatory:
 kubectl get astro -n observatory
 ```
 
-The devices of `east` and `west` are `Idle`. Describing equipment
-starts nothing. The operator starts pods only for a telescope that a
-`Reservation` holds. The spare focuser is `Inventory`, because it is
-on the shelf: it names no optical train.
+The devices of `east` and `west` are `Idle`, because declaring
+equipment starts nothing. The operator starts pods only for a
+telescope that an active `Reservation` uses. The spare focuser is
+`Inventory`, because it is in no optical train.
 
 The last resource in the example is the `Reservation` `east-tonight`.
 It has no start time, so it activates the `east` telescope at once.
@@ -114,8 +114,9 @@ kubectl get rsv -n observatory -w
 
 Each line shows the phase, the step that runs, and what that step
 waits for. The first activation pulls the INDI images, so it takes
-longer than the next one. The camera's activation cools the sensor to
--10 °C and waits for it, which takes a few minutes on the simulator.
+longer than later ones. The camera's activation cools the sensor to
+-10 °C and waits until it gets there, which takes a few minutes on the
+simulator.
 To wait for the end in a script:
 
 ```sh
@@ -132,11 +133,12 @@ kubectl get mnt,cam,dome,guider -n observatory
 ```
 
 [How a reservation runs](https://liken.sh/observatory/docs/concepts/how-a-reservation-runs/)
-explains each step.
+describes each step.
 
 ## Connect KStars
 
-The reservation's status names the telescope's INDI server:
+The reservation's status gives the address of the telescope's INDI
+server:
 
 ```sh
 kubectl get rsv east-tonight -n observatory -o jsonpath='{.status.endpoint.host}:{.status.endpoint.port}'
@@ -150,8 +152,8 @@ kubectl port-forward -n observatory svc/east-telescope 7624
 ```
 
 In KStars, open Ekos, create a profile, and set its mode to remote
-with host `localhost` and port `7624`. Leave the device list empty:
-Ekos takes every device the server offers. Start the profile, and the
+with host `localhost` and port `7624`. Leave the device list empty, so
+that Ekos uses every device the server offers. Start the profile, and the
 INDI control panel lists the simulators by their INDI names, such as
 `Telescope Simulator` and `CCD Simulator`.
 
@@ -165,8 +167,8 @@ In the Ekos guide module, choose PHD2 as the guider, with host
 `localhost` and port `4400`. [Guide with PHD2](https://liken.sh/observatory/docs/guides/guide-with-phd2/)
 covers the guider in full.
 
-A port forward is the simplest path, and it is enough for one person
-at one desktop. To reach the telescope another way, see
+A port forward is enough for one person at one desktop. To reach the
+telescope another way, see
 [Reach the telescope from outside the cluster](https://liken.sh/observatory/docs/guides/reserve-a-telescope/#reach-the-telescope-from-outside-the-cluster).
 
 ## End the reservation
@@ -177,18 +179,18 @@ Delete the reservation to end the night:
 kubectl delete reservation east-tonight -n observatory
 ```
 
-The delete waits while the operator runs the deactivation steps: it
+The delete waits while the operator runs the deactivation steps. It
 stops guiding, closes the dust cap, warms the camera, parks the mount,
-parks the dome, and stops the pods. That takes a few minutes, mostly
-for the camera's warm-up. When the command returns, the equipment is
+parks the dome, and stops the pods. This takes a few minutes, mostly
+for the camera to warm up. When the command returns, the equipment is
 safe to power off.
 
 ## Collect metrics
 
-The operator serves Prometheus metrics on port `9200`. If you run the
-prometheus-operator, add the monitoring component beside the base in
-your `kustomization.yaml`. It adds a `PodMonitor` in `liken-system`
-and a Grafana dashboard in the `monitoring` namespace:
+The operator serves Prometheus metrics on port `9200`. If you run
+prometheus-operator, add the monitoring component to your
+`kustomization.yaml`, next to the base. It creates a `PodMonitor` in
+`liken-system` and a Grafana dashboard in the `monitoring` namespace:
 
 ```yaml
 resources:
@@ -198,18 +200,19 @@ components:
 ```
 
 [Metrics](https://liken.sh/observatory/docs/reference/metrics/) lists every series and suggests
-the alerts for a night of observing.
+alerts for a night of observing.
 
 ## Load the firmware of QHY cameras
 
 Many QHY cameras power up as a bare chip with no firmware, and
 `indi_qhy_ccd` cannot open one until the host writes the camera's
 firmware into it. [`firmware-operator`](https://liken.sh/firmware/)
-does that for every machine of the cluster, from the `Firmware`
-objects in `deploy/firmware/`: one for each bare QHY chip that it can
-load. Install `firmware-operator` first, as its manual describes,
-because it defines the `Firmware` resource. Then add the directory
-beside the base in your `kustomization.yaml`:
+does that on every machine of the cluster, from the `Firmware`
+objects in `deploy/firmware/`. There is one object for each bare QHY
+chip that the `fxload` program of the `indi-qhy` image can load.
+Install `firmware-operator` first, as its manual describes, because it
+defines the `Firmware` resource. Then add the directory to your
+`kustomization.yaml`, next to the base:
 
 ```yaml
 resources:
@@ -219,9 +222,9 @@ resources:
 
 The objects are cluster-scoped, and each one runs `fxload` from the
 `indi-qhy` image of the same release as the operator's drivers. A
-cluster without `firmware-operator` leaves the directory out. Every
-other device works there, and a QHY camera that needs firmware stays a
-bare chip.
+cluster without `firmware-operator` leaves this directory out. Every
+other device works on such a cluster, but a QHY camera that needs
+firmware stays a bare chip.
 [QHY cameras that need firmware](https://liken.sh/observatory/docs/guides/connect-usb-equipment/#qhy-cameras-that-need-firmware)
 lists which cameras the objects load.
 
@@ -231,42 +234,43 @@ Only one copy of the operator acts at a time: the copy that holds the
 `Lease` `observatory-operator` in `liken-system`. Two copies that
 acted at once would both run the same reservation's steps on the same
 devices. Every other copy only reads the `Lease`. It opens no watch,
-creates no pod, and sends nothing to a device. To see which pod leads:
+creates no pod, and sends nothing to a device. To see which pod holds
+the `Lease`:
 
 ```sh
 kubectl -n liken-system get lease observatory-operator
 ```
 
-A rollout starts the new pod beside the old one, and the new pod logs
-that it waits for the `Lease`. When the old pod stops, it stops its
-reservations' steps and closes its INDI connections. It waits until
-its last write to the API server returns, the `Event`s it posted
-included, and then it releases the `Lease`. The new pod takes the
-`Lease` within about 11 seconds. When an `Event` write does not return
-within 5 seconds, the old pod exits without the release, and the new
-pod takes the `Lease` when it expires, 30 to 41 seconds later. It reads which
-reservation holds each telescope from the reservations' status, and
-continues each reservation from the step that its status records. The
-INDI servers and the device pods run through the rollout, so a
-connected device stays connected.
+A rollout starts the new pod next to the old one, and the new pod logs
+that it is waiting for the `Lease`. When the old pod stops, it stops
+running its reservations' steps and closes its INDI connections. It
+waits until its last write to the API server returns, including the
+`Event`s it posted, and then it releases the `Lease`. The new pod takes
+the `Lease` within about 11 seconds. When an `Event` write does not
+return within 5 seconds, the old pod exits without releasing the
+`Lease`, and the new pod takes it when it expires, 30 to 41 seconds
+later. The new pod reads which reservation uses each telescope from
+the reservations' status, and continues each reservation from the step
+that its status records. The INDI servers and the device pods keep
+running during the rollout, so a connected device stays connected.
 
-When the leading pod cannot renew the `Lease`, for example because
-its node lost the network, it stops writing 10 seconds after its last
-renewal, and exits within 25 seconds of it. A waiting copy takes the `Lease` 30 to 41
-seconds after the last renewal, so the two copies never act at the
-same time. The base runs one replica, so the waiting copy is the
-replacement pod that Kubernetes starts on another node, or the same
-pod after the kubelet restarts it.
+When the pod that holds the `Lease` cannot renew it, for example
+because its node lost the network, the pod stops writing 10 seconds
+after its last successful renewal and exits within 25 seconds of it. A waiting
+copy takes the `Lease` 30 to 41 seconds after the last renewal, so the
+two copies never act at the same time. The base runs one replica, so
+the waiting copy is either the replacement pod that Kubernetes starts
+on another node, or the same pod after the kubelet restarts it.
 
 ## Upgrade from a base that created `observatory`
 
 The base of releases before `2026.10.08-002` created the namespace
-`observatory` and ran the operator in it. The base now creates no
+`observatory` and ran the operator in it. Later bases create no
 namespace. A GitOps tool that prunes, such as Flux with `prune: true`,
-deletes what a new version of a source no longer lists, so it deletes
-`observatory` and every resource in it on the upgrade. Before you
-upgrade, take the namespace out of the base's hands. Declare it in
-your own manifests, or mark it so Flux keeps it:
+deletes what a new version of a source no longer lists, so on the
+upgrade it deletes `observatory` and every resource in it. Before you
+upgrade, make the namespace independent of the base. Declare it in
+your own manifests, or annotate it so that Flux keeps it:
 
 ```sh
 kubectl annotate namespace observatory kustomize.toolkit.fluxcd.io/prune=disabled
@@ -275,20 +279,19 @@ kubectl annotate namespace observatory kustomize.toolkit.fluxcd.io/prune=disable
 Flux then deletes the old `Deployment`, `ServiceAccount`, `Role`,
 and `RoleBinding` in `observatory`, and creates the operator in
 `liken-system`. With `kubectl apply -k`, delete those four yourself
-before you apply the new base, so two copies of the operator never
-run at once. The old copy holds no `Lease`, so the election does not
-keep it apart from the new one. The new
-operator finds the pods of a running reservation where they are, in
-`observatory`.
+before you apply the new base. The old operator takes no part in leader
+election, so nothing else stops it from acting on the same reservations
+as the new one. The new operator finds the pods of a running
+reservation in `observatory`, where they already run.
 
 ## Run a development build
 
 A push to `main` that changes the operator publishes a development
 build of it. Its version is the most recent release tag plus a suffix:
-`2026.10.13-003-dev-012-93f85ef4` is 12 commits past release
+`2026.10.13-003-dev-012-93f85ef4` is 12 commits after release
 `2026.10.13-003`, at commit `93f85ef4`. The summary of the CI run for
-that commit gives the version, and `:latest` still names the most
-recent release.
+that commit gives the version. The tag `:latest` still points to the
+most recent release.
 
 A development build has no git tag, so the manifests pin to the
 commit's full sha, and the image pins to the version:
@@ -301,13 +304,13 @@ images:
     newTag: <version>
 ```
 
-A git fetch by sha needs all forty characters. The eight in the
-version are not enough.
+A git fetch by commit needs all 40 characters of the sha. The eight
+characters in the version are not enough.
 
 The same build publishes the manifests as the OCI artifact
-`oci://ghcr.io/liken-sh/observatory-operator-deploy:<version>`, with the image set
-to that version. A Flux `OCIRepository` can pull that artifact by the
-version, with no sha.
+`oci://ghcr.io/liken-sh/observatory-operator-deploy:<version>`, with
+the image set to that version. A Flux `OCIRepository` can pull that
+artifact by the version, with no sha.
 
 ## Remove the operator
 
@@ -317,11 +320,11 @@ Remove your resources first, while the operator still runs:
 kubectl delete -n observatory -f https://liken.sh/observatory/examples/simulators.yaml
 ```
 
-A resource that the operator is still running something for carries
-the finalizer `observatory.liken.sh/deactivate`, and its delete waits
-for the operator. If the operator is gone first, those deletes wait
-forever. [Deleting a running resource](https://liken.sh/observatory/docs/concepts/how-a-reservation-runs/#deleting-a-running-resource)
-explains the finalizer and how to remove it by hand.
+A device with a running pod, and a telescope or an observatory that a
+reservation uses, has the finalizer `observatory.liken.sh/deactivate`,
+and its delete waits for the operator. If the operator is removed first, those
+deletes never finish. [Deleting a running resource](https://liken.sh/observatory/docs/concepts/how-a-reservation-runs/#deleting-a-running-resource)
+describes the finalizer and how to remove it by hand.
 
 Then delete the base:
 

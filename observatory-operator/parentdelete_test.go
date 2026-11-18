@@ -1,10 +1,5 @@
 package main
 
-// A Telescope or an Observatory that a person deletes while a
-// reservation holds it ends that reservation, as spec.end does. The
-// finalizer keeps it in the tree until the reservation is Released, so
-// the deactivation steps still find it and its devices.
-
 import (
 	"slices"
 	"strings"
@@ -15,6 +10,10 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
+// A Telescope that a person deletes during a reservation ends that
+// reservation, as spec.end does. The finalizer keeps the Telescope
+// until the reservation is Released, so the deactivation steps can
+// still find it and its devices.
 func TestATelescopeDeletedDuringASessionEndsItsReservation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -22,23 +21,22 @@ func TestATelescopeDeletedDuringASessionEndsItsReservation(t *testing.T) {
 		w.api.deleteNamed(kindCollection(observatory.TelescopeKind), "east")
 		r := w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
 		if abort := stepOf(r, observatory.StepStopWork); !strings.HasPrefix(abort.Summary, "Telescope east was deleted") {
-			t.Errorf("StopWork = %q, want it to name the delete", abort.Summary)
+			t.Errorf("the StopWork summary is %q, want it to begin \"Telescope east was deleted\"", abort.Summary)
 		}
 		w.gone(observatory.TelescopeKind, "east", time.Minute)
 		if !slices.Contains(w.indi.changes(), parkCap) {
-			t.Errorf("changes = %q, want %q", w.indi.changes(), parkCap)
+			t.Errorf("the INDI changes are %q, want them to include %q", w.indi.changes(), parkCap)
 		}
 		if pods := w.api.names(podsCollection); len(pods) != 0 {
-			t.Errorf("pods after the release: %v", pods)
+			t.Errorf("after the release, the pods are %v, want none", pods)
 		}
 		deactivating := "Deactivating: Deactivating Telescope east: Telescope east was deleted"
 		if n := countOf(eventMessages(w.api), deactivating); n != 1 {
-			t.Errorf("%d Events %q in %q, want one", n, deactivating, eventMessages(w.api))
+			t.Errorf("%d Events have the message %q in %q, want 1", n, deactivating, eventMessages(w.api))
 		}
 	})
 }
 
-// countOf counts the items of a list that equal one value.
 func countOf(items []string, value string) int {
 	n := 0
 	for _, item := range items {
@@ -49,8 +47,9 @@ func countOf(items []string, value string) int {
 	return n
 }
 
-// An Observatory deleted during a session ends the reservation of each
-// of its telescopes, and goes once both are Released.
+// An Observatory that a person deletes during a session ends the
+// reservation of each of its telescopes, and is removed once they are
+// all Released.
 func TestAnObservatoryDeletedDuringASessionEndsEveryReservationOfIt(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -63,23 +62,23 @@ func TestAnObservatoryDeletedDuringASessionEndsEveryReservationOfIt(t *testing.T
 		for _, telescope := range []string{"east", "west"} {
 			r := w.phase(telescope+"-tonight", observatory.ReservationReleased, 10*time.Minute)
 			if abort := stepOf(r, observatory.StepStopWork); !strings.HasPrefix(abort.Summary, "Observatory lab was deleted") {
-				t.Errorf("the StopWork of %s = %q, want it to name the delete", telescope, abort.Summary)
+				t.Errorf("the StopWork summary of %s is %q, want it to begin \"Observatory lab was deleted\"", telescope, abort.Summary)
 			}
 		}
 		w.gone(observatory.ObservatoryKind, "lab", time.Minute)
 		park := "lab-observatory Dome Simulator.DOME_PARK PARK=On UNPARK=Off"
 		if !slices.Contains(w.indi.changes(), park) {
-			t.Errorf("changes = %q, want %q", w.indi.changes(), park)
+			t.Errorf("the INDI changes are %q, want them to include %q", w.indi.changes(), park)
 		}
 		if pods := w.api.names(podsCollection); len(pods) != 0 {
-			t.Errorf("pods after the release: %v", pods)
+			t.Errorf("after the release, the pods are %v, want none", pods)
 		}
 	})
 }
 
-// holdWith adds another controller's finalizer to a stored object, so
-// a delete leaves it with a deletionTimestamp.
-func (a *fakeAPI) holdWith(collection, name, finalizer string) {
+// addFinalizer adds a finalizer to a stored object, so that a delete
+// sets its deletionTimestamp and keeps it.
+func (a *fakeAPI) addFinalizer(collection, name, finalizer string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	next := clone(a.objects[collection][name])
@@ -88,8 +87,8 @@ func (a *fakeAPI) holdWith(collection, name, finalizer string) {
 }
 
 // A reservation of a telescope that is being deleted, or whose
-// observatory is, waits in its Wait step, as it waits for a telescope
-// that does not exist.
+// observatory is being deleted, stays in its Wait step, as it does for
+// a telescope that does not exist.
 func TestAReservationOfADeletingTelescopeWaits(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -106,7 +105,7 @@ func TestAReservationOfADeletingTelescopeWaits(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				w := startWorld(t)
-				w.api.holdWith(kindCollection(c.kind), c.object, "example.com/hold")
+				w.api.addFinalizer(kindCollection(c.kind), c.object, "example.com/hold")
 				w.api.deleteNamed(kindCollection(c.kind), c.object)
 				w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 				w.until(time.Minute, "the Wait step does not name the delete", func() bool {
@@ -116,15 +115,16 @@ func TestAReservationOfADeletingTelescopeWaits(t *testing.T) {
 				time.Sleep(10 * time.Minute)
 				r, _ := w.reservation("east-tonight")
 				if wait := stepOf(r, observatory.StepWait); wait.State != observatory.StepRunning || wait.Summary != c.summary {
-					t.Errorf("Wait = %s %q, want Running %q", wait.State, wait.Summary, c.summary)
+					t.Errorf("the Wait step is %s %q, want Running %q", wait.State, wait.Summary, c.summary)
 				}
 			})
 		})
 	}
 }
 
-// A Telescope or an Observatory that no reservation holds carries no
-// finalizer, so a delete removes it at once, also after a session.
+// A Telescope or an Observatory that no reservation uses has no
+// finalizer, so a delete removes it at once. That includes one whose
+// session has ended.
 func TestAParentWithNoReservationIsDeletedAtOnce(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -153,7 +153,7 @@ func TestAParentWithNoReservationIsDeletedAtOnce(t *testing.T) {
 				})
 				w.api.deleteNamed(kindCollection(c.kind), c.object)
 				if _, ok := w.api.object(kindCollection(c.kind), c.object); ok {
-					t.Errorf("%s %s stays after its delete", c.kind.Name, c.object)
+					t.Errorf("%s %s exists after its delete, want it gone", c.kind.Name, c.object)
 				}
 			})
 		})

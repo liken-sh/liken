@@ -2,20 +2,19 @@
 // for each camera chip that must take its firmware from the host before
 // its driver can open it.
 //
-// Many QHY cameras power up as a bare Cypress EZ-USB chip. On a Linux
-// distribution, a udev rule of INDI's libqhy runs fxload when the bare
-// chip appears, and the chip then enumerates again as the camera. A
-// liken machine runs no udev, so firmware-operator runs the same fxload
-// command from the indi-qhy image in a pod. The rules stay the source,
-// so the objects follow the package at each bump of the INDI images.
+// Many QHY cameras power up as a bare Cypress EZ-USB chip with no
+// firmware. On a Linux distribution, a udev rule from INDI's libqhy
+// runs fxload when the bare chip appears, and the chip then
+// re-enumerates as the camera. A liken machine runs no udev, so
+// firmware-operator runs the same fxload command in a pod from the
+// indi-qhy image. This package generates the objects from the udev
+// rules, so they follow the package when the INDI images are bumped.
 //
-// 85-qhyccd.rules in this directory is a copy, byte for byte, of
+// 85-qhyccd.rules in this directory is a byte-for-byte copy of
 // /usr/lib/udev/rules.d/85-qhyccd.rules in the indi-qhy image, which
-// installs it from the indi-3rdparty-libs package of the INDI PPA. The
-// copy came from indi-3rdparty-libs 2.2.0+202610040511~ubuntu26.04.1,
-// the version that the snapshot of 20261031 installs. `make
-// firmware-rules` copies it again from the image at the tag that
-// indi/package.toml pins.
+// installs it from the indi-3rdparty-libs package of the INDI PPA.
+// `make firmware-rules` copies the file again from the image at the tag
+// that indi/package.toml pins.
 package firmware
 
 //go:generate go test -run TestTheQHYFirmwareIsCurrent -update
@@ -23,6 +22,7 @@ package firmware
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -33,48 +33,45 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// firmwareDir is where libqhy installs the firmware files, in the
-// builder and in the indi-qhy image. A rule that names a file anywhere
-// else names a file that the image does not hold.
+// firmwareDir is the directory where libqhy installs the firmware files
+// in the indi-qhy image. parseFxload refuses a file anywhere else,
+// because the image does not contain it.
 const firmwareDir = "/usr/lib/firmware/qhy/"
 
-// loadableChips are the chip types that the fxload of Ubuntu loads,
-// the program that indi-qhy holds. Its usage text names an21, fx, fx2,
-// and fx2lp. The rules for FX3 chips name -t fx3, which that fxload
-// refuses, so they have no object until the image holds a loader for
-// FX3 chips.
+// loadableChips are the chip types that Ubuntu's fxload in the indi-qhy
+// image accepts for -t. It refuses fx3, so the FX3 chips get no object.
 var loadableChips = []string{"an21", "fx", "fx2", "fx2lp"}
 
-// genericChips are the IDs that Cypress and Anchor Chips give every
-// EZ-USB chip that holds no program and no EEPROM. libqhy's rules
-// write a QHY5's firmware into any chip with one of them, which on a
-// cluster would also flash a logic analyzer or a development board
-// that powers up blank. QHY's own cameras power up with QHY's own IDs,
-// so these two have no object.
+// genericChips are the vendor and product IDs that Cypress and Anchor
+// Chips give every EZ-USB chip that has no program and no EEPROM.
+// libqhy's rules load a QHY5's firmware into any chip with one of these
+// IDs, which would also flash a logic analyzer or a development board
+// that powers up blank. QHY's own cameras power up with QHY's IDs, so
+// these IDs get no object.
 var genericChips = []string{"04b4:8613", "0547:1002"}
 
-// knownChips are the chip types that the rules name.
+// knownChips are the chip types that parseFxload accepts for -t.
 var knownChips = []string{"an21", "fx", "fx2", "fx2lp", "fx3"}
 
-// rule matches one line of the rules file that runs a program for one
+// rule matches a line of the rules file that runs a program for one
 // vendor and product. Every rule that loads firmware has this form.
 var rule = regexp.MustCompile(`^ATTRS\{idVendor\}=="([0-9a-fA-F]{4})", ATTRS\{idProduct\}=="([0-9a-fA-F]{4})", RUN\+="([^"]*)"$`)
 
-// load is one fxload command of the rules, for one chip.
+// load is one fxload command from the rules, for one chip.
 type load struct {
 	vendor, product string
 	chip            string
 	image           string
-	// loader is the second-stage loader that fxload writes into the
-	// chip's internal memory first, and then uses to write the parts of
-	// the image that go to external memory. It is "" when the image
-	// fits the chip's internal memory.
+	// loader is the file for fxload's -s flag. fxload writes it into the
+	// chip's internal memory first, and then uses it to write the parts
+	// of the image that belong in external memory. It is "" when the
+	// image fits in the chip's internal memory.
 	loader string
 }
 
-// QHY reads a libqhy rules file and answers deploy/firmware/qhy.yaml:
-// one Firmware for each chip that the image's fxload can load, on the
-// image that holds indi_qhy_ccd.
+// QHY reads a libqhy rules file and returns the contents of
+// deploy/firmware/qhy.yaml: one Firmware for each chip that the image's
+// fxload can load, using the image that contains indi_qhy_ccd.
 func QHY(rulesPath string) ([]byte, error) {
 	image, err := drivers.Resolve(observatory.Driver{Name: "indi_qhy_ccd"})
 	if err != nil {
@@ -117,10 +114,11 @@ func QHY(rulesPath string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// writeObject writes one Firmware. The kubelet expands $(LIKEN_DEVICE)
-// in the command to the usbfs node of the bare chip, which
-// firmware-operator sets in the pod's environment, where the rule names
-// the node that udev gives it in $env{DEVNAME}.
+// writeObject writes one Firmware. The rule passes the device node as
+// $env{DEVNAME}, which udev sets. Here the command uses
+// $(LIKEN_DEVICE) instead. firmware-operator sets LIKEN_DEVICE in the
+// pod's environment to the usbfs node of the bare chip, and the kubelet
+// expands the reference in the command.
 func writeObject(out *bytes.Buffer, chip load, image string) {
 	command := []string{"fxload", "-t", chip.chip, "-I", chip.image, "-D", "$(LIKEN_DEVICE)"}
 	if chip.loader != "" {
@@ -139,11 +137,12 @@ func writeObject(out *bytes.Buffer, chip load, image string) {
 	fmt.Fprintf(out, "    command: [%s]\n", strings.Join(command, ", "))
 }
 
-// readRules reads every fxload command of a rules file, in the file's
-// order. A rule that sets a mode or jumps to a label loads nothing, and
-// a liken machine gives a claimed device node to the pod's user, so the
-// modes are not needed. A rule that runs any program but fxload or
-// sleep fails the read, because its effect would be lost.
+// readRules returns every fxload command in a rules file, in file
+// order. Rules that only set a mode or jump to a label are skipped,
+// because they load nothing and a liken machine already gives a claimed
+// device node to the pod's user. A rule that runs any program other
+// than fxload or sleep fails the read, because the generated objects
+// would lose its effect.
 func readRules(path string) ([]load, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -159,7 +158,7 @@ func readRules(path string) ([]load, error) {
 		}
 		match := rule.FindStringSubmatch(text)
 		if match == nil {
-			return nil, fmt.Errorf("%s:%d: a rule that runs a program for something other than one vendor and product: %s", path, line, text)
+			return nil, fmt.Errorf("%s:%d: the rule runs a program but does not match one vendor and one product: %s", path, line, text)
 		}
 		args := strings.Fields(match[3])
 		if len(args) > 0 && args[0] == "/bin/sleep" {
@@ -176,54 +175,50 @@ func readRules(path string) ([]load, error) {
 	return loads, scanner.Err()
 }
 
-// parseFxload reads the flags of one fxload command: the chip type, the
-// image, the device, and an optional second-stage loader. Any other
-// flag fails, because it would change what the command does.
+// parseFxload parses one fxload command line: the chip type (-t), the
+// image (-I), the device (-D), and an optional second-stage loader
+// (-s). Any other flag fails, because it would change what the command
+// does.
 func parseFxload(args []string) (load, error) {
 	if len(args) == 0 || args[0] != "/sbin/fxload" {
-		return load{}, fmt.Errorf("a rule that runs %q, not /sbin/fxload", strings.Join(args, " "))
+		return load{}, fmt.Errorf("the rule runs %q, want /sbin/fxload", strings.Join(args, " "))
 	}
 	flags := map[string]string{}
 	for i := 1; i < len(args); i += 2 {
 		if i+1 >= len(args) {
-			return load{}, fmt.Errorf("fxload flag %s has no value", args[i])
+			return load{}, fmt.Errorf("the fxload flag %s has no value", args[i])
 		}
 		switch args[i] {
 		case "-t", "-I", "-D", "-s":
 			flags[args[i]] = args[i+1]
 		default:
-			return load{}, fmt.Errorf("fxload flag %s is not one of -t, -I, -D, and -s", args[i])
+			return load{}, fmt.Errorf("the fxload flag %s is not one of -t, -I, -D, and -s", args[i])
 		}
 	}
 	if flags["-D"] != "$env{DEVNAME}" {
-		return load{}, fmt.Errorf("fxload names the device %q, not $env{DEVNAME}", flags["-D"])
+		return load{}, fmt.Errorf("fxload -D is %q, want $env{DEVNAME}", flags["-D"])
 	}
 	if !slices.Contains(knownChips, flags["-t"]) {
-		return load{}, fmt.Errorf("fxload names the chip %q, not one of %s", flags["-t"], strings.Join(knownChips, ", "))
+		return load{}, fmt.Errorf("fxload -t is %q, want one of %s", flags["-t"], strings.Join(knownChips, ", "))
 	}
 	if flags["-I"] == "" {
-		return load{}, fmt.Errorf("fxload names no image")
+		return load{}, errors.New("fxload has no -I image file")
 	}
 	for _, file := range []string{flags["-I"], flags["-s"]} {
 		if file != "" && !strings.HasPrefix(file, firmwareDir) {
-			return load{}, fmt.Errorf("fxload names %s, outside %s", file, firmwareDir)
+			return load{}, fmt.Errorf("fxload file %s is outside %s", file, firmwareDir)
 		}
 	}
 	return load{chip: flags["-t"], image: flags["-I"], loader: flags["-s"]}, nil
 }
 
-// byChip answers one load for each vendor and product, sorted by
-// vendor and product, so each chip gets one Firmware with one name.
-//
-// The rules name two chips more than once. One rule is repeated word
-// for word, and one copy is enough. For 0547:1002, a generic chip that
-// QHY leaves out, one rule writes
-// QHY5LOADER.HEX, a second sleeps, and a third writes QHY5.HEX. That
-// is the work of fxload -s, which writes the loader and then uses it
-// to write the image, and the rules for the other QHY5 chips write the
-// same two files with -s. A pod runs one command, so that chip takes
-// the -s form. Any other pair of loads for one chip fails, because no
-// one command would do the same.
+// byChip merges the loads into one for each vendor and product, sorted,
+// because each chip gets one Firmware and a pod runs one command.
+// Identical rules merge into one. Some chips, such as 0547:1002, have
+// one fxload that writes a loader, a sleep, and a second fxload that
+// writes the image. fxload -s does the same in one command, so the pair
+// becomes one load with the first image as its loader. Any other set of
+// different loads for one chip fails.
 func byChip(loads []load) ([]load, error) {
 	chips := map[string][]load{}
 	for _, l := range loads {
@@ -248,7 +243,7 @@ func byChip(loads []load) ([]load, error) {
 			chip.loader = same[0].image
 			merged = append(merged, chip)
 		default:
-			return nil, fmt.Errorf("%s has %d loads that no one fxload command can replace", key, len(same))
+			return nil, fmt.Errorf("%s has %d different loads, and no single fxload command replaces them", key, len(same))
 		}
 	}
 	return merged, nil

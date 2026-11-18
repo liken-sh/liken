@@ -6,10 +6,9 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// handWritten answers the fields that a kind's template writes by
-// hand, in spec and in status: the parent, the fields that every
-// device shares, such as `driver`, `pod`, and `properties`, the
-// procedures, and the kind's own, such as `readings`.
+// handWritten returns the fields that a kind's CRD template defines by
+// hand, such as the parent, `driver`, `pod`, and the procedures, keyed
+// by spec and status.
 func handWritten(dir, plural string) (map[string]map[string]any, error) {
 	rendered, err := renderCRD(dir, plural, "", "")
 	if err != nil {
@@ -40,16 +39,17 @@ func handWritten(dir, plural string) (map[string]map[string]any, error) {
 	return out, nil
 }
 
-// collisions refuses a typed field that has the name of a field that
-// the template writes by hand. The Go types embed the typed fields
-// beside the hand-written ones, and encoding/json drops both fields of
-// a name that two embedded structs hold, with no error.
+// collisions returns an error when a typed field has the same name as a
+// hand-written field of the template, or when two typed fields share a
+// name. The Go types embed the typed fields beside the hand-written
+// ones, and when two embedded structs have a field of the same name,
+// encoding/json drops both without an error.
 func collisions(kind string, hand map[string]map[string]any, typed map[string][]field) error {
 	for _, half := range []string{"spec", "status"} {
 		seen := map[string]bool{}
 		for _, f := range typed[half] {
 			if _, taken := hand[half][f.JSON]; taken {
-				return fmt.Errorf("%s's typed field %s.%s, from %s, has the name of a field that the template writes", kind, half, f.JSON, f.INDI)
+				return fmt.Errorf("%s: the typed field %s.%s, from %s, has the same name as a field that the template writes", kind, half, f.JSON, f.INDI)
 			}
 			if seen[f.JSON] {
 				return fmt.Errorf("%s has two typed fields named %s.%s", kind, half, f.JSON)

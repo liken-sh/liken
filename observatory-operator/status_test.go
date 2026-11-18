@@ -1,8 +1,7 @@
 package main
 
-// The status of every resource while a reservation holds the east
-// telescope: what each device reports, and what each resource above
-// the devices builds of the tree.
+// Tests of the status that the operator writes for each resource while
+// a reservation holds the east telescope.
 
 import (
 	"io"
@@ -20,7 +19,7 @@ func readyWorld(t *testing.T) *world {
 	w := startWorld(t)
 	w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 	w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
-	// The status writer runs once a second.
+	// The status writer runs at most once per statusWindow.
 	time.Sleep(2 * statusWindow)
 	synctest.Wait()
 	return w
@@ -34,7 +33,7 @@ func TestADeviceReportsWhatItsDriverReports(t *testing.T) {
 		s := camera.Status
 		if s.Phase != observatory.DeviceConnected || s.IndiDevice != "CCD Simulator" || s.Pod != "east-main-camera" || s.Node != "node-1" ||
 			s.Driver != "indi_simulator_ccd" || !strings.HasPrefix(s.Image, "ghcr.io/liken-sh/indi-simulators:") {
-			t.Errorf("camera status = %+v", s)
+			t.Errorf("camera status is %+v, want phase Connected on node-1 with pod east-main-camera, driver indi_simulator_ccd, and an indi-simulators image", s)
 		}
 		if s.Temperature == nil || s.Temperature.Value == nil || *s.Temperature.Value != -10 {
 			t.Errorf("temperature = %+v, want the setpoint the driver reports", s.Temperature)
@@ -45,7 +44,7 @@ func TestADeviceReportsWhatItsDriverReports(t *testing.T) {
 		if s.ImageData == nil || s.ImageData.State == "" {
 			t.Errorf("imageData = %+v, want the state of the BLOB property CCD1", s.ImageData)
 		}
-		// The driver chooses the ranges, and the schema the rest.
+		// Each limit is the min, max, and step of the driver's definition.
 		want := map[string]observatory.Limit{"CCD_TEMPERATURE": {Min: -15, Max: 25}, "CCD_GAIN": {Min: 0, Max: 300, Step: 10}}
 		for property, limit := range want {
 			if got := s.Limits[property]; len(got) != 1 || slices.Collect(maps.Values(got))[0] != limit {
@@ -53,18 +52,18 @@ func TestADeviceReportsWhatItsDriverReports(t *testing.T) {
 			}
 		}
 		if _, ok := s.Limits["CCD_INFO"]; ok {
-			t.Error("limits hold the read-only CCD_INFO, which no client writes")
+			t.Error("limits include the read-only CCD_INFO, which no client writes")
 		}
 		if c := conditionOf(s.Conditions, observatory.ConditionReady); c.Status != observatory.ConditionTrue {
-			t.Errorf("Ready = %+v", c)
+			t.Errorf("condition Ready is %+v, want True", c)
 		}
 		if c := conditionOf(s.Conditions, observatory.ConditionParentFound); c.Status != observatory.ConditionTrue {
-			t.Errorf("ParentFound = %+v", c)
+			t.Errorf("condition ParentFound is %+v, want True", c)
 		}
 
 		wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
 		if wheel.Status.Slot == nil || wheel.Status.Readings.Filter != "Luminance" {
-			t.Errorf("filter wheel slot = %+v, readings = %+v", wheel.Status.Slot, wheel.Status.Readings)
+			t.Errorf("filter wheel slot is %+v and readings are %+v, want a slot and the filter Luminance", wheel.Status.Slot, wheel.Status.Readings)
 		}
 		power, _ := decode[observatory.Switch](t, w.api, kindCollection(observatory.SwitchKind), "east")
 		var on []int32
@@ -74,11 +73,11 @@ func TestADeviceReportsWhatItsDriverReports(t *testing.T) {
 			}
 		}
 		if !slices.Equal(on, []int32{1, 2, 3}) {
-			t.Errorf("outputs on = %v", on)
+			t.Errorf("outputs on are %v, want [1 2 3]", on)
 		}
 		mount, _ := decode[observatory.Mount](t, w.api, kindCollection(observatory.MountKind), "east")
 		if mount.Status.Readings.State != observatory.MountStopped || mount.Status.Equatorial == nil || mount.Status.Equatorial.RightAscension == nil {
-			t.Errorf("mount readings = %+v, coordinates = %+v", mount.Status.Readings, mount.Status.Equatorial)
+			t.Errorf("mount readings are %+v and coordinates are %+v, want state Stopped and a right ascension", mount.Status.Readings, mount.Status.Equatorial)
 		}
 
 		// A cover that moves reports Moving.
@@ -93,7 +92,7 @@ func TestADeviceReportsWhatItsDriverReports(t *testing.T) {
 		// Idle.
 		west, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "west-main")
 		if west.Status.Phase != observatory.DeviceIdle || west.Status.Pod != "" || west.Status.Properties != nil {
-			t.Errorf("west camera = %+v", west.Status)
+			t.Errorf("west camera status is %+v, want phase Idle, no pod, and no properties", west.Status)
 		}
 	})
 }
@@ -105,54 +104,54 @@ func TestTheTreeReportsDownward(t *testing.T) {
 		east, _ := decode[observatory.Telescope](t, w.api, kindCollection(observatory.TelescopeKind), "east")
 		s := east.Status
 		if s.Phase != observatory.PhaseReady || s.Server == nil || s.Server.Host != "east-telescope.observatory.svc" || s.Server.Port != 7624 || s.Server.Pod != "east-telescope" {
-			t.Errorf("east = %+v", s)
+			t.Errorf("east status is %+v, want phase Ready, server east-telescope.observatory.svc:7624 in pod east-telescope", s)
 		}
 		if s.Reservation == nil || s.Reservation.Name != "east-tonight" || s.Reservation.Holder != "desktop" {
-			t.Errorf("reservation = %+v", s.Reservation)
+			t.Errorf("reservation is %+v, want east-tonight held by desktop", s.Reservation)
 		}
 		if !slices.Equal(s.Tubes, []string{"east-guidescope", "east-refractor"}) || len(s.Trains) != 2 || len(s.Trains[1].Devices) != 6 {
-			t.Errorf("tubes %v, trains %+v", s.Tubes, s.Trains)
+			t.Errorf("tubes are %v and trains are %+v, want two tubes, two trains, and six devices in the second train", s.Tubes, s.Trains)
 		}
 		for _, d := range append(s.Devices, s.Trains[1].Devices...) {
 			if d.Phase != observatory.DeviceConnected {
-				t.Errorf("%s %s is %s", d.Kind, d.Name, d.Phase)
+				t.Errorf("%s %s is %s, want Connected", d.Kind, d.Name, d.Phase)
 			}
 		}
 		if s.Guider == nil || !s.Guider.Ready || s.Guider.Phase != observatory.PhaseReady || s.Guider.State != observatory.GuiderStopped {
-			t.Errorf("guider = %+v", s.Guider)
+			t.Errorf("guider is %+v, want Ready, phase Ready, state Stopped", s.Guider)
 		}
 		west, _ := decode[observatory.Telescope](t, w.api, kindCollection(observatory.TelescopeKind), "west")
 		if west.Status.Phase != observatory.PhaseIdle || west.Status.Server != nil {
-			t.Errorf("west = %+v", west.Status)
+			t.Errorf("west status is %+v, want phase Idle and no server", west.Status)
 		}
 
 		lab, _ := decode[observatory.Observatory](t, w.api, kindCollection(observatory.ObservatoryKind), "lab")
 		if lab.Status.Phase != observatory.PhaseReady || !slices.Equal(lab.Status.Telescopes, []string{"east", "west"}) ||
 			!slices.Equal(lab.Status.Reservations, []string{"east-tonight"}) || lab.Status.Server == nil || len(lab.Status.Devices) != 2 {
-			t.Errorf("lab = %+v", lab.Status)
+			t.Errorf("lab status is %+v, want phase Ready, telescopes east and west, reservation east-tonight, a server, and two devices", lab.Status)
 		}
 		if lab.Status.Weather == "" {
-			t.Errorf("weather is empty")
+			t.Error("the weather of lab is empty, want a reading")
 		}
 
 		guider, _ := decode[observatory.Guider](t, w.api, kindCollection(observatory.GuiderKind), "east")
 		if c := conditionOf(guider.Status.Conditions, observatory.ConditionReady); c.Reason != string(observatory.PhaseReady) || c.Status != observatory.ConditionTrue {
-			t.Errorf("guider Ready = %+v", c)
+			t.Errorf("guider condition Ready is %+v, want True with reason Ready", c)
 		}
 		train, _ := decode[observatory.OpticalTrain](t, w.api, kindCollection(observatory.OpticalTrainKind), "east-imaging")
 		if len(train.Status.Devices) != 6 || conditionOf(train.Status.Conditions, observatory.ConditionParentFound).Status != observatory.ConditionTrue {
-			t.Errorf("train = %+v", train.Status)
+			t.Errorf("train status is %+v, want six devices and ParentFound True", train.Status)
 		}
 		tube, _ := decode[observatory.OpticalTube](t, w.api, kindCollection(observatory.OpticalTubeKind), "east-refractor")
 		if !slices.Equal(tube.Status.Trains, []string{"east-imaging"}) {
-			t.Errorf("tube = %+v", tube.Status)
+			t.Errorf("tube status is %+v, want the train east-imaging", tube.Status)
 		}
 	})
 }
 
 // An observatory whose only reservation deactivates is Deactivating,
 // not Activating, while its devices disconnect. The dome's driver never
-// answers the disconnect, so the release stays in StopSite.
+// answers the disconnect, so the release stays in its StopSite step.
 func TestAnObservatoryDeactivatesWithItsReservation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -170,13 +169,13 @@ func TestAnObservatoryDeactivatesWithItsReservation(t *testing.T) {
 		}
 		lab, _ := decode[observatory.Observatory](t, w.api, kindCollection(observatory.ObservatoryKind), "lab")
 		if c := conditionOf(lab.Status.Conditions, observatory.ConditionReady); c.Message != "Deactivating for Reservation east-tonight" {
-			t.Errorf("Ready = %+v", c)
+			t.Errorf("condition Ready is %+v, want the message Deactivating for Reservation east-tonight", c)
 		}
 	})
 }
 
-// A resource whose parent is missing stays, and says which parent is
-// missing.
+// A resource whose parent does not exist still gets a status, and its
+// ParentFound condition names the missing parent.
 func TestAMissingParentIsReported(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -212,7 +211,7 @@ func TestAMissingParentIsReported(t *testing.T) {
 	}
 }
 
-// A status is written once a window at most, however often the driver
+// A status is written at most once per window, however often the driver
 // updates.
 func TestStatusWritesAreCoalesced(t *testing.T) {
 	t.Parallel()
@@ -268,7 +267,7 @@ func TestADeviceThatComesBackIsSetUpAgain(t *testing.T) {
 		time.Sleep(time.Minute)
 		synctest.Wait()
 		if slices.Contains(w.indi.connected("east-telescope"), "Focuser Simulator") {
-			t.Error("the focuser is connected again")
+			t.Error("the focuser connected again, want it left disconnected")
 		}
 		if n := w.indi.count("east-telescope", "Focuser Simulator.CONNECTION"); n != connects+1 {
 			t.Errorf("CONNECTION changes = %d, want only the person's", n-connects)
@@ -287,14 +286,14 @@ func TestAServerThatRestartsIsSetUpAgain(t *testing.T) {
 			return len(w.indi.connected("east-telescope")) == 11
 		})
 		if r, _ := w.reservation("east-tonight"); r.Status.Phase != observatory.ReservationReady {
-			t.Errorf("the reservation is %s", r.Status.Phase)
+			t.Errorf("the reservation is %s, want Ready", r.Status.Phase)
 		}
 	})
 }
 
 // A connection that ends while the server's pod stays Ready brings no
-// pod event, so the operator dials again after a pause, which doubles
-// for each connection that ends early.
+// pod event, so the operator dials again after a pause that doubles
+// with each connection that ends early.
 func TestAConnectionThatEndsIsOpenedAgainAfterAPause(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -304,7 +303,7 @@ func TestAConnectionThatEndsIsOpenedAgainAfterAPause(t *testing.T) {
 			time.Sleep(pause - time.Millisecond)
 			synctest.Wait()
 			if n := w.indi.clients("east-telescope"); n != 0 {
-				t.Fatalf("%d connections before the pause of %v ended", n, pause)
+				t.Fatalf("%d connections before the pause of %v ended, want 0", n, pause)
 			}
 			time.Sleep(time.Millisecond)
 			synctest.Wait()
@@ -317,8 +316,8 @@ func TestAConnectionThatEndsIsOpenedAgainAfterAPause(t *testing.T) {
 
 // indiserver opens its port a moment after its pod is Ready, so the
 // operator's first dial of a new server is often refused. That refusal
-// is no fault and logs nothing. A server that refuses the dial after
-// the pause too is logged.
+// is no fault and logs nothing. A second refusal, after the pause, is
+// logged.
 func TestAServerThatListensLateLogsOnlyARepeatedRefusal(t *testing.T) {
 	cases := []struct {
 		name  string

@@ -1,17 +1,17 @@
 package main
 
-// The Active condition of each Telescope and Observatory. Activation
-// procedures run as it turns True, and deactivation procedures as it
-// turns False, and each run records the transition time it answers.
-// So the time must survive an operator restart: a new copy that read
-// another time would run every procedure again.
+// The Active condition of each Telescope and Observatory. The operator
+// runs activation procedures when Active turns True and deactivation
+// procedures when it turns False, and each run records the transition
+// time it ran for. A restarted operator must compute the same time, or
+// it runs every procedure again.
 //
 // A Telescope is Active from the start of its holder's Activation step
-// until the start of its Deactivation step, and the reservation's
-// record gives both times. An Observatory is Active from the
-// Activation step of the first reservation in it until the
-// Deactivation step of the last one, and no single record holds that,
-// so a new copy reads the time from the Observatory's stored Active
+// until the start of its Deactivation step, and the Reservation's
+// status.steps records both times. An Observatory is Active from the
+// Activation step of its first Reservation until the Deactivation step
+// of its last. No single Reservation records that, so a restarted
+// operator reads the Observatory's time from its stored Active
 // condition.
 
 import (
@@ -23,25 +23,25 @@ import (
 
 type activeState struct {
 	active bool
-	// since is when the state began, or zero for a resource that was
-	// never Active.
+	// since is when the state began. It is zero for a resource that
+	// has never been Active.
 	since time.Time
-	// by names the reservation whose step set the state.
+	// by is the name of the Reservation whose step set the state.
 	by string
-	// settled is true when a resource that is not Active has run its
-	// deactivation tiers, or never was Active. The Observatory's
-	// deactivation waits for every Telescope in it to settle, so the
-	// dome parks after every mount's deactivation.
+	// settled is true when a resource that is not Active has finished
+	// its deactivation tiers, or was never Active. An Observatory's
+	// deactivation waits until every Telescope in it is settled, so
+	// the dome parks after every mount.
 	settled bool
 }
 
 type activity struct {
 	mu      sync.Mutex
 	states  map[string]activeState
-	changed *bell
+	changed *changeNotifier
 }
 
-func newActivity(changed *bell) *activity {
+func newActivity(changed *changeNotifier) *activity {
 	return &activity{states: map[string]activeState{}, changed: changed}
 }
 
@@ -54,8 +54,9 @@ func (a *activity) get(key string) activeState {
 	return a.states[key]
 }
 
-// set records a state, and answers the time the state began: since for
-// a change, and the time already held when the state holds already.
+// set records a state and returns the time it began: since for a
+// change, or the recorded time when the key already has that state. A
+// change clears settled.
 func (a *activity) set(key string, active bool, since time.Time, by string) time.Time {
 	a.mu.Lock()
 	held := a.states[key]
@@ -69,7 +70,7 @@ func (a *activity) set(key string, active bool, since time.Time, by string) time
 	return since
 }
 
-// settle records that a resource that is not Active ran its
+// settle records that a resource that is not Active has finished its
 // deactivation.
 func (a *activity) settle(key string) {
 	a.mu.Lock()
@@ -80,9 +81,10 @@ func (a *activity) settle(key string) {
 	}
 }
 
-// seed reads the states from the reservations' records and the stored
-// conditions, after the claims are seeded.
-func (a *activity) seed(t *tree, c *claims) {
+// load rebuilds the states after an operator restart, from the
+// Reservations' steps and the stored Active conditions. It runs after
+// claims.load, because it reads each telescope's holder.
+func (a *activity) load(t *tree, c *claims) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	stored := func(conditions []observatory.Condition) activeState {
@@ -93,14 +95,15 @@ func (a *activity) seed(t *tree, c *claims) {
 	for name, telescope := range t.telescopes {
 		state := stored(telescope.Status.Conditions)
 		if holder, ok := c.holderOf(name); ok && t.reservations[holder] != nil {
-			// The holder's record decides. A holder that has not begun
-			// its Activation step leaves the telescope not Active.
+			// The holder's steps override the stored condition. Before
+			// the holder starts its Activation step, the telescope is
+			// not Active.
 			from, ok := recordedActivity(t.reservations[holder])
 			switch {
 			case !ok && !state.active:
 				from.since = state.since
 			case from.active && state.active:
-				// A retry of the Activation step moves its start, and
+				// A retry of the Activation step moves its start time, and
 				// the telescope keeps the time it first turned Active.
 				from.since = state.since
 			}
@@ -115,8 +118,8 @@ func (a *activity) seed(t *tree, c *claims) {
 		state := stored(site.Status.Conditions)
 		// The stored condition can be older than the last activation,
 		// when the operator stopped before the status writer wrote it.
-		// A telescope that is Active makes its observatory Active, from
-		// the first such telescope's activation.
+		// An Active telescope makes its Observatory Active, from the
+		// time of the earliest such telescope.
 		if !state.active {
 			for telescope, scope := range t.telescopes {
 				held := a.states[telescopeKey(telescope)]
@@ -129,9 +132,10 @@ func (a *activity) seed(t *tree, c *claims) {
 	}
 }
 
-// recordedActivity answers a telescope's state from its holder's steps:
-// Active from the start of the Activation step, and not Active from the
-// start of the Deactivation step.
+// recordedActivity returns a telescope's state from its holder's steps.
+// The telescope is Active from the start of the Activation step and not
+// Active from the start of the Deactivation step. The bool is false
+// when neither step has started.
 func recordedActivity(r *observatory.Reservation) (activeState, bool) {
 	if s := findStep(r.Status.Steps, observatory.StepDeactivation); s != nil && s.StartTime != nil {
 		return activeState{since: *s.StartTime, by: r.Metadata.Name, settled: ended(s.State)}, true
@@ -142,7 +146,7 @@ func recordedActivity(r *observatory.Reservation) (activeState, bool) {
 	return activeState{}, false
 }
 
-// condition answers the Active condition of a Telescope or an
+// condition returns the Active condition of a Telescope or an
 // Observatory.
 func (a *activity) condition(key string) observatory.Condition {
 	state := a.get(key)
@@ -161,12 +165,12 @@ func (a *activity) condition(key string) observatory.Condition {
 	return c
 }
 
-// forgetUnheld ends the activity of each Telescope that no reservation
-// holds, and of each Observatory with no held telescope. A
-// reservation that went away with no deactivation, such as one whose
-// finalizer a person removed, leaves its telescope Active, and this
-// ends it with no procedure: the reservation's own deactivation would
-// have run them.
+// forgetUnheld sets each Telescope that no Reservation holds to not
+// Active, and each Observatory with no held Telescope too. A
+// Reservation that disappears without deactivating, such as one whose
+// finalizer a person removed, leaves its telescope Active. forgetUnheld
+// clears that state without running deactivation procedures, because
+// only a Reservation's Deactivation step runs them.
 func (a *activity) forgetUnheld(t *tree, c *claims) {
 	held := c.held()
 	sites := map[string]bool{}

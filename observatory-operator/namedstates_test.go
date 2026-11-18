@@ -1,9 +1,10 @@
 package main
 
-// The named states that a person reads: a mount's state in its
-// readings, a camera's exposure in its display, and the reasons of the
-// state conditions that the printer columns of a dome and a flat panel
-// show. Each comes from the switches and lights the driver reports.
+// The state names that a person reads: a mount's readings.state, a
+// camera's display.exposure, and the reasons of the state conditions
+// that the printer columns of a dome and a flat panel show. The operator
+// computes each one from the switches and lights that the driver
+// reports.
 
 import (
 	"testing"
@@ -13,7 +14,7 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// field answers one string field of a device's status, by its path, or
+// field returns one string field of a device's status, by its path, or
 // "" when the field is absent.
 func field(path ...string) func(w *world, kind observatory.Kind, name string) string {
 	return func(w *world, kind observatory.Kind, name string) string {
@@ -29,7 +30,7 @@ func field(path ...string) func(w *world, kind observatory.Kind, name string) st
 	}
 }
 
-// reason answers the reason of one condition of a device, or "" while
+// reason returns the reason of one condition of a device, or "" while
 // the device has no such condition.
 func reason(condition string) func(w *world, kind observatory.Kind, name string) string {
 	return func(w *world, kind observatory.Kind, name string) string {
@@ -39,15 +40,15 @@ func reason(condition string) func(w *world, kind observatory.Kind, name string)
 	}
 }
 
-// stateStep is one thing a driver or a client does, and the named
-// state that the device reads after it.
+// stateStep is one action of a driver or a client, and the state name
+// that the device shows after it.
 type stateStep struct {
 	name string
 	do   func(w *world)
 	want string
 }
 
-// walk runs each step in order, and checks one named state after each.
+// walk runs each step in order, and checks the state name after each.
 func (w *world) walk(kind observatory.Kind, name string, read func(*world, observatory.Kind, string) string, steps []stateStep) {
 	w.t.Helper()
 	for _, s := range steps {
@@ -59,7 +60,7 @@ func (w *world) walk(kind observatory.Kind, name string, read func(*world, obser
 	}
 }
 
-func TestAMountNamesItsState(t *testing.T) {
+func TestAMountShowsItsState(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
@@ -99,7 +100,7 @@ func TestAMountNamesItsState(t *testing.T) {
 			{"the unpark ends", func(w *world) {
 				w.indi.setState(server, mount, "TELESCOPE_PARK", "Ok")
 			}, string(observatory.MountStopped)},
-			// libindi's telescope answers an abort during a park with
+			// libindi's telescope responds to an abort during a park with
 			// every park switch Off and the light Alert. The mount
 			// stopped where it was, so it reads Stopped.
 			{"a park starts again", func(w *world) {
@@ -136,7 +137,7 @@ func TestAMountWhoseParkFailedIsNotParked(t *testing.T) {
 	})
 }
 
-func TestADomeNamesItsPark(t *testing.T) {
+func TestADomeShowsItsPark(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
@@ -159,7 +160,7 @@ func TestADomeNamesItsPark(t *testing.T) {
 	})
 }
 
-func TestACameraNamesItsExposure(t *testing.T) {
+func TestACameraShowsItsExposure(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
@@ -170,7 +171,7 @@ func TestACameraNamesItsExposure(t *testing.T) {
 		w.walk(observatory.CameraKind, "east-main", field("display", "exposure"), []stateStep{
 			{"before the first exposure", func(w *world) {}, string(observatory.ExposureIdle)},
 			// While an exposure runs, the display shows the time left,
-			// which the simulator's CCD_EXPOSURE holds as 1 s.
+			// and the simulator's CCD_EXPOSURE reports 1 s.
 			{"an exposure runs", exposure("Busy"), "1 s"},
 			{"the exposure ends", exposure("Ok"), string(observatory.ExposureDone)},
 			{"an exposure fails", exposure("Alert"), string(observatory.ExposureFailed)},
@@ -178,7 +179,7 @@ func TestACameraNamesItsExposure(t *testing.T) {
 	})
 }
 
-func TestAFlatPanelNamesItsLight(t *testing.T) {
+func TestAFlatPanelShowsItsLight(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
@@ -192,8 +193,9 @@ func TestAFlatPanelNamesItsLight(t *testing.T) {
 	})
 }
 
-// lookup answers a lookup over a fixed set of INDI properties, so a
-// test can name a state from a driver that defines only some of them.
+// lookup returns a property lookup over a fixed set of INDI
+// properties, so a test can read a state as if from a driver that
+// defines only some of them.
 func lookup(ps ...indi.Property) func(string) (indi.Property, bool) {
 	return func(name string) (indi.Property, bool) {
 		for _, p := range ps {
@@ -209,7 +211,7 @@ func switchProperty(name string, state indi.State, on string) indi.Property {
 	return indi.Property{Name: name, Type: indi.SwitchType, State: state, Members: []indi.Member{{Name: on, Switch: true}}}
 }
 
-func TestAMountWithoutParkOrTrackingNamesItsState(t *testing.T) {
+func TestAMountWithoutParkOrTrackingShowsItsState(t *testing.T) {
 	t.Parallel()
 	coordinates := func(state indi.State) indi.Property {
 		return indi.Property{Name: "EQUATORIAL_EOD_COORD", Type: indi.NumberType, State: state}

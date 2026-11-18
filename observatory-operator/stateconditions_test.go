@@ -1,7 +1,7 @@
 package main
 
-// The conditions of a device's state, which the triggers of procedures
-// read, and the Events that their transitions post.
+// The state conditions of a device, which procedure triggers read, and
+// the Events that their transitions post.
 
 import (
 	"fmt"
@@ -13,13 +13,13 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// settle lets the status writer compose and write every status.
+// settle waits until the status writer has written every status.
 func (w *world) settle() {
 	time.Sleep(2 * statusWindow)
 	synctest.Wait()
 }
 
-// stateOf answers one condition of a device as "<status> <reason>:
+// stateOf returns one condition of a device as "<status> <reason>:
 // <message>", or "" when the device has no such condition.
 func (w *world) stateOf(kind observatory.Kind, name, condition string) string {
 	w.t.Helper()
@@ -31,7 +31,7 @@ func (w *world) stateOf(kind observatory.Kind, name, condition string) string {
 	return fmt.Sprintf("%s %s: %s", c.Status, c.Reason, c.Message)
 }
 
-// eventsWith answers the Events about a device whose reason is one of
+// eventsWith returns the Events about a device whose reason is one of
 // reasons, as "<type> <reason>: <message> x<count>".
 func (w *world) eventsWith(kind observatory.Kind, name string, reasons ...string) []string {
 	var out []string
@@ -61,7 +61,7 @@ func TestAConnectedDeviceReportsItsState(t *testing.T) {
 			{observatory.CameraKind, "east-main", observatory.ConditionCooling, "False CoolerOff: The cooler of Camera east-main is off"},
 			{observatory.WeatherStationKind, "lab", observatory.ConditionSafe, "True Safe: WeatherStation lab reports Safe"},
 			// A device of a telescope that no reservation holds is not
-			// connected, so it has none of them.
+			// connected, so it has no state conditions.
 			{observatory.MountKind, "west", observatory.ConditionParked, ""},
 		} {
 			if got := w.stateOf(c.kind, c.name, c.condition); got != c.want {
@@ -71,7 +71,8 @@ func TestAConnectedDeviceReportsItsState(t *testing.T) {
 	})
 }
 
-// Each state's other side, and a driver that reports neither side.
+// Each state condition after the device switches to its other state,
+// and the Unknown condition of a driver that reports neither state.
 func TestTheOtherSideOfEachState(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -94,7 +95,7 @@ func TestTheOtherSideOfEachState(t *testing.T) {
 			{observatory.FlatPanelKind, "east", observatory.ConditionLit, "True LightOn: The light of FlatPanel east is on"},
 			{observatory.CameraKind, "east-main", observatory.ConditionCooling, "True CoolerOn: The cooler of Camera east-main is on"},
 			{observatory.DomeKind, "lab", observatory.ConditionParked, "Unknown NotReported: Dome lab reports neither PARK nor UNPARK On in DOME_PARK"},
-			{observatory.WeatherStationKind, "lab", observatory.ConditionSafe, "Unknown NotReported: WeatherStation lab reports no safety verdict"},
+			{observatory.WeatherStationKind, "lab", observatory.ConditionSafe, "Unknown NotReported: WeatherStation lab reports no safety level"},
 		} {
 			if got := w.stateOf(c.kind, c.name, c.condition); got != c.want {
 				t.Errorf("%s %s %s = %q\nwant %q", c.kind.Name, c.name, c.condition, got, c.want)

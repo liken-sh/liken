@@ -1,10 +1,10 @@
 package main
 
-// The tree is one reading of the observatory's resources and of the
-// objects the operator created, taken from the watches' stores. Each
-// resource names its parent in its spec, so every reference points up
-// the tree, and the tree answers the questions that point down: which
-// devices a telescope's server runs, and which trains a tube serves.
+// A tree is a snapshot of the observatory's resources and of the
+// objects the operator created, built from the watch caches. Each
+// resource names its parent in its spec, so a lookup in the other
+// direction, such as which devices run on a telescope's INDI server, is
+// a method of tree that scans the children.
 
 import (
 	"encoding/json"
@@ -15,11 +15,10 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// deviceObject is one device resource of any of the 13 device kinds.
-// The spec holds the fields that every device kind has, so one type
-// reads them all, and the status holds the typed fields, the readings,
-// and the display of the kind as values of any type. The CRD of each kind refuses the fields it does not have, so a
-// field that does not belong to a kind is always empty here.
+// deviceObject decodes a device resource of any kind. The status keeps
+// the fields that differ by kind as values of type any. The CRD of each
+// kind rejects the fields that the kind does not have, so such a field
+// is always empty here.
 type deviceObject struct {
 	APIVersion string                 `json:"apiVersion,omitempty"`
 	Kind       string                 `json:"kind,omitempty"`
@@ -36,17 +35,14 @@ type deviceSpec struct {
 	Observatory  string `json:"observatory,omitempty"`
 	observatory.DeviceSpec
 	observatory.Procedures[action]
-	// FITSKeywords is a Camera's spec.fitsKeywords. The CRD of every
-	// other kind has no such field, so it is empty for them.
 	FITSKeywords []observatory.FITSKeyword `json:"fitsKeywords,omitempty"`
-	// raw is the spec as the API server holds it. Each kind's settings
-	// differ, so the Configure step decodes them from it into the
-	// kind's own type (settings.go).
+	// raw is the spec as the API server stores it. The Configure step
+	// decodes the kind's settings from raw into the kind's own type
+	// (settings.go).
 	raw []byte
 }
 
-// UnmarshalJSON reads the fields that every kind shares, and keeps the
-// whole spec for the settings of the kind.
+// UnmarshalJSON keeps the whole spec in raw for the kind's settings.
 func (s *deviceSpec) UnmarshalJSON(body []byte) error {
 	type shared deviceSpec
 	if err := json.Unmarshal(body, (*shared)(s)); err != nil {
@@ -58,17 +54,17 @@ func (s *deviceSpec) UnmarshalJSON(body []byte) error {
 
 type deviceStatus struct {
 	observatory.DeviceStatus
-	// Standard holds the typed fields of the kind's standard
-	// properties, such as a *observatory.CameraStandard, which the
-	// JSON writes at the level of the status, as each kind's status
-	// embeds it. The cached copy of a device holds none (watch.go).
+	// Standard is the kind's typed standard properties, such as a
+	// *observatory.CameraStandard. MarshalJSON writes its fields at the
+	// top level of the status, where the kind's status type embeds
+	// them. A device in the watch cache has a nil Standard (watch.go).
 	Standard any `json:"-"`
 	Readings any `json:"readings,omitempty"`
 	Display  any `json:"display,omitempty"`
 }
 
-// MarshalJSON writes the typed fields beside the rest of the status, as
-// encoding/json writes an embedded struct.
+// MarshalJSON writes the fields of Standard at the top level of the
+// status JSON, as encoding/json would write an embedded struct.
 func (s deviceStatus) MarshalJSON() ([]byte, error) {
 	type plain deviceStatus
 	shared, err := json.Marshal(plain(s))
@@ -87,21 +83,22 @@ func (s deviceStatus) MarshalJSON() ([]byte, error) {
 	return append(append(shared[:len(shared)-1], ','), typed[1:]...), nil
 }
 
-// device is one device resource and its kind. While a session holds
-// the device, its spec holds what the session recorded (records.go).
+// device is a device resource and its kind. While the device is in a
+// session's record, object.Spec is the spec that the session recorded,
+// not the spec a person wrote (records.go).
 type device struct {
 	kind   observatory.Kind
 	object deviceObject
-	// declared is the spec as the API server holds it, while a record
-	// replaced it, and nil otherwise (declaredSpec).
+	// declared is the spec as the API server stores it. It is set only
+	// when the recorded spec replaced object.Spec.
 	declared *deviceSpec
-	// record is the device's record, and recordedOn the held server
-	// whose record names it, while a session holds the device.
+	// record is the device's entry in a session record, and recordedOn
+	// is the server of that session.
 	record     *observatory.SessionDevice
 	recordedOn serverRef
 }
 
-// declaredSpec answers the spec as a person wrote it.
+// declaredSpec returns the spec as a person wrote it.
 func (d *device) declaredSpec() *deviceSpec {
 	if d.declared != nil {
 		return d.declared
@@ -111,24 +108,24 @@ func (d *device) declaredSpec() *deviceSpec {
 
 func (d *device) name() string { return d.object.Metadata.Name }
 
-// key names the device across kinds, such as Camera/east-main.
+// key identifies the device across kinds, such as Camera/east-main.
 func (d *device) key() string { return d.kind.Name + "/" + d.name() }
 
-// serverRef names one INDI server: a Telescope's, or an Observatory's
-// for the devices that no telescope owns.
+// serverRef identifies one INDI server: a Telescope's, or an
+// Observatory's for the devices that belong to no telescope.
 type serverRef struct {
 	kind observatory.Kind
 	name string
 }
 
-// String answers the name of the server's pod and Service, which is
-// also its key among the operator's INDI connections.
+// String returns the name of the server's pod and Service. The
+// operator also keys its INDI connections by this name.
 func (s serverRef) String() string { return generatedName(s.kind, s.name) }
 
-// tree is one copy of every watched object. The goroutines that read
-// between two changes share one tree (operator.snapshot), so no code
-// changes a tree or an object in it. Code that changes an object
-// changes its own copy.
+// tree is a copy of every watched object. Every goroutine that reads
+// between two changes gets the same tree (operator.snapshot), so code
+// must not modify a tree or an object in it. Copy an object before you
+// change it.
 type tree struct {
 	namespace     string
 	observatories map[string]*observatory.Observatory
@@ -147,30 +144,29 @@ type tree struct {
 	jobs       map[string]*job
 	claims     map[string]bool
 
-	// taken is computed once from the devices (shareddrivers.go).
-	takenOnce sync.Once
-	taken     map[*device]*device
-	// held records what the sessions hold, computed once (sessions).
+	// driverHolders is computed on first use (shareddrivers.go).
+	driverHoldersOnce sync.Once
+	driverHolders     map[*device]*device
+	// held is computed on first use (sessions).
 	heldOnce sync.Once
 	held     sessions
-	// served holds the owner of each served device (served.go).
-	served servedVerdicts
-	// records holds the record of each held server that a holder's
-	// status records, recordedTubes the spec of each tube that one of
-	// them names, and writtenTrains each train whose spec a record
-	// replaced, as a person wrote it (records.go).
+	// served has the owner of each served device (served.go).
+	served servedOwnerships
+	// records has the session record of each held server, from the
+	// status of the reservation that holds it. recordedTubes has the
+	// recorded spec of each tube in a record. writtenTrains has each
+	// train whose spec a record replaced, with the spec that a person
+	// wrote (records.go).
 	records       map[serverRef]observatory.Session
 	recordedTubes map[string]observatory.SessionTube
 	writtenTrains map[string]*observatory.OpticalTrain
 }
 
-// parent answers the resource above a device, from the parent field
-// its kind has. The answer is false for a device on the shelf, which
-// names no parent.
+// parent returns the resource above a device. It returns false for a
+// device that names no parent, which the status calls not installed.
 func (d *device) parent() (observatory.Parent, bool) { return parentOf(&d.object.Spec) }
 
-// declaredParent answers the parent that the device's spec names as a
-// person wrote it (declaredSpec).
+// declaredParent returns the parent in the spec that a person wrote.
 func (d *device) declaredParent() (observatory.Parent, bool) { return parentOf(d.declaredSpec()) }
 
 func parentOf(s *deviceSpec) (observatory.Parent, bool) {
@@ -185,14 +181,13 @@ func parentOf(s *deviceSpec) (observatory.Parent, bool) {
 	return observatory.Parent{}, false
 }
 
-// declared answers the INDI server that a device's parents place it
-// on, as a person wrote them: its telescope's, or its observatory's. A
-// device on a train runs on the server of the telescope that the
-// train's spec names now, though a session froze the train. The
-// answer is false for a device on the shelf, while a train that the
-// device names is missing, and for a device that a person deleted.
-// The finalizer keeps a deleted device's object until its server let
-// it go, and a server that runs it treats it as a device that left
+// declared returns the INDI server that the specs a person wrote put
+// the device on: its telescope's server or its observatory's. A device
+// on a train goes to the telescope in the train's current spec, even
+// when a session recorded an older spec for the train. It returns false
+// for a device with no parent, a device whose train does not exist, and
+// a deleted device. The finalizer keeps a deleted device's object in
+// the API, and the server that runs it treats it as a device that left
 // (finalizers.go).
 func (t *tree) declared(d *device) (serverRef, bool) {
 	p, installed := d.declaredParent()
@@ -211,11 +206,13 @@ func (t *tree) declared(d *device) (serverRef, bool) {
 	return serverRef{observatory.ObservatoryKind, p.Name}, true
 }
 
-// runningOn answers the server that the pod of a device's driver runs
-// on (podOf): the server in the pod's label. A served device has its
-// owner's pod while it shares the owner's INDI device. The pod places
-// a device that a person deleted, or whose finalizer a person removed
-// by hand, while its deactivation runs through that driver.
+// runningOn returns the server of the pod that runs a device's driver
+// (podOf), from the pod's server label. A served device uses its
+// owner's pod while it shares the owner's INDI device. Unlike declared,
+// it ignores the device's parents and its deletion, because a device's
+// deactivation runs through the driver that is running. That includes a
+// device that a person deleted, and one whose finalizer a person
+// removed by hand.
 func (t *tree) runningOn(d *device) (serverRef, bool) {
 	_, p, running := t.podOf(d)
 	if !running {
@@ -224,9 +221,10 @@ func (t *tree) runningOn(d *device) (serverRef, bool) {
 	return t.serverNamed(p.Metadata.Labels[labelServer])
 }
 
-// devicesRunningOn answers the devices whose driver's pod runs on one
-// server (runningOn), in the order of t.devices, whatever their parents
-// say: the devices whose deactivation that server's driver can run.
+// devicesRunningOn returns the devices whose driver pod belongs to s
+// (runningOn), in the order of t.devices, even when the device's spec
+// now names other parents.
+// These are the devices whose deactivation the server can run.
 func (t *tree) devicesRunningOn(s serverRef) []*device {
 	var out []*device
 	for _, d := range t.devices {
@@ -237,12 +235,11 @@ func (t *tree) devicesRunningOn(s serverRef) []*device {
 	return out
 }
 
-// releasedOn answers the devices that the release of one server acts
-// on, in the order of t.devices: the devices whose driver's pod runs
-// there, and the devices that the server's session recorded, which
-// include the devices whose pods the release deleted already. A device
-// that its parents place there and that the session never started is
-// not one of them.
+// releasedOn returns the devices that the release of s stops, in the
+// order of t.devices: the devices whose driver pod belongs to s, and
+// the devices in the session record of s, whose pods the release can
+// already have deleted. A device that its parents put on s but that the
+// session never started is not included.
 func (t *tree) releasedOn(s serverRef) []*device {
 	var out []*device
 	for _, d := range t.devices {
@@ -254,8 +251,8 @@ func (t *tree) releasedOn(s serverRef) []*device {
 	return out
 }
 
-// serverNamed answers the server of a Telescope or an Observatory in
-// the tree by the name of its pod.
+// serverNamed returns the server of a Telescope or an Observatory in
+// the tree whose pod has this name.
 func (t *tree) serverNamed(name string) (serverRef, bool) {
 	for scope := range t.telescopes {
 		if ref := (serverRef{observatory.TelescopeKind, scope}); ref.String() == name {
@@ -270,26 +267,25 @@ func (t *tree) serverNamed(name string) (serverRef, bool) {
 	return serverRef{}, false
 }
 
-// devicesOn answers the devices that one server runs, in the order of
-// t.devices: the devices that run a driver, and the devices that one
-// of them serves. A device whose driver another device on the server
-// runs is left out (shareddrivers.go), and so is a served device that
-// the tree refuses (served.go).
+// devicesOn returns the devices that s runs, in the order of
+// t.devices. It leaves out a device whose driver another device on s
+// already runs (shareddrivers.go), and a served device that no device
+// on s serves (served.go).
 func (t *tree) devicesOn(s serverRef) []*device {
 	var out []*device
 	for _, d := range t.placedOn(s) {
 		if _, owned := t.ownerOf(d); !owned {
 			continue
 		}
-		if _, taken := t.driverTakenBy(d); !taken {
+		if _, taken := t.driverHolder(d); !taken {
 			out = append(out, d)
 		}
 	}
 	return out
 }
 
-// placedOn answers the devices that one server runs or will run
-// (server), in the order of t.devices.
+// placedOn returns the devices that t.server puts on s, in the order of
+// t.devices, including those that devicesOn leaves out.
 func (t *tree) placedOn(s serverRef) []*device {
 	var out []*device
 	for _, d := range t.devices {
@@ -300,7 +296,7 @@ func (t *tree) placedOn(s serverRef) []*device {
 	return out
 }
 
-// devicesOf answers the devices of one kind on one server.
+// devicesOf returns the devices of one kind that s runs.
 func (t *tree) devicesOf(s serverRef, kind observatory.Kind) []*device {
 	var out []*device
 	for _, d := range t.devicesOn(s) {
@@ -311,8 +307,6 @@ func (t *tree) devicesOf(s serverRef, kind observatory.Kind) []*device {
 	return out
 }
 
-// trainDevices answers the devices whose spec.opticalTrain names a
-// train.
 func (t *tree) trainDevices(train string) []*device {
 	var out []*device
 	for _, d := range t.devices {
@@ -323,7 +317,6 @@ func (t *tree) trainDevices(train string) []*device {
 	return out
 }
 
-// device answers the device of one kind and name.
 func (t *tree) device(kind observatory.Kind, name string) (*device, bool) {
 	for _, d := range t.devices {
 		if d.kind == kind && d.name() == name {
@@ -333,7 +326,6 @@ func (t *tree) device(kind observatory.Kind, name string) (*device, bool) {
 	return nil, false
 }
 
-// deviceByKey answers the device of a key, such as Camera/east-main.
 func (t *tree) deviceByKey(key string) (*device, bool) {
 	for _, d := range t.devices {
 		if d.key() == key {
@@ -343,10 +335,10 @@ func (t *tree) deviceByKey(key string) (*device, bool) {
 	return nil, false
 }
 
-// missingParent answers the first resource up the tree from a device
-// that does not exist, as "OpticalTrain east-imaging", or "" when
-// every parent up to the Observatory exists, or when the device is on
-// the shelf.
+// missingParent returns the first resource above a device that does
+// not exist, such as "OpticalTrain east-imaging". It returns "" when
+// every parent up to the Observatory exists, and when the device names
+// no parent.
 func (t *tree) missingParent(d *device) string {
 	p, installed := d.declaredParent()
 	switch {
@@ -379,11 +371,11 @@ func (t *tree) missingObservatory(name string) string {
 	return ""
 }
 
-// asJSON answers a value as the generic form that a decoded JSON
-// document has, so two statuses compare equal when the API server
-// would store the same document. A number read from a watch's store is
-// an int64 and the same number composed by the operator is a float64,
-// and this form makes both float64.
+// asJSON converts a value to the generic form of a decoded JSON
+// document, so two statuses compare equal when the API server would
+// store the same document. A number from a watch cache is an int64, and
+// the same number built by the operator is a float64. After the
+// conversion both are float64.
 func asJSON(v any) any {
 	body, err := json.Marshal(v)
 	if err != nil {

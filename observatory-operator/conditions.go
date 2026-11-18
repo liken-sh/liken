@@ -1,9 +1,7 @@
 package main
 
-// The conditions of every kind, in the shape of metav1.Condition. A
-// condition's lastTransitionTime is when its status last changed, so a
-// write that keeps the status keeps the time, and a status that holds
-// the same facts as the stored one compares equal and is not written.
+// A condition's lastTransitionTime is when its status last changed, so
+// a write that keeps the status keeps the stored time.
 
 import (
 	"reflect"
@@ -20,11 +18,10 @@ func condition(kind string, status observatory.ConditionStatus, reason, message 
 	}
 }
 
-// mergeConditions answers the next conditions, with the transition time
-// of each stored condition whose status did not change, and each next
-// condition that transitioned from the stored one (conditions.Set). A
-// stored condition of a type that next leaves out is dropped, except a
-// person's SetUp, which stays as the person wrote it (keepSetUp).
+// mergeConditions returns next, with the stored transition time on
+// each condition whose status did not change, and the conditions whose
+// status did change. It drops a stored condition whose type is not in
+// next, except SetUp, which a person writes.
 func mergeConditions(stored, next []observatory.Condition) (merged, transitions []observatory.Condition) {
 	merged = make([]observatory.Condition, len(next))
 	for i, c := range next {
@@ -37,20 +34,20 @@ func mergeConditions(stored, next []observatory.Condition) (merged, transitions 
 		}
 		merged[i] = held[0]
 	}
-	return keepSetUp(stored, merged), transitions
+	return withStoredSetUp(stored, merged), transitions
 }
 
-// equalJSON reports whether two values are the same JSON document
-// (asJSON in tree.go).
+// equalJSON reports whether a and b encode to the same JSON document.
+// asJSON in tree.go explains why the comparison goes through JSON.
 func equalJSON(a, b any) bool {
 	return reflect.DeepEqual(asJSON(a), asJSON(b))
 }
 
-// stamp answers the time a record holds: UTC, to the second, which is
-// what the API server keeps of a date-time.
+// stamp truncates to the second because the API server stores a
+// date-time to the second.
 func stamp() time.Time { return time.Now().UTC().Truncate(time.Second) }
 
-// conditionOf answers the condition of one type, or the zero condition.
+// conditionOf returns the zero Condition when list has none of kind.
 func conditionOf(list []observatory.Condition, kind string) observatory.Condition {
 	c, _ := conditions.Find(list, kind)
 	return c

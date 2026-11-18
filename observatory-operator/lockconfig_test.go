@@ -1,8 +1,9 @@
 package main
 
-// A mount reads DOME_POLICY from its configuration file again each
-// time a client asks for its properties (fakeconfig_test.go), so the
-// lock holds only if the file holds it too.
+// A mount reads DOME_POLICY from its saved configuration on each
+// getProperties (fakeconfig_test.go), so the mount stays locked for a
+// client that connects later only if the saved configuration has
+// DOME_LOCKS On.
 
 import (
 	"context"
@@ -11,16 +12,16 @@ import (
 	"testing/synctest"
 )
 
-// look connects to a server as another client does, such as PHD2 or a
-// person's KStars, and asks for every property.
+// look connects to a server as another client such as PHD2 or KStars
+// does, and sends getProperties.
 func (w *indiWorld) look(server string) {
 	w.t.Helper()
 	conn, err := w.DialContext(context.Background(), "tcp", server+".observatory.svc:7624")
 	if err != nil {
-		w.t.Fatal(err)
+		w.t.Fatalf("connecting to %s: %v", server, err)
 	}
 	if _, err := io.WriteString(conn, `<getProperties version="1.7"/>`+"\n"); err != nil {
-		w.t.Fatal(err)
+		w.t.Fatalf("sending getProperties to %s: %v", server, err)
 	}
 	synctest.Wait()
 	_ = conn.Close()

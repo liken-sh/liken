@@ -1,9 +1,9 @@
-// The INDI wire protocol, version 1.7: the elements that a server sends
-// and the conversion of each into the store's types, and the elements
+// The INDI wire protocol, version 1.7. This file decodes the elements
+// that a server sends into the store's types and writes the elements
 // that a client sends. The protocol is a stream of XML elements with no
 // root element, so the reader decodes one top-level element at a time.
-// The reference is https://docs.indilib.org/protocol/ and the client
-// side of libindi, libs/indiabstractclient/ in indilib/indi.
+// The references are https://docs.indilib.org/protocol/ and the client
+// code of libindi, libs/indiabstractclient/ in indilib/indi.
 
 package indi
 
@@ -17,13 +17,14 @@ import (
 	"time"
 )
 
-// protocolVersion is INDIV in libs/indicore/indiapi.h. INDI 2.x still
-// sends 1.7: its changes are between the server and its drivers.
+// protocolVersion is INDIV in libindi's libs/indicore/indiapi.h. INDI
+// 2.x still sends version 1.7 to clients, because its changes are in the
+// protocol between the server and its drivers.
 const protocolVersion = "1.7"
 
-// element is any top-level element that a server sends. The fields
-// cover the attributes of every element the client reads, and an
-// element leaves the others empty.
+// element is any top-level element that a server sends. It has a field
+// for every attribute of every element type that the client reads, and
+// the attributes that an element does not have stay empty.
 type element struct {
 	XMLName   xml.Name
 	Device    string   `xml:"device,attr"`
@@ -38,13 +39,14 @@ type element struct {
 	Message   string   `xml:"message,attr"`
 	UID       string   `xml:"uid,attr"`
 	Members   []member `xml:",any"`
-	// wholeDevice marks a delProperty with no name attribute.
+	// wholeDevice is true for a delProperty with no name attribute,
+	// which deletes the device. An empty name attribute deletes nothing.
 	wholeDevice bool
 }
 
 // member is one def* or one* child of a vector. A one* element in an
-// update carries only the attributes that changed, so an empty
-// attribute means no change.
+// update has only the attributes that changed, so an empty attribute
+// means no change.
 type member struct {
 	XMLName xml.Name
 	Name    string `xml:"name,attr"`
@@ -57,8 +59,8 @@ type member struct {
 	Value   string `xml:",chardata"`
 }
 
-// vectorType reads the type from a def or set element's name, such as
-// defNumberVector or setNumberVector.
+// vectorType returns the property type for the tag of a def or set
+// element, such as defNumberVector or setNumberVector.
 func vectorType(tag string) (Type, bool) {
 	for _, t := range []Type{NumberType, SwitchType, TextType, LightType, BLOBType} {
 		if tag == "def"+string(t)+"Vector" || tag == "set"+string(t)+"Vector" {
@@ -68,10 +70,9 @@ func vectorType(tag string) (Type, bool) {
 	return "", false
 }
 
-// definition converts a def*Vector into a property.
 func (e element) definition(t Type) (Property, error) {
 	if e.Device == "" || e.Name == "" {
-		return Property{}, fmt.Errorf("%s with no device or no name", e.XMLName.Local)
+		return Property{}, fmt.Errorf("the %s element has no device or no name", e.XMLName.Local)
 	}
 	p := Property{
 		Device: e.Device, Name: e.Name, Label: e.Label, Group: e.Group, Type: t,
@@ -80,14 +81,14 @@ func (e element) definition(t Type) (Property, error) {
 	if t != LightType {
 		perm := Permission(e.Perm)
 		if perm != ReadOnly && perm != WriteOnly && perm != ReadWrite {
-			return Property{}, fmt.Errorf("%s.%s: permission %q", e.Device, e.Name, e.Perm)
+			return Property{}, fmt.Errorf("%s.%s has the permission %q, want ro, wo, or rw", e.Device, e.Name, e.Perm)
 		}
 		p.Perm = perm
 	}
 	if t == SwitchType {
 		rule := Rule(e.Rule)
 		if rule != OneOfMany && rule != AtMostOne && rule != AnyOfMany {
-			return Property{}, fmt.Errorf("%s.%s: rule %q", e.Device, e.Name, e.Rule)
+			return Property{}, fmt.Errorf("%s.%s has the switch rule %q, want OneOfMany, AtMostOne, or AnyOfMany", e.Device, e.Name, e.Rule)
 		}
 		p.Rule = rule
 	}
@@ -97,17 +98,17 @@ func (e element) definition(t Type) (Property, error) {
 	for _, m := range e.Members {
 		member := Member{Name: m.Name, Label: m.Label}
 		if err := m.apply(t, &member); err != nil {
-			return Property{}, fmt.Errorf("%s.%s.%s: %w", e.Device, e.Name, m.Name, err)
+			return Property{}, fmt.Errorf("reading the member %s.%s.%s: %w", e.Device, e.Name, m.Name, err)
 		}
 		p.Members = append(p.Members, member)
 	}
 	return p, nil
 }
 
-// updated applies a set*Vector to a copy of the property it names.
-// When keepBLOBs is set, it also returns the BLOBs that the update
-// carries, decoded. Otherwise it records each BLOB's format and size
-// and drops its data.
+// updated applies a set*Vector to a copy of the property and returns
+// the copy. When keepBLOBs is true, it also returns the decoded BLOBs
+// of the update. Otherwise it records each BLOB's format and size and
+// discards the data.
 func (e element) updated(p Property, keepBLOBs bool) (Property, []BLOB, error) {
 	p = p.clone()
 	if err := e.applyAttributes(&p); err != nil {
@@ -117,15 +118,15 @@ func (e element) updated(p Property, keepBLOBs bool) (Property, []BLOB, error) {
 	for _, m := range e.Members {
 		i := memberIndex(p, m.Name)
 		if i < 0 {
-			return Property{}, nil, fmt.Errorf("%s.%s has no member %q", e.Device, e.Name, m.Name)
+			return Property{}, nil, fmt.Errorf("the update for %s.%s names the member %q, which the property does not define", e.Device, e.Name, m.Name)
 		}
 		if err := m.apply(p.Type, &p.Members[i]); err != nil {
-			return Property{}, nil, fmt.Errorf("%s.%s.%s: %w", e.Device, e.Name, m.Name, err)
+			return Property{}, nil, fmt.Errorf("reading the member %s.%s.%s: %w", e.Device, e.Name, m.Name, err)
 		}
 		if p.Type == BLOBType && keepBLOBs {
 			blob, err := m.blob()
 			if err != nil {
-				return Property{}, nil, fmt.Errorf("%s.%s.%s: %w", e.Device, e.Name, m.Name, err)
+				return Property{}, nil, fmt.Errorf("reading the member %s.%s.%s: %w", e.Device, e.Name, m.Name, err)
 			}
 			blobs = append(blobs, blob)
 		}
@@ -142,19 +143,18 @@ func memberIndex(p Property, name string) int {
 	return -1
 }
 
-// applyAttributes applies the attributes that a definition and an
-// update share. An update can leave each one out.
+// applyAttributes sets the attributes that def* and set* elements
+// share. A set* element can leave any of them out.
 func (e element) applyAttributes(p *Property) error {
 	if e.State != "" {
 		state, err := parseState(e.State)
 		if err != nil {
-			return fmt.Errorf("%s.%s: %w", e.Device, e.Name, err)
+			return fmt.Errorf("reading the state of %s.%s: %w", e.Device, e.Name, err)
 		}
 		p.State = state
 	}
-	// A timeout or a timestamp that does not parse loses no value the
-	// client acts on, so the client keeps the vector and leaves the
-	// field as it was.
+	// A bad timeout or timestamp does not fail the vector, because the
+	// client does not act on either. The field keeps its old value.
 	if seconds, err := strconv.ParseFloat(strings.TrimSpace(e.Timeout), 64); err == nil {
 		p.Timeout = time.Duration(seconds * float64(time.Second))
 	}
@@ -170,19 +170,19 @@ func parseState(text string) (State, error) {
 	case Idle, Ok, Busy, Alert:
 		return state, nil
 	}
-	return "", fmt.Errorf("state %q", text)
+	return "", fmt.Errorf("the state %q is not Idle, Ok, Busy, or Alert", text)
 }
 
 // parseTimestamp reads INDI's timestamp, an ISO 8601 time in UTC with
-// no zone, such as 2026-10-05T19:53:26, with or without a fraction of
-// a second.
+// no zone designator, such as 2026-10-05T19:53:26. A fraction of a
+// second is accepted.
 func parseTimestamp(text string) (time.Time, bool) {
 	timestamp, err := time.Parse("2006-01-02T15:04:05", strings.TrimSpace(text))
 	return timestamp, err == nil
 }
 
-// apply sets one member's value and the attributes the element
-// carries.
+// apply sets the member's value and each other attribute that the
+// element has. An attribute that the element leaves out keeps its value.
 func (m member) apply(t Type, to *Member) error {
 	switch t {
 	case NumberType:
@@ -209,7 +209,7 @@ func (m member) apply(t Type, to *Member) error {
 		case "Off":
 			to.Switch = false
 		default:
-			return fmt.Errorf("switch %q", m.Value)
+			return fmt.Errorf("the switch value %q is not On or Off", m.Value)
 		}
 	case TextType:
 		to.Text = strings.TrimSpace(m.Value)
@@ -230,9 +230,9 @@ func (m member) apply(t Type, to *Member) error {
 	return nil
 }
 
-// BLOB is one BLOB that a server sent, decoded. Format is the file
-// extension the driver gives, such as ".fits", and Size is the size of
-// Data in bytes.
+// BLOB is one decoded BLOB from a server. Format is the file extension
+// that the driver sets, such as ".fits", and Size is the length of Data
+// in bytes.
 type BLOB struct {
 	Member string
 	Format string
@@ -240,8 +240,8 @@ type BLOB struct {
 	Data   []byte
 }
 
-// blob decodes a oneBLOB's base64 content, which libindi breaks into
-// lines.
+// blob decodes the base64 content of a oneBLOB. libindi wraps that
+// content across lines, so the whitespace is removed first.
 func (m member) blob() (BLOB, error) {
 	encoded := strings.Map(func(r rune) rune {
 		if r == ' ' || r == '\n' || r == '\r' || r == '\t' {
@@ -260,22 +260,22 @@ func (m member) blob() (BLOB, error) {
 	return BLOB{Member: m.Name, Format: m.Format, Size: size, Data: data}, nil
 }
 
-// newVector writes a new*Vector, the element a client sends to change a
-// property. It writes every member of the property.
+// newVector writes a new*Vector, the element that a client sends to
+// change a property, with every member of the property.
 func newVector(p Property) []byte {
 	return vector("new", p, "")
 }
 
-// setVector writes a set*Vector with the property's state, the element
-// a driver sends to report a property. A client sends one only to relay
-// a device that its server does not hold (Client.Relay).
+// setVector writes a set*Vector with the property's state. A driver
+// sends this element to report a property. A client sends one only in
+// Client.Relay, for a device that its own server does not hold.
 func setVector(p Property) []byte {
 	return vector("set", p, ` state=`+attribute(string(p.State)))
 }
 
-// vector writes a new*Vector or a set*Vector, with every member of the
-// property. attributes follows the name, and is empty or starts with a
-// space.
+// vector writes a new*Vector or a set*Vector with every member of the
+// property. attributes is text placed after the name attribute, either
+// empty or starting with a space.
 func vector(verb string, p Property, attributes string) []byte {
 	var b bytes.Buffer
 	tag := verb + string(p.Type) + "Vector"
@@ -324,12 +324,12 @@ func pingReply(uid string) []byte {
 	return []byte("<pingReply uid=" + attribute(uid) + "/>\n")
 }
 
-// escape writes the five characters that XML reserves as the named
-// entities that libindi's parser decodes (libs/indicore/lilxml.cpp).
-// encoding/xml writes ' and " as numeric references, such as &#39;,
-// which the parser leaves as they are: a driver given "it&#39;s" keeps
-// those seven characters, so its answer never matches the value sent.
-// A tab or a newline goes as it is, for the same reason.
+// escape writes the five characters that XML reserves as named
+// entities, because libindi's parser (libs/indicore/lilxml.cpp) decodes
+// named entities and no numeric references. encoding/xml would write an
+// apostrophe as &#39; and a tab as &#x9;, and a driver would store those
+// characters as they are, so its reply would not match the value sent.
+// For the same reason, tabs and newlines are sent unescaped.
 var escape = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "'", "&apos;", `"`, "&quot;")
 
 // attribute quotes and escapes an attribute value.

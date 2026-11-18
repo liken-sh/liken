@@ -1,7 +1,7 @@
 package main
 
-// The reservations that cannot activate as the inventory stands, and
-// the step that names the reason.
+// How a reservation's steps fail, and how the operator recovers from a
+// write that the API server refuses and from a device that comes back.
 
 import (
 	"slices"
@@ -35,7 +35,7 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 				w.put(observatory.FocuserKind, "east", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_fishcamp_ccd"}})
 			},
 			step:    observatory.StepStartDevices,
-			message: "Focuser east: indi_fishcamp_ccd: no image of the indi build holds this driver",
+			message: "Focuser east: indi_fishcamp_ccd: no image of the indi build includes this driver",
 		},
 		{
 			name: "a Switch that does not exist",
@@ -46,13 +46,13 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 			message: "missing Switch nowhere, which spec.power names",
 		},
 		{
-			name: "a Switch on the shelf",
+			name: "a Switch that is not installed",
 			change: func(w *world) {
 				w.put(observatory.SwitchKind, "spare", map[string]any{"driver": map[string]any{"name": "indi_simulator_io"}})
 				w.put(observatory.RotatorKind, "east", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_rotator"}, "power": map[string]any{"switch": "spare", "output": 1}})
 			},
 			step:    observatory.StepPowerOn,
-			message: "the Switch spare, which spec.power names, is on the shelf: set its spec.telescope or spec.observatory",
+			message: "the Switch spare, which spec.power names, is not installed: set its spec.telescope or spec.observatory",
 		},
 		{
 			name: "a Switch output that does not exist",
@@ -85,7 +85,7 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 				w.put(observatory.FocuserKind, "guide", map[string]any{"opticalTrain": "east-guiding", "driver": map[string]any{"name": "indi_simulator_focus"}})
 			},
 			step:    observatory.StepPowerOn,
-			message: "Focuser east and Focuser guide share driver indi_simulator_focus on server east-telescope: INDI gives both devices one name",
+			message: "Focuser east and Focuser guide share driver indi_simulator_focus on server east-telescope: INDI gives both devices the same name",
 		},
 		{
 			name: "two devices of the observatory with one driver",
@@ -93,7 +93,7 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 				w.put(observatory.WeatherStationKind, "roof", map[string]any{"observatory": "lab", "driver": map[string]any{"name": "indi_simulator_weather"}})
 			},
 			step:    observatory.StepStartSite,
-			message: "WeatherStation lab and WeatherStation roof share driver indi_simulator_weather on server lab-observatory: INDI gives both devices one name",
+			message: "WeatherStation lab and WeatherStation roof share driver indi_simulator_weather on server lab-observatory: INDI gives both devices the same name",
 		},
 	}
 	for _, c := range cases {
@@ -113,7 +113,7 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 	}
 }
 
-// A telescope with no devices has nothing for a server to run.
+// A telescope with no devices gives the INDI server no driver to run.
 func TestATelescopeWithNoDevicesFailsPowerOn(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -122,12 +122,13 @@ func TestATelescopeWithNoDevicesFailsPowerOn(t *testing.T) {
 		w.reserve("south-tonight", map[string]any{"telescope": "south", "holder": "desktop"})
 		r := w.phase("south-tonight", observatory.ReservationFailed, 15*time.Minute)
 		if step := stepOf(r, observatory.StepPowerOn); step.Summary != "Failed: no devices on Telescope south" {
-			t.Errorf("PowerOn = %+v", step)
+			t.Errorf("the PowerOn step is %+v, want Summary \"Failed: no devices on Telescope south\"", step)
 		}
 	})
 }
 
-// The notes of a step name what a driver lacks, and the step goes on.
+// When a driver lacks a property that a setting needs, the step notes
+// it, skips that setting, and continues.
 func TestADriverThatLacksAPropertyIsNotedAndSkipped(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -144,16 +145,16 @@ func TestADriverThatLacksAPropertyIsNotedAndSkipped(t *testing.T) {
 		for name, want := range notes {
 			for _, note := range want {
 				if message := stepText(stepOf(r, name)); !strings.Contains(message, note) {
-					t.Errorf("%s: %q does not note %q", name, message, note)
+					t.Errorf("the %s step text is %q, want it to contain %q", name, message, note)
 				}
 			}
 		}
 	})
 }
 
-// StopWork ends an exposure and a slew, and sends nothing to a device that
-// is idle.
-func TestAbortStopsWhatMoves(t *testing.T) {
+// StopWork ends an exposure and a slew, and sends nothing to a device
+// that is idle.
+func TestStopWorkAbortsWhatMoves(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
@@ -171,7 +172,7 @@ func TestAbortStopsWhatMoves(t *testing.T) {
 			}
 		}
 		if n := w.indi.count("east-telescope", "Guide Simulator.CCD_ABORT_EXPOSURE"); n != 0 {
-			t.Errorf("the idle guide camera received %d aborts", n)
+			t.Errorf("the idle guide camera received %d aborts, want 0", n)
 		}
 	})
 }
@@ -190,10 +191,10 @@ func TestTheObservatorysServerStopsAfterTheLastReservation(t *testing.T) {
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "end": end})
 		r := w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
 		if step := stepOf(r, observatory.StepStopSite); step.State != observatory.StepSkipped || step.Summary != "In use by Reservation west-tonight" {
-			t.Errorf("StopSite = %+v", step)
+			t.Errorf("the StopSite step is %+v, want Skipped with Summary \"In use by Reservation west-tonight\"", step)
 		}
 		if _, ok := w.api.object(podsCollection, "lab-observatory"); !ok {
-			t.Error("the observatory's server stopped while west holds its telescope")
+			t.Error("the lab-observatory pod is gone, want it kept while west-tonight holds its telescope")
 		}
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "west-tonight")
 		w.until(10*time.Minute, "the observatory's server runs", func() bool {
@@ -203,8 +204,9 @@ func TestTheObservatorysServerStopsAfterTheLastReservation(t *testing.T) {
 	})
 }
 
-// A reservation whose finalizer a person removed goes at once, and the
-// operator stops the pods that it left.
+// When a person removes a Reservation's finalizer, the API server
+// deletes it at once, and the operator deletes the pods and Services
+// that the Reservation started.
 func TestThePodsOfAReservationThatVanishedAreStopped(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -219,8 +221,8 @@ func TestThePodsOfAReservationThatVanishedAreStopped(t *testing.T) {
 	})
 }
 
-// A create or a delete that the API server refuses is tried again, and
-// the step goes on when the API server answers.
+// A create or a delete that the API server refuses is retried, and the
+// step continues when a retry succeeds.
 func TestARefusedWriteIsTriedAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -237,10 +239,10 @@ func TestARefusedWriteIsTriedAgain(t *testing.T) {
 	})
 }
 
-// A stop ends a write that the API server refuses at once, and does not
-// wait out the pause before the next try. Here the runner of a Ready
-// telescope creates the focuser's pod again, and the API server refuses
-// its claim.
+// Stopping the operator ends the retries of a refused write at once,
+// without waiting for the delay before the next retry. Here the runner
+// of a Ready reservation creates the focuser's pod again, and the API
+// server refuses the pod's ResourceClaimTemplate.
 func TestAStopEndsARefusedWriteAtOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -254,25 +256,27 @@ func TestAStopEndsARefusedWriteAtOnce(t *testing.T) {
 		time.Sleep(5 * time.Second)
 		synctest.Wait()
 		if w.api.creates(templatesCollection) == tries {
-			t.Fatal("the runner did not create the claim again")
+			t.Fatal("the runner created no new claim after the pod was deleted, want one")
 		}
 		stopped := time.Now()
 		w.halt()
 		if waited := time.Since(stopped); waited != 0 {
-			t.Errorf("the stop waited %v", waited)
+			t.Errorf("halting waited %v, want no wait", waited)
 		}
 	})
 }
 
-// A device that answers a change with Alert fails the step that sent
-// the change, and the step's message names the device.
+// A device that sets a property to Alert after a change fails the step
+// that sent the change, and the step's summary names the device and the
+// property.
 func TestADeviceThatRefusesAChangeFailsItsStep(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		device, property string
 		step             observatory.StepName
-		// ready refuses the change after activation, and ends the
-		// reservation, so a deactivation step meets the refusal.
+		// ready makes the device refuse the change only after the
+		// reservation is Ready, and then deletes the reservation, so the
+		// refusal fails a step of the teardown.
 		ready bool
 	}{
 		{"Weather Simulator", "CONNECTION", observatory.StepStartSite, false},
@@ -318,7 +322,7 @@ func TestADeviceThatRefusesAChangeFailsItsStep(t *testing.T) {
 				}
 				if c.ready {
 					if safe := conditionOf(r.Status.Conditions, observatory.ConditionSafeToPowerOff); safe.Status != observatory.ConditionFalse || !strings.Contains(safe.Message, string(c.step)) {
-						t.Errorf("SafeToPowerOff = %+v", safe)
+						t.Errorf("the SafeToPowerOff condition is %+v, want False with a message that names %s", safe, c.step)
 					}
 				}
 			})
@@ -326,9 +330,9 @@ func TestADeviceThatRefusesAChangeFailsItsStep(t *testing.T) {
 	}
 }
 
-// A camera whose exposure does not end when StopWork asks fails StopWork at
-// its deadline.
-func TestAnExposureThatDoesNotAbortFailsAbort(t *testing.T) {
+// A camera whose exposure does not abort fails StopWork at the step's
+// deadline.
+func TestAnExposureThatDoesNotAbortFailsStopWork(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
@@ -338,14 +342,14 @@ func TestAnExposureThatDoesNotAbortFailsAbort(t *testing.T) {
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
 		r := w.phase("east-tonight", observatory.ReservationFailed, 10*time.Minute)
 		if step := stepOf(r, observatory.StepStopWork); step.State != observatory.StepFailed || step.Summary != "Timed out after 2 min: aborting Camera east-main" {
-			t.Errorf("StopWork = %+v", step)
+			t.Errorf("the StopWork step is %+v, want Failed with Summary \"Timed out after 2 min: aborting Camera east-main\"", step)
 		}
 	})
 }
 
-// A status write or an Event that the API server refuses costs nothing
-// but a log line: the next status write carries the same facts, and
-// the recorder sends the Event again.
+// A status write or an Event that the API server refuses is not lost.
+// The next status write sends the same fields again, and the recorder sends
+// the Event again.
 func TestRefusedStatusWritesAndEventsAreWrittenLater(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -353,18 +357,19 @@ func TestRefusedStatusWritesAndEventsAreWrittenLater(t *testing.T) {
 		w.api.mu.Lock()
 		w.api.statusRefusals = 40
 		w.api.mu.Unlock()
-		// The recorder sends each Event three times, so two refusals
-		// delay the first Event and lose none.
+		// The recorder sends each Event up to three times, so two
+		// refusals delay the first Event and lose none.
 		w.api.recorded.Refuse(2)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		time.Sleep(2 * statusWindow)
 		synctest.Wait()
 		if camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main"); camera.Status.Phase != observatory.DeviceConnected {
-			t.Errorf("the camera is %q", camera.Status.Phase)
+			t.Errorf("the Camera phase is %q, want %q", camera.Status.Phase, observatory.DeviceConnected)
 		}
-		// The runner's own status writes can take every refusal above,
-		// so the status writer meets one here, while it alone writes.
+		// The runner's status writes can use up every refusal above.
+		// While the reservation is Ready, only the status writer writes,
+		// so this refusal reaches it.
 		w.api.mu.Lock()
 		w.api.statusRefusals = 1
 		w.api.mu.Unlock()
@@ -399,7 +404,7 @@ func TestADeviceThatComesBackAndRefusesItsSettingsShowsTheFault(t *testing.T) {
 			return camera.Status.Phase == observatory.DeviceError && strings.Contains(ready.Message, "CCD Simulator.CCD_GAIN is Alert")
 		})
 		if r, _ := w.reservation("east-tonight"); r.Status.Phase != observatory.ReservationReady {
-			t.Errorf("the reservation is %s", r.Status.Phase)
+			t.Errorf("the Reservation phase is %s, want %s", r.Status.Phase, observatory.ReservationReady)
 		}
 	})
 }
@@ -426,8 +431,8 @@ func TestADeviceThatComesBackAgainClearsItsFault(t *testing.T) {
 	})
 }
 
-// A reservation whose end passed before it took its telescope ends at
-// once, and does not hold up the reservations that wait.
+// A reservation whose end passed before it got its telescope ends at
+// once, and does not delay the reservations that wait.
 func TestAReservationThatEndedBeforeItsStartGoesAtOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -439,7 +444,7 @@ func TestAReservationThatEndedBeforeItsStartGoesAtOnce(t *testing.T) {
 		w.reserve("later", map[string]any{"telescope": "east", "holder": "b"})
 		r := w.phase("yesterday", observatory.ReservationReleased, time.Minute)
 		if wait := stepOf(r, observatory.StepWait); wait.State != observatory.StepSkipped {
-			t.Errorf("Wait = %+v", wait)
+			t.Errorf("the Wait step is %+v, want state %s", wait, observatory.StepSkipped)
 		}
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
 		w.phase("later", observatory.ReservationReady, 20*time.Minute)

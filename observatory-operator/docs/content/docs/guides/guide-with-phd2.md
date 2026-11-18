@@ -7,16 +7,18 @@ description: "Add a Guider to a telescope so the operator runs PHD2 with the gui
 # Guide with PHD2
 
 A `Guider` makes the operator run [PHD2](https://openphdguiding.org/)
-for one telescope. During a reservation, the operator starts PHD2,
-connects it to the guide camera and the mount, and then leaves it
-idle. You calibrate and guide from KStars, through PHD2's event
-server, as you would with PHD2 on your own computer.
+for one telescope. During a reservation, the operator starts PHD2 and
+connects it to the guide camera and the mount. You calibrate and guide
+from KStars, through PHD2's event server, as you would with PHD2 on
+your own computer. You need a `Telescope` with a mount, a guide
+camera, and a `Reservation`, as
+[Reserve a telescope](/docs/guides/reserve-a-telescope/) shows.
 
 ## Declare the guider
 
-The guider names its telescope and the optical train whose camera
-guides. A guide scope is a train on its own small tube. An off-axis
-guider is a train on the imaging tube.
+A `Guider` refers to its telescope and to the optical train whose
+camera guides. For a guide scope, that train is on its own small
+tube. For an off-axis guider, it is on the imaging tube.
 
 ```yaml
 apiVersion: observatory.liken.sh/v1alpha1
@@ -54,7 +56,7 @@ spec:
   pulses: Mount
 ```
 
-`pulses` says where PHD2 sends its corrections:
+`pulses` sets where PHD2 sends its corrections:
 
 * `Mount` sends them to the mount's driver, over the mount's own
   connection. Use this unless you have a reason not to.
@@ -62,7 +64,7 @@ spec:
   mount that is cabled for ST-4 guiding.
 
 The operator writes PHD2's profile from these resources: the INDI
-server, the guide camera and the mount by their INDI names, and the
+server, the INDI names of the guide camera and the mount, and the
 guide tube's focal length. PHD2 computes the pixel scale from the
 focal length and the camera's pixel size, so give the guide tube's
 real focal length.
@@ -74,22 +76,24 @@ the operator starts PHD2, connects its camera and mount, and waits
 until PHD2 reports both connected. Then the reservation is `Ready`.
 
 The operator never loops, calibrates, or guides, and it never starts
-tracking. Calibration needs a tracking mount and a star, so you align
-the mount, start tracking, and then start guiding.
+tracking, because calibration needs a tracking mount and a star. You
+align the mount, start tracking, and then start guiding.
 
 At the end of the reservation, the operator stops guiding and
 exposures, and stops PHD2 before it disconnects the camera and the
 mount.
 
-PHD2 runs in the pod `<guider>-guider`, such as `east-guider`. The
-pod runs on the same node as the telescope's INDI server, and so does
-the guide camera unless its claim puts it elsewhere, because PHD2 reads
-a guide frame about once a second.
+PHD2 runs in the pod `<guider>-guider`, such as `east-guider`. PHD2
+reads a guide frame from the INDI server about once a second, so its
+pod runs on the same node as the telescope's INDI server. The guide
+camera's pod runs there too, unless its claim places it on another
+node.
 
 ## Guide from KStars
 
-The guider's `status.endpoint` names PHD2's event server, with its
-host, such as `east-guider.observatory.svc`, and its port, 4400. From a desktop, forward the port:
+The guider's `status.endpoint` has the host of PHD2's event server,
+such as `east-guider.observatory.svc`, and its port, 4400. From a
+desktop, forward the port:
 
 ```sh
 kubectl port-forward -n observatory svc/east-guider 4400
@@ -101,8 +105,8 @@ and its guiding graph, and its buttons start looping, calibration, and
 guiding. [Reserve a telescope](/docs/guides/reserve-a-telescope/#reach-the-telescope-from-outside-the-cluster)
 gives other ways to reach the port.
 
-PHD2's own window is not visible. It draws on a headless display in
-the pod, because PHD2 cannot run without one.
+You cannot see PHD2's own window. PHD2 cannot run without a display,
+so it draws on a headless display in the pod.
 
 ## Read the guiding
 
@@ -111,9 +115,9 @@ kubectl get guider -n observatory
 kubectl get telescope -n observatory -o wide
 ```
 
-The guider's status holds what PHD2 reports:
+The guider's status shows what PHD2 reports:
 
-* `state`: what PHD2 does, such as `Looping`, `Calibrating`,
+* `state`: what PHD2 is doing, such as `Looping`, `Calibrating`,
   `Guiding`, or `LostLock`
 * `calibrated`, and `pixelScale` in arc-seconds per pixel
 * `rms`: the guiding error in arc-seconds, in right ascension,
@@ -128,8 +132,8 @@ phase and PHD2's state together, such as `Ready, Guiding`.
 ## When PHD2 restarts
 
 If PHD2's pod is deleted, the operator creates it again and connects
-PHD2's camera and mount. The operator also connects them again when
-the telescope's INDI server restarts. A new PHD2 starts idle and not
+PHD2's camera and mount. It also connects them again when the
+telescope's INDI server restarts. A new PHD2 starts idle and not
 calibrated, so calibrate and start guiding again from Ekos.
 
 If PHD2 exits and the kubelet restarts its container in the same pod,
@@ -142,7 +146,7 @@ kubectl delete pod -n observatory east-guider
 ```
 
 PHD2 can exit by itself when it opens a dialog that waits for an
-answer, because the headless display has no one to answer it. If the
+answer, because nobody can answer on the headless display. If the
 guider restarts again and again, read its log:
 
 ```sh

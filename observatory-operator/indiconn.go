@@ -1,12 +1,11 @@
 package main
 
-// The operator holds one INDI client for each INDI server it runs, and
+// The operator keeps one INDI client for each INDI server it runs, and
 // connects, configures, and reads every device through it. The client
-// dials the server's Service, and opens its connection when the
-// server's pod is Ready, which is when the Service has a ready
-// endpoint. Each new connection reads the whole state again (the indi
-// package), so a restart of the server or of the operator costs one
-// baseline and nothing else.
+// dials the server's Service only once the server's pod is Ready,
+// because the Service has no ready endpoint before then. Each new
+// connection reads the whole state again, so a restart of the server or
+// the operator needs no other recovery.
 
 import (
 	"context"
@@ -20,11 +19,12 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
-// The pause after a connection that ended while the server's pod stayed
-// Ready. It is a clock: no pod event follows such an end, as when
-// kube-proxy has not yet programmed the Service's new endpoint, or when
-// the connection broke while the server ran. It doubles to its limit,
-// and a connection that ran for the reset time starts it again.
+// The wait before dialing again when a connection ends while the
+// server's pod is still Ready. No pod event follows such an end, for
+// example when kube-proxy has not yet programmed the Service's new
+// endpoint, or when the connection broke while the server kept running,
+// so a timer must retry. A connection that lasted at least redialReset
+// resets the wait to redialFirst.
 const (
 	redialFirst = time.Second
 	redialLimit = 30 * time.Second
@@ -33,8 +33,8 @@ const (
 
 type indiServer struct {
 	name string
-	// source names the server in the observation series: the resource
-	// whose server it is, such as Telescope/east.
+	// source is the resource whose server this is, such as
+	// Telescope/east. It labels the server's observation series.
 	source string
 	client *indi.Client
 	cancel context.CancelFunc
@@ -58,7 +58,7 @@ func newServers(o *operator) *servers {
 	return &servers{o: o, byName: map[string]*indiServer{}}
 }
 
-// get answers the client of one server, when its pod exists.
+// get returns the client of one server, if its pod exists.
 func (s *servers) get(name string) (*indiServer, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -97,9 +97,9 @@ func (s *servers) stopAll() {
 	}
 }
 
-// close ends a server's connection, and deletes its observation series:
-// the server's pod is gone, so nothing is left to observe. The caller
-// holds s.mu.
+// close ends a server's connection and deletes its observation series,
+// because the server's pod is gone and nothing is left to observe. The
+// caller holds s.mu.
 func (s *servers) close(server *indiServer) {
 	server.cancel()
 	<-server.done
@@ -119,12 +119,11 @@ func (s *servers) open(parent context.Context, name, source string) *indiServer 
 	events := server.client.Subscribe(ctx)
 	s.o.series.observation(source, false)
 	var group sync.WaitGroup
-	// Every INDI event wakes the operator, as a watch event does: a
-	// runner may wait for a property, and the status writer shows it.
-	// An update or a message changes no device that a server defines,
-	// so it rings changed alone (operator.go). Every event but the end
-	// of the connection is a message from an open connection, so it
-	// moves the observation's timestamp.
+	// Every INDI event wakes the operator, because a runner may be
+	// waiting for a property and the status writer reports it. An
+	// Updated or Message event cannot change which properties the server
+	// defines, so it only notifies o.changed. Any other event can, so it
+	// also advances the server's epoch and notifies o.structure.
 	group.Go(func() {
 		for e := range events {
 			s.o.series.observation(source, e.Kind != indi.Disconnected)
@@ -145,13 +144,11 @@ func (s *servers) open(parent context.Context, name, source string) *indiServer 
 }
 
 // keepOpen runs a client's connection while the pod of that name is
-// Ready, and opens it again after it ends: an INDI server's connection,
-// or a guider's. A new server opens its port a moment after its pod is
-// Ready, so the first dial to it is often refused. That refusal is not
-// a fault, and the reservation's status already says that it waits for
-// the connection, so keepOpen logs only a refusal that follows another
-// refusal. A connection that ran makes the next refusal the first
-// again, because the server that ended it may have restarted.
+// Ready, and dials again after the connection ends. A new server opens
+// its port shortly after its pod becomes Ready, so the first dial is
+// often refused, and the reservation's status already shows that it
+// waits for the connection. So keepOpen logs a refusal only when the
+// attempt before it was also refused.
 func (o *operator) keepOpen(ctx context.Context, name string, run func(context.Context) error) {
 	pause := redialFirst
 	refused := false

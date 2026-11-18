@@ -2,10 +2,10 @@ package main
 
 import "testing"
 
-// A runner looks at a server's devices after each change, and a device
-// counts as come back once for each subscription. A device that the
-// runner cannot find on its first look, because its driver has not
-// defined DRIVER_INFO yet, still counts at a later look.
+// take reports each device once after a server's subscription opens,
+// on the first check of that device, even when the check comes several
+// passes later because the driver had not yet defined DRIVER_INFO. On
+// a server with no subscription, take reports only a CONNECTION definition.
 func TestEachDeviceCountsOnceAfterASubscription(t *testing.T) {
 	t.Parallel()
 	a := newAppearances()
@@ -25,7 +25,7 @@ func TestEachDeviceCountsOnceAfterASubscription(t *testing.T) {
 			server = "lab-observatory"
 		}
 		if got := a.take(server, c.device); got != c.want {
-			t.Errorf("%s: take(%s, %s) = %v, want %v", c.look, server, c.device, got, c.want)
+			t.Errorf("on %s, take(%s, %s) = %v, want %v", c.look, server, c.device, got, c.want)
 		}
 	}
 }

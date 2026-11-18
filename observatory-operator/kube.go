@@ -1,18 +1,16 @@
 package main
 
-// The Kubernetes objects that the operator creates and reads: the pods
-// and Services of the topology, the ResourceClaimTemplate of a device
-// on real hardware, the ConfigMap of a guider, and the Events of a
-// Reservation. Each type holds only the
-// fields the operator writes or reads, in the wire format of the
-// Kubernetes API, the way the other operators of the repository write
-// theirs. A generated client would bring k8s.io/api for a few structs.
+// The Kubernetes objects that the operator creates and reads. Each type
+// has only the fields that the operator writes or reads, in the JSON
+// form of the Kubernetes API, so the operator does not depend on the
+// large k8s.io/api module.
 
 import "time"
 
-// meta is the metadata of an object the operator creates. It holds the
-// owner references, which the observatory package's ObjectMeta leaves
-// out because a person's resources carry none.
+// meta is the metadata of an object that the operator creates. It
+// includes owner references, which the observatory package's
+// ObjectMeta leaves out because the resources that people write have
+// none.
 type meta struct {
 	Name              string            `json:"name"`
 	Namespace         string            `json:"namespace,omitempty"`
@@ -24,8 +22,6 @@ type meta struct {
 	DeletionTimestamp *time.Time        `json:"deletionTimestamp,omitempty"`
 }
 
-// ownerReference names the resource that caused an object. Kubernetes'
-// garbage collector deletes the object when its owner is deleted.
 type ownerReference struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`
@@ -56,11 +52,10 @@ type podSpec struct {
 	SecurityContext               *podSecurityContext `json:"securityContext,omitempty"`
 }
 
-// podSecurityContext holds the settings that apply to every container
-// of a pod. FSGroup makes the kubelet give a volume to that group, so
-// a container that runs as another user than the volume's owner can
-// write to it.
 type podSecurityContext struct {
+	// FSGroup makes the kubelet give a volume to that group, so a
+	// container that runs as a user other than the volume's owner can
+	// write to it.
 	FSGroup             *int64 `json:"fsGroup,omitempty"`
 	FSGroupChangePolicy string `json:"fsGroupChangePolicy,omitempty"`
 }
@@ -70,20 +65,17 @@ type container struct {
 	Image string `json:"image"`
 	// RestartPolicy Always on an init container makes it a native
 	// sidecar: it starts before the containers and runs beside them.
-	RestartPolicy   string           `json:"restartPolicy,omitempty"`
-	Command         []string         `json:"command,omitempty"`
-	Args            []string         `json:"args,omitempty"`
-	Env             []envVar         `json:"env,omitempty"`
-	Ports           []containerPort  `json:"ports,omitempty"`
-	SecurityContext *securityContext `json:"securityContext,omitempty"`
-	VolumeMounts    []volumeMount    `json:"volumeMounts,omitempty"`
-	ReadinessProbe  *probe           `json:"readinessProbe,omitempty"`
-	// TerminationMessagePolicy FallbackToLogsOnError makes the kubelet
-	// take a failed container's termination message from the end of
-	// its log when the container writes none.
-	TerminationMessagePolicy string     `json:"terminationMessagePolicy,omitempty"`
-	StartupProbe             *probe     `json:"startupProbe,omitempty"`
-	Resources                *resources `json:"resources,omitempty"`
+	RestartPolicy            string           `json:"restartPolicy,omitempty"`
+	Command                  []string         `json:"command,omitempty"`
+	Args                     []string         `json:"args,omitempty"`
+	Env                      []envVar         `json:"env,omitempty"`
+	Ports                    []containerPort  `json:"ports,omitempty"`
+	SecurityContext          *securityContext `json:"securityContext,omitempty"`
+	VolumeMounts             []volumeMount    `json:"volumeMounts,omitempty"`
+	ReadinessProbe           *probe           `json:"readinessProbe,omitempty"`
+	TerminationMessagePolicy string           `json:"terminationMessagePolicy,omitempty"`
+	StartupProbe             *probe           `json:"startupProbe,omitempty"`
+	Resources                *resources       `json:"resources,omitempty"`
 }
 
 type containerPort struct {
@@ -128,13 +120,10 @@ type volume struct {
 	PersistentVolumeClaim *claimVolume       `json:"persistentVolumeClaim,omitempty"`
 }
 
-// claimVolume mounts a PersistentVolumeClaim of the pod's namespace.
 type claimVolume struct {
 	ClaimName string `json:"claimName"`
 }
 
-// downwardAPISource writes fields of the pod's own object as files.
-// The kubelet writes a file again when its field changes.
 type downwardAPISource struct {
 	Items []downwardAPIFile `json:"items"`
 }
@@ -177,8 +166,6 @@ type resourceName struct {
 	Name string `json:"name"`
 }
 
-// podClaim names the ResourceClaimTemplate that the pod makes its
-// ResourceClaim from.
 type podClaim struct {
 	Name                      string `json:"name"`
 	ResourceClaimTemplateName string `json:"resourceClaimTemplateName"`
@@ -191,8 +178,8 @@ type podStatus struct {
 	ContainerStatuses []containerStatus `json:"containerStatuses,omitempty"`
 }
 
-// containerStatus holds what a failed Job's container reports when it
-// ended.
+// containerStatus is read for the exit code and message of a failed
+// Job's container.
 type containerStatus struct {
 	Name  string `json:"name"`
 	State struct {
@@ -206,16 +193,13 @@ type terminated struct {
 	Message  string `json:"message,omitempty"`
 }
 
-// podCondition is one condition of a pod. The scheduler sets
-// PodScheduled to False with a message when no node fits the pod.
 type podCondition struct {
 	Type    string `json:"type"`
 	Status  string `json:"status"`
 	Message string `json:"message,omitempty"`
 }
 
-// ready reports whether the kubelet reports the pod Ready: every
-// container runs and passes its readiness probe.
+// ready reports whether the pod is Ready and is not being deleted.
 func (p *pod) ready() bool {
 	if p.Metadata.DeletionTimestamp != nil {
 		return false
@@ -228,10 +212,10 @@ func (p *pod) ready() bool {
 	return false
 }
 
-// unschedulable answers ": " and the scheduler's message while no node
-// fits the pod, such as when its claim is bound on another node, and
-// "" otherwise. Without it, a step that waits for the pod reads only
-// Pending, and the reason is in the pod's status alone.
+// unschedulable returns ": " and the scheduler's message when no node
+// fits the pod, for example when its claim is allocated on another
+// node, and "" otherwise. The pod's phase shows only Pending, so a step
+// that waits for the pod appends this message to say why it waits.
 func unschedulable(p *pod) string {
 	for _, c := range p.Status.Conditions {
 		if c.Type == "PodScheduled" && c.Status == "False" && c.Message != "" {
@@ -256,12 +240,11 @@ type serviceSpec struct {
 type servicePort struct {
 	Name string `json:"name"`
 	Port int32  `json:"port"`
-	// TargetPort names the container's port. The operator always names
-	// it, so the text form is enough.
+	// TargetPort is the name of the container's port. The operator
+	// never uses a port number here, so a string is enough.
 	TargetPort string `json:"targetPort"`
 }
 
-// configMap is a ConfigMap of files that a pod mounts.
 type configMap struct {
 	APIVersion string            `json:"apiVersion,omitempty"`
 	Kind       string            `json:"kind,omitempty"`
@@ -278,8 +261,8 @@ type job struct {
 	Status     jobStatus `json:"status,omitzero"`
 }
 
-// jobMeta is the metadata of a Job, with the creation time that tells
-// a Job of the current run from one of an earlier run.
+// jobMeta is the metadata of a Job. The creation time lets the operator
+// tell a Job of the current run from a Job of an earlier run.
 type jobMeta struct {
 	meta
 	CreationTimestamp *time.Time `json:"creationTimestamp,omitempty"`
@@ -301,8 +284,6 @@ type jobStatus struct {
 	Conditions []jobCondition `json:"conditions,omitempty"`
 }
 
-// jobCondition is one condition of a Job. Complete or Failed with the
-// status True ends it.
 type jobCondition struct {
 	Type    string `json:"type"`
 	Status  string `json:"status"`
@@ -310,9 +291,9 @@ type jobCondition struct {
 	Message string `json:"message,omitempty"`
 }
 
-// claimTemplate is a ResourceClaimTemplate of resource.k8s.io/v1. The
-// spec of the claims it makes is the device's spec.claim, as the person
-// wrote it, and the API server validates it.
+// claimTemplate is a ResourceClaimTemplate of resource.k8s.io/v1. Its
+// claim spec is the device's spec.claim, unchanged, and the API server
+// validates it.
 type claimTemplate struct {
 	APIVersion string            `json:"apiVersion"`
 	Kind       string            `json:"kind"`

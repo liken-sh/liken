@@ -1,8 +1,5 @@
 package main
 
-// A reservation whose status names the first deactivation step Abort,
-// the name that step had before it was StopWork.
-
 import (
 	"slices"
 	"testing"
@@ -12,9 +9,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// storeMidDeactivation rewrites a reservation's status as an operator
-// that named the step Abort left it partway through deactivation:
-// Abort done, and every later deactivation step pending.
+// storeMidDeactivation rewrites a reservation's status as an older
+// operator would have left it partway through deactivation: the first
+// step stored as Abort and done, and every later step pending.
 func storeMidDeactivation(w *world, name string) {
 	w.t.Helper()
 	object, _ := w.api.object(kindCollection(observatory.ReservationKind), name)
@@ -34,10 +31,10 @@ func storeMidDeactivation(w *world, name string) {
 	w.api.mu.Unlock()
 }
 
-// An operator that starts while a stored reservation is partway
-// through deactivation, with its first step stored as Abort, reads
-// that step as StopWork, finishes the deactivation, and stores each
-// step once, with the new name.
+// StopWork was once named Abort. When the operator starts and a stored
+// reservation is partway through deactivation with its first step named
+// Abort, the operator reads that step as StopWork, finishes the
+// deactivation, and stores each step once under its current name.
 func TestAStoredAbortStepResumesAsStopWork(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -52,10 +49,10 @@ func TestAStoredAbortStepResumesAsStopWork(t *testing.T) {
 		}
 		want := slices.Concat(observatory.ActivationSteps, observatory.DeactivationSteps)
 		if !slices.Equal(names, want) {
-			t.Errorf("steps = %v, want %v", names, want)
+			t.Errorf("the steps are %v, want %v", names, want)
 		}
 		if s := stepOf(r, observatory.StepStopWork); s.State != observatory.StepDone {
-			t.Errorf("StopWork = %+v", s)
+			t.Errorf("the StopWork step is %+v, want Done", s)
 		}
 	})
 }

@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// Type is the kind of value that a property's members hold. Each type
-// has its own def, set, and new elements on the wire, such as
+// Type is the kind of value that a property's members have. Each type
+// has its own def, set, and new elements in the INDI protocol, such as
 // defNumberVector, setNumberVector, and newNumberVector.
 type Type string
 
@@ -18,9 +18,9 @@ const (
 	BLOBType   Type = "BLOB"
 )
 
-// Permission says whether a client can write a property. A Light
-// property has no permission attribute on the wire, and the store
-// records it as ReadOnly, because no client can write a light.
+// Permission is whether a client can write a property. A Light
+// property has no perm attribute in the protocol, and the store records
+// it as ReadOnly.
 type Permission string
 
 const (
@@ -41,7 +41,7 @@ const (
 	Alert State = "Alert"
 )
 
-// Rule says how many members of a Switch property can be On at once.
+// Rule limits how many members of a Switch property can be On at once.
 type Rule string
 
 const (
@@ -54,8 +54,8 @@ const (
 )
 
 // Property is one property of one device, as the device defined it and
-// as its later updates changed it. The store hands out copies, so a
-// caller can keep one and the next update does not change it.
+// as later updates changed it. The store returns copies, so a later
+// update does not change a Property that a caller kept.
 type Property struct {
 	Device string
 	Name   string
@@ -66,11 +66,12 @@ type Property struct {
 	State  State
 	// Rule is set on a Switch property only.
 	Rule Rule
-	// Timeout is how long the driver expects a change to take, as the
-	// driver states it. Zero means the driver states no limit.
+	// Timeout is how long the driver says a change can take. Zero means
+	// the driver gave no timeout.
 	Timeout time.Duration
-	// Timestamp is the time that the driver gave its last definition or
-	// update, in UTC. It is zero when the driver gave none.
+	// Timestamp is the time that the driver sent with its last
+	// definition or update, in UTC. It is zero when the driver sent
+	// none.
 	Timestamp time.Time
 	Members   []Member
 }
@@ -84,8 +85,8 @@ type Member struct {
 	// Number is the value of a Number member. Format is the member's
 	// printf format, such as "%.2f", or a sexagesimal format, such as
 	// "%010.6m", which FormatNumber prints. Min, Max, and Step are the
-	// limits that the driver states, and Step is zero when the driver
-	// states no step.
+	// limits that the driver defined. Step is zero when the driver
+	// defined none.
 	Number float64
 	Format string
 	Min    float64
@@ -102,14 +103,15 @@ type Member struct {
 	Light State
 
 	// BLOBFormat and BLOBSize describe the last BLOB that the client
-	// received for a BLOB member, such as ".fits" and its size in bytes
-	// before encoding. The store keeps no BLOB data: Event.BLOBs
-	// carries the data to subscribers, and only to them.
+	// received for a BLOB member: its file format, such as ".fits", and
+	// its size in bytes before encoding. The store does not keep the
+	// BLOB data. Event.BLOBs gives it to subscribers.
 	BLOBFormat string
 	BLOBSize   int
 }
 
-// Member returns the member of the given name.
+// Member returns the member with the given name, and false when the
+// property has none.
 func (p Property) Member(name string) (Member, bool) {
 	for _, member := range p.Members {
 		if member.Name == name {
@@ -131,8 +133,8 @@ func (p Property) On() []string {
 	return on
 }
 
-// clone copies the members, so a copy of the property shares no memory
-// with the store.
+// clone copies the members, so the copy shares no slice with the
+// store.
 func (p Property) clone() Property {
 	p.Members = slices.Clone(p.Members)
 	return p

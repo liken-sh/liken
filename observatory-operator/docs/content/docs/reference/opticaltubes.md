@@ -8,7 +8,7 @@ toc: true
 
 # `OpticalTube`
 
-An `OpticalTube` is the optical tube assembly, or OTA: the lens or mirror that collects the light. It has no driver. Two OpticalTrains can name one tube, such as an imaging train and an off-axis guider.
+An `OpticalTube` is the optical tube assembly, or OTA: the lens or mirror that collects the light. It has no driver. Two `OpticalTrain` resources can use the same tube, such as an imaging train and an off-axis guider.
 
 ## spec
 
@@ -22,14 +22,14 @@ The tube's optics.
 
 ## status
 
-What the operator observes. The operator writes it, and a person reads it.
+What the operator observes. Only the operator writes it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="status--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the operator last acted on. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `ParentFound` is `False` when the `Telescope` or its `Observatory` does not exist. |
-| <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The spec as a person reads it, with its units, for the printer columns. |
-| <span id="status--trains"></span>`trains` | []string | no | Each `OpticalTrain` that names this tube. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The `ParentFound` condition is `False` when the `Telescope` or its `Observatory` does not exist. |
+| <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The `spec` values with their units, for the printer columns. |
+| <span id="status--trains"></span>`trains` | []string | no | The name of each `OpticalTrain` that uses this tube. |
 
 ### status.conditions[]
 
@@ -38,15 +38,15 @@ One condition, in the shape of `metav1.Condition`.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusconditions--type"></span>`type` | string | yes | The condition's name, such as `Ready`. |
-| <span id="statusconditions--status"></span>`status` | string | yes | Whether the condition holds: `True`, `False`, or `Unknown`. One of: `True`, `False`, `Unknown`. |
+| <span id="statusconditions--status"></span>`status` | string | yes | Whether the condition is met: `True`, `False`, or `Unknown`. One of: `True`, `False`, `Unknown`. |
 | <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the condition reflects. |
 | <span id="statusconditions--reason"></span>`reason` | string | yes | One word in CamelCase for the cause. |
-| <span id="statusconditions--message"></span>`message` | string | yes | The cause, for a person to read. It can be empty. |
-| <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | yes | When `status` last changed. A write with the same status keeps this time. |
+| <span id="statusconditions--message"></span>`message` | string | yes | A sentence for a person that explains the reason. It can be empty. |
+| <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | yes | When `status` last changed. A write that leaves `status` unchanged keeps this time. |
 
 ### status.display
 
-The spec as a person reads it, with its units, for the printer columns.
+The `spec` values with their units, for the printer columns.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

@@ -1,59 +1,62 @@
 package main
 
-// The status writer composes every status once a window, and most of
-// them match what the API server holds. The comparison with the stored
-// status reads both through JSON (equalJSON), because a number read
-// from a watch's store and the same number composed by the operator
-// have different Go types. A device's status lists every property of
-// its driver, so that comparison costs more than the rest of a window.
-// The memo records the JSON of the status that each object holds at
-// one resourceVersion, as the operator last wrote it or found it equal.
-// While the object keeps that version, the writer compares the JSON of
-// the composed status with the record alone: the same JSON is current,
-// and other JSON is a change to write.
+// The status writer composes every object's status once per window,
+// and most of them equal the stored status. equalJSON compares the two
+// by encoding and decoding both, because a number from the watch's cache
+// and the same number composed by the operator have different Go types.
+// A device's status lists every property of its driver, so this costs
+// more than the rest of the window.
+//
+// statusMemo records the JSON of each status that the writer wrote or
+// found equal, with the object's resourceVersion. While the object stays
+// at that version, the writer compares the new JSON with the recorded
+// JSON instead.
 
 import "bytes"
 
 type statusMemo struct {
-	seen map[string]statusSeen
-	// kept collects the records of the current window. Each window
-	// starts it again, so the record of a deleted object goes.
-	kept map[string]statusSeen
-	// failed reports whether a write of the current window failed.
-	failed bool
+	// previous holds the entries of the last window, which this window
+	// reads.
+	previous map[string]memoEntry
+	// current collects the entries for the next window. An entry that
+	// this window does not copy into current is dropped, such as the
+	// entry of a deleted object.
+	current map[string]memoEntry
+	failed  bool
 }
 
-type statusSeen struct {
+type memoEntry struct {
 	version string
 	body    []byte
 }
 
-// begin starts a window with the records of the window before.
+// begin starts a window.
 func (m *statusMemo) begin() {
-	m.seen, m.kept, m.failed = m.kept, map[string]statusSeen{}, false
+	m.previous, m.current, m.failed = m.current, map[string]memoEntry{}, false
 }
 
-// knows reports whether the memo records the status of an object at a
-// version. The record stays for the next window.
+// knows reports whether the memo has an entry for an object at a
+// version, and copies that entry into the next window.
 func (m *statusMemo) knows(key, version string) bool {
-	s, ok := m.seen[key]
+	s, ok := m.previous[key]
 	if ok && s.version == version {
-		m.kept[key] = s
+		m.current[key] = s
 	}
 	return ok && s.version == version
 }
 
-// same reports whether an object holds a status at a version. A status
-// that does not encode, such as one with a NaN reading, has no JSON and
-// matches no record.
+// same reports whether the memo's entry for an object at a version has
+// the given JSON. A status that does not encode, such as one with a NaN
+// reading, has nil JSON and matches no entry, so it is written.
 func (m *statusMemo) same(key, version string, body []byte) bool {
-	s, ok := m.seen[key]
+	s, ok := m.previous[key]
 	return ok && body != nil && s.version == version && bytes.Equal(s.body, body)
 }
 
-// note records that an object holds a status at a version.
+// note records the JSON of an object's status at a version, unless the
+// JSON or the version is empty.
 func (m *statusMemo) note(key, version string, body []byte) {
 	if body != nil && version != "" {
-		m.kept[key] = statusSeen{version, body}
+		m.current[key] = memoEntry{version, body}
 	}
 }

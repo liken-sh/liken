@@ -1,8 +1,5 @@
 package main
 
-// A server pod that is gone while a reservation is Ready is created
-// again with every device that its session started.
-
 import (
 	"slices"
 	"testing"
@@ -10,9 +7,9 @@ import (
 	"time"
 )
 
-// A server pod that is gone while Ready, such as one a node's eviction
-// deleted, is created again with every device. The new pod lists the
-// devices itself.
+// A server pod that is deleted while its reservation is Ready, for
+// example by a node eviction, is created again with every device of
+// the session.
 func TestAServerCreatedAgainStartsWithEveryDevice(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

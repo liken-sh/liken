@@ -1,8 +1,9 @@
 package main
 
-// The order in which waiting reservations take a free telescope. The
-// runners of two waiting reservations call take in whatever order the
-// scheduler runs them, so these cases call it directly.
+// Tests of the order in which waiting reservations take a free
+// telescope. The runners of two reservations call take in no fixed
+// order, so each case calls take directly for the reservation under
+// test.
 
 import (
 	"testing"
@@ -13,9 +14,10 @@ import (
 
 var takeNow = time.Date(2026, 10, 5, 22, 0, 0, 0, time.UTC)
 
-// waiter builds a reservation of the east telescope that starts some
-// minutes before takeNow, and ends some minutes after it when ends is
-// not zero.
+// waiter builds a reservation of the east telescope whose spec.start
+// is started minutes before takeNow. Its spec.end is ends minutes after
+// takeNow, a negative ends puts the end in the past, and an ends of 0
+// leaves spec.end unset.
 func waiter(name string, started, ends int) *observatory.Reservation {
 	start := takeNow.Add(-time.Duration(started) * time.Minute)
 	r := &observatory.Reservation{}
@@ -46,7 +48,7 @@ func TestAFreeTelescopeGoesToTheEarliestWaiter(t *testing.T) {
 			tree := &tree{reservations: map[string]*observatory.Reservation{c.first.Metadata.Name: c.first, c.taker.Metadata.Name: c.taker}}
 			took, other := newClaims().take(tree, c.taker, takeNow)
 			if took != c.took || other != c.waitsFor {
-				t.Errorf("take = %v, %q, want %v, %q", took, other, c.took, c.waitsFor)
+				t.Errorf("take returns %v and %q, want %v and %q", took, other, c.took, c.waitsFor)
 			}
 		})
 	}

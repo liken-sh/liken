@@ -1,25 +1,22 @@
-# A `Horizon` is the part of the sky that trees, buildings, and roofs
-# block from one place, such as `yard` or `roof`. A `Telescope` names
-# the one for where it stands now. observatory-operator starts nothing
-# for a `Horizon` and writes no status to it. astrophotography-operator
-# reads the profile, and claims no target and starts no frame of a
-# target while the target is below it.
+# observatory-operator does not read a `Horizon` and writes no status
+# to it. astrophotography-operator reads it, as the description says.
 #
-# The rules on `spec.profile` refuse a profile that no program could
-# read. Each rule matches the whole profile with one regular
-# expression. A rule on each line of `split` is easier to read, but the
-# API server's cost estimator priced it at more than 100 times its
-# budget with a `maxLength` of 8192, and refused the CRD: the estimate
-# grows with the square of the length. One expression costs the length
-# alone. In each expression, a line is a comment or a blank
-# line, `[ \t\r]*(#.*)?`, or a point: a number, a comma or spaces and
-# tabs, and a number, where a number is
-# `[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)`. The second and third rules put
-# the azimuth's range, 0 to 360, or the altitude's range, -90 to 90,
-# into the expression of its number. Each of the last three rules
-# passes a profile that the first rule refuses, so a mistake gets one
-# message. `ParseProfile` in `observatory/horizon.go` reads the same
-# lines, and a test holds the two to the same cases.
+# Each rule on `spec.profile` matches the whole profile with one
+# regular expression. A rule that splits the profile into lines with
+# `split` has a CEL cost estimate that grows with the square of
+# `maxLength`, and the API server refuses the CRD when the estimate is
+# over its budget. A regular expression's estimate grows only with the
+# length.
+#
+# In each expression, a line is a comment or a blank line,
+# `[ \t\r]*(#.*)?`, or a point: a number, a comma or spaces and tabs,
+# and a number. A number is `[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)`. The
+# second rule replaces the first number with one from 0 to 360, and the
+# third replaces the second number with one from -90 to 90. The last
+# three rules pass any profile that the first rule refuses, so a bad
+# line gets one message, not several. `ParseProfile` in
+# `observatory/horizon.go` must accept the same profiles, and
+# `TestTheParserAcceptsWhatTheAPIServerAccepts` checks that it does.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -48,7 +45,12 @@ spec:
             - rule: size(self.metadata.name) <= 32
               message: >-
                 a Horizon name is at most 32 characters, the limit of
-                every resource of observatory.liken.sh
+                every observatory.liken.sh kind. observatory-operator
+                builds the names of pods and Services, and the values of
+                Job labels, from the names of observatory.liken.sh
+                resources, and Kubernetes limits each of those to 63
+                characters. The limit of 32 leaves room for a suffix
+                longer than any that the operator adds.
           description: >-
             A `Horizon` is the part of the sky that trees, buildings,
             and roofs block from one place, such as `yard` or `roof`. A

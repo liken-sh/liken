@@ -1,6 +1,6 @@
-# The typed fields of a `Receiver`, from the standard properties of
-# INDI's receiver, a SPECTROGRAPH interface. curated.go gives the format
-# and the roles.
+# Typed fields of a `Receiver`, from INDI's receiver driver base
+# class, whose DRIVER_INTERFACE bit is SPECTROGRAPH_INTERFACE.
+# curated.go describes the format.
 kind: Receiver
 interfaces: [receiver]
 detect: [RECEIVER_SETTINGS]

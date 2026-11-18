@@ -1,9 +1,7 @@
 package observatory
 
-// Each case is a resource that a person could write, and the verdict
-// that the API server gives it. The tests run the structural schema
-// validator and then the CEL rules, the two passes the API server
-// runs on a create or an update.
+// Each case is a resource that a person could write, and whether the
+// API server accepts it.
 
 import (
 	"slices"
@@ -17,27 +15,27 @@ import (
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
 )
 
-// validate answers the errors that the API server would give an
-// object of the kind. With an old object, it is an update, and the
-// rules that compare with oldSelf run too.
+// validate returns the errors that the API server would return for an
+// object of the kind. It runs the structural schema validator and then
+// the CEL rules, as the API server does. With an old object it
+// validates an update, so the rules that compare with oldSelf run too.
 func validate(t *testing.T, kind Kind, object, old map[string]any) field.ErrorList {
 	t.Helper()
 	internal := internalSchema(t, kind)
 	schemaValidator, _, err := validation.NewSchemaValidator(internal)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the schema validator: %v", err)
 	}
 	errs := validation.ValidateCustomResource(field.NewPath(""), object, schemaValidator)
 	structural, err := structuralschema.NewStructural(internal)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("converting the schema to a structural schema: %v", err)
 	}
 	celErrs, _ := celschema.NewValidator(structural, true, celconfig.PerCallLimit).Validate(
 		t.Context(), field.NewPath(""), structural, object, old, celconfig.RuntimeCELCostBudget)
 	return append(errs, celErrs...)
 }
 
-// resource builds an object of a kind with the spec given.
 func resource(kind Kind, spec map[string]any) map[string]any {
 	return map[string]any{
 		"apiVersion": APIVersion,
@@ -51,7 +49,8 @@ func simulator(name string) map[string]any {
 	return map[string]any{"name": name}
 }
 
-// camera builds the spec of a camera on a train, with more fields.
+// camera returns the spec of a camera on an optical train, with more
+// fields added.
 func camera(more map[string]any) map[string]any {
 	spec := map[string]any{"opticalTrain": "east-imaging", "driver": simulator("indi_simulator_ccd")}
 	for k, v := range more {
@@ -65,13 +64,13 @@ func TestTheAPIServerAcceptsAndRefuses(t *testing.T) {
 		name string
 		kind Kind
 		spec map[string]any
-		// refusal is part of the error, or empty when the resource is
-		// accepted.
+		// refusal is text that the error contains, or empty when the
+		// resource is accepted.
 		refusal string
 	}{
 		{"a camera on a train with a simulator", CameraKind,
 			map[string]any{"opticalTrain": "east-imaging", "driver": simulator("indi_simulator_ccd")}, ""},
-		{"a camera on the shelf", CameraKind,
+		{"a camera with no parent", CameraKind,
 			map[string]any{"driver": simulator("indi_simulator_ccd")}, ""},
 		{"a camera with no driver", CameraKind,
 			map[string]any{"opticalTrain": "east-imaging"}, "set exactly one of spec.driver and spec.device"},
@@ -216,7 +215,7 @@ func TestTheAPIServerAcceptsAndRefuses(t *testing.T) {
 			map[string]any{"observatory": "lab", "horizon": "Yard"}, "spec.horizon: Invalid value"},
 		{"a horizon with no profile", HorizonKind,
 			map[string]any{}, "spec.profile: Required value"},
-		{"a mount on the shelf", MountKind,
+		{"a mount with no parent", MountKind,
 			map[string]any{"driver": simulator("indi_simulator_telescope")}, ""},
 		{"a parent name in capitals", MountKind,
 			map[string]any{"telescope": "East", "driver": simulator("indi_simulator_telescope")},
@@ -235,11 +234,11 @@ func TestTheAPIServerAcceptsAndRefuses(t *testing.T) {
 		{"a switch with two parents", SwitchKind,
 			map[string]any{"telescope": "east", "observatory": "lab", "driver": simulator("indi_simulator_io")},
 			"set at most one parent"},
-		{"a switch on the shelf", SwitchKind,
+		{"a switch with no parent", SwitchKind,
 			map[string]any{"driver": simulator("indi_simulator_io")}, ""},
-		{"a dome on the shelf", DomeKind,
+		{"a dome with no parent", DomeKind,
 			map[string]any{"driver": simulator("indi_simulator_dome")}, ""},
-		{"a shelved camera with a claim and a power output", CameraKind,
+		{"a camera with no parent, a claim, and a power output", CameraKind,
 			map[string]any{"driver": simulator("indi_asi_ccd"),
 				"power": map[string]any{"switch": "east", "output": 1},
 				"claim": map[string]any{"devices": map[string]any{"requests": []any{
@@ -332,7 +331,7 @@ func TestTheAPIServerAcceptsAndRefuses(t *testing.T) {
 	}
 }
 
-// fits builds one item of spec.fitsKeywords, with no comment when
+// fits builds one item of spec.fitsKeywords, without a comment when
 // comment is "".
 func fits(name, value, comment string) map[string]any {
 	item := map[string]any{"name": name, "value": value}
@@ -342,8 +341,8 @@ func fits(name, value, comment string) map[string]any {
 	return item
 }
 
-// refuses answers whether the errors match a case's verdict: no error
-// when the case states no refusal, or an error that holds its text.
+// refuses reports whether the errors match a case's expected result:
+// no error when refusal is empty, or an error that contains refusal.
 func refuses(errs error, refusal string) bool {
 	if errs == nil {
 		return refusal == ""
@@ -351,10 +350,9 @@ func refuses(errs error, refusal string) bool {
 	return refusal != "" && strings.Contains(errs.Error(), refusal)
 }
 
-// A reservation is for one telescope. Moving it to another telescope
-// while the first one is active would leave the first one running, so
-// the rule refuses the change, and the person creates another
-// reservation.
+// Moving a Reservation to another telescope while the first one is
+// active would leave the first one running, so the rule refuses the
+// change. The person creates another Reservation instead.
 func TestAReservationKeepsItsTelescope(t *testing.T) {
 	cases := []struct {
 		name, telescope, refusal string
@@ -374,10 +372,10 @@ func TestAReservationKeepsItsTelescope(t *testing.T) {
 	}
 }
 
-// A served resource keeps the device that serves it, and a resource
-// keeps spec.driver or spec.device for its life. Moving one is a delete
-// and a create, so the operator never meets a pointer that changed
-// while the old device still runs it.
+// spec.device cannot change, and a resource cannot switch between
+// spec.driver and spec.device. A person deletes the resource and
+// creates it again, so the operator never sees a reference that
+// changed while the old device still runs.
 func TestAServedResourceKeepsItsDevice(t *testing.T) {
 	served := func(camera string) map[string]any {
 		return map[string]any{"opticalTrain": "east-imaging", "device": map[string]any{"kind": "Camera", "name": camera}}
@@ -406,12 +404,11 @@ func TestAServedResourceKeepsItsDevice(t *testing.T) {
 	}
 }
 
-// Every kind caps its name at 32 characters. observatory-operator names
-// the pod and Service of a device, a Telescope, or an Observatory
-// <name>-<kind>, a Service name holds at most 63 characters, and the
-// longest kind, WeatherStation, leaves 48. A Job's labels carry the name
-// of the resource whose trigger ran it, and a label value holds at most
-// 63. One cap for every kind leaves room for a longer kind.
+// The operator names the pod and Service of a device, a Telescope, or
+// an Observatory <name>-<kind>, and a Service name has at most 63
+// characters. The longest kind, WeatherStation, leaves 48 characters
+// for the name. A limit of 32 for every kind leaves room for a longer
+// kind.
 func TestEveryKindCapsItsName(t *testing.T) {
 	cases := []struct {
 		name    string

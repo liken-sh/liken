@@ -2,20 +2,20 @@ package capture
 
 import "fmt"
 
-// Simulators are the drivers that observatory-operator runs, without
-// their indi_simulator_ prefix. Plan 06 gives a kind to each. Each one
-// has a directory of transcripts in indi/inditest/testdata/.
+// Simulators are the INDI simulator drivers that observatory-operator
+// supports, named without their indi_simulator_ prefix. Each has a
+// directory of transcripts in indi/inditest/testdata/.
 var Simulators = []string{
 	"telescope", "ccd", "guide", "wheel", "focus", "rotator", "dome",
 	"weather", "dustcover", "lightpanel", "gps", "pac", "io",
 	"receiver",
 }
 
-// SimulatorScript is what a capture sends to one simulator. Every
-// simulator's transcripts have the phases baseline, connect, its own
-// steps, then disconnect, and each phase's reply is the file of the
-// same name. The replay tests serve each file in answer to its phase's
-// message.
+// SimulatorScript returns what a capture sends to one simulator: the
+// phases baseline, connect, the simulator's own steps, and disconnect.
+// The server's reply to each phase is saved in a file named for the
+// phase, and the replay tests serve that file as the reply to the
+// phase's message.
 func SimulatorScript(simulator, device string) Script {
 	phases := []Phase{
 		{"baseline", Baseline},
@@ -26,19 +26,18 @@ func SimulatorScript(simulator, device string) Script {
 	return Script{Setup: simulatorSetup(device)[simulator], Phases: phases}
 }
 
-// simulatorSetup asks for the camera's frames before it connects, so
-// the reply to its exposure holds the BLOB.
+// simulatorSetup enables BLOBs from the camera before it connects, so
+// the reply to its exposure contains the frame.
 func simulatorSetup(device string) map[string][]string {
 	return map[string][]string{
 		"ccd": {fmt.Sprintf(`<enableBLOB device=%q name="CCD1">Also</enableBLOB>`, device)},
 	}
 }
 
-// simulatorSteps are the changes captured between connect and
-// disconnect. The focuser moves within its limits and then past them,
-// which the driver refuses with Alert. The dome turns, which takes it
-// through Busy. The camera sets a frame of 8 by 8 pixels, selects slot
-// 2 of its own wheel, and takes a frame of 0.1 s.
+// simulatorSteps are the changes that a capture sends between connect
+// and disconnect. The focuser moves within its limits, then to a
+// position beyond them, which the driver refuses with the Alert state.
+// The dome turns, so the transcript records the Busy state.
 func simulatorSteps(device string) map[string][]Phase {
 	return map[string][]Phase{
 		"ccd": {

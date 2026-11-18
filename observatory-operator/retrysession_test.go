@@ -1,7 +1,8 @@
 package main
 
-// A retry is a person saying that they fixed the spec that failed a
-// step, so it records the session again from the specs as they are.
+// A retry is how a person says that they fixed the spec that failed a
+// step of a session. The operator then records the session again from
+// the specs as they are now.
 
 import (
 	"fmt"
@@ -15,9 +16,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/phd2/phd2test"
 )
 
-// failThenFix gives a device a driver that no image of the indi build
-// holds, so east-tonight fails, then names the device's own driver
-// again and asks for a retry.
+// failThenFix sets the device's driver to one that no image of the
+// indi build has, so east-tonight fails. Then it sets the driver to
+// driver and asks for a retry.
 func failThenFix(w *world, kind observatory.Kind, name, driver string) {
 	w.t.Helper()
 	w.amend(kind, name, func(spec map[string]any) { spec["driver"] = map[string]any{"name": "indi_fishcamp_ccd"} })
@@ -27,8 +28,8 @@ func failThenFix(w *world, kind observatory.Kind, name, driver string) {
 	w.retry("east-tonight")
 }
 
-// The session starts the focuser with the driver that its spec names
-// after the retry.
+// After the retry, the session starts the focuser with the driver that
+// its spec names now.
 func TestARetryStartsTheSpecThatAPersonFixed(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -65,8 +66,9 @@ func TestARetryOfStartSiteRecordsTheFixedSiteForLaterReservations(t *testing.T) 
 
 // west-tonight starts while east-tonight's StartSite has failed, so it
 // records the dome that failed and fails too. The retry of east-tonight
-// records the fixed dome and leaves out the set that west-tonight
-// copied, and then the retry of west-tonight records the fixed dome.
+// records the fixed dome and does not reuse the site set that
+// west-tonight copied. Then the retry of west-tonight records the fixed
+// dome.
 func TestARetryOfStartSiteLeavesOutTheSetThatAnotherFailedReservationCopied(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -93,8 +95,8 @@ func TestARetryOfStartSiteLeavesOutTheSetThatAnotherFailedReservationCopied(t *t
 }
 
 // failGuiderThenRetry fails east-tonight at StartGuider, after its
-// Activation step opened the dust cap, applies change, lets PHD2
-// connect, and asks for a retry.
+// Activation step has opened the dust cap. Then it applies change,
+// lets PHD2 connect, and asks for a retry.
 func failGuiderThenRetry(w *world, change func(w *world)) {
 	w.t.Helper()
 	w.guiders.prepare = func(s *phd2test.Server) { s.Refuse = "equipment failed to connect: camera" }
@@ -110,9 +112,10 @@ func failGuiderThenRetry(w *world, change func(w *world)) {
 	w.retry("east-tonight")
 }
 
-// A retry that records a spec which moves the open dust cap off the
-// telescope leaves the session: the cap closes through its own
-// deactivation, its pod goes, and its Event names the retry.
+// A person takes the open dust cap off the telescope and retries. The
+// retry removes the cap from the session: the cap closes through its
+// own deactivation, the operator deletes its pod, and the pod's Event
+// names the retry.
 func TestARetryThatMovesADeviceOutOfTheSessionReleasesIt(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -127,15 +130,13 @@ func TestARetryThatMovesADeviceOutOfTheSessionReleasesIt(t *testing.T) {
 		if slices.Contains(w.api.names(podsCollection), "east-dustcap") {
 			t.Errorf("pods = %v, want no east-dustcap", w.api.names(podsCollection))
 		}
-		left := "Normal PodDeleted: Deleted pod east-dustcap, because the retry of Reservation east-tonight recorded a spec that takes the DustCap out of its session."
+		left := "Normal PodDeleted: Deleted pod east-dustcap because the retry of Reservation east-tonight recorded a spec that takes the DustCap out of its session"
 		if got := typedEvents(w.api, observatory.DustCapKind, "east"); !slices.Contains(got, left) {
 			t.Errorf("dust cap Events = %q, want %q", got, left)
 		}
 	})
 }
 
-// output answers the change that switches an output of the east
-// telescope's Switch on or off.
 func output(n int, on bool) string {
 	if on {
 		return fmt.Sprintf("east-telescope Simulator IO.DIGITAL_OUTPUT_%d OFF=Off ON=On", n)
@@ -145,9 +146,9 @@ func output(n int, on bool) string {
 
 // The main camera fails StartDevices after PowerOn switched on its
 // output 1, and a person fixes its driver and moves it to output 4. The
-// retry runs PowerOn again, which switches output 4 on, and switches
-// off output 1, which no other device draws from. The release switches
-// off output 4.
+// retry runs PowerOn again, which switches output 4 on and switches
+// off output 1, because no other device draws from it. The release
+// switches off output 4.
 func TestARetryThatChangesADevicesPowerRunsPowerOnAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -185,8 +186,9 @@ func TestARetryThatChangesADevicesPowerRunsPowerOnAgain(t *testing.T) {
 // and started its pod on the observatory's server. A person then moves
 // the station to the east telescope. east-tonight records the station
 // on the observatory's server too, fails, and retries. The station
-// stays on the observatory's server, which west-tonight's session
-// started it on, so no record names it on the telescope's.
+// stays on the observatory's server, because west-tonight's session
+// started it there, so east-tonight's record does not list it among the
+// telescope's devices.
 func TestARetryLeavesOutADeviceThatAFailedSiteStarted(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -204,7 +206,7 @@ func TestARetryLeavesOutADeviceThatAFailedSiteStarted(t *testing.T) {
 		r := w.phase("east-tonight", observatory.ReservationReady, 15*time.Minute)
 
 		if _, ok := r.Status.Session.Devices["WeatherStation/lab"]; ok {
-			t.Errorf("east-tonight records the weather station on the telescope's server: %v", slices.Sorted(maps.Keys(r.Status.Session.Devices)))
+			t.Errorf("the session of east-tonight records devices %v, want no WeatherStation/lab", slices.Sorted(maps.Keys(r.Status.Session.Devices)))
 		}
 		pod, _ := w.api.object(podsCollection, "lab-weatherstation")
 		if server := pod["metadata"].(map[string]any)["labels"].(map[string]any)[labelServer]; server != "lab-observatory" {

@@ -7,8 +7,8 @@ import (
 	"testing/synctest"
 )
 
-// domeParked is the dome simulator's DOME_PARK as the dome reports it
-// once it has parked.
+// domeParked is DOME_PARK as the dome simulator reports it after it
+// parks.
 var domeParked = Property{
 	Device: "Dome Simulator", Name: "DOME_PARK", Type: SwitchType, State: Ok,
 	Members: []Member{{Name: "PARK", Switch: true}, {Name: "UNPARK"}},
@@ -18,7 +18,7 @@ func TestRelaySendsTheReportOfADeviceTheServerLacks(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server := connectedBaseline(t, "telescope")
 		if err := c.Relay(domeParked); err != nil {
-			t.Fatal(err)
+			t.Fatalf("relaying the property: %v", err)
 		}
 		got := server.await("DOME_PARK")
 		if got.XMLName.Local != "setSwitchVector" || got.Device != "Dome Simulator" || got.State != "Ok" {

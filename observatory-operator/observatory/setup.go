@@ -1,41 +1,39 @@
 package observatory
 
-// A person's part in a procedure. A portable telescope spends the day
-// in a garage, and a person carries it out, uncovers it, and polar
-// aligns it before a night. The person states that in the resource's
-// status, as the SetUp condition, and a spec.requires that names it
-// keeps the equipment off until then. Plan 21 gives the design.
+// Conditions for work that only a person can do, such as carrying a
+// portable telescope outside, uncovering it, and polar aligning it
+// before a night. A reservation does not start a resource whose
+// spec.requires lists SetUp until the person sets SetUp to True.
 
-// ConditionSetUp is the condition that a person writes into a
-// resource's status.conditions through the status subresource, such as
-// with `kubectl liken observatory set-up`. True says that the person
-// set the resource up for the night. The operator keeps it as the
-// person wrote it, and sets it False with the reason Expired at the
-// first astronomical dawn after its lastTransitionTime at the
-// resource's Observatory, or at status.setUpUntil when the person
-// wrote one. A confirmation is an observation of the world, so it is
-// in status, where a GitOps tool that applies the spec never removes
-// it.
+// ConditionSetUp is a condition that a person writes to the resource's
+// status.conditions through the status subresource, for example with
+// `kubectl liken observatory set-up`. True means that the person set
+// the resource up for the night. The operator sets it to False with the
+// reason Expired at status.setUpUntil when the person wrote one, and
+// otherwise at the first astronomical dawn at the resource's
+// Observatory after the condition's lastTransitionTime. The condition
+// is in status, not spec, so a GitOps tool that applies the spec does
+// not remove it.
 const ConditionSetUp = "SetUp"
 
-// The reasons of SetUp. A person writes SetUp and TakenDown, and the
-// operator writes Expired.
+// The reasons of the SetUp condition. A person writes SetUp and
+// TakenDown, and the operator writes Expired.
 const (
 	ReasonSetUp     = "SetUp"
 	ReasonTakenDown = "TakenDown"
 	ReasonExpired   = "Expired"
 )
 
-// ConditionAttentionNeeded is True while a notify action of the
-// resource's procedures asks a person to do something, with the text
-// of each request as its message. It turns False at the start of the
-// resource's next activation, or when a person writes SetUp after the
-// request, as `kubectl liken observatory take-down` does once the
-// telescope is covered. A resource that never ran a notify action has
-// no such condition.
+// ConditionAttentionNeeded is True while a notify action in the
+// resource's procedures has asked a person to act, and its message is
+// the text of each open request. It becomes False when the resource's
+// next activation starts, or when a person writes the SetUp condition
+// after the request, as `kubectl liken observatory take-down` does once
+// the telescope is covered. A resource that never ran a notify action
+// does not have this condition.
 const ConditionAttentionNeeded = "AttentionNeeded"
 
-// The reasons of AttentionNeeded.
+// The reasons of the AttentionNeeded condition.
 const (
 	ReasonNotified     = "Notified"
 	ReasonAcknowledged = "Acknowledged"

@@ -130,8 +130,8 @@ phase:
   enum: [Inventory, Idle, Starting, Connecting, Connected, Disconnecting, Error]
   description: >-
     The device's state in one word. `Inventory`: the
-    device is on the shelf, with no parent, and the
-    operator creates nothing for it. `Idle`: the device
+    device is not installed: its spec sets no parent, and
+    the operator creates nothing for it. `Idle`: the device
     is installed, but no reservation of its telescope or
     its observatory is active, so it has no pod, or the
     device waits for the next session of a server that a
@@ -151,7 +151,7 @@ conditions:
     `ParentFound` is `False` when a resource that the
     spec names, up to the `Observatory`, does not exist,
     and its message names the missing resource. A
-    device on the shelf names no parent, and its
+    device that is not installed sets no parent, and its
     `ParentFound` is `True` with the reason `NoParent`.
     A device that a session holds where its spec no
     longer places it has `ParentFound` `True` with the
@@ -225,8 +225,8 @@ indiDevice:
     this name. A device that another resource serves
     names that resource's device. The field is present
     only while the driver runs and defines the device on
-    its server, so an `Idle` device and a device on the
-    shelf have none.
+    its server, so an `Idle` device and a device that is
+    not installed have none.
 endpoint:
   type: object
   required: [service, host, port]

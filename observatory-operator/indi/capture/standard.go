@@ -10,30 +10,30 @@ import (
 )
 
 // A Definition is one property that a capture saw defined. Phase is
-// the phase whose reply defined it first, and XML is the last
-// definition it saw, as the server sent it with no timestamp.
+// the phase whose reply first defined it, and XML is its last
+// definition as the server sent it, without the timestamp.
 type Definition struct {
 	Name  string
 	Phase string
 	XML   []byte
 }
 
-// Definitions is the union of every definition in the replies, in the
-// order of their first appearance. A capture keeps the definition of a
-// property that the driver deleted later, because some drivers define
-// a property and delete it at once, and some define a property only
-// after a value changes. When a property is defined twice, the last
-// definition wins, as it does in a client. A definition with no name
-// is left out, because no client can address it: libindi defines one
-// for a stream manager on a device that is not a CCD, and for the park
-// position of a telescope whose park type has no position.
+// Definitions returns every property defined in the replies, in the
+// order of its first definition, with the XML of its last definition,
+// as a client would store it. It keeps a property that the driver later
+// deletes, because some drivers define a property and delete it at
+// once, and the capture records every property a driver can define. It
+// skips a definition with no name, because no client can address it.
+// libindi sends such a definition for the stream manager of a device
+// that is not a CCD, and for the park position of a telescope whose
+// park type has no position.
 func Definitions(replies []Reply) ([]Definition, error) {
 	var defs []Definition
 	index := map[string]int{}
 	for _, reply := range replies {
 		elements, err := topLevel(reply.Data)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", reply.Phase, err)
+			return nil, fmt.Errorf("reading the replies of phase %s: %w", reply.Phase, err)
 		}
 		for _, e := range elements {
 			if !strings.HasPrefix(e.kind, "def") || !strings.HasSuffix(e.kind, "Vector") || e.name == "" {
@@ -51,9 +51,9 @@ func Definitions(replies []Reply) ([]Definition, error) {
 	return defs, nil
 }
 
-// The timestamp changes on every capture and says nothing about the
-// property, so a capture leaves it out, and a capture again after an
-// INDI bump differs only where libindi changed.
+// timestamp matches the timestamp attribute, which differs on every
+// capture. Definitions removes it, so that a capture after an INDI
+// upgrade changes the file only where libindi's definitions changed.
 var timestamp = regexp.MustCompile(` timestamp="[^"]*"`)
 
 type element struct {
@@ -103,9 +103,9 @@ func attribute(e xml.StartElement, name string) string {
 	return ""
 }
 
-// A Header names where a capture came from: the driver, the device it
+// A Header records where a capture came from: the driver, the device it
 // served, the version of the indi-bin package it ran on, and the
-// interface bits in its DRIVER_INFO.
+// interface bits from its DRIVER_INFO.
 type Header struct {
 	Driver    string `xml:"driver,attr"`
 	Device    string `xml:"device,attr"`
@@ -113,9 +113,9 @@ type Header struct {
 	Interface string `xml:"interface,attr"`
 }
 
-// Write writes a capture: the header as the root element's attributes,
-// and the definitions grouped by the phase that defined them first.
-// Every definition named in exclude is left out.
+// Write writes a capture file: the header as the root element's
+// attributes, and the definitions grouped by the phase that first
+// defined them. It skips each definition whose name is in exclude.
 func Write(w io.Writer, header Header, defs []Definition, exclude map[string]bool) error {
 	var out bytes.Buffer
 	fmt.Fprintf(&out, "<capture driver=%s device=%s indi=%s interface=%s>\n",
@@ -174,7 +174,7 @@ func Interface(defs []Definition) string {
 }
 
 // A Capture is a capture file as Read parses it: the header, and the
-// name and kind of each property in each phase.
+// name and element kind of each property in each phase.
 type Capture struct {
 	Header
 	Phases []struct {
@@ -186,14 +186,13 @@ type Capture struct {
 	} `xml:"phase"`
 }
 
-// Read parses a capture file.
 func Read(r io.Reader) (Capture, error) {
 	var c Capture
 	err := xml.NewDecoder(r).Decode(&c)
 	return c, err
 }
 
-// Defines reports whether the capture holds a definition of the
+// Defines reports whether the capture has a definition of the
 // property.
 func (c Capture) Defines(property string) bool {
 	for _, p := range c.Phases {

@@ -1,22 +1,17 @@
 package main
 
-// Each running mount's DOME_POLICY follows the domes of its
-// observatory. A mount under DOME_LOCKS keeps the last dome report it
-// received, so a mount whose dome was deleted stays locked to a parked
-// dome that no longer exists, until its driver restarts or the next
-// Configure. So the lock relay's pass also writes the policy: when an
-// observatory's last dome goes, each running mount of it gets
-// DOME_IGNORED at once. A dome declared during a session waits for the
-// next one (tree.server), whose Configure writes DOME_LOCKS. The write
-// saves the driver's configuration, as Configure's does (lockPolicy).
+// The lock relay also keeps each running mount's DOME_POLICY in line
+// with its observatory's domes. A mount under DOME_LOCKS keeps the last
+// dome report it received, so when a person deletes the observatory's
+// last dome, the mount stays locked to a parked dome that no longer
+// exists. The relay's pass then writes DOME_IGNORED to each mount of
+// that observatory, without waiting for the next Configure. A dome
+// declared during a session counts only from the next session
+// (tree.server), whose Configure writes DOME_LOCKS.
 //
-// The pass acts only on a telescope whose reservation is Ready.
-// Activation's Configure step writes the policy, and the operator
-// writes a mount's settings again when its driver restarts during a
-// session (steady.go), so the pass covers a dome that a person deletes.
-// One write to a mount runs at a time: each save rewrites the driver's
-// configuration file, and the server's epoch moves with each property
-// that a driver defines while the write is on its way.
+// The pass acts only on a telescope whose reservation is Ready, because
+// Configure writes the policy during activation, and steady.go writes
+// it again after a mount's driver restarts.
 
 import (
 	"context"
@@ -27,39 +22,44 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// policyWait bounds one write of a mount's DOME_POLICY and its save. It
-// is a clock.
+// policyWait is the time limit for one write of a mount's DOME_POLICY
+// and its configuration save.
 const policyWait = 30 * time.Second
 
-// mountPolicies holds what the pass wrote to each mount, so a driver
-// that answers with another policy is not written again on each
-// change. The key holds the server's epoch, so a driver that restarts
-// is written again.
+// mountPolicies is the state of the pass between runs.
 type mountPolicies struct {
+	// tried holds the server's epoch and the policy of the last write to
+	// each mount. So a driver that refuses a policy is not written again
+	// on each pass, and a driver that restarts, which starts a new epoch,
+	// is written again.
 	tried map[string]string
 	group sync.WaitGroup
-	// writing holds each mount whose write runs now.
+	// writing holds the mounts that have a write in progress. The epoch
+	// can change during a write, for example when the driver defines a
+	// property, and without this set the next pass would start a second
+	// write and a second save of the driver's configuration file.
 	mu      sync.Mutex
 	writing map[string]bool
-	// seen holds the version of the stores and the INDI epoch that the
-	// last pass read. A reading changes neither, so a pass that finds
-	// both the same has nothing new to write, and a mount that reports
-	// its position several times a second costs nothing here.
+	// seen is the version of the stores and the INDI epoch at the last
+	// pass. An update of a property, such as a mount's position, changes
+	// neither, so the pass returns at once for it.
 	seen [2]uint64
 }
 
-// keepDomePolicies writes DOME_POLICY to each connected mount of a held
-// telescope whose policy differs from what its observatory's domes ask
-// for. Each write runs on its own goroutine, so a slow driver does not
-// hold the lock relay.
+// keepDomePolicies writes DOME_POLICY to each connected mount of a
+// Ready reservation's telescope whose policy differs from what its
+// observatory's domes require, and saves the driver's configuration
+// (lockPolicy). Each write runs on its own goroutine, so a slow driver
+// does not delay the lock relay.
 func (o *operator) keepDomePolicies(ctx context.Context, p *mountPolicies) {
 	now := [2]uint64{o.stores.version.Load(), epochs.Load()}
 	if now == p.seen {
 		return
 	}
 	p.seen = now
-	// The snapshot comes after the versions, so a change after them
-	// starts another pass.
+	// Take the snapshot after reading the versions, so a change that
+	// arrives in between changes the versions again and starts another
+	// pass.
 	t := o.snapshot()
 	for _, site := range sortedNames(t.observatories) {
 		locked := len(domesOf(t, t.observatories[site])) > 0
@@ -103,8 +103,8 @@ func (o *operator) keepDomePolicies(ctx context.Context, p *mountPolicies) {
 	}
 }
 
-// start marks a write to a mount as running, and answers false when
-// one runs already.
+// start marks a write to a mount as in progress, and returns false when
+// one is already in progress.
 func (p *mountPolicies) start(id string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()

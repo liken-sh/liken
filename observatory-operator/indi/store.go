@@ -5,40 +5,38 @@ import (
 	"sort"
 )
 
-// Store holds what one connection reported: every device, and every
-// property that each device defined and did not delete. A Client
-// updates it from the server's messages, and a caller reads it through
-// the Client's methods or inside a WaitFor condition.
+// Store holds every property that a device defined and has not deleted
+// on the current connection. A Client updates it from the server's
+// messages, and a caller reads it through the Client's methods or inside
+// a WaitFor condition.
 //
-// The store describes the current connection only. When a connection
-// ends, the store empties, because nothing it held is current any
-// more: a server that restarted has drivers that restarted too, with
-// their settings lost. The next connection fills it from a new
-// baseline.
+// The Client empties the store when a connection starts and when it
+// ends, because the next connection can be to a restarted server whose
+// drivers lost their settings. The server's definitions fill it again.
 type Store struct {
 	connected bool
-	// connection counts the connections, so a wait that began on one
-	// connection fails when another one replaced it.
+	// connection counts the connections, so a wait that started on one
+	// connection fails when a later connection replaces it.
 	connection uint64
-	// sequence counts every change that the store applied. Each
-	// property records the sequence of its definition and of its last
-	// update, so a wait can tell an update after a send from one
-	// before it.
+	// sequence counts every change to the store. Each entry records
+	// the sequence of its definitions and updates, so a wait can tell an
+	// update that came after a send from one that came before it.
 	sequence uint64
 	devices  map[string]*device
 }
 
-// A device holds its properties in the order the driver defined them,
-// the order in which a client such as KStars shows them.
+// A device keeps its properties in the order the driver first defined
+// them, which is the order that a client such as KStars shows.
 type device struct {
 	order      []string
 	properties map[string]*entry
 }
 
-// An entry records the sequence of the property's first definition,
-// of its last definition, of its last change, and of its last change
-// to Busy. Settle and Sync read them, because several changes can
-// arrive between two of their checks.
+// An entry is one property with the store's sequence number at its
+// first definition, its last definition, its last change, and its last
+// change to Busy. Settle and Sync compare these numbers with the
+// sequence at the time of a send, because several changes can arrive
+// between two of their checks.
 type entry struct {
 	property  Property
 	defined   uint64
@@ -91,7 +89,6 @@ func (s *Store) entry(device, name string) *entry {
 	return nil
 }
 
-// reset empties the store at the start or the end of a connection.
 func (s *Store) reset(connected bool) {
 	s.connected = connected
 	if connected {
@@ -101,8 +98,8 @@ func (s *Store) reset(connected bool) {
 }
 
 // define records a definition. A property that the device defines
-// again keeps its place and its identity: only a deletion ends a
-// property, so a wait on it continues across a second definition.
+// again keeps its position and its entry, so a wait on it continues
+// across the second definition.
 func (s *Store) define(p Property) {
 	s.sequence++
 	if s.devices == nil {
@@ -123,7 +120,6 @@ func (s *Store) define(p Property) {
 	e.set(p, s.sequence)
 }
 
-// update records a change to a defined property.
 func (s *Store) update(e *entry, p Property) {
 	s.sequence++
 	e.set(p, s.sequence)
@@ -137,13 +133,11 @@ func (e *entry) set(p Property, sequence uint64) {
 	}
 }
 
-// removeDevice deletes every property of a device.
 func (s *Store) removeDevice(device string) {
 	s.sequence++
 	delete(s.devices, device)
 }
 
-// remove deletes one property.
 func (s *Store) remove(device, name string) {
 	s.sequence++
 	d := s.devices[device]

@@ -5,118 +5,132 @@ weight: 20
 
 # Reading the status
 
-The operator writes every status. The one exception is the `SetUp`
+`observatory-operator` writes the status of every device, telescope,
+observatory, and reservation. The one exception is the `SetUp`
 condition, which a person writes, as [Conditions](#conditions)
-describes. This page explains the status of the devices, the telescopes and observatories,
-and the reservations.
+describes.
 
 ## Conditions
 
-Each kind
-except `Horizon` has `status.conditions` in the shape of
-`metav1.Condition`, and `status.observedGeneration`. A `Horizon` has
-no status, because the operator reads nothing in it. `ParentFound` is `False` when a resource
-that the spec names does not exist; the resource stays in place, and
-the message names the missing parent. A device on the shelf has no
-parent to find, so its `ParentFound` is `True` with the reason
-`NoParent`. A device that a session holds where its spec no longer
-places it has `ParentFound` `True` with the reason `MovePending`, and
-the message says where it goes when the session ends, such as `Moves
-to OpticalTrain west-imaging when Reservation east-tonight ends`.
+Every kind except `Horizon` has `status.conditions`, in the shape of
+`metav1.Condition`, and `status.observedGeneration`. A `Horizon` has no
+status, because the operator reads nothing from it.
 
-A `Telescope` that names a `Horizon` in `spec.horizon` has the
-condition `HorizonFound`. It is `True` with the message `Found Horizon
-yard` when that `Horizon` exists, and `False` with the reason
-`HorizonMissing` and the message `Missing Horizon yard` when it does
-not. A missing horizon stops nothing: the telescope's phase and its
-`Ready` condition do not change. A telescope with no `spec.horizon` has
-no `HorizonFound` condition.
+`ParentFound` is `False` when a resource that the spec names does not
+exist, and its message names the missing resource. A device that names
+no parent, such as a device that is not in an optical train, has
+nothing to find, so its `ParentFound` is `True` with the reason
+`NoParent`. When you move a device while a session uses it at its old
+place, `ParentFound` is `True` with the reason `MovePending`. The message says where the device goes when the session
+ends, such as `Moves to OpticalTrain west-imaging when Reservation
+east-tonight ends`.
 
-`SetUp` is the one condition that a person writes, through the status
-subresource, such as with `kubectl liken observatory set-up`. It is
-`True` with the reason `SetUp` and a message such as `Set up by ada`,
-or `False` with the reason `TakenDown`. The operator keeps it as the
-person wrote it, with `status.setUpUntil`, until it expires at dawn or
-at `status.setUpUntil`, and then sets it `False` with the reason
-`Expired`. While it is `True`, the operator writes the time it
-expires into `status.setUpExpiryTime`, which the `SET UP UNTIL`
-column of `kubectl get` shows. `AttentionNeeded` is `True` with the reason `Notified`
-while a `notify` action's request is open, and `False` with the reason
-`Activated` or `Acknowledged` once the next activation or a person's
-`SetUp` answers it. The `Acknowledged` message repeats the message of
-that `SetUp`, such as `Taken down by ada`. [Set up a portable
-telescope](/docs/guides/set-up-a-portable-telescope/) uses both.
+A `Telescope` that sets `spec.horizon` has the condition
+`HorizonFound`. It is `True` with the message `Found Horizon yard` when
+that `Horizon` exists. It is `False` with the reason `HorizonMissing`
+and the message `Missing Horizon yard` when it does not. A missing
+horizon changes neither the telescope's phase nor its `Ready`
+condition. A telescope with no `spec.horizon` has no `HorizonFound`
+condition.
+
+`SetUp` is the only condition that a person writes. You write it through
+the status subresource, for example with `kubectl liken observatory
+set-up`. It is `True` with the reason `SetUp` and a message such as
+`Set up by ada`, or `False` with the reason `TakenDown`. The operator
+keeps the condition as you wrote it until it expires. It expires at
+`status.setUpUntil` when you wrote one, and otherwise at the first
+astronomical dawn after you set it, at the location of the resource's
+`Observatory`. Then the operator sets it `False` with the reason
+`Expired`. While `SetUp` is `True`, the operator writes the time it
+expires to `status.setUpExpiryTime`, which the `SET UP UNTIL` column of
+`kubectl get` shows.
+
+`AttentionNeeded` is `True` with the reason `Notified` while the
+request of a `notify` action is open. It becomes `False` with the
+reason `Activated` when the next activation answers the request, or
+with the reason `Acknowledged` when a person's `SetUp` answers it. The
+`Acknowledged` message repeats the message of that `SetUp`, such as
+`Taken down by ada`. [Set up a portable
+telescope](/docs/guides/set-up-a-portable-telescope/) uses both
+conditions.
 
 ## Devices
 
-A device's status has the same fields in every kind, and a typed field
-for each standard property of the kind's INDI interface. Each value is
-in one place. One INDI device can serve several resources, such as a
-camera and the `FilterWheel` that the camera's driver serves, and each
-of its properties is in the status of one resource, so an update to
-the wheel's slot writes the `FilterWheel` alone.
+Every device kind has the same status fields, plus a typed field for
+each standard property of the kind's INDI interface. One INDI device
+can serve several resources, such as a camera and the `FilterWheel`
+that the camera's driver serves, but each INDI property appears in the
+status of only one of them. The wheel's slot, for example, is in the
+status of the `FilterWheel` and not of the `Camera`.
 
-- `phase`: `Inventory` on the shelf, with a `Ready` message such as
-  `Not installed in an optical train`. `Idle` when the device is
-  installed and no reservation of its telescope or its observatory is
-  active, with the message `Not reserved`. A device whose server runs
-  for a session and does not run the device is `Idle` too, with a
-  message such as `Starts at the next reservation, after Reservation
-  east-tonight ends`: a device added during the session, and a device
-  that the release stopped, until the server stops. From the start of
-  a reservation's activation, `Starting` until the pod exists, then
-  `Connecting`, `Connected`, and `Disconnecting`, or `Error`. During
-  a release, a device is `Disconnecting` from its disconnect until its
-  pod is gone, while the operator stops its driver or its server. A
-  `Telescope`, an `Observatory`, and a `Guider` are `Idle` with no
-  active reservation, then `Activating`, `Ready`, and `Deactivating`,
-  or `Error`.
-- `indiDevice` and `endpoint`: the INDI device and the server that
-  serve the resource. A client reaches the resource there, a served
-  one too, with no need to follow `spec.device`. `driver`, `image`,
-  `pod`, and `node`: what runs, and where, for the resource that runs
-  the driver. `indiDevice` is the name that KStars shows. The status
-  says what is true now, so `pod` and `node` are present only while
-  the pod of the driver runs, `endpoint` only while that pod runs and
-  is not stopping, and `indiDevice` only while the driver defines the
-  device on its server. The driver stops on its server before its pod
-  is deleted, so a stopping pod has no driver to reach. `endpoint`
-  names the server in the pod's `observatory.liken.sh/server` label,
-  so a device that a person moved during a session names the server
-  that runs it until the session ends. When a reservation ends, a
-  person deletes the device, or the pod of the resource that serves it
-  stops, the operator removes these fields. An `Idle` device and an
-  `Inventory` device have none of them.
+- `phase`: where the device is in its life cycle.
+  - `Inventory` when the device is not installed in an optical train.
+    Its `Ready` message is `Not installed in an optical train`.
+  - `Idle` when the device is installed and no reservation of its
+    telescope or its observatory is active. The message is `Not
+    reserved`. A device is also `Idle` while it waits to start on an
+    INDI server that is running for a session. Its message is then
+    such as `Starts at the next reservation, after Reservation
+    east-tonight ends`. This happens to a device that someone added
+    during the session, and to a device that the release stopped, until
+    the server stops.
+  - From the start of a reservation's activation, `Starting` until the
+    pod exists, then `Connecting`, `Connected`, and `Disconnecting`, or
+    `Error`. When a reservation ends, the device is `Disconnecting`
+    until the operator has stopped its driver and deleted its pod.
+  - A `Telescope`, an `Observatory`, and a `Guider` are `Idle` while no
+    reservation is active, then `Activating`, `Ready`, and
+    `Deactivating`, or `Error`.
+- `indiDevice` and `endpoint`: the INDI device that serves the
+  resource, and the INDI server it is on. A client reaches the resource
+  there, including a resource that another resource's driver serves, so
+  it does not need to follow `spec.device`. `indiDevice` is the name
+  that KStars shows. The resource that runs the driver also has
+  `driver`, `image`, `pod`, and `node`, which say what runs and where.
+  Each of these fields is present only while it is true:
+  - `pod` and `node` are present while the driver's pod runs.
+  - `endpoint` is present while that pod runs and is not stopping. It
+    is the server named by the pod's `observatory.liken.sh/server`
+    label, so a device that a person moved during a session keeps the
+    server that runs it until the session ends.
+  - `indiDevice` is present while the driver defines the device on its
+    server.
+
+  The operator stops the driver before it deletes the pod, so a client
+  cannot reach the device through a pod that is stopping. An `Idle`
+  device and an `Inventory` device have none of these fields.
 - The typed fields: one for each standard property of the kind's
   interface that the driver defines, such as `status.temperature` and
-  `status.gain` of a `Camera`, or `status.slot` and `status.filters`
-  of a `FilterWheel`. Each holds the property's state and its values.
+  `status.gain` of a `Camera`, or `status.slot` and `status.filters` of
+  a `FilterWheel`. Each holds the property's state and values.
   `kubectl explain` describes each field, its property, and its unit.
-  Where the driver chooses the elements, such as a mount's slew rates
-  or a wheel's filter names, the field lists them.
-- `limits`: the range that the driver gives each number of the typed
-  fields that a client can write, by INDI property and member, such as
+  When the driver sets the elements of a property, such as a mount's
+  slew rates or a wheel's filter names, the field lists them.
+- `limits`: the range that the driver sets for each writable number in
+  the typed fields, by INDI property and member, such as
   `status.limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE` with its `min`
   and `max`.
-- `readings`: on a `Mount` and a `FilterWheel` only, a value that the
+- `readings`: on a `Mount` and a `FilterWheel` only, values that the
   operator derives from several properties and that no typed field
-  holds: what the mount does, in `status.readings.state`, and the name
-  of the filter in the wheel's slot, in `status.readings.filter`.
-- `display`: values of the typed fields as text with their units, such
-  as `-9.8 °C`, for the printer columns. A program reads the typed
+  holds. `status.readings.state` is what the mount does.
+  `status.readings.filter` is the name of the filter in the wheel's
+  slot.
+- `display`: the values of the typed fields as text with their units,
+  such as `-9.8 °C`, for the printer columns. A program reads the typed
   fields, and `kubectl get` shows `display`. INDI gives a flat panel's
-  brightness no unit, so it shows against the maximum in `limits`,
-  such as `128 of 255`. A `Switch` shows the numbers of its outputs
-  that are on, such as `1, 2, 3`, because a printer column shows only
-  the first value of a JSONPath that matches several.
+  brightness no unit, so `display` shows it against the maximum in
+  `limits`, such as `128 of 255`. For a `Switch`, `display` lists the
+  numbers of the outputs that are on, such as `1, 2, 3`, because a
+  printer column shows only the first value of a JSONPath that matches
+  several.
 - `properties`: on the resource that runs the driver, each INDI
   property that no typed field holds, with its label, group, type,
   permission, state, switch rule, and the value and limits of each
-  member. A vendor's own properties are here, and so are the
-  properties that every INDI device has, such as `DEBUG`. A standard
-  property of an interface that no resource on the device is stays
-  here too, such as the `FILTER_SLOT` of a camera with a wheel and no
-  `FilterWheel`. The list holds no BLOB data.
+  member. It lists a vendor's own properties and the properties that
+  every INDI device has, such as `DEBUG`. It also lists a standard
+  property of an interface that no resource on the device implements,
+  such as the `FILTER_SLOT` of a camera that has a wheel but no
+  `FilterWheel`. The list has no BLOB data.
 
 ```sh
 kubectl get camera east-main -n observatory -o jsonpath='{.status.gain.value}'
@@ -128,10 +142,11 @@ kubectl get camera east-main -n observatory \
 
 ## Device states
 
-A device is in one state at a time, and the printer columns name it in
-one word. A mount's state comes from three properties, so it is a
-reading. Each other state is the reason of a state condition (below),
-or the camera's display:
+The printer columns of `kubectl get` show a device's state in one
+word. A mount's state is in `status.readings`, because the operator
+derives it from three properties. A camera's state is in `display`.
+Each other state is the reason of a state condition, which
+[State conditions](#state-conditions) describes:
 
 | Kind | Column | Values | From |
 |---|---|---|---|
@@ -143,21 +158,28 @@ or the camera's display:
 | `FlatPanel` | `Light`, the reason of `Lit` | `LightOn`, `LightOff` | `FLAT_LIGHT_CONTROL` |
 | `WeatherStation` | `Safety`, the reason of `Safe` | `Safe`, `Warning`, `Danger` | `SAFETY_STATUS` |
 
-A mount reads the first state that applies, in this order. A `Busy`
-park is `Parking` or `Unparking`, toward the switch that is on. `PARK`
-on is `Parked`, unless the park's state is `Alert`: a park that failed
-or that a client aborted does not say where the mount is. A `Busy`
-`EQUATORIAL_EOD_COORD` is `Slewing`, so a slew that ends in tracking
-reads `Slewing` until the coordinates settle. `TRACK_ON` on is
-`Tracking`, and a mount that does none of these is `Stopped`. A
-`Moving` dome turns to or from its park position.
+The operator derives a mount's state from the first rule below that
+applies:
+
+1. When the park property is `Busy`, the state is `Parking` or
+   `Unparking`, toward the switch that is on.
+2. When `PARK` is on, the state is `Parked`, unless the park property's
+   state is `Alert`. A park that failed or that a client aborted does
+   not show where the mount is.
+3. When `EQUATORIAL_EOD_COORD` is `Busy`, the state is `Slewing`. So a
+   mount that slews and then tracks reads `Slewing` until the
+   coordinates settle.
+4. When `TRACK_ON` is on, the state is `Tracking`.
+5. Otherwise the state is `Stopped`.
+
+A dome that is `Moving` is turning to or from its park position.
 
 ## State conditions
 
-While a device is `Connected`, its conditions also give its state, for
-a trigger or for `kubectl wait --for=condition=Parked`. Each one comes
-from the property in the table, and a driver that does not define the
-property gives no condition:
+While a device is `Connected`, its conditions also report its state,
+for a trigger or for `kubectl wait --for=condition=Parked`. Each
+condition comes from the property in the table. A driver that does not
+define the property has no such condition:
 
 | Kind | Condition | `True` when | Property |
 |---|---|---|---|
@@ -169,50 +191,54 @@ property gives no condition:
 | `Camera` | `Cooling` | the cooler is on | `CCD_COOLER` |
 | `WeatherStation` | `Safe` | the station reports `Safe` | `SAFETY_STATUS` |
 
-The reason names the state, such as `Parked` or `Unparked`, and the
-message names the device, such as `Dome lab is parked`. A park, a
-shutter, or a cover that moves is `Unknown` with the reason `Moving`
-until the move ends. `Safe` is `False` with the reason `Warning` or
-`Danger`. A driver that reports neither side of a switch, or a station
-with no safety status, gives `Unknown` with the reason `NotReported`. A
-device that is not connected has none of these conditions, so a
-trigger never reads a state that the operator cannot confirm.
+The reason is the state, such as `Parked` or `Unparked`, and the
+message names the device, such as `Dome lab is parked`. While a park,
+a shutter, or a cover moves, the condition is `Unknown` with the reason
+`Moving`. `Safe` is `False` with the reason `Warning` or `Danger`. When
+a driver reports neither side of a switch, or a station has no safety
+status, the condition is `Unknown` with the reason `NotReported`. A
+device that is not connected has none of these conditions, so a trigger
+never acts on a state that the operator cannot confirm.
 
 ## Telescopes and observatories
 
-A `Telescope`'s status names its INDI server in `status.server`, its
-active reservation, its tubes, its trains with their devices, its own
-devices, and its guider's phase and PHD2's state. Its `Guider` column,
-in `-o wide`, shows both, such as `Ready, Guiding`, and an empty cell
-for a telescope with no `Guider`. An `Observatory`'s status
-names its server, its telescopes, its devices, the active reservations,
-and the worst safety status of its weather stations. A `Telescope` and an
-`Observatory` also report the condition `Active`, and each resource
-with procedures reports their runs in `status.procedures`, as
-[Procedures](/docs/concepts/procedures/) states.
+A `Telescope`'s status gives its INDI server in `status.server`, its
+active reservation, its tubes, its optical trains and their devices,
+its own devices, and the phase of its guider and the state of PHD2. The
+`Guider` column, in `-o wide`, shows the last two, such as `Ready,
+Guiding`. The cell is empty for a telescope with no `Guider`. An
+`Observatory`'s status gives its server, its telescopes, its devices,
+its active reservations, and the worst safety status of its weather
+stations. A `Telescope` and an `Observatory` also have the condition
+`Active`. A resource with procedures records their runs in
+`status.procedures`, as [Procedures](/docs/concepts/procedures/)
+describes.
 
 ## Reservations
 
 A `Reservation` moves through the phases `Scheduled`, `Activating`,
-`Ready`, `Deactivating`, and `Released`, or `Failed`. `status.steps`
-lists the steps in order, with their states, start and stop times, and
-summaries. A summary names the device that a step waits for. The list
-holds the activation steps from the start, and deactivation adds its
-steps when it begins, so a `Ready` reservation lists only what ran.
-Each step's state is `Pending`, `Running`, `Done`, `Failed`, or
-`Skipped`. `status.step` names the step that runs now, or the step
-that failed, and it is empty while the reservation is `Ready` or
-`Released`. [How a reservation runs](/docs/concepts/how-a-reservation-runs/) states what each step does.
+`Ready`, `Deactivating`, and `Released`, or ends in `Failed`.
+`status.steps` lists the steps in order, with each step's state, start
+and stop times, and summary. The summary names the device that the
+step waits for. The list holds the activation steps from the start.
+The deactivation steps are added when deactivation begins, so a
+`Ready` reservation lists only the steps that ran. A step's state is
+`Pending`, `Running`, `Done`, `Failed`, or `Skipped`. `status.step` is
+the step that runs now or the step that failed, and it is empty while
+the reservation is `Ready` or `Released`. [How a reservation
+runs](/docs/concepts/how-a-reservation-runs/) describes what each step
+does.
 
-`status.session` records what the session started with: the
+`status.session` records the state the session started with: the
 telescope's `observatory`, the devices of the observatory's server in
 `site`, and the `devices`, `trains`, `tubes`, and `guiders` of the
 telescope's server. Each device is under its kind and name, such as
-`Focuser/east`. `StartSite` and `PowerOn` write it once, a retry of a
-failed activation step writes it again from the specs, and the
-operator reads it in place of the specs until the reservation is
-`Released`. Compare it with a spec to see which edit waits for the
-next session:
+`Focuser/east`. The `StartSite` and `PowerOn` steps write it once. When
+you retry a failed activation step, the operator writes it again from
+the current specs. Until the reservation is `Released`, the operator
+reads the session record and ignores later edits to the specs. So you
+can compare the record with a spec to see which edits wait for the next
+session:
 
 ```sh
 kubectl get rsv east-tonight -n observatory \
@@ -229,55 +255,59 @@ kubectl get cam,mnt,sw -n observatory
 ```
 
 `kubectl get rsv -w` prints a line for each change of the status: the
-phase, the step, and the message of the step that runs, such as the
-device it waits for. It also prints a line for each change of the
-metadata, which repeats the line before it: one when the operator adds
-its finalizer, and one when a person deletes the reservation. `-o wide` adds the start, the end, and the
-endpoint. The message is the `Ready` condition's: while a step runs,
-its reason is the step and its message is the step's summary.
-`kubectl describe` lists each step with its name first, and the
-reservation's Events: one for each step that ends, with the time it
-took, one for each phase, and a `Warning` for a step that fails. The
-`Ready` condition is `True` while the phase is `Ready`, and its
+phase, the step that runs, and the message of the `Ready` condition.
+While a step runs, that condition's reason is the step's name and its
+message is the step's summary, such as the device the step waits for.
+`-w` also prints a line when the metadata changes, such as when the
+operator adds its finalizer or a person deletes the reservation, and
+that line repeats the one before it. `-o wide` adds the start, the end,
+and the endpoint.
+
+`kubectl describe` lists each step with its name first. It also lists
+the reservation's Events: one for each step that ends, with the time
+the step took, one for each phase, and a `Warning` for a step that
+fails. The `Ready` condition is `True` while the phase is `Ready`. Its
 message and `status.endpoint` then give the host and port for KStars,
 such as `east-telescope.observatory.svc:7624`.
 
-`kubectl logs` tells the same story as the status, one line for each
-phase change and for each step's start and end:
+The operator's log has one line for each phase change and for the
+start and end of each step. Each line names the namespace after the
+operator's name:
 
 ```text
-observatory-operator: Reservation east-tonight: Activating
-observatory-operator: Reservation east-tonight: Activation started
-observatory-operator: Reservation east-tonight: Activation done in 19 s: ran the activation of Dome lab, Mount east, Camera east-main, DustCap east
-observatory-operator: Reservation east-tonight: Ready at east-telescope.observatory.svc:7624
+observatory-operator: observatory: Reservation east-tonight: Activating
+observatory-operator: observatory: Reservation east-tonight: Activation started
+observatory-operator: observatory: Reservation east-tonight: Activation done in 19 s: ran the activation of Dome lab, Mount east, Camera east-main, DustCap east
+observatory-operator: observatory: Reservation east-tonight: Ready at east-telescope.observatory.svc:7624
 ```
 
 `SafeToPowerOff` is `True` when the deactivation steps are done. Until
-then it is `False`, and its message says why, such as
-`In use by desktop` while the reservation is `Ready`.
+then it is `False`, and its message gives the reason, such as `In use
+by desktop` while the reservation is `Ready`.
 
-`EditsPending` tells you whether an edit of the outbox or of a FITS
-keyword waits for the next session. The reservation has it from the
+`EditsPending` is `True` while an edit of the outbox or of a FITS
+keyword waits for the next session. The reservation has this condition from the
 moment `PowerOn` records the session until the reservation is
 `Released`. It is `False` with the reason `NoEditPending` while
-`status.session` holds the outbox and the merged keywords that the
-specs give now. It is `True` with the reason `EditPending` when an
-edit of `spec.outbox`, or of `spec.fitsKeywords` on the `Observatory`,
-the `Telescope`, a `Camera`, or the `Reservation`, changes what the
-next session records. The message names each change and its next
-value, separated by `;`:
+`status.session` holds the same outbox and merged keywords that the
+specs give now. It is `True` with the reason `EditPending` when an edit
+of `spec.outbox` changes what the next session records. An edit of
+`spec.fitsKeywords` on the `Observatory`, the `Telescope`, a `Camera`,
+or the `Reservation` does the same. The message lists each change with
+its next value, separated by `;`:
 
 ```text
 spec.outbox.claimName changes from frames to nightly at the next session; FITS keyword OBJECT of Camera east-main changes from "M31" to "M33" at the next session
 ```
 
-A keyword whose value is the same and whose comment changed reads
-`the comment of FITS keyword TELESCOP of Camera east-main changes from
-...`, and a value that the next session adds or drops reads `none` on
-that side. Each change of the condition's status or reason posts one
-Event with the same reason and message, so a second edit while one
-waits posts none. A retry of a failed activation step records the
-session again from the specs, so it turns the condition `False`. A
-moved or added device does not show here: its own `ParentFound` or
-`Ready` condition says that it waits. [The
-guider](/docs/concepts/the-guider/) states what a `Guider`'s status holds.
+When a keyword's value is the same and only its comment changed, the
+message reads `the comment of FITS keyword TELESCOP of Camera east-main
+changes from ...`. A value that the next session adds or removes reads
+`none` on that side. Each change of the condition's status or reason
+posts one Event with the same reason and message. A second edit while
+one is already waiting changes neither, so it posts no Event. When you retry a failed activation
+step, the operator records the session again from the specs, and the
+condition turns `False`. A device that was moved or added does not show
+here. Its own `ParentFound` or `Ready` condition shows that it waits.
+[The guider](/docs/concepts/the-guider/) describes the status of a
+`Guider`.

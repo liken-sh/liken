@@ -1,10 +1,5 @@
 package main
 
-// The rules of the steps: the deadline of each step, the record that a
-// new copy of the operator continues from, the order in which two
-// reservations take one telescope, and the times in a reservation's
-// spec.
-
 import (
 	"slices"
 	"strings"
@@ -15,8 +10,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// A device whose pod never becomes Ready fails StartDevices at its
-// deadline, and the Ready condition names the step and the pod.
+// When a device's pod never becomes Ready, StartDevices fails at its
+// deadline, and the Ready condition's message names the step and the
+// pod.
 func TestAStepThatPassesItsDeadlineFailsTheReservation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -28,45 +24,46 @@ func TestAStepThatPassesItsDeadlineFailsTheReservation(t *testing.T) {
 		r := w.phase("east-tonight", observatory.ReservationFailed, 15*time.Minute)
 		step := stepOf(r, observatory.StepStartDevices)
 		if step.State != observatory.StepFailed || !strings.Contains(step.Summary, "Timed out after 10 min: ") || !strings.Contains(step.Summary, "east-main-camera") {
-			t.Errorf("StartDevices = %+v", step)
+			t.Errorf("StartDevices = %+v, want Failed with a summary that starts \"Timed out after 10 min: \" and names east-main-camera", step)
 		}
 		if waited := time.Since(began); waited < 10*time.Minute-time.Second || waited > 11*time.Minute {
 			t.Errorf("the step failed after %v, want its 10-minute deadline", waited)
 		}
 		ready := conditionOf(r.Status.Conditions, observatory.ConditionReady)
 		if ready.Reason != reasonTimedOut || !strings.HasPrefix(ready.Message, "StartDevices timed out after 10 min: ") || !strings.Contains(ready.Message, "Camera east-main") {
-			t.Errorf("Ready = %+v", ready)
+			t.Errorf("Ready = %+v, want reason %s and a message that starts \"StartDevices timed out after 10 min: \" and names Camera east-main", ready, reasonTimedOut)
 		}
 		if got := stepStates(r); !slices.Equal(got[6:], []string{"Configure=Pending", "Activation=Pending", "StartGuider=Pending"}) {
-			t.Errorf("the steps after the failed one ran: %v", got)
+			t.Errorf("the steps after StartDevices are %v, want Configure, Activation, and StartGuider Pending", got)
 		}
 		if !slices.Contains(w.api.eventReasons(), reasonTimedOut) {
-			t.Errorf("events = %v", w.api.eventReasons())
+			t.Errorf("events = %v, want one with reason %s", w.api.eventReasons(), reasonTimedOut)
 		}
 		time.Sleep(2 * statusWindow)
 		synctest.Wait()
 		if east, _ := decode[observatory.Telescope](t, w.api, kindCollection(observatory.TelescopeKind), "east"); east.Status.Phase != observatory.PhaseError {
-			t.Errorf("the telescope is %s", east.Status.Phase)
+			t.Errorf("the telescope is %s, want %s", east.Status.Phase, observatory.PhaseError)
 		}
 		if camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main"); camera.Status.Phase != observatory.DeviceStarting {
-			t.Errorf("the camera whose pod is Pending is %s", camera.Status.Phase)
+			t.Errorf("the camera whose pod is Pending is %s, want %s", camera.Status.Phase, observatory.DeviceStarting)
 		}
 
-		// A delete runs deactivation from StopWork, and stops what
+		// A delete runs deactivation from StopWork, which stops what
 		// activation started.
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
-		w.until(10*time.Minute, "the reservation stays", func() bool {
+		w.until(10*time.Minute, "the reservation is not deleted", func() bool {
 			_, ok := w.reservation("east-tonight")
 			return !ok
 		})
 		if pods := w.api.names(podsCollection); len(pods) != 0 {
-			t.Errorf("pods after the release: %v", pods)
+			t.Errorf("pods after the release: %v, want none", pods)
 		}
 	})
 }
 
-// A device that never answers a change fails its step at the deadline,
-// and the message names the device.
+// When the camera never reports its cooler setpoint, the cool action
+// times out after 20 minutes and fails the Activation step, and the
+// step's summary names the camera.
 func TestACoolerThatNeverReachesItsSetpointFailsActivation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -79,20 +76,20 @@ func TestACoolerThatNeverReachesItsSetpointFailsActivation(t *testing.T) {
 		step := stepOf(r, observatory.StepActivation)
 		want := "Failed: Camera east-main: cool: -10 °C within 0.5 °C: timed out after 20 min: cooling Camera east-main to -10 °C"
 		if step.State != observatory.StepFailed || step.Summary != want {
-			t.Errorf("Activation = %+v\nwant %q", step, want)
+			t.Errorf("Activation = %+v, want Failed with the summary %q", step, want)
 		}
 		if waited := time.Since(began); waited < 20*time.Minute || waited > 21*time.Minute {
 			t.Errorf("the step failed after %v, want the action's 20-minute timeout", waited)
 		}
 		if !slices.Contains(w.api.eventReasons(), reasonProcedureFailed) {
-			t.Errorf("events = %v", w.api.eventReasons())
+			t.Errorf("events = %v, want one with reason %s", w.api.eventReasons(), reasonProcedureFailed)
 		}
 	})
 }
 
-// An operator that stops in the middle of a step leaves the step
-// Running, and the next copy continues it with its first start time,
-// and sends no change that the steps before it sent.
+// A step that was Running when the operator stopped continues after
+// the restart with its original start time, and the restarted operator
+// does not send again the changes of the steps before it.
 func TestANewOperatorContinuesTheStepThatRan(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -123,8 +120,8 @@ func TestANewOperatorContinuesTheStepThatRan(t *testing.T) {
 	})
 }
 
-// A restart during deactivation continues it, and the finalizer holds
-// the reservation until the end.
+// A restart during deactivation continues it, and the finalizer keeps
+// the reservation until deactivation ends.
 func TestANewOperatorContinuesDeactivation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -139,26 +136,26 @@ func TestANewOperatorContinuesDeactivation(t *testing.T) {
 		})
 		w.restart()
 		w.indi.release("Telescope Simulator", "TELESCOPE_PARK")
-		// The held park was sent and never answered, so the new copy
-		// sends it again, and the driver answers this time. The
-		// simulator starts unparked, so activation sent no unpark.
-		w.until(25*time.Minute, "the reservation stays", func() bool {
+		// The driver never answered the first park, so the restarted
+		// operator sends it again. The simulator starts unparked, so
+		// activation sent no TELESCOPE_PARK of its own.
+		w.until(25*time.Minute, "the reservation is not deleted", func() bool {
 			_, ok := w.reservation("east-tonight")
 			return !ok
 		})
 		if n := w.indi.count("east-telescope", "Telescope Simulator.TELESCOPE_PARK"); n != 2 {
-			t.Errorf("the mount received TELESCOPE_PARK %d times; want the park and the park again", n)
+			t.Errorf("the mount received TELESCOPE_PARK %d times, want the park and the park again", n)
 		}
 		if pods := w.api.names(podsCollection); len(pods) != 0 {
-			t.Errorf("pods after the release: %v", pods)
+			t.Errorf("pods after the release: %v, want none", pods)
 		}
 	})
 }
 
-// A new operator that finds a park still running waits for it to end,
-// and sends no park of its own. libindi's telescope aborts a park when
-// a client sends TELESCOPE_PARK while the mount moves to its park
-// position, so a second park would fail the Deactivation step.
+// A restarted operator that finds a park in progress waits for it to
+// end and sends no second park. libindi's telescope aborts a park when
+// a client sends TELESCOPE_PARK while the mount is parking, so a second
+// park would fail the Deactivation step.
 func TestANewOperatorWaitsForAParkThatRuns(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -180,7 +177,7 @@ func TestANewOperatorWaitsForAParkThatRuns(t *testing.T) {
 		w.restart()
 		synctest.Wait()
 		w.indi.setState("east-telescope", "Telescope Simulator", "TELESCOPE_PARK", "Ok")
-		w.until(25*time.Minute, "the reservation stays", func() bool {
+		w.until(25*time.Minute, "the reservation is not deleted", func() bool {
 			_, ok := w.reservation("east-tonight")
 			return !ok
 		})
@@ -190,7 +187,7 @@ func TestANewOperatorWaitsForAParkThatRuns(t *testing.T) {
 	})
 }
 
-// A second reservation of a telescope waits in Wait until the first is
+// A second reservation of a telescope stays in Wait until the first is
 // released, and its message names the first.
 func TestASecondReservationWaitsForTheFirst(t *testing.T) {
 	t.Parallel()
@@ -204,15 +201,15 @@ func TestASecondReservationWaitsForTheFirst(t *testing.T) {
 		synctest.Wait()
 		r, _ = w.reservation("east-later")
 		if wait := stepOf(r, observatory.StepWait); wait.State != observatory.StepRunning || wait.Summary != "Waiting for Reservation east-tonight" {
-			t.Errorf("Wait = %+v", wait)
+			t.Errorf("Wait = %+v, want Running with the summary \"Waiting for Reservation east-tonight\"", wait)
 		}
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
 		w.phase("east-later", observatory.ReservationReady, 20*time.Minute)
 	})
 }
 
-// Two reservations that wait take the telescope in the order of their
-// starts, whatever order they were created in.
+// Two waiting reservations take the telescope in the order of their
+// spec.start, whatever order they were created in.
 func TestWaitingReservationsTakeTheTelescopeInOrderOfStart(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -231,7 +228,7 @@ func TestWaitingReservationsTakeTheTelescopeInOrderOfStart(t *testing.T) {
 	})
 }
 
-// A reservation with a start waits for it.
+// A reservation with a spec.start waits until that time.
 func TestAReservationWaitsForItsStart(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -240,24 +237,24 @@ func TestAReservationWaitsForItsStart(t *testing.T) {
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "start": start.Format(time.RFC3339)})
 		r := w.phase("east-tonight", observatory.ReservationScheduled, time.Minute)
 		if wait := stepOf(r, observatory.StepWait); wait.Summary != "Waiting until "+start.Format(time.RFC3339) {
-			t.Errorf("Wait = %+v", wait)
+			t.Errorf("Wait = %+v, want the summary \"Waiting until %s\"", wait, start.Format(time.RFC3339))
 		}
 		if pods := w.api.names(podsCollection); len(pods) != 0 {
-			t.Errorf("pods before the start: %v", pods)
+			t.Errorf("pods before the start: %v, want none", pods)
 		}
 		time.Sleep(2*time.Hour - time.Minute)
 		if r, _ := w.reservation("east-tonight"); r.Status.Phase != observatory.ReservationScheduled {
-			t.Errorf("a minute before its start the reservation is %s", r.Status.Phase)
+			t.Errorf("a minute before its start the reservation is %s, want %s", r.Status.Phase, observatory.ReservationScheduled)
 		}
 		r = w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		if took := stepOf(r, observatory.StepWait).StopTime; took == nil || took.Before(start) {
-			t.Errorf("Wait finished at %v, before the start at %v", took, start)
+			t.Errorf("Wait stopped at %v, want a time at or after the start at %v", took, start)
 		}
 	})
 }
 
-// A reservation deleted before it took its telescope started nothing,
-// and goes away with no deactivation.
+// A reservation deleted before it took its telescope has started
+// nothing, so the operator removes it without a deactivation.
 func TestAReservationDeletedWhileItWaitsGoesAtOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -266,7 +263,7 @@ func TestAReservationDeletedWhileItWaitsGoesAtOnce(t *testing.T) {
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "start": start})
 		w.phase("east-tonight", observatory.ReservationScheduled, time.Minute)
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
-		w.until(time.Minute, "the reservation stays", func() bool {
+		w.until(time.Minute, "the reservation is not deleted", func() bool {
 			_, ok := w.reservation("east-tonight")
 			return !ok
 		})
@@ -276,7 +273,6 @@ func TestAReservationDeletedWhileItWaitsGoesAtOnce(t *testing.T) {
 	})
 }
 
-// The retry annotation runs a failed step again.
 func TestTheRetryAnnotationRunsTheFailedStepAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -284,22 +280,22 @@ func TestTheRetryAnnotationRunsTheFailedStepAgain(t *testing.T) {
 		w.api.holdPending("east-main-camera")
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.phase("east-tonight", observatory.ReservationFailed, 15*time.Minute)
-		// The person powers the camera on, and asks for a retry.
+		// The person powers the camera on and asks for a retry.
 		w.api.setPodReady("east-main-camera")
 		object, _ := w.api.object(kindCollection(observatory.ReservationKind), "east-tonight")
 		object["metadata"].(map[string]any)["annotations"] = map[string]any{annotationRetry: "1"}
 		w.api.mu.Lock()
-		// The first removal of the annotation meets an API server that
-		// refuses it, and the operator sends it again.
+		// The API server refuses the first removal of the annotation,
+		// and the operator sends it again.
 		w.api.patchRefusals = 1
 		w.api.store(kindCollection(observatory.ReservationKind), "east-tonight", object, "MODIFIED")
 		w.api.mu.Unlock()
 		r := w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		if _, still := r.Metadata.Annotations[annotationRetry]; still {
-			t.Errorf("the annotation stays: %v", r.Metadata.Annotations)
+			t.Errorf("annotations are %v, want the retry annotation removed", r.Metadata.Annotations)
 		}
 		if !slices.Contains(w.api.eventReasons(), "Retry") {
-			t.Errorf("events = %v", w.api.eventReasons())
+			t.Errorf("events = %v, want one with reason Retry", w.api.eventReasons())
 		}
 	})
 }
@@ -312,14 +308,15 @@ func TestAReservationWaitsForItsTelescope(t *testing.T) {
 		w.reserve("north-tonight", map[string]any{"telescope": "north", "holder": "desktop"})
 		r := w.phase("north-tonight", observatory.ReservationScheduled, time.Minute)
 		if wait := stepOf(r, observatory.StepWait); wait.Summary != "Missing Telescope north" {
-			t.Errorf("Wait = %+v", wait)
+			t.Errorf("Wait = %+v, want the summary \"Missing Telescope north\"", wait)
 		}
 	})
 }
 
-// A deactivation step that fails after spec.end waits for its retry on
-// the next change alone. A spec.end that passed must wake nothing: a
-// runner that woke on it would wake again at once, and never block.
+// A deactivation step that fails after spec.end runs again only on the
+// retry annotation. The runner sets no timer for a spec.end in the past
+// (waitForChange in steady.go), because the timer would fire at once and
+// the runner would loop without blocking.
 func TestAFailedDeactivationAfterItsEndWaitsForARetry(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

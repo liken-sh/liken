@@ -8,9 +8,6 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The drivers of plan 06's table, with the images the indi build puts
-// them in. The simulators run from indi-simulators, which holds the
-// star catalog that the camera simulators draw from.
 func TestEveryDriverResolvesToTheImageThatHoldsIt(t *testing.T) {
 	cases := []struct {
 		driver string
@@ -43,7 +40,7 @@ func TestEveryDriverResolvesToTheImageThatHoldsIt(t *testing.T) {
 		t.Run(c.driver, func(t *testing.T) {
 			image, err := Resolve(observatory.Driver{Name: c.driver})
 			if err != nil || image != c.image {
-				t.Errorf("Resolve(%s) = %q, %v; want %q", c.driver, image, err, c.image)
+				t.Errorf("Resolve(%s) = %q, %v, want %q", c.driver, image, err, c.image)
 			}
 		})
 	}
@@ -52,12 +49,10 @@ func TestEveryDriverResolvesToTheImageThatHoldsIt(t *testing.T) {
 func TestAnImageInTheSpecIsUsedAsWritten(t *testing.T) {
 	image, err := Resolve(observatory.Driver{Name: "acme-ccd", Image: "ghcr.io/example/acme:1.0"})
 	if err != nil || image != "ghcr.io/example/acme:1.0" {
-		t.Errorf("Resolve = %q, %v; want the image as written", image, err)
+		t.Errorf("Resolve = %q, %v, want the image as written", image, err)
 	}
 }
 
-// A third-party driver that the indi build puts in no image cannot
-// run, and the error says so.
 func TestAnUnpublishedDriverHasNoImage(t *testing.T) {
 	_, err := Resolve(observatory.Driver{Name: "indi_fishcamp_ccd"})
 	if !errors.Is(err, ErrUnpublished) {
@@ -67,24 +62,20 @@ func TestAnUnpublishedDriverHasNoImage(t *testing.T) {
 
 func TestTheServerRunsTheIndiImage(t *testing.T) {
 	if got := ServerImage(); got != "ghcr.io/liken-sh/indi:"+Tag {
-		t.Errorf("ServerImage() = %q", got)
+		t.Errorf("ServerImage() = %q, want the indi image at tag %s", got, Tag)
 	}
 }
 
 func TestTheGuiderRunsTheIndiPHD2Image(t *testing.T) {
 	if got := GuiderImage(); got != "ghcr.io/liken-sh/indi-phd2:"+Tag {
-		t.Errorf("GuiderImage() = %q", got)
+		t.Errorf("GuiderImage() = %q, want the indi-phd2 image at tag %s", got, Tag)
 	}
 }
 
-// The guider's compositor is the weston image that display-operator
-// builds on, at the tag weston/package.toml pins, so a node that runs
-// display-operator holds the guider's compositor already, and one bump
-// of weston moves both.
 func TestTheCompositorIsThePinnedWestonImage(t *testing.T) {
 	tag, err := pinnedTag(filepath.Join("..", "..", "weston", "package.toml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the tag of weston/package.toml: %v", err)
 	}
 	if got := CompositorImage(); got != "ghcr.io/liken-sh/weston:"+tag {
 		t.Errorf("CompositorImage() = %q, want the tag %s of weston/package.toml", got, tag)

@@ -1,10 +1,10 @@
 package main
 
-// A dome's target state includes its shutter. The driver moves the
-// shutter through DOME_SHUTTER_PARK_POLICY only when the park state
-// changes, so a dome that starts unparked with its shutter closed, as
-// the simulator does, stays closed after an unpark that finds it
-// unparked. The action then opens the shutter itself.
+// The operator opens a dome's shutter when it unparks the dome, and
+// closes it when it parks the dome. The driver applies
+// DOME_SHUTTER_PARK_POLICY only when the park state changes, and the
+// simulator starts unparked with its shutter closed, so without the
+// operator an unpark leaves the shutter closed.
 
 import (
 	"slices"
@@ -15,10 +15,11 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The second case starts the dome parked with its shutter open, and
-// nothing unparks the dome or a mount, so the dome's deactivation finds
-// it parked.
-func TestADomesStateIncludesItsShutter(t *testing.T) {
+// In the second case the dome starts parked with its shutter open, and
+// the dome and the mount have no activation, so nothing unparks them.
+// The deactivation finds the dome already parked and still closes the
+// shutter.
+func TestTheOperatorOpensAndClosesADomesShutter(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
 		name, trigger string

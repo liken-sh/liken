@@ -1,15 +1,17 @@
 package main
 
-// While a reservation is Ready, its runner keeps the guider as
-// StartGuider left it: it creates the guider's pod again when the pod is
-// gone, replaces it when PHD2's profile changes, and connects the camera
-// and the mount of each new PHD2. A PHD2 that restarts, in a new pod or
-// in the same one, starts with nothing connected. A new INDI server
-// ends PHD2's INDI connection, and PHD2 does not open it again. So the
-// runner connects the equipment once for each pair of a guider's pod
-// and a server's pod, after the server's camera and mount connect, and
-// only while PHD2 is Stopped. A holder that disconnects PHD2's
-// equipment on purpose keeps it disconnected until either pod changes.
+// While a reservation is Ready, its runner keeps the guider as the
+// StartGuider step set it up. It creates the guider's pod again when the
+// pod is gone, updates the pod when PHD2's profile changes, and connects
+// the camera and the mount in each new PHD2.
+//
+// A PHD2 that restarts starts with no equipment connected. When the
+// INDI server restarts, PHD2 loses its INDI connection and does not
+// reconnect. So the runner connects PHD2's equipment once for each pair
+// of guider pod and server pod, after the camera and the mount are
+// connected on the server, and only while PHD2 is not capturing. If the
+// holder disconnects PHD2's equipment on purpose, it stays disconnected
+// until the guider pod or the server pod changes.
 
 import (
 	"context"
@@ -17,9 +19,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// keepGuider keeps the telescope's guider, and records a failure in the
-// Guider's status. A failure does not end the reservation: the holder
-// may still image without guiding.
+// keepGuider runs one pass of the work above and records a failure in
+// the Guider's status. A failure does not end the reservation, because
+// the holder can still image without guiding.
 func (r *runner) keepGuider(ctx context.Context, t *tree, ref serverRef, telescope *observatory.Telescope) {
 	guider := t.guiderOf(telescope.Metadata.Name)
 	if guider == nil {
@@ -40,15 +42,16 @@ func (r *runner) keepGuider(ctx context.Context, t *tree, ref serverRef, telesco
 	}
 	gear, defined := guiderGear(camera, mount, focalLength, handles)
 	if !defined {
-		// The drivers define their devices after a server restart, and
-		// each definition rings structure, which runs this again.
+		// After an INDI server restart, the drivers define their devices
+		// again, and each definition runs keepGuider again through
+		// o.structure.
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, guiderLimit)
 	defer cancel()
 	created, err := r.o.startGuiderPod(ctx, nil, ref, guider, gear)
 	if created {
-		r.recordPod(reference(observatory.GuiderKind, guider.Metadata), guiderName(guider), "The new PHD2 starts idle and not calibrated.")
+		r.recordPod(reference(observatory.GuiderKind, guider.Metadata), guiderName(guider), "The new PHD2 starts idle and not calibrated")
 	}
 	if err == nil && gearConnected(handles) {
 		err = r.connectNewGuider(ctx, ref, guider, gear)
@@ -59,9 +62,9 @@ func (r *runner) keepGuider(ctx context.Context, t *tree, ref serverRef, telesco
 	}
 }
 
-// gearConnected reports whether every device of the guider's equipment is
-// connected on its server. PHD2's own INDI client would connect a
-// device that is not, before the runner configures it again (steady.go).
+// gearConnected reports whether every device that the guider uses is
+// connected on the INDI server. The runner waits for this, or PHD2
+// would connect a device before the runner configures it (steady.go).
 func gearConnected(handles map[string]handle) bool {
 	for _, h := range handles {
 		if !h.connected() {
@@ -71,8 +74,9 @@ func gearConnected(handles map[string]handle) bool {
 	return true
 }
 
-// connectNewGuider connects the equipment of a PHD2 that the runner has
-// not connected to the server's pod that runs now.
+// connectNewGuider connects PHD2's equipment when the runner has not
+// yet done so for this pair of guider pod and server pod. When PHD2
+// already has its equipment connected, it only records the pair.
 func (r *runner) connectNewGuider(ctx context.Context, ref serverRef, guider *observatory.Guider, gear guiderEquipment) error {
 	name := guiderName(guider)
 	t := r.o.snapshot()

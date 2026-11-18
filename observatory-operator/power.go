@@ -1,10 +1,9 @@
 package main
 
-// The Switch outputs that power the devices. A device's spec.power
-// names a Switch and an output, from output 1, and the operator turns
-// the output on through the Switch's INDI device as DIGITAL_OUTPUT_<n>,
-// whose members are OFF and ON. The Switch can be on the telescope's
-// server or on the observatory's.
+// A device's spec.power names a Switch and an output number, counting
+// from 1. The operator turns the output on or off through the property
+// DIGITAL_OUTPUT_<n> of the Switch's INDI device, whose members are OFF
+// and ON.
 
 import (
 	"context"
@@ -16,10 +15,10 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// setOutputs turns the outputs that the devices name on or off, and
-// answers what it changed. A Switch whose server does not run cannot be
-// reached, and setOutputs answers an error for it when the outputs must
-// turn on, and a note when they must turn off.
+// setOutputs turns the outputs of the devices on or off, and returns a
+// note for each Switch it changed. A Switch that it cannot reach is an
+// error when the outputs must turn on, and only a note when they must
+// turn off.
 func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, power bool) ([]string, error) {
 	member, verb := "OFF", "off"
 	if power {
@@ -35,28 +34,25 @@ func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, p
 			}
 			continue
 		}
-		// A Switch is reached on the server that its pod runs on,
-		// whatever its parents say now: a Switch that a person deleted,
-		// or moved during the session, switches its outputs off there
-		// during that server's release. A Switch with no pod is reached
-		// on the server that the tree places it on, which is known
-		// unless it is on the shelf, because a Switch never belongs to a
-		// train.
+		// Use the server that runs the Switch's pod, even when its spec
+		// now names other parents, so a Switch that a person deleted or moved
+		// during the session still turns its outputs off on its old
+		// server when that server is released.
 		ref, installed := t.runningOn(sw)
 		if !installed {
 			ref, installed = t.server(sw)
 		}
 		if !installed {
 			if power {
-				return nil, fmt.Errorf("the Switch %s, which spec.power names, is on the shelf: set its spec.telescope or spec.observatory", name)
+				return nil, fmt.Errorf("the Switch %s, which spec.power names, is not installed: set its spec.telescope or spec.observatory", name)
 			}
-			notes = append(notes, fmt.Sprintf("left the outputs of Switch %s as they are: it is on the shelf", name))
+			notes = append(notes, fmt.Sprintf("left the outputs of Switch %s as they are: it is not installed", name))
 			continue
 		}
 		handles, _ := o.connectedHandles(ctx, nil, t, ref, []*device{sw})
 		if len(handles) == 0 {
 			if power {
-				return nil, fmt.Errorf("Switch %s not connected on %s", name, ref)
+				return nil, fmt.Errorf("the Switch %s is not connected on server %s", name, ref)
 			}
 			notes = append(notes, fmt.Sprintf("left the outputs of Switch %s as they are: not connected", name))
 			continue
@@ -80,12 +76,12 @@ func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, p
 	return notes, nil
 }
 
-// poweredBy answers the devices whose outputs the release of a
-// server switches off: the devices that it releases (releasedOn), and
-// one for each device in the server's record whose object is gone or
-// was created again, with the recorded spec. The finalizer holds a
-// deleted device only until its pod is gone, so after StopDevices only
-// the record names the output that the session switched on for it.
+// poweredBy returns the devices whose outputs the release of a server
+// turns off: the devices that the release stops (releasedOn), and a
+// device built from the recorded spec for each recorded device whose
+// object is gone or has a new UID. The operator removes a deleted
+// device's finalizer once its pod is gone, so after StopDevices only the
+// record names the output that the session turned on for it.
 func (t *tree) poweredBy(ref serverRef, released []*device) []*device {
 	out := slices.Clone(released)
 	for _, key := range sortedKeys(t.records[ref].Devices) {
@@ -103,13 +99,11 @@ func (t *tree) poweredBy(ref serverRef, released []*device) []*device {
 	return out
 }
 
-// unpowered answers the devices whose output no device that draws
-// from it names (draws), apart from the devices of the server that
-// stops: the server whose release switches the outputs off, or none
-// (serverRef{}). A deleted device, or a server that releases, so
-// leaves on an output that another device still draws from, such as an
-// output of an observatory's Switch that powers devices on two
-// telescopes.
+// unpowered returns the devices whose output no device in the tree
+// still uses (draws), so that an output of an observatory's Switch
+// that powers devices on two telescopes stays on while one of them
+// runs. stopping is the server being released, whose devices do not
+// count, or serverRef{} for none.
 func (t *tree) unpowered(devices []*device, stopping serverRef) []*device {
 	used := map[observatory.Power]bool{}
 	for _, d := range t.devices {
@@ -126,20 +120,19 @@ func (t *tree) unpowered(devices []*device, stopping serverRef) []*device {
 	return out
 }
 
-// draws reports whether a device draws from its output on a server
-// other than the one that stops: the tree places it on a running
-// server (tree.server), and its pod is not stopping. A device with no
-// pod draws there too, because PowerOn switches its output on before
-// StartDevices creates its pod. Once a release's StopDevices has
-// deleted the pods, the session's set no longer holds its devices, so
-// two releases that overlap do not each leave the other's output on.
+// draws reports whether a device keeps its power output in use: the
+// tree places it on a server other than stopping, that server's pod exists
+// and is not being deleted, and the device's pod is not being deleted. A device with no
+// pod yet counts, because PowerOn turns its output on before
+// StartDevices creates its pod. A device whose pod is being deleted
+// does not count, so two releases that overlap do not each keep the
+// other's outputs on.
 func (t *tree) draws(d *device, stopping serverRef) bool {
 	ref, placed := t.server(d)
 	_, p, running := t.podOf(d)
 	return placed && ref != stopping && t.serverRuns(ref) && !(running && p.Metadata.DeletionTimestamp != nil)
 }
 
-// serverRuns reports whether a server's pod exists and is not stopping.
 func (t *tree) serverRuns(ref serverRef) bool {
 	p, ok := t.pods[ref.String()]
 	return ok && p.Metadata.DeletionTimestamp == nil

@@ -1,22 +1,23 @@
 package main
 
-// The fake API server plays the Job controller too: a Job ends as soon
-// as the operator creates it, Complete, unless a test holds the Jobs
+// The fake API server also plays the Job controller: a Job becomes
+// Complete as soon as the operator creates it, unless a test holds Jobs
 // running or makes them fail.
 
 const jobsPath = "/apis/batch/v1/namespaces/" + testNamespace + "/jobs"
 
 type fakeJobController struct {
-	// hold keeps each new Job running until a test ends it.
+	// hold keeps each new Job running until a test completes it.
 	hold bool
-	// failure is the Failed condition of each new Job, when it is set.
+	// failure is the Failed condition to give each new Job, when it is
+	// set.
 	failure *jobCondition
-	// terminated is the state of the container of each failed Job's
-	// pod, when it is set. Without it, a failed Job has no pod.
+	// terminated is the container state of each failed Job's pod, when
+	// it is set. Without it, a failed Job has no pod.
 	terminated map[string]any
 }
 
-// started answers the status of a Job that the operator creates now.
+// started returns the status of a Job when the operator creates it.
 func (c *fakeJobController) started() map[string]any {
 	switch {
 	case c.hold:
@@ -27,8 +28,8 @@ func (c *fakeJobController) started() map[string]any {
 	return completeJob()
 }
 
-// completeJob is the status of a Job whose pod succeeded, as the Job
-// controller of Kubernetes 1.31 and later writes it.
+// completeJob returns the status of a Job whose pod succeeded, as the
+// Job controller in Kubernetes 1.31 and later writes it.
 func completeJob() map[string]any {
 	return map[string]any{"succeeded": 1, "conditions": []any{
 		map[string]any{"type": "SuccessCriteriaMet", "status": "True"},
@@ -52,7 +53,7 @@ func (a *fakeAPI) holdJobs() {
 }
 
 // failJobs makes each Job that the operator creates from now on fail
-// at once, or, with no reason, succeed again.
+// immediately, or succeed again when reason is empty.
 func (a *fakeAPI) failJobs(reason, message string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -62,7 +63,7 @@ func (a *fakeAPI) failJobs(reason, message string) {
 	}
 }
 
-// completeJob ends a held Job, Complete.
+// completeJob makes a held Job Complete, and stops holding new Jobs.
 func (a *fakeAPI) completeJob(name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -85,9 +86,9 @@ func (a *fakeAPI) terminateJobPods(exitCode int, message string) {
 	a.jobs.terminated = map[string]any{"exitCode": exitCode, "reason": "Error", "message": message}
 }
 
-// failedPod stores the pod of a Job that failed, with the labels of the
-// Job's template and the label that the Job controller adds. The
-// caller holds a.mu.
+// failedPod stores the pod of a failed Job, with the labels of the
+// Job's pod template and the batch.kubernetes.io/job-name label that
+// the Job controller adds. The caller holds a.mu.
 func (a *fakeAPI) failedPod(object map[string]any) {
 	if a.jobs.failure == nil || a.jobs.terminated == nil {
 		return

@@ -1,8 +1,5 @@
 package main
 
-// A person's SetUp: the status writer keeps it on every kind, and
-// expires it at dawn or at its setUpUntil.
-
 import (
 	"slices"
 	"testing"
@@ -12,9 +9,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The status writer composes and replaces every status while a
-// reservation activates, and leaves each person's SetUp, and its
-// setUpUntil, as the person wrote them.
+// The status writer replaces every status while a reservation
+// activates, and keeps each SetUp and setUpUntil as the person wrote
+// them.
 func TestTheStatusWriterKeepsAPersonsSetUp(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -54,10 +51,8 @@ func TestTheStatusWriterKeepsAPersonsSetUp(t *testing.T) {
 	})
 }
 
-// A SetUp holds until the first astronomical dawn after the person
-// wrote it, then turns False with the reason Expired, and its
-// transition posts one Event, with no other change to wake the status
-// writer.
+// No other change wakes the status writer at dawn, so this test checks
+// that its timer alone sets SetUp to False and posts one Event.
 func TestASetUpExpiresAtDawn(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -68,7 +63,7 @@ func TestASetUpExpiresAtDawn(t *testing.T) {
 		time.Sleep(time.Until(dawn) - time.Minute)
 		synctest.Wait()
 		if c := w.conditionOn(observatory.TelescopeKind, "east", observatory.ConditionSetUp); c.Status != observatory.ConditionTrue {
-			t.Fatalf("SetUp before dawn = %+v", c)
+			t.Fatalf("SetUp before dawn = %+v, want True", c)
 		}
 
 		time.Sleep(time.Minute + 2*statusWindow)
@@ -76,7 +71,7 @@ func TestASetUpExpiresAtDawn(t *testing.T) {
 		message := "Expired at " + dawn.Format(time.RFC3339) + ": set up by stargazer"
 		c := w.conditionOn(observatory.TelescopeKind, "east", observatory.ConditionSetUp)
 		if c.Status != observatory.ConditionFalse || c.Reason != observatory.ReasonExpired || c.Message != message {
-			t.Errorf("SetUp after dawn = %+v", c)
+			t.Errorf("SetUp after dawn = %+v, want False with reason Expired and message %q", c, message)
 		}
 		if got := w.setUpExpiryTime(observatory.TelescopeKind, "east"); !got.IsZero() {
 			t.Errorf("setUpExpiryTime after dawn = %v, want none", got)
@@ -87,7 +82,6 @@ func TestASetUpExpiresAtDawn(t *testing.T) {
 	})
 }
 
-// A setUpUntil replaces dawn, on a device as on a Telescope.
 func TestASetUpExpiresAtItsUntil(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -98,22 +92,17 @@ func TestASetUpExpiresAtItsUntil(t *testing.T) {
 		time.Sleep(29 * time.Minute)
 		synctest.Wait()
 		if c := w.conditionOn(observatory.MountKind, "east", observatory.ConditionSetUp); c.Status != observatory.ConditionTrue {
-			t.Fatalf("SetUp before its until = %+v", c)
+			t.Fatalf("SetUp before its until = %+v, want True", c)
 		}
 		time.Sleep(time.Minute + 2*statusWindow)
 		synctest.Wait()
 		c := w.conditionOn(observatory.MountKind, "east", observatory.ConditionSetUp)
 		if c.Reason != observatory.ReasonExpired || c.Message != "Expired at "+until.Format(time.RFC3339)+": set up by stargazer" {
-			t.Errorf("SetUp after its until = %+v", c)
+			t.Errorf("SetUp after its until = %+v, want reason Expired and message \"Expired at %s: set up by stargazer\"", c, until.Format(time.RFC3339))
 		}
 	})
 }
 
-// The status writer shows when each SetUp expires in
-// status.setUpExpiryTime: at the person's setUpUntil when they wrote
-// one, else at the next astronomical dawn, and nothing while the
-// resource is not set up. The same holds on an Observatory, a
-// Telescope, and a device.
 func TestTheStatusShowsWhenASetUpExpires(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -153,9 +142,7 @@ func noTime(time.Time) time.Time { return time.Time{} }
 
 func inTwoHours(now time.Time) time.Time { return now.Add(2 * time.Hour) }
 
-// A SetUp that expired lets no new session start: the next reservation
-// waits for a person again.
-func TestAnExpiredSetUpHoldsTheNextReservation(t *testing.T) {
+func TestAnExpiredSetUpBlocksTheNextReservation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)

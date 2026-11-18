@@ -46,15 +46,18 @@ spec:
           x-kubernetes-validations:
             - rule: size(self.metadata.name) <= 32
               message: >-
-                a OpticalTube name is at most 32 characters, because
-                observatory-operator builds the names of its pods,
-                Services, and Job labels from the names of observatory
-                resources, and Kubernetes limits those to 63 characters
+                an OpticalTube name is at most 32 characters, the limit
+                of every observatory.liken.sh kind. observatory-operator
+                builds the names of pods and Services, and the values of
+                Job labels, from the names of observatory.liken.sh
+                resources, and Kubernetes limits each of those to 63
+                characters. The limit of 32 leaves room for a suffix
+                longer than any that the operator adds.
           description: >-
             An `OpticalTube` is the optical tube assembly, or OTA: the
             lens or mirror that collects the light. It has no driver.
-            Two OpticalTrains can name one tube, such as an imaging
-            train and an off-axis guider.
+            Two `OpticalTrain` resources can use the same tube, such as
+            an imaging train and an off-axis guider.
           required: [spec]
           properties:
             spec:
@@ -86,8 +89,8 @@ spec:
             status:
               type: object
               description: >-
-                What the operator observes. The operator writes it, and
-                a person reads it.
+                What the operator observes. Only the operator writes
+                it.
               properties:
                 observedGeneration:
                   type: integer
@@ -98,8 +101,8 @@ spec:
                 conditions:
                   type: array
                   description: >-
-                    `ParentFound` is `False` when the `Telescope` or its
-                    `Observatory` does not exist.
+                    The `ParentFound` condition is `False` when the
+                    `Telescope` or its `Observatory` does not exist.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:
@@ -117,7 +120,7 @@ spec:
                         type: string
                         enum: ["True", "False", Unknown]
                         description: >-
-                          Whether the condition holds: `True`, `False`,
+                          Whether the condition is met: `True`, `False`,
                           or `Unknown`.
                       observedGeneration:
                         type: integer
@@ -135,19 +138,19 @@ spec:
                         type: string
                         maxLength: 32768
                         description: >-
-                          The cause, for a person to read. It can be
-                          empty.
+                          A sentence for a person that explains the
+                          reason. It can be empty.
                       lastTransitionTime:
                         type: string
                         format: date-time
                         description: >-
-                          When `status` last changed. A write with the
-                          same status keeps this time.
+                          When `status` last changed. A write that
+                          leaves `status` unchanged keeps this time.
                 display:
                   type: object
                   description: >-
-                    The spec as a person reads it, with its units, for the
-                    printer columns.
+                    The `spec` values with their units, for the printer
+                    columns.
                   properties:
                     aperture:
                       type: string
@@ -157,7 +160,7 @@ spec:
                       description: "The focal length, such as `480 mm`."
                 trains:
                   type: array
-                  description: "Each `OpticalTrain` that names this tube."
+                  description: "The name of each `OpticalTrain` that uses this tube."
                   x-kubernetes-list-type: set
                   items:
                     type: string

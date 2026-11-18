@@ -1,18 +1,18 @@
-// Package inditest is a fake indiserver for tests, built from the bytes
-// that the real simulators sent, which testdata/ holds. A Server runs
-// one Driver for each simulator it names. A driver defines what its
-// baseline transcript defines, adds what its connect transcript
-// defines when a client connects it, and answers every other change
-// with the values sent and the state Ok. A test can hold a property,
-// so its driver never answers, refuse it, so its driver answers Alert,
-// or make it move, so its driver answers Busy until the test sets its
-// state.
+// Package inditest is a fake indiserver for tests. Its drivers replay
+// transcripts that were recorded from the real INDI simulators, which
+// testdata/ holds. A Server runs one Driver for each simulator it is
+// given. A driver defines the properties of its baseline transcript,
+// adds those of its connect transcript when a client connects the
+// device, and answers every other change by setting the values sent
+// and the state Ok. A test can change that for one property. Hold makes
+// its driver never answer, Refuse makes it answer Alert, and Move makes
+// it answer Busy until the test sets the state.
 //
-// A client dials the Server through its DialContext, and each dial is
-// one end of a net.Pipe, so a test runs in a testing/synctest bubble on
-// the fake clock, which a real socket stops. The package uses the
-// standard library alone, so another component's tests take it with
-// no more of observatory-operator than the package.
+// A client dials the Server through DialContext, which returns one end
+// of a net.Pipe. Unlike a real socket, a pipe lets a test run in a
+// testing/synctest bubble on the fake clock. The package imports only
+// the standard library, so tests of other components can use it without
+// importing the rest of observatory-operator.
 package inditest
 
 import (
@@ -41,17 +41,17 @@ type Server struct {
 	moving  map[string]bool
 }
 
-// NewServer answers a server that runs one driver for each simulator,
-// named as a directory of testdata/ is, such as "telescope" and "ccd",
-// or as the INDI driver is, such as "indi_simulator_ccd". It closes
-// when the test ends.
+// NewServer returns a server that runs one driver for each simulator. A
+// simulator is named either as a directory of testdata/, such as
+// "telescope" and "ccd", or as its INDI driver, such as
+// "indi_simulator_ccd". The server closes when the test ends.
 func NewServer(t testing.TB, simulators ...string) *Server {
 	t.Helper()
 	s := &Server{held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}}
 	for _, simulator := range simulators {
 		d, err := NewDriver(trimmed(simulator))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("loading the simulator %q: %v", simulator, err)
 		}
 		s.drivers = append(s.drivers, d)
 	}
@@ -59,9 +59,9 @@ func NewServer(t testing.TB, simulators ...string) *Server {
 	return s
 }
 
-// DialContext answers one end of a new pipe to the server, and serves
-// the other, whatever the address. A closed server refuses the dial
-// with ECONNREFUSED, as a host with no listener on the port does.
+// DialContext returns one end of a new pipe and serves the other end,
+// whatever the address. After Close it fails with ECONNREFUSED, as a
+// host with nothing listening on the port does.
 func (s *Server) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -97,11 +97,14 @@ func (s *Server) serve(c *Conn) {
 		if err := decoder.DecodeElement(&v, &start); err != nil {
 			return
 		}
-		s.answer(c, v, start)
+		s.respond(c, v, start)
 	}
 }
 
-func (s *Server) answer(c *Conn, v Vector, start xml.StartElement) {
+// respond handles one message from a client: it sends definitions for
+// getProperties, replies to pingRequest, and applies each new* change
+// to the driver's property.
+func (s *Server) respond(c *Conn, v Vector, start xml.StartElement) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tag := v.XMLName.Local
@@ -167,7 +170,7 @@ func (s *Server) answer(c *Conn, v Vector, start xml.StartElement) {
 	}
 }
 
-// driver answers the driver of a device, or nil. The caller holds mu.
+// driver returns the driver of a device, or nil. The caller holds mu.
 func (s *Server) driver(device string) *Driver {
 	for _, d := range s.drivers {
 		if d.Device == device {
@@ -177,32 +180,35 @@ func (s *Server) driver(device string) *Driver {
 	return nil
 }
 
-// broadcast sends text to every client. The caller holds mu.
+// broadcast sends text to every connected client. The caller holds mu.
 func (s *Server) broadcast(text string) {
 	for _, c := range s.conns {
 		c.Send(text)
 	}
 }
 
-// Hold makes a driver never answer a change to one property, as a
-// driver whose hardware stops answering does.
+// Hold makes the driver never answer a change to the property, as when
+// its hardware stops responding.
 func (s *Server) Hold(device, property string) { s.mark(s.held, device, property, true) }
 
-// Release makes a held property's driver answer again. A change that
-// it did not answer stays unanswered, as a real driver's would.
+// Release makes the driver answer changes to the property again. A
+// change that it did not answer stays unanswered, as with a real
+// driver.
 func (s *Server) Release(device, property string) { s.mark(s.held, device, property, false) }
 
-// Refuse makes a driver answer every change to one property with
-// Alert and keep its values, as a driver whose hardware fails does.
+// Refuse makes the driver answer every change to the property with the
+// state Alert and keep its values, as when its hardware fails.
 func (s *Server) Refuse(device, property string) { s.mark(s.refused, device, property, true) }
 
-// Accept makes a driver that refused a property answer it again.
+// Accept makes a driver that was refusing a property answer it normally
+// again.
 func (s *Server) Accept(device, property string) { s.mark(s.refused, device, property, false) }
 
-// Move makes a driver answer each change to one property with the
-// values sent and the state Busy, as a mount that slews or a camera
-// that exposes does. The motion ends when the test sets the state with
-// SetState, and a change during the motion interrupts it with Alert.
+// Move makes the driver answer each change to the property with the
+// values sent and the state Busy, as a slewing mount or an exposing
+// camera does. The motion ends when the test calls SetState. A change
+// during the motion interrupts it: the driver turns every member Off and
+// answers Alert.
 func (s *Server) Move(device, property string) { s.mark(s.moving, device, property, true) }
 
 func (s *Server) mark(set map[string]bool, device, property string, on bool) {
@@ -215,8 +221,8 @@ func (s *Server) mark(set map[string]bool, device, property string, on bool) {
 	}
 }
 
-// SetState sets a property's state and reports it, as a driver does
-// when an exposure or a slew ends.
+// SetState sets a property's state and sends it to the clients, as a
+// driver does when an exposure or a slew ends.
 func (s *Server) SetState(device, property, state string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -226,8 +232,8 @@ func (s *Server) SetState(device, property, state string) {
 	}
 }
 
-// Report sets one member of a property and reports it, as a driver
-// reports a reading.
+// Report sets one member of a property and sends the property to the
+// clients, as a driver does when it reads a sensor.
 func (s *Server) Report(device, property, member, value string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -245,7 +251,7 @@ func (s *Server) Message(device, text string) {
 	s.broadcast(fmt.Sprintf("<message device=\"%s\" message=\"%s\"/>\n", Escape(device), Escape(text)))
 }
 
-// find answers a device's property, or nil. The caller holds mu.
+// find returns a device's property, or nil. The caller holds mu.
 func (s *Server) find(device, property string) *Property {
 	if d := s.driver(device); d != nil {
 		return d.Find(property)
@@ -253,8 +259,8 @@ func (s *Server) find(device, property string) *Property {
 	return nil
 }
 
-// Property answers a copy of a device's property as its driver holds
-// it now, or nil when the driver does not define it.
+// Property returns a copy of a device's property as its driver has it
+// now, or nil when the driver does not define it.
 func (s *Server) Property(device, property string) *Property {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -264,7 +270,7 @@ func (s *Server) Property(device, property string) *Property {
 	return nil
 }
 
-// Changes answers the changes that clients sent, in order, as
+// Changes returns the changes that clients sent, in order, each as
 // "<device>.<property> <member>=<value> ...".
 func (s *Server) Changes() []string {
 	s.mu.Lock()
@@ -272,8 +278,8 @@ func (s *Server) Changes() []string {
 	return slices.Clone(s.sent)
 }
 
-// Connected answers the devices that a client has connected, in order
-// of their names.
+// Connected returns the names of the devices that a client has
+// connected, sorted.
 func (s *Server) Connected() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -287,15 +293,15 @@ func (s *Server) Connected() []string {
 	return out
 }
 
-// Clients counts the open client connections.
+// Clients returns the number of open client connections.
 func (s *Server) Clients() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.conns)
 }
 
-// Cut closes every client connection while the drivers run, as a
-// network that drops a connection does.
+// Cut closes every client connection while the drivers keep running, as
+// a network failure does.
 func (s *Server) Cut() {
 	s.mu.Lock()
 	conns := s.conns
@@ -306,7 +312,7 @@ func (s *Server) Cut() {
 	}
 }
 
-// Close stops the server: it closes every connection and refuses each
+// Close stops the server. It closes every connection and refuses every
 // later dial.
 func (s *Server) Close() {
 	s.mu.Lock()

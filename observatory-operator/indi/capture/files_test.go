@@ -11,7 +11,7 @@ func TestWriteTranscriptsWritesOneFileForEachPhase(t *testing.T) {
 	replies := []Reply{{"baseline", []byte("<a/>")}, {"move", []byte("<b/>")}}
 
 	if err := WriteTranscripts(dir, replies); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the transcripts: %v", err)
 	}
 
 	for _, r := range replies {
@@ -36,32 +36,32 @@ func readFile(t *testing.T, dir, name string) Capture {
 	t.Helper()
 	file, err := os.Open(filepath.Join(dir, name+".xml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening %s.xml: %v", name, err)
 	}
 	defer file.Close()
 	c, err := Read(file)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading %s.xml: %v", name, err)
 	}
 	return c
 }
 
-// A capture of an interface leaves out what the capture of
-// DefaultDevice in the same directory holds.
+// A capture of an interface leaves out the properties that the capture
+// of DefaultDevice in the same directory contains.
 func TestWriteCaptureLeavesOutTheDefaultDevice(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := WriteCapture(dir, bare(DefaultDevice), "2.2.5", "Bare Device", defs("CONNECTION", "DEBUG")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the capture of DefaultDevice: %v", err)
 	}
 
 	kept, err := WriteCapture(dir, bare("dustcap"), "2.2.5", "Bare Dust Cap", defs("CONNECTION", "CAP_PARK", "DEBUG"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the capture of dustcap: %v", err)
 	}
 
 	c := readFile(t, dir, "dustcap")
 	if kept != 1 || !c.Defines("CAP_PARK") || c.Defines("CONNECTION") || c.Defines("DEBUG") {
-		t.Errorf("kept %d, and the capture is %+v; want CAP_PARK alone", kept, c)
+		t.Errorf("kept %d and the capture is %+v, want 1 and CAP_PARK alone", kept, c)
 	}
 	want := Header{Driver: "indi_bare_dustcap", Device: "Bare Dust Cap", INDI: "2.2.5"}
 	if c.Header != want {
@@ -84,7 +84,7 @@ func TestWriteCaptureFails(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if _, err := WriteCapture(t.TempDir(), c.bare, "2.2.5", "Bare", c.replies); err == nil {
-				t.Error("WriteCapture succeeded")
+				t.Error("WriteCapture returned no error, want one")
 			}
 		})
 	}

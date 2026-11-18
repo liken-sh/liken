@@ -10,29 +10,29 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The CRD of each kind with procedures is a template in this
-// directory, <plural>-crd.yaml.tmpl, with the fields that only that
-// kind has written out, and directives for the parts that it shares
-// with other kinds or that come from INDI:
+// Each kind with procedures has a CRD template in this directory,
+// <plural>-crd.yaml.tmpl, which spells out the fields that only that
+// kind has. It uses these template functions for the parts that several
+// kinds share and the parts that come from INDI:
 //
 //   - {{ include "device spec" . }} and {{ include "device status" . }}
-//     are the fields that every device kind shares, in device.yaml.tmpl.
+//     insert the fields that every device kind has, from
+//     device.yaml.tmpl.
 //   - {{ include "procedure spec" . }} and
-//     {{ include "procedure status" . }} are the procedure schema, in
-//     procedures.yaml.tmpl. Its actions include the kind's own
-//     template "action", which states the action's fields that only
-//     the kind has, and includes "action fields" for the rest.
-//   - {{ include "fits keywords" . }} is spec.fitsKeywords, in
-//     fitskeywords.yaml.tmpl, whose rule refuses the keywords that
-//     {{ refusedKeywords }} lists from observatory.RefusedFITSKeywords.
-//     {{ astrophotographyKeywords }} lists the ones among them that
-//     astrophotography-operator writes, so the rule's message names
-//     that operator.
-//   - {{ settings }} and {{ standard }} are the typed fields that the
-//     kind's fields file gives, in spec and in status.
+//     {{ include "procedure status" . }} insert the procedure schema,
+//     from procedures.yaml.tmpl. That schema includes the kind's own
+//     "action" template for the action fields that only the kind has,
+//     and the "action" template includes "action fields" for the rest.
+//   - {{ include "fits keywords" . }} inserts spec.fitsKeywords, from
+//     fitskeywords.yaml.tmpl. Its rule rejects the keywords that
+//     {{ refusedKeywords }} lists. {{ astrophotographyKeywords }} lists
+//     the ones among them that astrophotography-operator writes, so the
+//     rule's message can name that operator.
+//   - {{ settings }} and {{ standard }} insert the typed fields of the
+//     kind's <plural>-fields.yaml, for spec and for status.
 //
-// "indent n" indents a fragment by n columns, so a fragment is written
-// once at the left margin and included at any depth.
+// "indent n" lets each fragment be written at the left margin and
+// included at any depth.
 const (
 	templateSuffix  = "-crd.yaml.tmpl"
 	deviceTemplate  = "device.yaml.tmpl"
@@ -40,8 +40,8 @@ const (
 	fitsTemplate    = "fitskeywords.yaml.tmpl"
 )
 
-// renderCRD renders the template of one kind. The typed fields arrive
-// as YAML at the left margin, empty for a kind with none.
+// settings and standard are the typed fields as YAML at the left
+// margin, and are empty for a kind that has none.
 func renderCRD(dir, plural, settings, standard string) (string, error) {
 	t := template.New(plural)
 	t.Funcs(template.FuncMap{
@@ -74,7 +74,7 @@ func renderCRD(dir, plural, settings, standard string) (string, error) {
 	return tidy(out.String()), nil
 }
 
-// indent puts n spaces before each line of a fragment that holds text.
+// indent leaves blank lines empty.
 func indent(n int, fragment string) string {
 	lines := strings.Split(strings.Trim(fragment, "\n"), "\n")
 	for i, line := range lines {
@@ -85,7 +85,7 @@ func indent(n int, fragment string) string {
 	return strings.Join(lines, "\n")
 }
 
-// celList writes names as the items of a CEL list, such as
+// celList returns names as the items of a CEL list, such as
 // 'SIMPLE', 'BITPIX'.
 func celList(names []string) string {
 	quoted := make([]string, len(names))

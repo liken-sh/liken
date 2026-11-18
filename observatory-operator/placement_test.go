@@ -1,10 +1,5 @@
 package main
 
-// The guide camera's pod runs on the node of its telescope's server.
-// Plan 03 measured 430 ms for each hop of a guide-sized frame between
-// two nodes, and the scheduler alone put the guide camera on the other
-// node from the server.
-
 import (
 	"maps"
 	"testing"
@@ -14,15 +9,13 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// besideEast is the pod affinity that holds a pod to the node of the
-// east telescope's server.
 var besideEast = &affinity{PodAffinity: &podAffinity{Required: []podAffinityTerm{{
 	LabelSelector: &labelSelector{MatchLabels: map[string]string{labelName: "east-telescope"}},
 	TopologyKey:   "kubernetes.io/hostname",
 }}}}
 
 // A guide camera with a claim runs on the node of its device, so an
-// affinity to the server could hold it Pending forever.
+// affinity to the server could leave its pod Pending.
 func TestOnlyAGuideCameraWithNoClaimFollowsTheServer(t *testing.T) {
 	t.Parallel()
 	claimed := simulator(observatory.CameraKind, "east-guide", "indi_asi_ccd")
@@ -42,17 +35,17 @@ func TestOnlyAGuideCameraWithNoClaimFollowsTheServer(t *testing.T) {
 			t.Parallel()
 			p, _, _, err := devicePod("observatory", east, c.d, c.guides, "")
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("building the pod of %s: %v", c.what, err)
 			}
 			if mustJSON(p.Spec.Affinity) != mustJSON(c.want) {
-				t.Errorf("affinity = %s, want %s", mustJSON(p.Spec.Affinity), mustJSON(c.want))
+				t.Errorf("the pod affinity is %s, want %s", mustJSON(p.Spec.Affinity), mustJSON(c.want))
 			}
 		})
 	}
 }
 
-// affinities answers the pod affinity of each pod that has one, by the
-// pod's name.
+// affinities returns the pod affinity of each pod that has one, keyed
+// by pod name.
 func affinities(w *world) map[string]*affinity {
 	out := map[string]*affinity{}
 	for _, name := range w.api.names(podsCollection) {

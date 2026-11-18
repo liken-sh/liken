@@ -1,8 +1,8 @@
 package main
 
-// A camera's cooler, which the cool and warm actions drive. INDI's
-// camera takes a setpoint in CCD_TEMPERATURE and works toward it, and
-// reports the sensor's temperature in the same property.
+// An INDI camera driver takes a cooler setpoint written to
+// CCD_TEMPERATURE, cools or warms toward it, and reports the sensor's
+// temperature in the same property.
 
 import (
 	"context"
@@ -15,8 +15,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// noCooler answers why a camera's driver has no cooler that the
-// operator can set, or "" when it has one.
+// noCooler returns why the operator cannot set the camera's cooler, or
+// "" when it can.
 func noCooler(ctx context.Context, h handle) string {
 	p, ok := h.property(ctx, "CCD_TEMPERATURE")
 	switch {
@@ -28,12 +28,12 @@ func noCooler(ctx context.Context, h handle) string {
 	return ""
 }
 
-// coolerOffLimit bounds the switch-off of a cooler after a warm-up,
-// which can begin after the action's timeout. It is a deadline: a
-// driver answers a switch in milliseconds.
+// coolerOffLimit is the deadline for switching off the cooler at the
+// end of warm. warm can get there after the action's timeout has
+// passed, so the switch-off needs a deadline of its own.
 const coolerOffLimit = 30 * time.Second
 
-// within answers how close to its setpoint a sensor must come.
+// within returns the tolerance around the setpoint in degrees Celsius.
 func within(t observatory.Temperature) float64 {
 	if t.Within <= 0 {
 		return observatory.DefaultWithin
@@ -42,10 +42,9 @@ func within(t observatory.Temperature) float64 {
 }
 
 // setTemperature sends a cooler setpoint and waits until the sensor is
-// within tolerance of it, or until the driver answers Alert, or until
-// ctx ends. The driver's answer to this setpoint decides an Alert, so
-// an Alert that an earlier setpoint left does not fail a retry. report
-// says how far the sensor is.
+// within tolerance of it, the driver replies Alert, or ctx ends. Only
+// the reply to this setpoint can fail it, so an Alert state left from
+// an earlier setpoint does not fail a retry.
 func setTemperature(ctx context.Context, h handle, target, tolerance float64, report func(string)) error {
 	sent, err := h.client().SetNumbers(h.name, "CCD_TEMPERATURE", map[string]float64{"CCD_TEMPERATURE_VALUE": target})
 	if err != nil {
@@ -72,14 +71,13 @@ func setTemperature(ctx context.Context, h handle, target, tolerance float64, re
 		if p, ok := h.client().Property(h.name, "CCD_TEMPERATURE"); ok {
 			last, _ = number(p, "CCD_TEMPERATURE_VALUE")
 		}
-		return fmt.Errorf("%s reached %s of %s: %w", h, quantity(last, 1, "°C"), quantity(target, 1, "°C"), err)
+		return fmt.Errorf("%s stopped at %s before reaching %s: %w", h, quantity(last, 1, "°C"), quantity(target, 1, "°C"), err)
 	}
 	report(fmt.Sprintf("reached %s on %s", quantity(target, 1, "°C"), h))
 	return nil
 }
 
-// cool sends a setpoint and waits until the sensor reaches it, until
-// the action's deadline in ctx.
+// cool skips a camera whose cooler the operator cannot set.
 func cool(ctx context.Context, h handle, t observatory.Temperature, report func(string)) (string, error) {
 	if why := noCooler(ctx, h); why != "" {
 		return "", skip(why)
@@ -91,14 +89,14 @@ func cool(ctx context.Context, h handle, t observatory.Temperature, report func(
 	return fmt.Sprintf("cooled %s to %s", h, quantity(t.Celsius, 1, "°C")), nil
 }
 
-// warm raises a camera's setpoint, waits until the sensor reaches it
-// or until the action's deadline in wait, and then switches the cooler
-// off. A sensor that loses its cooler at -10 °C warms by tens of
-// degrees in seconds, and the stress of that change can crack it, so
-// the sensor warms under control first. A cooler cannot warm a sensor
-// above the air around it, so on a cold night the sensor may never
-// reach the setpoint: the deadline ends the wait and does not fail the
-// action. ctx outlives the deadline, so the cooler still goes off.
+// warm raises the setpoint to t.Celsius and then switches the cooler
+// off. A cold sensor whose cooler switches off warms by tens of degrees
+// in seconds, and that thermal stress can crack it, so the cooler
+// brings it up to the setpoint first. A cooler cannot warm a sensor above the air
+// temperature, so on a cold night the sensor may never reach the
+// setpoint, and the end of wait does not fail the action. wait has
+// the action's deadline and ctx does not, so the cooler is still
+// switched off after wait ends.
 func warm(ctx, wait context.Context, h handle, t observatory.Temperature, report func(string)) (string, error) {
 	if why := noCooler(wait, h); why != "" {
 		return "", skip(why)

@@ -10,27 +10,27 @@ import (
 )
 
 // Member is one member of a property: a number, a switch, a text, or a
-// light. Format, Min, Max, and Step are a number's alone.
+// light. Only a number member uses Format, Min, Max, and Step.
 type Member struct {
 	Name, Label, Format, Min, Max, Step, Value string
 }
 
-// Property is one property of a driver, as the driver defines it and
-// reports it. Type is Number, Switch, Text, Light, or BLOB.
+// Property is one property of a fake driver. Type is Number, Switch,
+// Text, Light, or BLOB.
 type Property struct {
 	Type                                          string
 	Device, Name, Label, Group, State, Perm, Rule string
 	Members                                       []Member
 }
 
-// Clone answers a copy that shares no member with p.
+// Clone returns a copy that shares no Members slice with p.
 func (p *Property) Clone() *Property {
 	out := *p
 	out.Members = slices.Clone(p.Members)
 	return &out
 }
 
-// Value answers a member's value, and false when p has no such member.
+// Value returns a member's value, and false when p has no such member.
 func (p *Property) Value(member string) (string, bool) {
 	for _, m := range p.Members {
 		if m.Name == member {
@@ -40,7 +40,7 @@ func (p *Property) Value(member string) (string, bool) {
 	return "", false
 }
 
-// SetValue sets a member's value, and does nothing when p has no such
+// SetValue sets a member's value. It does nothing when p has no such
 // member.
 func (p *Property) SetValue(member, value string) {
 	for i := range p.Members {
@@ -50,8 +50,8 @@ func (p *Property) SetValue(member, value string) {
 	}
 }
 
-// Switch turns one member On and every other member Off, as a switch
-// of the rule OneOfMany does.
+// Switch turns one member On and every other member Off, as under
+// OneOfMany.
 func (p *Property) Switch(on string) {
 	for i := range p.Members {
 		p.Members[i].Value = "Off"
@@ -61,8 +61,8 @@ func (p *Property) Switch(on string) {
 	}
 }
 
-// Updated answers a copy of p with the state and the member values of
-// a later update or change. A vector with no state keeps p's.
+// Updated returns a copy of p with the state and member values from
+// the vector v. When v has no state, the copy keeps p's state.
 func (p *Property) Updated(v Vector) *Property {
 	out := p.Clone()
 	if v.State != "" {
@@ -81,8 +81,8 @@ func Escape(text string) string {
 	return b.String()
 }
 
-// Def answers the def*Vector element that defines p, as indiserver
-// sends it.
+// Def returns the def*Vector element that defines p, in the XML form
+// that indiserver sends.
 func (p *Property) Def() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `<def%sVector device="%s" name="%s" label="%s" group="%s" state="%s"`, p.Type, Escape(p.Device), Escape(p.Name), Escape(p.Label), Escape(p.Group), p.State)
@@ -104,7 +104,7 @@ func (p *Property) Def() string {
 	return b.String()
 }
 
-// Set answers the set*Vector element that reports p's state and
+// Set returns the set*Vector element that reports p's state and
 // values.
 func (p *Property) Set() string {
 	var b strings.Builder
@@ -116,7 +116,7 @@ func (p *Property) Set() string {
 	return b.String()
 }
 
-// Vector is one element that a transcript holds or a client sends: a
+// Vector is one XML element of a transcript or of a client's input: a
 // def*Vector, a set*Vector, a new*Vector, or a getProperties.
 type Vector struct {
 	XMLName xml.Name
@@ -138,8 +138,8 @@ type Vector struct {
 	} `xml:",any"`
 }
 
-// Changes answers a new*Vector's members as "<member>=<value>", in
-// the order the client sent them.
+// Changes returns a new*Vector's members as "<member>=<value>", in the
+// order the client sent them.
 func (v Vector) Changes() []string {
 	var out []string
 	for _, m := range v.Members {
@@ -148,12 +148,12 @@ func (v Vector) Changes() []string {
 	return out
 }
 
-// Definitions reads the def*Vector elements of one transcript, in
-// order, with a later definition of a property in place of an earlier
-// one. Each set*Vector after a definition changes it, so a property
-// holds the state and the values that the driver reported last: the
-// telescope simulator defines TELESCOPE_PARK with both switches Off,
-// and then reports UNPARK On.
+// Definitions returns the properties that a transcript defines, in
+// order. A later definition of a property replaces an earlier one, and
+// each set*Vector after a definition updates the property. So each
+// property has the state and values that the driver reported last. For
+// example, the telescope simulator defines TELESCOPE_PARK with both
+// switches Off, and then reports UNPARK On.
 func Definitions(transcript []byte) ([]*Property, error) {
 	decoder := xml.NewDecoder(bytes.NewReader(transcript))
 	decoder.Strict = false

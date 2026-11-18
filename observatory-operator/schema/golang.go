@@ -55,7 +55,7 @@ func (d *declarations) add(s *shape) error {
 	return nil
 }
 
-// goShape answers what Go sees of an object: the names and the types
+// goShape returns what Go sees of an object: the names and the types
 // of its fields, without the descriptions, which differ by use.
 func goShape(s *shape) []string {
 	var out []string
@@ -91,7 +91,7 @@ func writeStruct(b *bytes.Buffer, name, doc string, fields []field) {
 	b.WriteString("}\n\n")
 }
 
-// goType answers the Go type of a field. An optional number or object
+// goType returns the Go type of a field. An optional number or object
 // is a pointer, so an absent value differs from a zero.
 func goType(f field) string {
 	return typeOf(f.Type, !f.Required)

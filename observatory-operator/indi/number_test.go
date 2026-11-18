@@ -28,7 +28,7 @@ func TestParseNumber(t *testing.T) {
 		t.Run(c.text, func(t *testing.T) {
 			got, err := ParseNumber(c.text)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing %q: %v", c.text, err)
 			}
 			if math.Abs(got-c.want) > 1e-12*math.Max(1, math.Abs(c.want)) {
 				t.Errorf("ParseNumber(%q) = %v, want %v", c.text, got, c.want)

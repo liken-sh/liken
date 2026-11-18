@@ -1,11 +1,11 @@
 package main
 
-// The values that a person reads in `kubectl get`, with their units.
-// Each status keeps its numbers plain for programs, with the unit in
-// the field's description, and a display block beside them holds the
-// same values as text with the unit, such as -9.8 °C. A printer column
-// shows the text, because a column of bare numbers does not say what
-// they measure.
+// Formatting of the values that a person reads in `kubectl get`. A
+// status stores its numbers without units, for programs, and the
+// field's description gives the unit. A display block has the same
+// values as text with the unit, such as -9.8 °C, and the printer
+// columns show that text, because a column of bare numbers does not
+// say what it measures.
 
 import (
 	"fmt"
@@ -18,10 +18,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// quantity writes a number with at most decimals places and no
-// trailing zeros, then its unit. A degree sign follows the number with
-// no space, as SI writes a plane angle, and every other unit follows a
-// space.
+// quantity formats v with at most decimals places and no trailing
+// zeros, followed by the unit. SI writes a degree sign with no space
+// after the number, and every other unit follows a space.
 func quantity(v float64, decimals int, unit string) string {
 	text := strconv.FormatFloat(v, 'f', decimals, 64)
 	if strings.Contains(text, ".") {
@@ -53,22 +52,22 @@ func longitude(v float64) string {
 	return quantity(v, 4, "°") + " E"
 }
 
-// frequency writes a frequency in hertz as megahertz, the unit that
-// radio astronomy names its lines in, such as 1420.406 MHz.
+// frequency formats a frequency in hertz as megahertz, because radio
+// astronomy gives its spectral lines in that unit, such as 1420.406 MHz.
 func frequency(hertz float64) string { return quantity(hertz/1e6, 3, "MHz") }
 
-// rightAscension writes hours from 0 to 24 as 19h17m21s, rounded to
-// the second. Every field has two digits, so a column of them lines
-// up.
+// rightAscension formats hours from 0 to 24 as 19h17m21s, rounded to
+// the second. Every field has two digits so that a column of values
+// lines up.
 func rightAscension(hours float64) string {
 	seconds := int64(math.Round(hours*3600)) % (24 * 3600)
 	return fmt.Sprintf("%02dh%02dm%02ds", seconds/3600, seconds/60%60, seconds%60)
 }
 
-// declination writes degrees from -90 to 90 as +12°34′56″, rounded to
-// the arcsecond, with the sign always written. The prime and the
-// double prime are one column wide in a terminal, as the degree sign
-// is, so a column of them lines up.
+// declination formats degrees from -90 to 90 as +12°34′56″, rounded to
+// the arcsecond, and always writes the sign. The prime and double prime
+// characters are one column wide in a terminal, like the degree sign,
+// so a column of values lines up.
 func declination(degrees float64) string {
 	sign := "+"
 	if degrees < 0 {
@@ -78,8 +77,8 @@ func declination(degrees float64) string {
 	return fmt.Sprintf("%s%02d°%02d′%02d″", sign, seconds/3600, seconds/60%60, seconds%60)
 }
 
-// duration writes a step's time to the second, in the largest two
-// units: 7 s, 2 min 2 s, 1 h 5 min.
+// duration formats a step's time rounded to the second, using at most
+// the two largest units: 7 s, 2 min 2 s, 1 h 5 min.
 func duration(d time.Duration) string {
 	s := int64(d.Round(time.Second) / time.Second)
 	switch {
@@ -95,16 +94,16 @@ func duration(d time.Duration) string {
 	return fmt.Sprintf("%d h %d min", s/3600, s%3600/60)
 }
 
-// weatherUnits maps the unit that a weather driver writes in a
-// parameter's label, such as "Wind (kph)", to its SI symbol.
+// weatherUnits maps the unit that a weather driver puts in a
+// parameter's label, such as "Wind (kph)", to the symbol to display.
 var weatherUnits = map[string]string{
 	"C": "°C", "F": "°F", "%": "%", "kph": "km/h", "mph": "mph",
 	"m/s": "m/s", "mm": "mm", "hPa": "hPa", "mbar": "mbar",
 }
 
-// weatherText writes a weather parameter's value with the unit that
-// its label names in parentheses. INDI gives WEATHER_FORECAST, and any
-// label with no parentheses, no unit, so its number stands alone.
+// weatherText formats a weather parameter's value with the unit in the
+// parentheses of its label. A label without parentheses has no unit, as
+// with INDI's WEATHER_FORECAST, so only the number is written.
 func weatherText(label string, v float64) string {
 	open, end := strings.LastIndex(label, "("), strings.LastIndex(label, ")")
 	if open < 0 || end < open {
@@ -124,11 +123,11 @@ func onOff(v bool) string {
 	return "Off"
 }
 
-// deviceDisplay answers the display block of a device's kind, from its
-// typed fields, its limits, and its spec, or nil for a kind with no
-// value to show. standard is nil before the driver reports. A flat
-// panel's brightness shows against the maximum in its limits, because
-// INDI gives FLAT_LIGHT_INTENSITY no unit.
+// deviceDisplay returns the display block for a device's kind, built
+// from its typed fields, its limits, and its spec. It returns nil for a
+// kind with nothing to show. standard is nil before the driver reports.
+// A flat panel's brightness is shown as a fraction of the maximum in
+// its limits, because INDI gives FLAT_LIGHT_INTENSITY no unit.
 func deviceDisplay(d *device, standard any, limits map[string]map[string]observatory.Limit) any {
 	degrees := func(v float64) string { return quantity(v, 1, "°") }
 	switch d.kind {
@@ -191,10 +190,10 @@ func deviceDisplay(d *device, standard any, limits map[string]map[string]observa
 	return nil
 }
 
-// cameraDisplay shows a camera's temperature, cooler, and exposure,
-// and the setpoint of its activation's cool action. While an exposure
-// runs, the exposure shows the time left, and otherwise the state of
-// CCD_EXPOSURE in one word.
+// cameraDisplay shows the setpoint of the cool action in the camera's
+// activation, even before the driver reports. While an exposure runs
+// and the driver reports the time left, Exposure is that time.
+// Otherwise it is the state of CCD_EXPOSURE as one word.
 func cameraDisplay(d *device, s *observatory.CameraStandard) observatory.CameraDisplay {
 	var out observatory.CameraDisplay
 	if t := coolSetpoint(d); t != nil {
@@ -221,7 +220,6 @@ func cameraDisplay(d *device, s *observatory.CameraStandard) observatory.CameraD
 	return out
 }
 
-// exposureState names the state of CCD_EXPOSURE.
 func exposureState(state indi.State) observatory.ExposureState {
 	switch state {
 	case indi.Busy:

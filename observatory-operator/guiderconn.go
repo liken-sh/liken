@@ -1,12 +1,10 @@
 package main
 
-// The operator holds one connection to the event server of each
-// guider's PHD2, the way it holds one INDI client for each server
-// (indiconn.go). The connection opens when the guider's pod is Ready,
-// and the client reads PHD2's state from it: the baseline when it
-// opens, and the events after that. The status writer reports that
-// state, and the guider's steps send set_connected and stop_capture
-// through it.
+// The operator keeps one connection to the PHD2 event server of each
+// guider pod, as indiconn.go keeps one INDI client for each INDI
+// server. keepOpen dials when the pod is Ready, and dials again when
+// the connection ends. The status writer reports the client's state,
+// and the guider steps send set_connected and stop_capture through it.
 
 import (
 	"context"
@@ -18,14 +16,14 @@ import (
 
 type guiderConn struct {
 	name string
-	// source names the PHD2 in the observation series: its Guider, such
-	// as Guider/east.
+	// source is the label of the guider's observation series, such as
+	// Guider/east.
 	source string
 	client *phd2.Client
 	cancel context.CancelFunc
 	done   chan struct{}
-	// last is what structure last rang for: whether the connection was
-	// open and the equipment connected.
+	// last is whether the connection was open and the equipment
+	// connected at the previous notification.
 	last [2]bool
 }
 
@@ -39,7 +37,6 @@ func newGuiderConns(o *operator) *guiderConns {
 	return &guiderConns{o: o, byName: map[string]*guiderConn{}}
 }
 
-// get answers the connection of one guider's pod, by the pod's name.
 func (g *guiderConns) get(name string) (*guiderConn, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -47,8 +44,8 @@ func (g *guiderConns) get(name string) (*guiderConn, bool) {
 	return c, ok
 }
 
-// sync opens a connection for each guider pod, and closes the
-// connection of each guider whose pod is gone.
+// sync opens a connection for each guider pod in the tree, and closes
+// the connection of each guider whose pod is gone.
 func (g *guiderConns) sync(ctx context.Context, t *tree) {
 	want := map[string]bool{}
 	for name, p := range t.pods {
@@ -78,8 +75,8 @@ func (g *guiderConns) stopAll() {
 	}
 }
 
-// close ends a connection, and deletes its observation series, as
-// servers.close does. The caller holds g.mu.
+// close stops a connection and deletes its observation series. The
+// caller holds g.mu.
 func (g *guiderConns) close(c *guiderConn) {
 	c.cancel()
 	<-c.done
@@ -92,13 +89,11 @@ func (g *guiderConns) open(parent context.Context, name, source string) *guiderC
 	c := &guiderConn{name: name, source: source, cancel: cancel, done: make(chan struct{})}
 	g.o.series.observation(source, false)
 	options := []phd2.Option{phd2.WithNotify(func(s phd2.State) {
-		// Each change is a message on an open connection, except the
-		// end of the connection.
 		g.o.series.observation(source, s.Open)
-		// A guide step changes the status and nothing a runner waits
-		// for, so it rings changed alone. The connection and the
-		// equipment are what StartGuider and a Ready runner wait for,
-		// so a change to either rings structure too (operator.go).
+		// StartGuider and a Ready runner wait on structure for the
+		// connection and the equipment, so only a change to either
+		// notifies structure, which also notifies changed. A guide step
+		// notifies changed alone, so it does not wake them.
 		now := [2]bool{s.Open, s.Equipment != nil && *s.Equipment}
 		if now != c.last {
 			c.last = now

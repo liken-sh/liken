@@ -75,10 +75,12 @@ spec:
           x-kubernetes-validations:
             - rule: size(self.metadata.name) <= 32
               message: >-
-                a Switch name is at most 32 characters, because
-                observatory-operator names its pod and Service
-                <name>-switch, and a Service name holds at most 63
-                characters
+                a Switch name is at most 32 characters.
+                observatory-operator names the Switch's pod and Service
+                <name>-switch, and Kubernetes limits those names to 63
+                characters. Every observatory.liken.sh kind has the same
+                limit of 32, which leaves room for a suffix longer than
+                any that the operator adds.
           description: >-
             A `Switch` is a relay board or a power box's outputs: an
             INDI device that serves `OUTPUT_INTERFACE` or
@@ -116,7 +118,7 @@ spec:
                     The name of the `Telescope` that the device belongs
                     to. Set this or `observatory`, not both. Optional.
                     With neither `telescope` nor `observatory`, the
-                    device is on the shelf, and the operator creates
+                    device is not installed, and the operator creates
                     nothing for it.
                 observatory:
                   type: string
@@ -129,7 +131,7 @@ spec:
                     device then runs on the observatory's own INDI
                     server. Set this or `telescope`, not both. Optional.
                     With neither `telescope` nor `observatory`, the
-                    device is on the shelf, and the operator creates
+                    device is not installed, and the operator creates
                     nothing for it.
                 driver:
                   type: object
@@ -1049,19 +1051,19 @@ spec:
                   enum: [Inventory, Idle, Starting, Connecting, Connected, Disconnecting, Error]
                   description: >-
                     The device's state in one word. `Inventory`: the
-                    device is on the shelf, with no parent, and the
-                    operator creates nothing for it. `Idle`: the device
-                    is installed, but no reservation of its telescope or
-                    its observatory is active, so it has no pod, or the
-                    device waits for the next session of a server that a
-                    session holds and did not start it on. `Starting`: a
-                    reservation's activation began, or the device's pod
-                    starts. `Connecting`: the operator asked the driver
-                    to connect. `Connected`: the driver reports the
-                    device connected. `Disconnecting`: the operator
-                    asked the driver to disconnect, or stops the pod.
-                    `Error`: a step failed, and the `Ready` condition
-                    gives the reason.
+                    device is not installed: its spec sets no parent,
+                    and the operator creates nothing for it. `Idle`: the
+                    device is installed, but no reservation of its
+                    telescope or its observatory is active, so it has no
+                    pod, or the device waits for the next session of a
+                    server that a session holds and did not start it on.
+                    `Starting`: a reservation's activation began, or the
+                    device's pod starts. `Connecting`: the operator
+                    asked the driver to connect. `Connected`: the driver
+                    reports the device connected. `Disconnecting`: the
+                    operator asked the driver to disconnect, or stops
+                    the pod. `Error`: a step failed, and the `Ready`
+                    condition gives the reason.
                 conditions:
                   type: array
                   description: >-
@@ -1069,12 +1071,12 @@ spec:
                     `ParentFound` is `False` when a resource that the
                     spec names, up to the `Observatory`, does not exist,
                     and its message names the missing resource. A device
-                    on the shelf names no parent, and its `ParentFound`
-                    is `True` with the reason `NoParent`. A device that
-                    a session holds where its spec no longer places it
-                    has `ParentFound` `True` with the reason
-                    `MovePending`, and the message says where the device
-                    goes when the session ends. While a device is
+                    that is not installed sets no parent, and its
+                    `ParentFound` is `True` with the reason `NoParent`.
+                    A device that a session holds where its spec no
+                    longer places it has `ParentFound` `True` with the
+                    reason `MovePending`, and the message says where the
+                    device goes when the session ends. While a device is
                     connected, it also reports the state that the
                     triggers of procedures read, by kind: a `Dome`
                     `Parked` and `Open` (the shutter), a `Mount`
@@ -1251,8 +1253,8 @@ spec:
                     this name. A device that another resource serves
                     names that resource's device. The field is present
                     only while the driver runs and defines the device on
-                    its server, so an `Idle` device and a device on the
-                    shelf have none.
+                    its server, so an `Idle` device and a device that is
+                    not installed have none.
                 endpoint:
                   type: object
                   required: [service, host, port]

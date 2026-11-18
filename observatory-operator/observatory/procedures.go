@@ -3,67 +3,64 @@ package observatory
 import "time"
 
 // A procedure is a list of actions that the operator runs on one
-// resource when a trigger fires. Each resource states its own
-// procedures, so each site composes its own routine from the actions
-// that its kinds support. An action is a target state, such as a park,
-// so it is safe to run twice and safe to run again after an operator
-// restart.
+// resource when a trigger fires. An action sets a target state, such as
+// parked, so running it twice, or again after the operator restarts,
+// does no harm.
 //
-// Every device kind, the Telescope, and the Observatory embed
-// Procedures with the action type of their kind, so the CRD of each
-// kind accepts only the actions that the kind supports. Plan 13 gives
-// the design.
+// Each device kind, the Telescope, and the Observatory embed
+// Procedures with their own action type, so the CRD of each kind
+// accepts only the actions that the kind supports.
 
-// Procedures are the triggers of one resource and the actions that
+// Procedures holds the triggers of one resource and the actions that
 // each one runs.
 type Procedures[A any] struct {
-	// Requires lists the conditions that must hold before a
-	// reservation's session starts the resource. The Observatory's and
-	// its own devices' requirements hold the Wait step, before
-	// StartSite; the Telescope's and its devices' hold the Requires
-	// step, before PowerOn. A requirement gates only the start: a
-	// condition that turns False later changes nothing, and a trigger
-	// acts on it.
+	// Requires lists the conditions that must be true before a
+	// reservation's session starts the resource. The session checks the
+	// requirements of the Observatory and of its devices in the Wait
+	// step, before StartSite. It checks the requirements of the
+	// Telescope and of its devices in the Requires step, before
+	// PowerOn. A requirement is checked only at the start. When the
+	// condition turns False later, only a trigger can act on it.
 	Requires []ConditionRef `json:"requires,omitempty"`
-	// Activation runs as the resource's Telescope or Observatory turns
-	// Active, while every device is connected.
+	// Activation runs when the resource's Telescope or Observatory
+	// turns Active, while every device is connected.
 	Activation []A `json:"activation,omitempty"`
-	// Deactivation runs as the resource's Telescope or Observatory
+	// Deactivation runs when the resource's Telescope or Observatory
 	// stops being Active, while every device is still connected.
 	Deactivation []A `json:"deactivation,omitempty"`
-	// Triggers lists triggers on conditions, which run while the
-	// resource is active. The field is not named on, because YAML 1.1,
-	// which kubectl reads through sigs.k8s.io/yaml, reads a bare on key
-	// as the boolean true.
+	// Triggers run actions when a condition changes, while the resource
+	// is active. The field is not called on, because YAML 1.1, which
+	// kubectl parses through sigs.k8s.io/yaml, reads a bare on key as
+	// the boolean true.
 	Triggers []Trigger[A] `json:"triggers,omitempty"`
 }
 
-// Trigger runs its actions once for each transition of a condition to
-// the status that When names.
+// Trigger runs Run once each time the condition in When changes to
+// the status in When.
 type Trigger[A any] struct {
 	When When `json:"when"`
 	Run  []A  `json:"run"`
 }
 
-// When is the condition of a trigger, and how long its status must
-// hold.
+// When is the condition that fires a trigger, and how long the
+// condition must keep that status first.
 type When struct {
 	ConditionRef
-	// For is a Go duration such as 20m. With none, the trigger runs at
-	// the transition.
+	// For is a Go duration such as 20m. When it is empty, the trigger
+	// runs at the transition.
 	For string `json:"for,omitempty"`
 }
 
-// Ref names one resource of the group by its kind and name, as a
-// scaleTargetRef does.
+// Ref refers to one resource of the API group by its kind and name,
+// as a scaleTargetRef does.
 type Ref struct {
 	Kind string `json:"kind"`
 	Name string `json:"name,omitempty"`
 }
 
-// ConditionRef names one condition of one resource, and the status
-// that it must have. With no kind, the condition is the resource's
-// own. An empty status means True.
+// ConditionRef refers to one condition of one resource and the status
+// that it must have. When Kind is empty, the condition belongs to the
+// resource that holds the reference. An empty Status means True.
 type ConditionRef struct {
 	Kind   string          `json:"kind,omitempty"`
 	Name   string          `json:"name,omitempty"`
@@ -71,45 +68,42 @@ type ConditionRef struct {
 	Status ConditionStatus `json:"status,omitempty"`
 }
 
-// ActionBase holds the fields that every kind's action has: the job
-// that any resource can run, and the bounds and the order of the
-// action.
+// ActionBase holds the fields that the action of every kind has: a
+// job, which any resource can run, and the timeout, requirements, and
+// ordering of the action.
 type ActionBase struct {
-	// Job runs a container as a Kubernetes Job, for what no other
+	// Job runs a container as a Kubernetes Job, for work that no other
 	// action does.
 	Job *Job `json:"job,omitempty"`
 	// Notify asks a person to do something that no driver can, such as
-	// covering a telescope: the resource's AttentionNeeded condition
-	// turns True with the text as its message. The action never waits
-	// for the person.
+	// covering a telescope. The resource's AttentionNeeded condition
+	// turns True with this text as its message. The action does not
+	// wait for the person.
 	Notify string `json:"notify,omitempty"`
-	// Timeout bounds the action, its waits for Requires and After
-	// included, as a Go duration such as 20m. With no timeout, the
-	// action takes the default of what it does.
+	// Timeout bounds the action, including its waits for Requires and
+	// After, as a Go duration such as 20m. When it is empty, the action
+	// uses the default timeout for its kind of work (StateTimeout and
+	// the constants after it).
 	Timeout string `json:"timeout,omitempty"`
-	// Requires lists the conditions that must hold before the action
-	// runs.
+	// Requires lists the conditions that must be true before the
+	// action runs.
 	Requires []ConditionRef `json:"requires,omitempty"`
-	// After lists the resources whose runs for the same event must end
-	// before the action runs.
+	// After lists the resources whose runs for the same event must
+	// finish before the action runs.
 	After []Ref `json:"after,omitempty"`
 }
 
 // Job is a container that the operator runs once as a batch/v1 Job in
 // its own namespace, such as a script that switches a dew heater's
-// relay or posts to a webhook. The vocabulary of target states cannot
-// hold what every site needs, and a Job can.
+// relay or posts to a webhook.
 type Job struct {
 	// Image is the container image, used as written.
-	Image string `json:"image"`
-	// Command replaces the image's entrypoint, as a container's
-	// command does.
+	Image   string   `json:"image"`
 	Command []string `json:"command,omitempty"`
-	// Args are the arguments of the command, as a container's args
-	// are.
-	Args []string `json:"args,omitempty"`
+	Args    []string `json:"args,omitempty"`
 	// Env adds variables to the container's environment. The operator
-	// adds its own after them (JobEnvironment).
+	// adds its own variables after them (EnvObservatory and the
+	// constants after it).
 	Env []EnvVar `json:"env,omitempty"`
 }
 
@@ -120,7 +114,7 @@ type EnvVar struct {
 }
 
 // The variables that the operator adds to a Job's environment, so a
-// script knows what ran it and where the resource's INDI server
+// script can tell what ran it and where the resource's INDI server
 // listens.
 const (
 	EnvObservatory = "LIKEN_OBSERVATORY"
@@ -131,7 +125,8 @@ const (
 	EnvINDIPort    = "INDI_PORT"
 )
 
-// Action is the action of a kind that has no action of its own: a job.
+// Action is the action type of a kind with no target state of its
+// own, so its actions can only run a job or notify a person.
 type Action struct {
 	ActionBase
 }
@@ -164,9 +159,9 @@ type CoverAction struct {
 	State CoverState `json:"state,omitempty"`
 }
 
-// LightState is the target of a FlatPanel's light. The states are
-// not named On and Off, because YAML 1.1 reads a bare On or Off as a
-// boolean. Lit matches the panel's Lit condition.
+// LightState is the target of a FlatPanel's light. The states are not
+// named On and Off because YAML 1.1 reads a bare On or Off as a
+// boolean. StateLit matches the panel's Lit condition.
 type LightState string
 
 const (
@@ -193,50 +188,51 @@ type CameraAction struct {
 type Temperature struct {
 	// Celsius is the setpoint in degrees Celsius.
 	Celsius float64 `json:"celsius"`
-	// Within is in degrees Celsius. Zero means the default, 0.5.
+	// Within is in degrees Celsius. Zero means DefaultWithin.
 	Within float64 `json:"within,omitempty"`
 }
 
-// The default timeouts of each action, which an action's timeout
-// replaces.
+// The default timeouts of the actions. An action's Timeout field
+// replaces them.
 const (
-	// A dome turns to its park position, which takes minutes.
+	// A dome takes minutes to turn to its park position.
 	StateTimeout = 10 * time.Minute
-	// The CCD simulator cools 0.5 °C a second, and a real sensor
+	// The INDI CCD simulator cools 0.5 °C a second, and a real sensor
 	// takes minutes to settle.
 	CoolTimeout = 20 * time.Minute
-	// A cooler cannot warm a sensor above the air around it, so a
-	// warm-up ends at its timeout wherever the sensor is.
+	// A cooler cannot warm a sensor above the air around it, so on a
+	// cold night a warm-up can run until this timeout.
 	WarmTimeout = 10 * time.Minute
-	// A job's script, such as a webhook or a relay, takes seconds,
-	// and the Job's pod may first pull its image.
+	// A job's script, such as a webhook or a relay, takes seconds, and
+	// the Job's pod may first have to pull its image.
 	JobTimeout = 10 * time.Minute
 )
 
 // DefaultWithin is how close to a setpoint a sensor must come, in
-// degrees Celsius, when an action states no within.
+// degrees Celsius, when an action sets no within.
 const DefaultWithin = 0.5
 
-// The triggers of a run's record.
+// The values of ProcedureRun.Trigger for the activation and
+// deactivation runs.
 const (
 	TriggerActivation   = "activation"
 	TriggerDeactivation = "deactivation"
 )
 
 // ConditionActive is True on a Telescope from when its reservation
-// begins the Activation step until its Deactivation step begins, and
-// on an Observatory from when the first reservation in it begins the
-// Activation step until the last one ends. Activation runs as it turns
-// True, and deactivation as it turns False.
+// begins the Activation step until its Deactivation step begins. On an
+// Observatory it is True from when the first reservation in it begins
+// the Activation step until the last reservation ends. Activation runs
+// when the condition turns True, and deactivation when it turns False.
 const ConditionActive = "Active"
 
-// ProcedureRun is the record of one trigger's last run.
+// ProcedureRun records the last run of one trigger.
 type ProcedureRun struct {
-	// Trigger names the trigger: activation, deactivation, or
-	// triggers[0] and so on for each item of spec.triggers.
+	// Trigger is activation, deactivation, or triggers[i] for item i of
+	// spec.triggers.
 	Trigger string `json:"trigger"`
-	// Since is the transition time of the condition that the run
-	// answers.
+	// Since is the transition time of the condition that caused the
+	// run.
 	Since     *time.Time  `json:"since,omitempty"`
 	State     StepState   `json:"state"`
 	StartTime *time.Time  `json:"startTime,omitempty"`
@@ -245,9 +241,10 @@ type ProcedureRun struct {
 	Actions   []ActionRun `json:"actions,omitempty"`
 }
 
-// ActionRun is the record of one action of a run.
+// ActionRun records one action of a run.
 type ActionRun struct {
-	// Action reads like the action's YAML, such as "state: Parked".
+	// Action is the action written as in its YAML, such as
+	// "state: Parked".
 	Action    string     `json:"action"`
 	State     StepState  `json:"state"`
 	StartTime *time.Time `json:"startTime,omitempty"`

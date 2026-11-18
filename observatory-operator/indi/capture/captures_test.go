@@ -1,11 +1,9 @@
 package capture
 
-// The captures in indi/standard/ hold the standard set of each INDI
-// interface, as the bare drivers defined it on the libindi that
-// indi/package.toml pins. `make captures` writes them again. These
-// tests fail when a bump of the INDI images leaves them stale, and when
-// a capture lost the property that tells the operator which interface
-// a device serves.
+// The captures in indi/standard/ record the properties that each INDI
+// interface defines, as the bare drivers define them in the libindi
+// that indi/package.toml pins. These tests fail when a bump of INDI
+// leaves the captures stale, which `make captures` fixes.
 
 import (
 	"os"
@@ -24,12 +22,12 @@ func readCapture(t *testing.T, name string) Capture {
 	t.Helper()
 	file, err := os.Open(filepath.Join(standardDir, name+".xml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening the capture %s: %v", name, err)
 	}
 	defer file.Close()
 	c, err := Read(file)
 	if err != nil {
-		t.Fatalf("%s: %v", name, err)
+		t.Fatalf("reading the capture %s: %v", name, err)
 	}
 	return c
 }
@@ -38,7 +36,7 @@ func captureNames(t *testing.T) []string {
 	t.Helper()
 	files, err := filepath.Glob(filepath.Join(standardDir, "*.xml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the captures: %v", err)
 	}
 	var names []string
 	for _, f := range files {
@@ -56,27 +54,26 @@ func TestEachBareDriverHasOneCapture(t *testing.T) {
 	got := captureNames(t)
 	slices.Sort(got)
 	if !slices.Equal(got, want) {
-		t.Errorf("indi/standard/ holds %v, want one capture for each bare driver, %v; run make captures", got, want)
+		t.Errorf("indi/standard/ holds the captures %v, want one capture for each bare driver, %v; run make captures", got, want)
 	}
 }
 
 func TestCapturesNameThePinnedINDI(t *testing.T) {
 	pinned, err := PinnedINDI(indiPins)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the INDI pin in %s: %v", indiPins, err)
 	}
 	for _, name := range captureNames(t) {
 		t.Run(name, func(t *testing.T) {
 			if got := readCapture(t, name).INDI; got != pinned {
-				t.Errorf("the capture is of indi %s, and indi/package.toml pins %s; run make captures", got, pinned)
+				t.Errorf("the capture is of INDI %s, and indi/package.toml pins %s; run make captures", got, pinned)
 			}
 		})
 	}
 }
 
-// The operator decides that a device serves an interface from one
-// property that the interface defines, as plan 16's table of kinds
-// gives it.
+// The operator detects that a device serves an interface by one
+// property of that interface, so each capture must define it.
 func TestEachInterfaceDefinesItsDetectionProperty(t *testing.T) {
 	cases := []struct {
 		capture, property string
@@ -107,14 +104,14 @@ func TestEachInterfaceDefinesItsDetectionProperty(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.capture+"/"+c.property, func(t *testing.T) {
 			if !readCapture(t, c.capture).Defines(c.property) {
-				t.Errorf("the capture defines no %s", c.property)
+				t.Errorf("the capture of %s defines no %s", c.capture, c.property)
 			}
 		})
 	}
 }
 
-// A capture leaves out every property of DefaultDevice and of the
-// connection plugins, because they belong to no interface.
+// The DefaultDevice capture holds the properties that every device
+// defines whatever its interface, so no other capture repeats them.
 func TestCapturesLeaveOutTheDefaultDevice(t *testing.T) {
 	device := readCapture(t, DefaultDevice)
 	for _, name := range captureNames(t) {
@@ -126,7 +123,7 @@ func TestCapturesLeaveOutTheDefaultDevice(t *testing.T) {
 			for _, p := range device.Phases {
 				for _, d := range p.Properties {
 					if c.Defines(d.Name) {
-						t.Errorf("the capture defines %s, a property of DefaultDevice", d.Name)
+						t.Errorf("the capture %s defines %s, which only the DefaultDevice capture may define", name, d.Name)
 					}
 				}
 			}

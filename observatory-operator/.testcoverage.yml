@@ -1,26 +1,20 @@
-# This is the coverage gate, enforced in CI (see
-# .github/workflows/ci.yaml).
+# The coverage gate that CI enforces (see .github/workflows/ci.yaml).
 #
-# The threshold only rises over time. It is set just under what the
-# tests measure today. So a change that loses coverage fails the
-# check, and a change that gains coverage should raise the number
-# here to keep the gain.
+# The threshold is set just under the coverage the tests measure, so a
+# change that loses coverage fails the check. A change that gains
+# coverage should raise the threshold to keep the gain.
 #
-# The numbers are measured with Go 1.27.2 and later, which count each basic
-# block once. Go 1.27.1 and earlier count a block once for each row
-# that comments split it into (golang/go#80974), and measure higher.
+# The threshold assumes Go 1.27.2 or later, which counts each basic
+# block once. Go 1.27.1 and earlier count a block once for each line
+# that comments split it into (golang/go#80974), so they measure higher.
 
 profile: coverage.out
 
-# go test never calls main(), so the statements in main.go never run
-# under the gate. main.go holds only the wiring of the in-cluster
-# clients, and the gate measures every other file.
-#
-# indi/capture/record/ runs INDI drivers in Docker on a workstation,
-# and no test starts a container. schema/crosscheck/ fetches a page from
-# GitHub, and no test reaches the network. Its tests cover what it decides
-# without one, and the capture package beside it holds the rest of the
-# record, which the gate measures.
+# Each excluded path does work that no test may do. main.go creates the
+# in-cluster clients and runs only when the program starts.
+# indi/capture/record/ starts INDI drivers in Docker containers, and
+# schema/crosscheck/ fetches a page from GitHub. The code that parses
+# what record records is in indi/capture, which the gate measures.
 exclude:
   paths:
     - ^main\.go$
@@ -28,22 +22,14 @@ exclude:
     - ^schema/crosscheck/
 
 threshold:
-  # The total covers every package but indi/capture/record/ and
-  # schema/crosscheck/. The tests measure 95.2%: observatory/ 96.0%,
-  # indi/ 97.8%, indi/inditest/ 96.1%, indi/capture/ 94.7%,
-  # indi/standard/ 95.3%, schema/ 94.6%, phd2/ 96.1%, phd2/phd2test/
-  # 99.4%, drivers/ 94.3%, firmware/ 99.0%, cli/ 89.7%, and the operator's package
-  # 95.1% with main.go left out. The
-  # plugin's main() and the error returns of building its clients from
-  # a kubeconfig are most of what cli/ leaves out. The floor was 97
-  # before the operator's package joined the total. Most of the rest of that
-  # package is one return of an error after one INDI change or one API
-  # request fails, at each call in each step. The fakes can fail any
-  # one call, and the tests fail one call in each step
-  # (failures_test.go); a test for every other call would repeat them.
+  # Most uncovered statements in the operator's package return an error
+  # after an INDI change or an API request fails. failures_test.go fails
+  # one call in each step, and a test for every other call would repeat
+  # it. Most of what cli/ leaves uncovered is the plugin's main() and
+  # the error returns from building its clients from a kubeconfig.
   #
-  # The floor is a point under the total, not a fraction of one,
+  # The threshold is about a percentage point under the measured total
   # because a few early returns run only when a goroutine reads the
-  # stores between two events, so the count of covered statements
-  # moves by a few from one run to the next.
+  # stores between two events. The number of covered statements changes
+  # by a few from one run to the next.
   total: 94

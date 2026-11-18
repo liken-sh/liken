@@ -1,21 +1,15 @@
 package main
 
-// A person who writes the SetUp condition. `kubectl liken observatory
-// set-up` sends a server-side apply of the condition and of
-// status.setUpUntil to the status subresource, and the API server
-// merges the condition into status.conditions by its type, because
-// the CRD lists the conditions as a map keyed by type. The fake makes
-// the same change to the stored object.
-
 import (
 	"time"
 
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// setUp writes a person's SetUp on a resource, as the plugin does: True
-// with the reason SetUp, or False with the reason TakenDown, at the
-// present time, and with a setUpUntil when until is not zero.
+// setUp writes the SetUp condition on a resource as `kubectl liken
+// observatory set-up` does: True with the reason SetUp, or False with
+// the reason TakenDown. It sets status.setUpUntil when until is not
+// zero.
 func (w *world) setUp(kind observatory.Kind, name string, up bool, until time.Time) {
 	w.t.Helper()
 	status, reason, message := "True", observatory.ReasonSetUp, "Set up by stargazer"
@@ -28,9 +22,11 @@ func (w *world) setUp(kind observatory.Kind, name string, up bool, until time.Ti
 	}, until)
 }
 
-// applyCondition merges one condition into an object's
-// status.conditions by its type, and sets or removes
-// status.setUpUntil, as a server-side apply of the two fields does.
+// applyCondition replaces the condition of c's type in an object's
+// status.conditions, and sets or removes status.setUpUntil. It does
+// what the API server does with the plugin's server-side apply, which
+// merges conditions by type because the CRD declares them a map keyed
+// by type.
 func (a *fakeAPI) applyCondition(collection, name string, c map[string]any, until time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -59,8 +55,6 @@ func (a *fakeAPI) applyCondition(collection, name string, c map[string]any, unti
 	a.store(collection, name, next, "MODIFIED")
 }
 
-// conditionOn answers one condition of a resource as the API server
-// holds it.
 func (w *world) conditionOn(kind observatory.Kind, name, conditionType string) observatory.Condition {
 	object, _ := decode[struct {
 		Status struct {
@@ -70,8 +64,8 @@ func (w *world) conditionOn(kind observatory.Kind, name, conditionType string) o
 	return conditionOf(object.Status.Conditions, conditionType)
 }
 
-// setUpExpiryTime answers a resource's status.setUpExpiryTime as the
-// API server holds it, or the zero time when it has none.
+// setUpExpiryTime returns a resource's status.setUpExpiryTime, or the
+// zero time when it is not set.
 func (w *world) setUpExpiryTime(kind observatory.Kind, name string) time.Time {
 	object, _ := decode[struct {
 		Status struct {

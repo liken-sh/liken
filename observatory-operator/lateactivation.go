@@ -1,27 +1,22 @@
 package main
 
-// A device in a session can miss the transition of Active that ran
-// every other activation. The Activation step leaves out a resource
-// whose device did not define its interface's properties, and when the
-// properties arrive later, the resource heals (interfaces.go). A spec
-// edit can also give a running device an activation it did not have.
-// So the trigger controller runs the activation of each such device as
-// an answer to the same transition: the run's since is the time its
-// Telescope or Observatory turned Active.
+// A device can miss the activation that runs when its Telescope or
+// Observatory turns Active. The Activation step skips a device whose
+// driver has not yet defined the properties its interface needs, and a
+// spec edit can add an activation to a device that is already running.
+// In both cases the trigger controller runs the activation itself, with
+// the time the parent turned Active as its since.
 //
-// The controller acts only while a reservation that governs the device
-// is Ready. Before that, the reservation's Activation step runs the
-// device's activation in the tree's order, and a run here would race
-// it. No step waits on the run, and its after waits for nothing: the
-// step already ended every other run of the transition. A failure
-// posts ProcedureFailed, as a trigger's does, and the retry annotation
-// on the device runs it again, with its Done actions skipped. The
-// device's triggers start when the run ends (activePeriod).
-//
-// While a governing reservation is Ready, a Failed activation of the
-// current transition is a run that this controller started. A failure
-// in the reservation's Activation step fails the reservation, which
-// is then not Ready, and that run retries through the reservation.
+// It does this only while a reservation that governs the device is
+// Ready, because before then the reservation's Activation step runs
+// activations in order and a run here would race with it. The device's
+// triggers start when this run ends (activePeriod). A failure posts
+// ProcedureFailed, and the retry annotation on the device runs the
+// activation again with its Done actions skipped. While the
+// reservation is Ready, a Failed activation of the current Active
+// period can only have come from this controller, because a failed
+// Activation step takes the reservation out of Ready and the retry then
+// goes through the reservation.
 
 import (
 	"context"
@@ -31,10 +26,10 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// governor answers the key of the Telescope or the Observatory whose
-// Active condition starts and ends a resource's activity, and false
+// activeParent returns the key of the Telescope or Observatory whose Active
+// condition starts and ends the resource's activity. It returns false
 // for a device with no parent.
-func governor(r resource) (string, bool) {
+func activeParent(r resource) (string, bool) {
 	switch {
 	case r.kind == observatory.ObservatoryKind:
 		return observatoryKey(r.name()), true
@@ -48,10 +43,10 @@ func governor(r resource) (string, bool) {
 	return "", false
 }
 
-// activeSince answers when the activity of a resource's Telescope or
-// Observatory began, or the zero time while it is not Active.
+// activeSince returns when the resource's Telescope or Observatory
+// turned Active, or the zero time while it is not Active.
 func (o *operator) activeSince(r resource) time.Time {
-	key, ok := governor(r)
+	key, ok := activeParent(r)
 	if !ok {
 		return time.Time{}
 	}
@@ -61,16 +56,17 @@ func (o *operator) activeSince(r resource) time.Time {
 	return time.Time{}
 }
 
-// lateActivation starts the activation of a device whose Active parent
-// did not run it, and stops it when the parent's activity ends. retry
-// runs a Failed activation of the current transition again.
+// lateActivation starts the activation of a device that its Active
+// parent did not run, and cancels the run when the parent stops being
+// Active. When retry is set, it runs a Failed activation of the
+// current Active period again.
 func (o *operator) lateActivation(ctx context.Context, t *tree, r resource, k *control, retry bool) {
 	if r.device == nil || len(r.procedures.Activation) == 0 {
 		return
 	}
 	id := r.record() + "/" + observatory.TriggerActivation
-	f := k.flights[id]
-	key, _ := governor(r)
+	f := k.inProgress[id]
+	key, _ := activeParent(r)
 	state := o.activity.get(key)
 	if !state.active {
 		if f != nil {
@@ -82,25 +78,26 @@ func (o *operator) lateActivation(ctx context.Context, t *tree, r resource, k *c
 		return
 	}
 	run, ok := o.runs.get(r.record(), observatory.TriggerActivation)
-	answered := ok && answers(run, state.since, time.Time{})
-	rerun := answered && retry && run.State == observatory.StepFailed
-	if answered && !rerun && run.State != observatory.StepRunning && run.State != observatory.StepPending {
+	recorded := ok && isRunFor(run, state.since, time.Time{})
+	rerun := recorded && retry && run.State == observatory.StepFailed
+	if recorded && !rerun && run.State != observatory.StepRunning && run.State != observatory.StepPending {
 		return
 	}
-	// A run that an operator restart interrupted resumes whatever the
-	// device reads now. A new run, or one run again, needs a connected
-	// device.
-	resumed := answered && !rerun
+	// A Running or Pending record is a run that an operator restart
+	// interrupted, and it resumes whatever the device's phase is. A new
+	// run or a rerun needs a connected device.
+	resumed := recorded && !rerun
 	if !o.governedByReady(t, r) || (!resumed && r.device.object.Status.Phase != observatory.DeviceConnected) {
 		return
 	}
-	k.flights[id] = o.fly(ctx, procCall{res: r, trigger: observatory.TriggerActivation,
+	k.inProgress[id] = o.startRun(ctx, procCall{res: r, trigger: observatory.TriggerActivation,
 		actions: r.procedures.Activation, since: state.since, rerun: rerun}, &k.group)
 }
 
-// governedByReady reports whether a reservation that governs a device
-// is Ready: the holder of the device's telescope, or of any telescope
-// in the device's observatory.
+// governedByReady reports whether a Ready reservation governs the
+// device: the reservation that holds the device's telescope, or for a
+// device of an observatory, the reservation that holds any telescope
+// in that observatory.
 func (o *operator) governedByReady(t *tree, r resource) bool {
 	for _, name := range sortedNames(t.telescopes) {
 		if r.telescope != "" && name != r.telescope {

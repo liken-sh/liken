@@ -27,32 +27,33 @@ kubectl describe mount east -n observatory
 kubectl logs -n liken-system deployment/observatory-operator
 ```
 
-The sections below follow the steps in the order they run.
-
 ## The reservation stays in Wait
 
-`Wait` waits for the start time, for the telescope to exist, for the
-`spec.requires` of the `Observatory` and its devices, and for no other
-reservation to hold it. The summary says which:
+The `Wait` step waits for the reservation's `spec.start`, for the
+telescope to exist, for the `spec.requires` of the `Observatory` and
+its devices, and for the telescope to be free. The summary says which:
 
+* `Waiting until <time>`: `spec.start` has not come yet.
 * `Missing Telescope east`: no `Telescope` of that name exists in
   `observatory`. Check the name and the namespace.
 * `Waiting for Observatory lab SetUp=True`: a requirement of the
   observatory or of a device on its server does not hold, as [The
   reservation stays in Requires](#the-reservation-stays-in-requires)
   describes.
-* A reservation name: another reservation holds the telescope. It
-  takes the telescope when that one is `Released`. A `Released`
-  reservation no longer holds anything, but a `Failed` one does until
-  you delete it or its `end` time passes.
+* `Waiting for Reservation <name>`: the other reservation holds the
+  telescope, or it waits for the telescope too and comes first.
+  Waiting reservations take a telescope in order of `spec.start`, then
+  of creation time. This one takes the telescope after the other one
+  is `Released`. A `Failed` reservation keeps the telescope until you
+  delete it or its `end` time passes.
 * `Telescope east is being deleted`: a delete of the telescope or its
   observatory is in progress.
 
 ## The reservation stays in Requires
 
-`Requires` waits for each condition that the `spec.requires` of the
-`Telescope` and of its devices names, and its summary lists the ones
-that do not hold yet, such as
+`Requires` is waiting for each condition that the `spec.requires` of
+the `Telescope` and of its devices lists. Its summary lists the ones
+that are not true yet, such as
 `Waiting for Telescope east SetUp=True, WeatherStation lab Safe=True`:
 
 * `SetUp=True`: nobody confirmed that the resource is set up tonight,
@@ -72,8 +73,9 @@ that do not hold yet, such as
 
 A requirement that names the `Safe` of a weather station on the
 observatory's server belongs on the `Telescope`, not the
-`Observatory`: the observatory's requirements hold `Wait`, before the
-station starts, so the station never reports `Safe`.
+`Observatory`. The `Wait` step checks the observatory's requirements
+before it starts the station, so the station never reports `Safe` and
+the reservation waits until dawn.
 
 A reservation that still waits at dawn ends. The step is `Skipped`
 with `Dawn came at ...` and the conditions it waited for, and the
@@ -83,9 +85,9 @@ powered on. Create a new reservation for the next night.
 ## A resource reports ParentFound False
 
 A resource whose parent does not exist reports `ParentFound` `False`,
-and the message names the missing parent. It stays in place and does
-nothing until the parent exists. This is almost always a typo in the
-parent field, or a parent in another namespace.
+and the message names the missing parent. The operator does nothing
+for the resource until the parent exists. Check the parent field for
+a typo, and check that the parent is in the same namespace.
 
 ## A telescope reports HorizonFound False
 
@@ -111,19 +113,19 @@ describes.
 One INDI server runs each driver once. When two devices on one server
 name the same driver, the step fails, and its message names both
 devices and the driver. Give one of the devices another driver, move
-it to the shelf, or move it to another telescope.
+it to another telescope, or remove its parent field to keep it in
+inventory.
 
-A device that a person adds to a running server during a session does
-not start until the next session, so it never stops a device that
-runs. When it names the driver of a device on that server, the next
-session's `StartSite` or `PowerOn` fails as above.
+A device that you add to a running server during a session does not
+start until the next session, so it cannot stop a device that is
+already running. When it names the driver of a device on that server,
+the next session's `StartSite` or `PowerOn` fails as above.
 
 ## PowerOn fails: the outbox does not exist
 
-The summary of `PowerOn` reads `Failed: missing PersistentVolumeClaim
-east-frames in namespace observatory, which spec.outbox.claimName
-names`. The step
-fails before it starts the telescope's server. Create the claim in the
+The summary of `PowerOn` reads `Failed: the PersistentVolumeClaim
+east-frames that spec.outbox.claimName names is not in the namespace
+observatory`. The step fails before it starts the telescope's server. Create the claim in the
 reservation's namespace, or correct `spec.outbox.claimName`, and then
 [run the failed step again](#run-a-failed-step-again). The retry
 records the outbox again from the spec.
@@ -133,23 +135,24 @@ records the outbox again from the spec.
 A running server keeps the devices that it started until the
 reservation ends, as
 [Editing devices during a session](https://liken.sh/observatory/docs/concepts/how-a-reservation-runs/#editing-devices-during-a-session)
-describes. A device that a person added during the session is `Idle`,
-and its `Ready` message names the reservation it waits for, such as
+describes. A device that you added during the session is `Idle`, and
+its `Ready` message names the reservation it waits for, such as
 `Starts at the next reservation, after Reservation east-tonight ends`.
-A device that a person moved keeps running where it was, and its
+A device that you moved keeps running where it was, and its
 `ParentFound` condition has the reason `MovePending` and says where it
 goes. An edit of an `OpticalTrain`, an `OpticalTube`, a `Guider`, or
-the reservation's `spec.outbox` waits for the next reservation the
-same way. An edit of the outbox or of a FITS keyword turns the
-reservation's `EditsPending` condition `True` with the reason
-`EditPending`, and its message names each change. The
-reservation's `status.session` shows what the session started with,
-and the operator acts on that until the reservation ends. End the
-reservation, or let it reach its `end`, and reserve the telescope
-again. When the reservation is `Failed` in an activation step, fix
-the spec and
-[run the failed step again](#run-a-failed-step-again) instead: the
-retry records the session from the specs as they are.
+the reservation's `spec.outbox` also waits for the next reservation.
+An edit of the outbox or of a FITS keyword sets the reservation's
+`EditsPending` condition to `True` with the reason `EditPending`, and
+its message names each change.
+
+The reservation's `status.session` records what the session started
+with, and the operator uses that record until the reservation ends. To
+apply your edits, end the reservation, or let it reach its `end`, and
+reserve the telescope again. When the reservation is `Failed` in an
+activation step, fix the spec and
+[run the failed step again](#run-a-failed-step-again) instead, because
+the retry records the session again from the specs as they are.
 
 ## StartDevices fails: a device never appears
 
@@ -192,21 +195,21 @@ kubectl describe pod east-mount -n observatory
   [QHY cameras that need firmware](https://liken.sh/observatory/docs/guides/connect-usb-equipment/#qhy-cameras-that-need-firmware)
   explains both. When the camera is loaded, check that its
   `DeviceClass` selects the product ID after the load.
-* **The image does not pull.** A vendor's driver image is large. The
-  ToupTek image is over 300 MB, so the first pull on a slow link can
-  take most of the deadline. Run the step again once the image is on
-  the node.
-* **The pod runs, but the driver never appears.** The driver name is
-  probably wrong, so the image does not hold it. Check the spelling
+* **The image does not pull.** A vendor's driver image is large, so
+  the first pull on a slow link can take most of the 10 minutes. Run
+  the step again once the image is on the node.
+* **The pod runs, but the driver never appears.** Check that
+  `spec.driver.name` names a driver that the image has. Check the spelling
   against the [INDI device list](https://indilib.org/devices.html)
   and [Drivers and images](https://liken.sh/observatory/docs/reference/drivers-and-images/).
 
 ## Connect fails
 
 The operator connects each device and waits for the driver to answer.
-A driver that cannot reach its hardware answers with an error, and the
-step names it. For a USB device, the usual cause is the port: see
-[Check the port](https://liken.sh/observatory/docs/guides/connect-usb-equipment/#6-check-the-port).
+A driver that cannot reach its hardware returns an error, and the
+step's summary names the device. For a USB device, check the port as
+[Check the port](https://liken.sh/observatory/docs/guides/connect-usb-equipment/#6-check-the-port)
+describes.
 The INDI server's log shows the driver's own messages:
 
 ```sh
@@ -217,8 +220,9 @@ kubectl logs -n observatory east-telescope
 
 After `Connect`, the operator checks that each device defines the
 properties of its resource's kind, such as `FILTER_SLOT` for a
-`FilterWheel` or `CCD_EXPOSURE` for a `Camera`. A resource whose device
-does not reports `Error`, and its `Ready` message names the property,
+`FilterWheel` or `CCD_EXPOSURE` for a `Camera`. When the device does
+not define them, the resource reports `Error`, and its `Ready` message
+names the property,
 such as
 `INDI device <device> defines no FILTER_SLOT after it connects, so it serves no FilterWheel`.
 The step's summary names it too, and the rest of the telescope starts.
@@ -227,17 +231,17 @@ The step's summary names it too, and the rest of the telescope starts.
   wheel, or delete the `FilterWheel`. When the driver defines the
   property later, the resource reports `Connected`, gets its settings,
   and runs its activation.
-* **The wrong driver.** Some drivers claim an interface in
+* **The wrong driver.** Some drivers list an interface in
   `DRIVER_INTERFACE` and define none of its properties. The operator
-  reads the properties, not the claim. Check the driver's properties in
+  reads the properties, not `DRIVER_INTERFACE`. Check the driver's properties in
   KStars, and choose the driver that defines them.
-* **A driver that does not answer.** The operator asks the driver for
-  its properties, and waits 30 seconds for the answer. When none comes,
+* **A driver that does not answer.** The operator requests the driver's
+  properties and waits 30 seconds for a reply. When none comes,
   the `Ready` message is
   `INDI device <device> did not answer a request for its properties`,
-  with the error. The operator asks again when the device's
+  with the error. The operator requests them again only when the device's
   `CONNECTION` changes, such as when you connect the device again from
-  KStars, and not before. The INDI server's log shows the driver's own
+  KStars. The INDI server's log shows the driver's own
   messages.
 
 A resource that names another in `spec.device` reports `Error` before
@@ -258,8 +262,8 @@ kubectl get dome lab -n observatory -o jsonpath='{.status.procedures}' | jq
 ```
 
 * **`Waiting for WeatherStation lab Safe=True`**, and then a timeout:
-  the action's `requires` never held. That is the procedure working as
-  written, on an unsafe night.
+  the action's `requires` never became true. The procedure worked as
+  written, and the night was not safe.
 * **A park lock refused the move.** The device posts a `Warning`:
   `MountUnparkRefused` on a `Mount` that cannot unpark while the dome
   is parked, or `DomeParkRefused` on a `Dome` that cannot park while a
@@ -292,14 +296,15 @@ failed activation step, it first records the session again in
 `status.session` from the specs as they are, because the record holds
 the spec that failed. So a driver, a power output, or a claim that you
 fixed takes effect, and the step replaces each pod that the old spec
-built. A device that you moved out of the session leaves it at the
-retry, through its `deactivation`, and an output that no recorded
-device names any more goes off. The steps then run again from the
-first step that reads what you changed, such as `PowerOn` for a
-device's power output. A retry of a failed deactivation step keeps
-the record, because the release stops what the session started. To give up on a failed
-activation instead, delete the reservation, and deactivation runs from
-its first step.
+built. A device that you moved out of the session runs its
+`deactivation` at the retry and leaves the session, and the operator
+switches off a power output that no recorded device names any more.
+The steps then run again from the first step that reads what you
+changed, such as `PowerOn` for a device's power output. A retry of a
+failed deactivation step keeps the record, because deactivation must
+stop what the session started. To give up on a failed activation
+instead, delete the reservation, and deactivation runs from its first
+step.
 
 A trigger's run that failed does not run again for the same change of
 its condition. The same annotation on the resource runs it again, if
@@ -311,11 +316,11 @@ kubectl annotate dome lab -n observatory observatory.liken.sh/retry=1
 
 ## A delete does not finish
 
-A resource that the operator runs something for carries the finalizer
-`observatory.liken.sh/deactivate`, and its delete waits for the
-operator to stop it. A deleted device first runs its deactivation, so a
-dust cap closes and a dome parks. A deleted telescope ends its
-reservation first. That can take minutes, and it is expected.
+A resource that the operator has started something for has the
+finalizer `observatory.liken.sh/deactivate`, and its delete waits for
+the operator to stop it. A deleted device first runs its deactivation,
+so a dust cap closes and a dome parks. A deleted telescope ends its
+reservation first. This can take minutes.
 
 If the operator is not running, the delete waits until it returns.
 To let a resource go at once, remove the finalizer by hand:

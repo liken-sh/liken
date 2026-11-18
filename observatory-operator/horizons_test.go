@@ -1,8 +1,7 @@
 package main
 
-// A Telescope that names a Horizon reports whether it exists, in its
-// HorizonFound condition. A missing Horizon never stops a reservation,
-// because only a scheduler reads a horizon.
+// A missing Horizon does not stop a reservation, because only a
+// scheduler reads a Horizon.
 
 import (
 	"fmt"
@@ -14,8 +13,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// horizonOf answers a Telescope's HorizonFound condition as "<status>
-// <reason>: <message>", or "" when the telescope has none.
+// horizonOf returns a Telescope's HorizonFound condition as "<status>
+// <reason>: <message>", or "" when the Telescope has none.
 func (w *world) horizonOf(telescope string) string {
 	w.t.Helper()
 	object, _ := decode[observatory.Telescope](w.t, w.api, kindCollection(observatory.TelescopeKind), telescope)
@@ -26,8 +25,8 @@ func (w *world) horizonOf(telescope string) string {
 	return fmt.Sprintf("%s %s: %s", c.Status, c.Reason, c.Message)
 }
 
-// The example's east telescope names the Horizon yard, and west names
-// none.
+// In the example, the east Telescope's spec.horizon is yard, and the
+// west Telescope has none.
 func TestATelescopeReportsTheHorizonItNames(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -53,16 +52,17 @@ func TestATelescopeReportsTheHorizonItNames(t *testing.T) {
 				w.settle()
 
 				if got := w.horizonOf(c.telescope); got != c.want {
-					t.Errorf("HorizonFound = %q, want %q", got, c.want)
+					t.Errorf("the HorizonFound condition is %q, want %q", got, c.want)
 				}
 			})
 		})
 	}
 }
 
-// A Horizon deleted and created again moves the condition each time,
-// and each transition posts one Event: a Warning while the horizon is
-// missing, because a scheduler would plan with no horizon.
+// Deleting a Horizon and creating it again changes the condition each
+// time, and each transition posts one Event. The Event is a Warning
+// while the Horizon is missing, because a scheduler would plan with no
+// horizon.
 func TestAHorizonThatComesAndGoesPostsEachTransition(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -77,9 +77,9 @@ func TestAHorizonThatComesAndGoesPostsEachTransition(t *testing.T) {
 		w.settle()
 
 		if missing != "False HorizonMissing: Missing Horizon yard" || w.horizonOf("east") != "True Found: Found Horizon yard" {
-			t.Errorf("HorizonFound = %q, then %q", missing, w.horizonOf("east"))
+			t.Errorf("the HorizonFound condition is %q after the delete and %q after the create, want %q and %q", missing, w.horizonOf("east"), "False HorizonMissing: Missing Horizon yard", "True Found: Found Horizon yard")
 		}
-		// The recorder counts a repeat of an Event in its first copy.
+		// The recorder counts a repeated Event on the first one, as x2.
 		got := w.eventsWith(observatory.TelescopeKind, "east", "Found", reasonHorizonMissing)
 		want := []string{
 			"Normal Found: Found every parent x1",
@@ -87,12 +87,12 @@ func TestAHorizonThatComesAndGoesPostsEachTransition(t *testing.T) {
 			"Warning HorizonMissing: Missing Horizon yard x1",
 		}
 		if !slices.Equal(got, want) {
-			t.Errorf("Events = %q, want %q", got, want)
+			t.Errorf("the Telescope Events are %q, want %q", got, want)
 		}
 	})
 }
 
-// A telescope whose Horizon is missing still activates and runs.
+// A Telescope whose Horizon is missing still activates and runs.
 func TestAMissingHorizonDoesNotStopAReservation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -104,7 +104,7 @@ func TestAMissingHorizonDoesNotStopAReservation(t *testing.T) {
 		w.settle()
 
 		if got := w.horizonOf("east"); got != "False HorizonMissing: Missing Horizon yard" {
-			t.Errorf("HorizonFound = %q", got)
+			t.Errorf("the HorizonFound condition is %q, want %q", got, "False HorizonMissing: Missing Horizon yard")
 		}
 	})
 }

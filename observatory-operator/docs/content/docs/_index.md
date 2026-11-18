@@ -24,8 +24,8 @@ the dome, the dust cap, the camera's cooler, power, and the weather.
 [Set up a portable telescope](/docs/guides/set-up-a-portable-telescope/)
 covers a telescope that someone carries out each night, and
 [Guide with PHD2](/docs/guides/guide-with-phd2/) covers autoguiding.
-[Troubleshoot](/docs/guides/troubleshoot/) starts from the step that
-failed or waits.
+[Troubleshoot](/docs/guides/troubleshoot/) starts from the reservation
+step that failed or is still waiting.
 
 The concepts explain what the guides do: [the
 resources](/docs/concepts/resources/) and their tree, [how a
@@ -36,8 +36,8 @@ and triggers, [the dome and mount locks](/docs/concepts/dome-and-mount-locks/),
 and [the guider](/docs/concepts/the-guider/). The reference lists the
 drivers and their images, what each status field means, the objects
 the operator creates, the Prometheus metrics, and every field of the
-20 resources.
+resources.
 
-Targets, plate solving, and where the frames go are
-`astrophotography-operator`'s. Its
-[manual](https://liken.sh/astrophotography/) covers them.
+`astrophotography-operator` handles targets, plate solving, and where
+the frames go, and its [manual](https://liken.sh/astrophotography/)
+covers them.

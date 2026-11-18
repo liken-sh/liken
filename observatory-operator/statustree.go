@@ -1,9 +1,5 @@
 package main
 
-// The status of the resources above the devices: what the operator
-// builds of the tree by looking down from each resource, and the phase
-// of the reservation that holds each telescope.
-
 import (
 	"fmt"
 	"slices"
@@ -12,7 +8,6 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The conditions of a resource with no parent of its own to look for.
 func found() observatory.Condition {
 	return condition(observatory.ConditionParentFound, observatory.ConditionTrue, "Found", "Found every parent")
 }
@@ -43,8 +38,8 @@ func withGeneration(conditions []observatory.Condition, generation int64) []obse
 	return conditions
 }
 
-// serverStatus answers a server's endpoint and pod, while its pod
-// exists.
+// serverStatus returns a server's endpoint, pod, and node, or nil when
+// its pod does not exist.
 func (o *operator) serverStatus(t *tree, ref serverRef) *observatory.Server {
 	p, ok := t.pods[ref.String()]
 	if !ok {
@@ -57,7 +52,6 @@ func (o *operator) serverStatus(t *tree, ref serverRef) *observatory.Server {
 	}
 }
 
-// refs lists devices with their phases.
 func refs(devices []*device, composed map[string]deviceStatus) []observatory.DeviceRef {
 	var out []observatory.DeviceRef
 	for _, d := range devices {
@@ -66,8 +60,9 @@ func refs(devices []*device, composed map[string]deviceStatus) []observatory.Dev
 	return out
 }
 
-// directDevices answers the devices whose parent field names a
-// resource of one kind and name, as opposed to through a train.
+// directDevices returns the devices whose spec names this resource as
+// their parent. It leaves out the devices on the resource's optical
+// trains.
 func directDevices(t *tree, kind observatory.Kind, name string) []*device {
 	var out []*device
 	for _, d := range t.devices {
@@ -78,8 +73,8 @@ func directDevices(t *tree, kind observatory.Kind, name string) []*device {
 	return out
 }
 
-// telescopePhase answers a telescope's phase from the reservation that
-// holds it.
+// telescopePhase returns a telescope's phase and the reservation that
+// holds it. The phase is Idle when no reservation holds the telescope.
 func (o *operator) telescopePhase(t *tree, telescope string) (observatory.Phase, *observatory.Reservation) {
 	holder, ok := o.claims.holderOf(telescope)
 	if !ok {
@@ -100,13 +95,14 @@ func (o *operator) telescopePhase(t *tree, telescope string) (observatory.Phase,
 	return observatory.PhaseActivating, r
 }
 
-// serverStanding answers what the reservations ask of a server's
-// devices: kept while a Ready reservation's runner keeps the server's
-// pods, activating while a reservation's activation runs, and idle
-// otherwise. Each Ready runner of a telescope on an observatory also
-// keeps the observatory's pods (steady.go), and each activation of one
-// starts them (StartSite).
-func (o *operator) serverStanding(t *tree, ref serverRef) standing {
+// useOfServer returns a server's use from the phases of the
+// telescopes that use it: maintained when any is Ready, activating when any
+// is Activating, releasing when any is Deactivating, and idle
+// otherwise. An observatory's server is used by every telescope in the
+// observatory, because the runner of each Ready telescope keeps the
+// observatory's pods (steady.go), and the StartSite step of each
+// activation starts them.
+func (o *operator) useOfServer(t *tree, ref serverRef) serverUse {
 	telescopes := []string{ref.name}
 	if ref.kind == observatory.ObservatoryKind {
 		telescopes = nil
@@ -120,7 +116,7 @@ func (o *operator) serverStanding(t *tree, ref serverRef) standing {
 	for _, name := range telescopes {
 		switch phase, _ := o.telescopePhase(t, name); phase {
 		case observatory.PhaseReady:
-			return kept
+			return maintained
 		case observatory.PhaseActivating:
 			best = activating
 		case observatory.PhaseDeactivating:
@@ -192,9 +188,10 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 			Longitude: longitude(site.Spec.Location.Longitude),
 		},
 	}
-	// A reservation that deactivates disconnects the observatory's
-	// devices, unless another reservation keeps or starts them
-	// (StopSite). Only then is the observatory Deactivating.
+	// The observatory is Deactivating while a reservation of one of its
+	// telescopes deactivates and no telescope in it is Ready, Activating,
+	// or in Error. The StopSite step (stopSite) then disconnects the
+	// observatory's devices.
 	var keeping bool
 	var leaving []string
 	for _, telescope := range sortedNames(t.telescopes) {
@@ -229,9 +226,9 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 	active := o.activity.condition(observatoryKey(name))
 	if active.Status == observatory.ConditionTrue && len(next.Reservations) > 0 {
 		// The reservation that activated the observatory may have ended
-		// while others hold telescopes in it, so the message names the
-		// holders now. A new message alone is no transition, so the
-		// condition keeps its time.
+		// while other reservations hold telescopes in it, so the message
+		// lists the current holders. A changed message is not a
+		// transition, so the condition keeps its transition time.
 		active.Message = "Active for " + reservationList(next.Reservations)
 	}
 	conditions := []observatory.Condition{readyCondition(next.Phase, message), active}
@@ -245,8 +242,8 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 	return next
 }
 
-// reservationList names one or more reservations, as "Reservation
-// east" or "Reservations east, west".
+// reservationList formats reservation names as "Reservation east" or
+// "Reservations east, west".
 func reservationList(names []string) string {
 	if len(names) == 1 {
 		return "Reservation " + names[0]
@@ -254,8 +251,8 @@ func reservationList(names []string) string {
 	return "Reservations " + strings.Join(names, ", ")
 }
 
-// worstWeather answers the worst verdict of the weather stations that
-// report SAFETY_STATUS, and Unknown when none does.
+// worstWeather returns the worst Safety that a weather station reports
+// in SAFETY_STATUS, or Unknown when none reports it.
 func worstWeather(devices []*device, composed map[string]deviceStatus) observatory.Safety {
 	rank := []observatory.Safety{observatory.SafetySafe, observatory.SafetyWarning, observatory.SafetyDanger}
 	worst := -1

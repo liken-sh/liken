@@ -1,10 +1,10 @@
 package schema
 
-// The report of disagreements is written by make crosscheck, which
-// reaches GitHub, so no test writes it again. These tests hold it to
-// the sources that change without the network: each line names a
-// property that a source still defines, and the cross-check finds each
-// kind of disagreement in a page built here.
+// make crosscheck downloads the page from GitHub, so no test writes the
+// report again. These tests check that each line of the committed
+// report names a property that a source still defines, and that the
+// cross-check finds each kind of disagreement on a page built in the
+// test.
 
 import (
 	"bufio"
@@ -18,14 +18,14 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi/standard"
 )
 
-func TestTheReportNamesPropertiesThatExist(t *testing.T) {
+func TestTheReportListsPropertiesThatExist(t *testing.T) {
 	sets, _, _, err := loadKinds("..")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the kinds: %v", err)
 	}
 	raw, err := os.ReadFile(ReportFile)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading %s: %v", ReportFile, err)
 	}
 	if !regexp.MustCompile(`(?m)^# indilib/docs commit: [0-9a-f]{40}$`).Match(raw) {
 		t.Errorf("%s names no commit of indilib/docs", ReportFile)
@@ -52,7 +52,7 @@ func TestTheReportNamesPropertiesThatExist(t *testing.T) {
 	}
 }
 
-// page builds a standard properties page with one section.
+// page builds a standard properties page with one section of rows.
 func page(section string, rows ...string) []byte {
 	return []byte("## " + section + "\n\n| Name | Type | Values | Description |\n| --- | --- | --- | --- |\n" + strings.Join(rows, "\n") + "\n")
 }
@@ -82,7 +82,7 @@ func TestTheCrossCheckFindsEachDisagreement(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			report, err := crossCheck(c.page, sets, focusers)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("cross-checking the page: %v", err)
 			}
 			if !slices.Contains(report, c.want) {
 				t.Errorf("report = %q, want it to hold %q", report, c.want)
@@ -91,16 +91,13 @@ func TestTheCrossCheckFindsEachDisagreement(t *testing.T) {
 	}
 }
 
-// The page says that most CCD_ properties apply to the guide head with
-// GUIDER_ in place of CCD_, so a guide head's property with no row of
-// its own is checked against its twin's.
 func TestTheCrossCheckReadsTheCameraRowForTheGuideHead(t *testing.T) {
 	exposure := standard.Property{Name: "GUIDER_EXPOSURE", Type: "Number", Members: []standard.Member{{Name: "GUIDER_EXPOSURE_VALUE"}}}
 	sets := map[string]standard.Interface{"ccd": {Name: "ccd", Properties: []standard.Property{exposure}}}
 	report, err := crossCheck(page("CCD Properties", "| CCD_EXPOSURE | Number | CCD_EXPOSURE_VALUE | Expose for this many hours |"), sets,
 		[]kind{{curated: curated{Interfaces: []string{"ccd"}}, Plural: "cameras", Fields: []property{{Property: exposure, entry: entry{Unit: "s"}}}}})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("cross-checking the page: %v", err)
 	}
 	want := "GUIDER_EXPOSURE: the standard properties page gives the unit h, and cameras-fields.yaml gives s"
 	if !slices.Contains(report, want) {
@@ -108,29 +105,30 @@ func TestTheCrossCheckReadsTheCameraRowForTheGuideHead(t *testing.T) {
 	}
 }
 
-// The page's formatter writes DIGITAL_INPUT_* as DIGITAL*INPUT*\*, and
-// a description that does not fit its cell goes on in the next row.
+// The page's Markdown formatter writes DIGITAL_INPUT_* as
+// DIGITAL*INPUT*\*, and continues a description that does not fit its
+// cell in the next row. readDocs reverses both.
 func TestTheDocsReaderUndoesTheMarkdown(t *testing.T) {
 	docs, err := readDocs(page("Input Interface Properties",
 		"| DIGITAL*INPUT*\\* | Switch | | Digital input |", "| | | | state |", "| | | ON | On |", "| | | | when high |"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the page: %v", err)
 	}
 	got := docs[0]
 	if got.Name != "DIGITAL_INPUT_*" || got.Description != "Digital input state" || got.Members[0].Description != "On when high" {
-		t.Errorf("readDocs = %+v", got)
+		t.Errorf("the first section reads as %+v, want DIGITAL_INPUT_* described \"Digital input state\" with a member described \"On when high\"", got)
 	}
 }
 
 func TestTheDocsReaderRefusesASectionWithNoInterface(t *testing.T) {
 	if _, err := readDocs([]byte("## Telescope Toys\n")); err == nil {
-		t.Error("readDocs read a section that names no interface")
+		t.Error("readDocs returned no error for a section that names no interface, want one")
 	}
 }
 
-// The report reads the committed sources, so a page built here shows
-// each part of it: the header with the commit, the lines that Load
-// finds, and the lines of the page.
+// CrossCheck reads the committed sources, so the report has the lines
+// that Load finds there, as well as the commit header and the lines
+// from the page built here.
 func TestTheReportHoldsTheCommitAndEverySource(t *testing.T) {
 	commit := strings.Repeat("ab", 20)
 	built := bytes.Join([][]byte{
@@ -139,7 +137,7 @@ func TestTheReportHoldsTheCommitAndEverySource(t *testing.T) {
 	}, nil)
 	report, err := CrossCheck("..", built, commit)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("cross-checking the page: %v", err)
 	}
 	for _, want := range []string{
 		"# indilib/docs commit: " + commit,

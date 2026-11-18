@@ -1,10 +1,5 @@
 package main
 
-// A Reservation's EditsPending condition says whether a spec edit
-// waits for the next session: the session record holds the outbox and
-// the merged FITS keywords, and an edit of either takes effect only
-// when a new session records them.
-
 import (
 	"slices"
 	"testing"
@@ -14,8 +9,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// sessionCurrent answers the EditsPending condition of east-tonight
-// as "<status> <reason>: <message>", or "" when it has none.
+// sessionCurrent returns the EditsPending condition of east-tonight as
+// "<status> <reason>: <message>", or "" when it has none.
 func (w *world) sessionCurrent() string {
 	w.t.Helper()
 	r, _ := w.reservation("east-tonight")
@@ -86,7 +81,7 @@ func TestAReservationShowsTheEditsThatWaitForTheNextSession(t *testing.T) {
 // The condition posts one Event for each transition: False when PowerOn
 // records the session, True at the first edit that waits, nothing for
 // a second edit that changes only the message, and False when the spec
-// matches the record again. An operator that restarts posts none.
+// matches the record again. An operator restart posts none.
 func TestEachTransitionOfEditsPendingPostsOneEvent(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -115,7 +110,7 @@ func TestEachTransitionOfEditsPendingPostsOneEvent(t *testing.T) {
 			"Normal NoEditPending: No edit waits for the next session",
 		}
 		if !slices.Equal(got, want) {
-			t.Errorf("Events = %q, want %q", got, want)
+			t.Errorf("EditsPending events are %q, want %q", got, want)
 		}
 	})
 }

@@ -8,12 +8,13 @@ import (
 	"unicode"
 )
 
-// ParseNumber reads a number as INDI writes it: a decimal number, or a
+// ParseNumber parses a number as INDI writes it: a decimal number, or a
 // sexagesimal one such as "12:30:00" or "-0:30", with ':' or ';'
-// between the parts. A sexagesimal number is degrees or hours,
-// minutes, and seconds, and its sign applies to the whole value. It
-// ignores whitespace anywhere in the text, as f_scansexa in libindi
-// does, because a driver writes each value on a line of its own.
+// between the parts. A sexagesimal number is degrees or hours, then
+// minutes and seconds, and its sign applies to the whole value.
+// ParseNumber ignores whitespace anywhere in the text, as f_scansexa in
+// libindi does, because libindi writes each value on its own line
+// inside its XML element.
 func ParseNumber(text string) (float64, error) {
 	compact := strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) {
@@ -46,19 +47,20 @@ func ParseNumber(text string) (float64, error) {
 }
 
 // sexagesimal matches INDI's own number format, %<w>.<f>m. libindi
-// reads it with sscanf("%%%d.%d%c"), so a 0 flag is part of the width.
+// reads it with sscanf("%%%d.%d%c"), so a leading 0 is part of the
+// width.
 var sexagesimal = regexp.MustCompile(`^%(\d+)\.(\d+)m$`)
 
 // printf matches the printf formats that drivers use for numbers.
 var printf = regexp.MustCompile(`^%[-+ 0#]*\d*(\.\d*)?([diefgEG])$`)
 
-// FormatNumber prints a value in a member's format, the way libindi's
-// numberFormat prints it for a person. A format %<w>.<f>m prints a
-// sexagesimal value <w> characters wide, and <f> chooses its parts:
-// 3 gives d:mm, 5 gives d:mm.m, 6 gives d:mm:ss, 8 gives d:mm:ss.s,
-// and 9 gives d:mm:ss.ss. A printf format prints as printf does. Any
-// other format, or none, prints the shortest decimal that reads back
-// as the same value.
+// FormatNumber formats a value with a member's format, as libindi's
+// numberFormat does for display to a person. A format %<w>.<f>m prints
+// a sexagesimal value <w> characters wide, and <f> selects the parts:
+// 5 prints d:mm.m, 6 prints d:mm:ss, 8 prints d:mm:ss.s, 9 prints
+// d:mm:ss.ss, and any other value prints d:mm. A printf format works
+// as in printf. Any other format, or none, prints the shortest decimal
+// that parses back to the same value.
 func FormatNumber(format string, value float64) string {
 	if match := sexagesimal.FindStringSubmatch(format); match != nil {
 		width, _ := strconv.Atoi(match[1])
@@ -78,8 +80,8 @@ func FormatNumber(format string, value float64) string {
 }
 
 // formatSexagesimal follows fs_sexa in libindi: it rounds the value to
-// the smallest part that the format prints, and prints the whole part
-// width characters wide.
+// the smallest part that the format prints, and right-aligns the whole
+// part in width characters.
 func formatSexagesimal(value float64, width, fraction int) string {
 	base := map[int]int64{9: 360000, 8: 36000, 6: 3600, 5: 600}[fraction]
 	if base == 0 {

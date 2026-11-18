@@ -26,20 +26,20 @@ var generatedFile = filepath.Join("..", "deploy", "firmware", "qhy.yaml")
 func TestTheQHYFirmwareIsCurrent(t *testing.T) {
 	want, err := QHY("85-qhyccd.rules")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the Firmware objects from 85-qhyccd.rules: %v", err)
 	}
 	if *update {
 		if err := os.WriteFile(generatedFile, want, 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing %s: %v", generatedFile, err)
 		}
 		return
 	}
 	got, err := os.ReadFile(generatedFile)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading %s: %v", generatedFile, err)
 	}
 	if string(got) != string(want) {
-		t.Errorf("%s is stale against 85-qhyccd.rules and drivers/generated.go; run make firmware", generatedFile)
+		t.Errorf("%s does not match what 85-qhyccd.rules and drivers/generated.go generate. Run make firmware", generatedFile)
 	}
 }
 
@@ -65,22 +65,22 @@ func committedObjects(t *testing.T) []firmwareObject {
 	t.Helper()
 	raw, err := os.ReadFile(generatedFile)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading %s: %v", generatedFile, err)
 	}
 	var objects []firmwareObject
 	for _, document := range bytes.Split(raw, []byte("\n---\n")) {
 		var object firmwareObject
 		if err := yaml.Unmarshal(document, &object); err != nil {
-			t.Fatal(err)
+			t.Fatalf("parsing a Firmware document: %v", err)
 		}
 		objects = append(objects, object)
 	}
 	return objects
 }
 
-// The objects and the drivers name one release of indi-qhy, so the
-// pod that loads a camera's firmware and the pod that drives the
-// camera run the same files.
+// The objects and the drivers use one tag of indi-qhy, so the pod that
+// loads a camera's firmware and the pod that drives the camera run the
+// same files.
 func TestEveryFirmwareRunsTheDriversTagOfIndiQHY(t *testing.T) {
 	want := drivers.Registry + "/indi-qhy:" + drivers.Tag
 	for _, object := range committedObjects(t) {
@@ -96,20 +96,20 @@ func TestEveryFirmwareRunsTheDriversTagOfIndiQHY(t *testing.T) {
 func TestTheCommittedObjectsAreWellFormed(t *testing.T) {
 	objects := committedObjects(t)
 	if len(objects) != 47 {
-		t.Errorf("deploy/firmware/qhy.yaml holds %d objects, want 47", len(objects))
+		t.Errorf("deploy/firmware/qhy.yaml has %d objects, want 47", len(objects))
 	}
 	seen := map[string]bool{}
 	for _, object := range objects {
 		if object.APIVersion != "firmware.liken.sh/v1alpha1" || object.Kind != "Firmware" {
-			t.Errorf("%s is %s %s", object.Metadata.Name, object.APIVersion, object.Kind)
+			t.Errorf("%s is %s %s, want firmware.liken.sh/v1alpha1 Firmware", object.Metadata.Name, object.APIVersion, object.Kind)
 		}
 		if seen[object.Metadata.Name] {
-			t.Errorf("%s is in the file twice", object.Metadata.Name)
+			t.Errorf("%s appears twice in the file", object.Metadata.Name)
 		}
 		seen[object.Metadata.Name] = true
 		command := strings.Join(object.Spec.Upload.Command, " ")
 		if !strings.HasPrefix(command, "fxload -t ") || !strings.Contains(command, " -D $(LIKEN_DEVICE)") {
-			t.Errorf("%s runs %q", object.Metadata.Name, command)
+			t.Errorf("%s runs %q, want an fxload command with -t and -D $(LIKEN_DEVICE)", object.Metadata.Name, command)
 		}
 	}
 }
@@ -121,12 +121,13 @@ func TestNoObjectMatchesAGenericChip(t *testing.T) {
 	for _, object := range committedObjects(t) {
 		switch object.Metadata.Name {
 		case "qhy-04b4-8613", "qhy-0547-1002":
-			t.Errorf("%s matches a generic chip", object.Metadata.Name)
+			t.Errorf("%s matches a generic chip, want no Firmware for one", object.Metadata.Name)
 		}
 	}
 }
 
-// One bare chip of the lab, the QHY5L-II-C, gives the exact object.
+// The object for the QHY5L-II-C, a camera that the lab tests with, has
+// the exact selector and command.
 func TestTheQHY5LIIObjectMatchesTheLab(t *testing.T) {
 	for _, object := range committedObjects(t) {
 		if object.Metadata.Name != "qhy-1618-0920" {
@@ -142,15 +143,15 @@ func TestTheQHY5LIIObjectMatchesTheLab(t *testing.T) {
 		}
 		return
 	}
-	t.Error("deploy/firmware/qhy.yaml holds no qhy-1618-0920")
+	t.Error("deploy/firmware/qhy.yaml has no object named qhy-1618-0920")
 }
 
-// writeRules writes one rules file for a test and answers its path.
+// writeRules writes one rules file for a test and returns its path.
 func writeRules(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "85-qhyccd.rules")
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the rules file: %v", err)
 	}
 	return path
 }
@@ -177,7 +178,7 @@ ATTRS{idVendor}=="1618", ATTRS{idProduct}=="0920", RUN+="/sbin/fxload -t fx2 -I 
 	for name, rules := range cases {
 		t.Run(name, func(t *testing.T) {
 			if _, err := QHY(writeRules(t, rules)); err == nil {
-				t.Errorf("QHY accepted %q", rules)
+				t.Errorf("QHY accepted %q, want an error", rules)
 			}
 		})
 	}
@@ -185,7 +186,7 @@ ATTRS{idVendor}=="1618", ATTRS{idProduct}=="0920", RUN+="/sbin/fxload -t fx2 -I 
 
 func TestAMissingRulesFileIsRefused(t *testing.T) {
 	if _, err := QHY(filepath.Join(t.TempDir(), "absent.rules")); err == nil {
-		t.Error("QHY accepted a rules file that does not exist")
+		t.Error("QHY accepted a rules file that does not exist, want an error")
 	}
 }
 
@@ -195,13 +196,13 @@ func generated(t *testing.T, rules string) map[string]string {
 	t.Helper()
 	out, err := QHY(writeRules(t, rules))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the Firmware objects: %v", err)
 	}
 	commands := map[string]string{}
 	for _, document := range bytes.Split(out, []byte("\n---\n")) {
 		var object firmwareObject
 		if err := yaml.Unmarshal(document, &object); err != nil {
-			t.Fatal(err)
+			t.Fatalf("parsing a Firmware document: %v", err)
 		}
 		if object.Metadata.Name != "" {
 			commands[object.Metadata.Name] = strings.Join(object.Spec.Upload.Command, " ")
@@ -265,13 +266,13 @@ func kustomization(t *testing.T, path string) []string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading %s: %v", path, err)
 	}
 	var k struct {
 		Resources []string `json:"resources"`
 	}
 	if err := yaml.Unmarshal(raw, &k); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing %s: %v", path, err)
 	}
 	return k.Resources
 }
@@ -285,7 +286,7 @@ func TestOnlyTheFirmwareKustomizationListsTheObjects(t *testing.T) {
 	}
 	for _, resource := range kustomization(t, filepath.Join("..", "deploy", "kustomization.yaml")) {
 		if strings.Contains(resource, "firmware") {
-			t.Errorf("deploy/kustomization.yaml lists %s", resource)
+			t.Errorf("deploy/kustomization.yaml lists %s, want no firmware directory", resource)
 		}
 	}
 }

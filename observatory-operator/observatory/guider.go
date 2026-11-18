@@ -3,12 +3,11 @@ package observatory
 import "time"
 
 // A Guider runs PHD2 for one Telescope, as a client of the telescope's
-// INDI server. It belongs to the Telescope, because guiding corrects
-// where the mount points. While a Reservation holds the telescope, the
-// operator runs PHD2, connects it to the guide camera and the mount,
-// and leaves it idle: the holder aligns the mount, then calibrates and
-// guides through PHD2's event server. The operator reads PHD2's state
-// back from that server into the status.
+// INDI server. While a Reservation holds the telescope, the operator
+// runs PHD2 in a pod and connects it to the guide camera and the mount,
+// but does not start guiding. The reservation's holder calibrates and
+// guides through PHD2's event server, and the operator copies PHD2's
+// state from that server into the status.
 
 type Guider = Object[GuiderSpec, GuiderStatus]
 
@@ -50,13 +49,13 @@ type GuiderStatus struct {
 	// Endpoint is PHD2's event server, while the guider's pod exists.
 	// KStars and astrophotography-operator drive PHD2 there.
 	Endpoint *Endpoint `json:"endpoint,omitempty"`
-	// Pod and Node name the guider's pod and where it runs.
+	// Pod and Node are the guider's pod and the node it runs on.
 	Pod  string `json:"pod,omitempty"`
 	Node string `json:"node,omitempty"`
 	// State is PHD2's state, while the operator's connection to its
 	// event server is open.
 	State GuiderState `json:"state,omitempty"`
-	// Calibrated is true while PHD2 holds a calibration of the mount.
+	// Calibrated is true while PHD2 has a calibration for the mount.
 	Calibrated *bool `json:"calibrated,omitempty"`
 	// PixelScale is the guide camera's scale in arc-seconds per pixel.
 	PixelScale *float64 `json:"pixelScale,omitempty"`
@@ -78,11 +77,13 @@ type GuiderRMS struct {
 	RA    float64 `json:"ra"`
 	Dec   float64 `json:"dec"`
 	Total float64 `json:"total"`
-	// Steps counts the guide steps that the RMS covers, at most 100.
+	// Steps is the number of guide steps that the RMS covers, at most
+	// 100.
 	Steps int32 `json:"steps"`
-	// Since is when PHD2 sent the first guide step that the RMS covers.
-	// PHD2 sends a new connection no earlier steps, so the window
-	// starts again when the operator restarts.
+	// Since is when PHD2 sent the oldest guide step that the RMS covers.
+	// The window starts again when guiding starts and when the operator
+	// opens a new connection to PHD2, because PHD2 does not send earlier
+	// steps to a new connection.
 	Since time.Time `json:"since"`
 }
 

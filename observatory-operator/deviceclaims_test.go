@@ -1,7 +1,5 @@
 package main
 
-// A device's ResourceClaim goes with its pod, however the pod went.
-
 import (
 	"strings"
 	"testing"
@@ -11,11 +9,12 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The dust cap's pod is evicted while the release parks the mount, and
-// stays terminating for 10 seconds into StopDevices. The release still
-// deletes the cap's claim, which would otherwise hold the hardware, and
-// which the next reservation would find and reuse whatever its
-// spec.claim says by then.
+// The dust cap's pod is deleted while the release parks the mount, and
+// stays terminating for 10 seconds after the park ends. The release
+// must still delete the cap's ResourceClaimTemplate. The operator
+// treats a 409 on creating a template as success, so a template left
+// behind would give the next reservation's pod the old claim even if
+// the dust cap's spec.claim had changed.
 func TestAReleaseDeletesTheClaimOfAPodThatIsTerminating(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -39,7 +38,7 @@ func TestAReleaseDeletesTheClaimOfAPodThatIsTerminating(t *testing.T) {
 		w.gone(observatory.ReservationKind, "east-tonight", 10*time.Minute)
 
 		if claims := w.api.names(templatesCollection); len(claims) != 0 {
-			t.Errorf("claims after the release = %v", claims)
+			t.Errorf("after the release, the claim templates are %v, want none", claims)
 		}
 	})
 }

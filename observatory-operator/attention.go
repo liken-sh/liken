@@ -1,28 +1,28 @@
 package main
 
 // The AttentionNeeded condition. A notify action asks a person to do
-// what no driver can, such as covering a portable telescope at the end
-// of a night. The action is done once its run records it, and the
-// status writer reads the records of the resource's runs and sets
-// AttentionNeeded, whose transition to True posts a Warning Event, so
-// one Event reaches the person, and an alert on the condition can
-// reach their phone. Plan 21 gives the design.
+// something that no driver can, such as cover a portable telescope at
+// the end of a night. The action does not wait for the person. It
+// finishes as soon as its run records it. The status writer then sets
+// AttentionNeeded to True with the request as its message. The
+// transition posts a Warning Event, and an alert on the condition can
+// notify the person.
 //
-// The condition clears at the start of the resource's next activation,
-// because the equipment is in use again, and when a person writes the
-// resource's SetUp after the request, because writing it is the
-// person's answer: take-down after covering the telescope, or set-up
-// after carrying it out again. An expiry at dawn is the operator's
-// write, not the person's, so it clears nothing.
+// AttentionNeeded turns False with the reason Activated when the
+// resource's next activation starts, because the equipment is in use
+// again. It turns False with the reason Acknowledged when a person
+// writes the resource's SetUp after the request, such as a take-down
+// after covering the telescope. A SetUp that expired at dawn was
+// written by the operator, so it does not acknowledge anything.
 //
-// The activation begins when the resource's Telescope or Observatory
-// turns Active, and a resource's own activation run records that start
-// only when the resource has activation actions. A portable telescope
-// often has none, only the notify of its deactivation, so the status
-// writer passes the start of the activity too. That start is gone once
-// the activity ends, so a request made before the condition last turned
-// False stays closed. Without that rule, the deactivation that follows
-// would open the old request again before its own notify asks.
+// An activation run records its start only when the resource has
+// activation actions, and a portable telescope often has only the
+// notify of its deactivation. So the caller also passes activeSince,
+// the time the resource's Telescope or Observatory turned Active.
+// activeSince is zero again once the activity ends. A request is
+// therefore also compared with the time the condition last turned
+// False, or the old request would count as open again until the next
+// deactivation's notify runs.
 
 import (
 	"strings"
@@ -35,72 +35,70 @@ import (
 // notifyPrefix starts the record of a notify action, as its YAML reads.
 const notifyPrefix = "notify: "
 
-// attention answers the AttentionNeeded condition of a resource from
-// the records of its runs, its stored conditions, and the start of its
-// activity, which is zero while it is not Active. It answers false for
-// a resource with no notify action that is done.
+// attention returns the AttentionNeeded condition of a resource, or
+// false when no notify action of the resource has finished.
 func attention(runs []observatory.ProcedureRun, stored []observatory.Condition, activeSince time.Time) (observatory.Condition, bool) {
 	activated := activeSince
-	var answered, cleared time.Time
-	var answer string
+	var acknowledgedAt, falseSince time.Time
+	var acknowledgment string
 	for _, run := range runs {
 		if run.Trigger == observatory.TriggerActivation && run.StartTime != nil && run.StartTime.After(activated) {
 			activated = *run.StartTime
 		}
 	}
 	if c, ok := conditions.Find(stored, observatory.ConditionSetUp); ok && c.Reason != observatory.ReasonExpired {
-		answered, answer = c.LastTransitionTime, personsAnswer(c)
+		acknowledgedAt, acknowledgment = c.LastTransitionTime, acknowledgedMessage(c)
 	}
-	held, wasCleared := conditions.Find(stored, observatory.ConditionAttentionNeeded)
-	wasCleared = wasCleared && held.Status == observatory.ConditionFalse
-	if wasCleared {
-		cleared = held.LastTransitionTime
+	previous, wasFalse := conditions.Find(stored, observatory.ConditionAttentionNeeded)
+	wasFalse = wasFalse && previous.Status == observatory.ConditionFalse
+	if wasFalse {
+		falseSince = previous.LastTransitionTime
 	}
-	asked := false
-	var open []string
+	hasNotify := false
+	var requests []string
 	for _, run := range runs {
 		for _, a := range run.Actions {
 			text, isNotify := strings.CutPrefix(a.Action, notifyPrefix)
 			if !isNotify || a.State != observatory.StepDone || a.StopTime == nil {
 				continue
 			}
-			asked = true
-			// A request that an activation run made itself is open
-			// while that run is the last activation.
-			if !a.StopTime.Before(activated) && a.StopTime.After(answered) && a.StopTime.After(cleared) {
-				open = append(open, sentence(strings.TrimSuffix(text, ".")))
+			hasNotify = true
+			// A request is open when it finished at or after the latest
+			// activation, and after both the person's acknowledgment and
+			// the last time the condition turned False.
+			if !a.StopTime.Before(activated) && a.StopTime.After(acknowledgedAt) && a.StopTime.After(falseSince) {
+				requests = append(requests, sentence(strings.TrimSuffix(text, ".")))
 			}
 		}
 	}
 	switch {
-	case !asked:
+	case !hasNotify:
 		return observatory.Condition{}, false
-	case len(open) > 0:
+	case len(requests) > 0:
 		return condition(observatory.ConditionAttentionNeeded, observatory.ConditionTrue, observatory.ReasonNotified,
-			strings.Join(open, ". ")), true
-	case wasCleared && !answered.After(cleared) && !activated.After(cleared):
-		return held, true
-	// The time of the condition's last transition moves only when its
-	// status changes, so a person's answer from before the activation
-	// that cleared the request can be later than it. Once the activity
-	// ends, the start of that activation is gone and cannot outrank the
-	// answer, so the condition keeps the reason Activated. Without this
-	// case, the end of every activity would turn the old answer into a
-	// new transition to Acknowledged and post its Event.
-	case wasCleared && held.Reason == observatory.ReasonActivated && activated.IsZero():
-		return held, true
-	case answered.After(activated):
-		return condition(observatory.ConditionAttentionNeeded, observatory.ConditionFalse, observatory.ReasonAcknowledged, answer), true
+			strings.Join(requests, ". ")), true
+	case wasFalse && !acknowledgedAt.After(falseSince) && !activated.After(falseSince):
+		return previous, true
+	// The condition turned False with Activated, and the activity has
+	// since ended, so activated is zero. A SetUp written before that
+	// activation can still be later than falseSince, because
+	// LastTransitionTime changes only when the status changes. Keep the
+	// stored condition, or the old SetUp would post a new Acknowledged
+	// transition and Event at the end of every activity.
+	case wasFalse && previous.Reason == observatory.ReasonActivated && activated.IsZero():
+		return previous, true
+	case acknowledgedAt.After(activated):
+		return condition(observatory.ConditionAttentionNeeded, observatory.ConditionFalse, observatory.ReasonAcknowledged, acknowledgment), true
 	}
 	return condition(observatory.ConditionAttentionNeeded, observatory.ConditionFalse, observatory.ReasonActivated,
 		"The activation began after the request"), true
 }
 
-// personsAnswer answers the message of the Acknowledged condition: the
-// message of the person's SetUp, such as "Taken down by ada", because
-// it says what the person did and who did it. A SetUp written by hand
-// can have no message, and then the message says only what was done.
-func personsAnswer(c observatory.Condition) string {
+// acknowledgedMessage returns the SetUp message, such as "Taken down by
+// ada", which says what the person did and who did it. A SetUp written
+// by hand can have no message, and then the result says only what was
+// done.
+func acknowledgedMessage(c observatory.Condition) string {
 	if c.Message != "" {
 		return sentence(c.Message)
 	}
@@ -110,8 +108,6 @@ func personsAnswer(c observatory.Condition) string {
 	return "Taken down"
 }
 
-// withAttention adds a resource's AttentionNeeded to its composed
-// conditions, when it has one.
 func withAttention(composed []observatory.Condition, runs []observatory.ProcedureRun, stored []observatory.Condition, activeSince time.Time) []observatory.Condition {
 	if c, ok := attention(runs, stored, activeSince); ok {
 		return append(composed, c)

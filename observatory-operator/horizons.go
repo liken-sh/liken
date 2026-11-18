@@ -1,22 +1,15 @@
 package main
 
-// The HorizonFound condition of a Telescope that names a Horizon in
-// spec.horizon (plan 18). The operator reads nothing in a Horizon: a
-// scheduler reads the profile. The condition and the Event of its
-// transition tell a person that the telescope names a horizon that
-// does not exist, before a scheduler plans a night with no horizon. A
-// missing Horizon stops nothing, so the condition has no part in the
-// telescope's phase. The status writer composes it on each change of
-// the watches' stores, so a Horizon created or deleted moves it.
+// The operator does not read a Horizon's contents. A scheduler reads
+// them. The HorizonFound condition tells a person that a Telescope's
+// spec.horizon refers to a Horizon that does not exist, before a
+// scheduler plans a night without it. A missing Horizon does not stop
+// the Telescope, so the condition does not change its phase.
 
 import "github.com/liken-sh/liken/observatory-operator/observatory"
 
-// reasonHorizonMissing is the reason of a HorizonFound condition that
-// is False.
 const reasonHorizonMissing = "HorizonMissing"
 
-// horizonFound answers the HorizonFound condition of a Telescope whose
-// spec.horizon names a Horizon.
 func (t *tree) horizonFound(name string) observatory.Condition {
 	if _, ok := t.horizons[name]; !ok {
 		return condition(observatory.ConditionHorizonFound, observatory.ConditionFalse, reasonHorizonMissing, "Missing Horizon "+name)

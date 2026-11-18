@@ -1,9 +1,9 @@
 package observatory
 
 // A Telescope is a mount with its optics and its instruments. Each
-// Telescope has its own INDI server, because INDI's snooping needs a
-// mount and its trains on one server, and a server for each telescope
-// limits a failure to one telescope.
+// Telescope has its own INDI server. INDI's snooping needs a mount and
+// its trains on one server, and a separate server for each telescope
+// limits a failure to that telescope.
 
 import "time"
 
@@ -11,12 +11,13 @@ type Telescope = Object[TelescopeSpec, TelescopeStatus]
 
 type TelescopeSpec struct {
 	Observatory string `json:"observatory"`
-	// Horizon names the Horizon, in the telescope's namespace, that the
-	// telescope sees from where it stands now. It is empty for a
-	// telescope with no horizon.
+	// Horizon names the Horizon of the place where the telescope stands
+	// now, in the telescope's namespace. It is empty for a telescope
+	// with no horizon.
 	Horizon string `json:"horizon,omitempty"`
-	// FITSKeywords are the keywords of every frame that the telescope's
-	// cameras take, the second level of MergeFITSKeywords.
+	// FITSKeywords are the keywords for every frame that the
+	// telescope's cameras take. They are the second level of
+	// MergeFITSKeywords.
 	FITSKeywords []FITSKeyword `json:"fitsKeywords,omitempty"`
 	Procedures[Action]
 }
@@ -30,7 +31,7 @@ type TelescopeStatus struct {
 	Server *Server `json:"server,omitempty"`
 	// Reservation is the active Reservation of this telescope.
 	Reservation *ReservationRef `json:"reservation,omitempty"`
-	// Tubes names each OpticalTube of this telescope.
+	// Tubes lists the names of the OpticalTubes of this telescope.
 	Tubes []string `json:"tubes,omitempty"`
 	// Trains lists each OpticalTrain of this telescope, with its
 	// devices.
@@ -40,16 +41,16 @@ type TelescopeStatus struct {
 	// Guider is the telescope's Guider, and whether it is ready.
 	Guider  *GuiderRef       `json:"guider,omitempty"`
 	Display TelescopeDisplay `json:"display"`
-	// Procedures holds the last run of each trigger of the telescope's
-	// own procedures.
+	// Procedures records the last run of each trigger of the
+	// telescope's own procedures.
 	Procedures []ProcedureRun `json:"procedures,omitempty"`
-	// SetUpUntil is when a person's SetUp expires, in place of the
-	// next astronomical dawn. A person writes it with SetUp, and the
-	// operator keeps it.
+	// SetUpUntil is a time that a person sets through SetUp. Their SetUp
+	// expires then, in place of at the next astronomical dawn. The
+	// operator keeps the value each time it writes the status.
 	SetUpUntil *time.Time `json:"setUpUntil,omitempty"`
 	// SetUpExpiryTime is when the SetUp condition expires: SetUpUntil,
 	// or the next astronomical dawn. The operator writes it while SetUp
-	// is True, so a printer column shows it.
+	// is True, so that a printer column can show it.
 	SetUpExpiryTime *time.Time `json:"setUpExpiryTime,omitempty"`
 }
 

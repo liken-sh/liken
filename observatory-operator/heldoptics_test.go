@@ -1,10 +1,5 @@
 package main
 
-// What a session records about a telescope's optics and its Guider, so
-// an edit during the session changes nothing that the session started:
-// the SCOPE_INFO that a camera's driver gets when it comes back, and
-// the PHD2 that guides.
-
 import (
 	"slices"
 	"strings"
@@ -15,12 +10,13 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// An edit of an OpticalTube, an OpticalTrain, or a Guider during
-// east-tonight takes effect when the session ends. The main camera,
-// whose pod an eviction deletes after the edit, gets the SCOPE_INFO of
-// the tube that the session started with. PHD2 keeps its pod, so it
-// keeps its calibration, and the Guider stays Ready. A Guider created
-// during the session starts no PHD2.
+// A session records the optics and the Guider of its telescope when it
+// starts, so an edit of an OpticalTube, an OpticalTrain, or a Guider
+// takes effect only after the session ends. The test deletes the main
+// camera's pod after the edit, as an eviction would, and the camera
+// still receives the SCOPE_INFO the session started with. PHD2 keeps
+// its pod, so it keeps its calibration. A Guider created during the
+// session starts no PHD2.
 func TestAnEditOfTheOpticsOrTheGuiderDuringASessionChangesNothingItStarted(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -69,17 +65,17 @@ func TestAnEditOfTheOpticsOrTheGuiderDuringASessionChangesNothingItStarted(t *te
 
 				info := slices.DeleteFunc(touches(w, from, "CCD Simulator"), func(c string) bool { return !strings.Contains(c, ".SCOPE_INFO ") })
 				if want := "east-telescope CCD Simulator.SCOPE_INFO FOCAL_LENGTH=480 APERTURE=80"; len(info) == 0 || slices.ContainsFunc(info, func(c string) bool { return c != want }) {
-					t.Errorf("SCOPE_INFO = %q, want only %q", info, want)
+					t.Errorf("the SCOPE_INFO changes are %q, want only %q", info, want)
 				}
 				after, ok := w.api.object(podsCollection, "east-guider")
 				if !ok || podUID(after) != podUID(before) {
-					t.Errorf("PHD2's pod was replaced or deleted")
+					t.Errorf("the PHD2 pod was replaced or deleted, want the original pod kept")
 				}
 				if phase := guider(w).Status.Phase; phase != observatory.PhaseReady {
 					t.Errorf("the Guider is %s, want Ready", phase)
 				}
 				if slices.Contains(w.api.names(podsCollection), "a-east-guider") {
-					t.Errorf("pods = %q, want no PHD2 of the Guider created during the session", w.api.names(podsCollection))
+					t.Errorf("the pods are %q, want no second PHD2 pod of the Guider", w.api.names(podsCollection))
 				}
 			})
 		})

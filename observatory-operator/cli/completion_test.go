@@ -16,9 +16,8 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
 
-// stubLister records the parse and the kind it is asked with and
-// returns a fixed set of names, so a test drives completeArgs without a
-// cluster.
+// stubLister records the parse and the kind it is called with and
+// returns fixed names, so completeArgs runs without a cluster.
 func stubLister(names ...string) (resourceLister, *completionParse, *confirmable) {
 	var seen completionParse
 	var kind confirmable
@@ -129,7 +128,7 @@ func TestRunCompleteWritesTheProtocol(t *testing.T) {
 		t.Fatalf("runComplete: %v", err)
 	}
 	if got := stdout.String(); got != "set-up\ntake-down\n:4\n" {
-		t.Fatalf("output = %q", got)
+		t.Fatalf("the output is %q, want the candidates and the directive", got)
 	}
 }
 
@@ -141,7 +140,7 @@ func TestCompletionScript(t *testing.T) {
 	got := stdout.String()
 	for _, want := range []string{"__complete", "complete -o default", "kubectl-liken-observatory"} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("the script does not contain %q", want)
+			t.Fatalf("the script has no %q, want it to", want)
 		}
 	}
 }

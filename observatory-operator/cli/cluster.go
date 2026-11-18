@@ -1,12 +1,12 @@
 package main
 
-// What the CLI reads from the cluster before it writes: the
-// operator's version from its Deployment image tag, and who the
-// person is. The label selector and the version read here are the
-// contract the sibling CLIs copy.
+// The CLI reads the operator's version from the image tag of its
+// Deployment, and the name of the person who runs the command. The CLIs of the other operators find their Deployment and
+// read the version in the same way.
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,18 +18,17 @@ import (
 )
 
 const (
-	// The label the base binary selects on to find an
-	// operator's workload, and this operator's value for it.
+	// `liken plugins` finds each operator that ships a CLI by this
+	// label, and pluginDomain is this operator's value.
 	pluginLabel  = "cli.liken.sh/plugin"
 	pluginDomain = "observatory"
 )
 
-// The label selector for the operator Deployment.
+// pluginSelector selects the operator's Deployment.
 var pluginSelector = pluginLabel + "=" + pluginDomain
 
-// operatorVersion reads the version tag off the
-// operator Deployment's image, the one source every CLI can read with
-// no new API.
+// operatorVersion returns the tag of the first container's image in the
+// operator's Deployment, which is the operator's version.
 func operatorVersion(ctx context.Context, clientset kubernetes.Interface) (string, error) {
 	deployments, err := clientset.AppsV1().Deployments("").List(ctx, metav1.ListOptions{
 		LabelSelector: pluginSelector,
@@ -38,20 +37,19 @@ func operatorVersion(ctx context.Context, clientset kubernetes.Interface) (strin
 		return "", err
 	}
 	if len(deployments.Items) == 0 {
-		return "", fmt.Errorf("no Deployment carries the label %s", pluginSelector)
+		return "", fmt.Errorf("no Deployment has the label %s", pluginSelector)
 	}
 	containers := deployments.Items[0].Spec.Template.Spec.Containers
 	if len(containers) == 0 {
-		return "", fmt.Errorf("the operator Deployment declares no container")
+		return "", errors.New("the operator Deployment has no container")
 	}
 	return imageTag(containers[0].Image), nil
 }
 
-// clients are what a verb reads and writes through, built from the
-// standard kube flags: the typed clients for the version and the
-// person's name, the dynamic client for the observatory's resources,
-// the namespace, and the name of the kubeconfig's user, which names
-// the person when the cluster does not.
+// clients are the connections and settings that a subcommand uses.
+// typed reads the version and the person's name, dynamic reads and
+// writes the observatory resources, and kubeUser is the kubeconfig's
+// user, which person falls back to.
 type clients struct {
 	typed     kubernetes.Interface
 	dynamic   dynamic.Interface
@@ -87,11 +85,13 @@ func observatoryClients(getter genericclioptions.RESTClientGetter) (clients, err
 	return clients{typed: typed, dynamic: dyn, namespace: namespace, kubeUser: user}, nil
 }
 
-// person answers the name that the condition's message gives: --by
+// person returns the name that the condition's message records: --by
 // when the person gave one, else the user that the API server
-// authenticated, as `kubectl auth whoami` reads it, else the
-// kubeconfig's user. The API server's answer is the one a person
-// cannot mistype, and an older cluster or a refused review falls back.
+// authenticated, from the same SelfSubjectReview that `kubectl auth
+// whoami` creates, else the kubeconfig's user. The API server's name
+// comes first because a person cannot mistype it. When the cluster
+// does not serve the review or refuses it, person returns the
+// kubeconfig's user.
 func person(ctx context.Context, c clients, by string) string {
 	if by != "" {
 		return by
@@ -103,8 +103,8 @@ func person(ctx context.Context, c clients, by string) string {
 	return c.kubeUser
 }
 
-// imageTag reads the tag off an image reference, and
-// reports an empty tag for a bare name or a digest reference.
+// imageTag returns the tag of an image reference, or "" for a bare name
+// or a reference that has only a digest.
 func imageTag(image string) string {
 	if at := strings.LastIndex(image, "@"); at >= 0 {
 		image = image[:at]

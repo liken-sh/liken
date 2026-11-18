@@ -6,36 +6,37 @@ weight: 40
 
 # Procedures
 
-Procedures are the actions you want the equipment to take when a
-reservation starts and ends, such as unpark the dome, cool the
-camera, and open the dust cap, and the reverse at the end. Triggers
-are actions that run once each time a condition changes to the status
-they name, while their resource is active, such as parking everything
-when the weather turns unsafe.
+A procedure is a list of actions that the operator runs on your
+equipment when a reservation starts or ends, such as unparking the
+dome, cooling the camera, and opening the dust cap at the start, and
+the reverse at the end. A trigger is a list of actions that runs each time a condition
+changes to a given status while its resource is active, such as
+parking everything when the weather turns unsafe.
 [Automate the equipment](/docs/guides/automate-the-equipment/) shows
 how to write them.
 
-Each resource lists its procedures in three fields of its spec. Every
-device kind, the `Telescope`, and the `Observatory` have them:
+Every device kind, the `Telescope`, and the `Observatory` have these
+fields in their spec:
 
 - `activation` runs as the resource's `Telescope` or `Observatory`
   turns `Active`, in the reservation's `Activation` step.
 - `deactivation` runs as it stops being `Active`, in the
   `Deactivation` step, while every device is still connected.
-- `triggers` lists triggers. Each one names a condition in `when`,
-  and runs its actions in `run`, as [Triggers](#triggers) states.
+- `triggers` lists triggers. Each trigger has a condition in `when`
+  and the actions to run in `run`, as [Triggers](#triggers)
+  describes.
 
-The same kinds have a fourth field, `requires`, which runs nothing: it
-lists conditions that must hold before a session starts the resource,
-such as a person's `SetUp`, and [Requirements and
+The same kinds also have `requires`, which runs no action. It lists
+the conditions that must be true before a session starts the
+resource, such as a person's `SetUp`. [Requirements and
 dawn](/docs/concepts/how-a-reservation-runs/#requirements-and-dawn)
-states how it holds the reservation.
+describes how `requires` keeps a reservation waiting.
 
 `activation`, `deactivation`, and each trigger's `run` are lists of
-actions that run in order. An action is a target
-state, so it is safe to run twice: the operator reads what the device
-reports, and sends nothing when the device is there already. Each kind
-accepts only the actions it supports, and the CRD refuses the others:
+actions that run in order. An action describes a target state, so
+running it twice is safe. The operator reads what the device reports,
+and sends nothing when the device is already in that state. Each kind
+accepts only its own actions, and the CRD rejects the others:
 
 | Kind | Action | Default timeout |
 |---|---|---|
@@ -45,51 +46,61 @@ accepts only the actions it supports, and the CRD refuses the others:
 | `Camera` | `cool: {celsius, within}`: write the setpoint and wait until the sensor is within `within`, 0.5 °C by default | 20 min |
 | `Camera` | `warm: {celsius, within}`: warm the sensor, then switch the cooler off | 10 min |
 | every kind, `Telescope`, `Observatory` | `job: {image, command, args, env}`: run a container once as a Kubernetes `Job` | 10 min |
-| every kind, `Telescope`, `Observatory` | `notify: <text>`: ask a person to do something, and go on at once | none |
+| every kind, `Telescope`, `Observatory` | `notify: <text>`: ask a person to do something, and continue at once | none |
 
 A `notify` is for what no driver can do, such as covering a portable
-telescope. It is `Done` as soon as its run records it, with the
-summary `Asked: <text>`, and it never waits for the person. The
-status writer reads the record and sets the resource's
-`AttentionNeeded` condition: `True` with the reason `Notified` and
-each open request as its message, and its transition posts a
-`Warning` Event. It turns `False` with the reason `Activated` when the
-resource's next activation begins, and with the reason `Acknowledged`
-when a person writes the resource's `SetUp` condition after the
-request, as `kubectl liken observatory take-down` does. Its message is
-then the message of that `SetUp`, such as `Taken down by ada`. The operator's
-own expiry of `SetUp` at dawn is no answer, so it clears nothing. A
-resource that never ran a `notify` has no `AttentionNeeded`.
+telescope. The action is `Done` at once, with the summary
+`Notified: <text>`, and never waits for the person. The operator then
+sets the resource's
+`AttentionNeeded` condition to `True`, with the reason `Notified` and
+each open request as its message. The transition posts a `Warning`
+Event. `AttentionNeeded` becomes `False` in two cases:
 
-A `warm` that does not reach its setpoint by its timeout still
-switches the cooler off, and notes where the sensor is, because a
-cooler cannot warm a sensor above the air around it. The setpoint of a
-camera's first `cool` action is also the setpoint that the operator
-sends again to a camera whose driver restarts, and the `Setpoint`
-column of `kubectl get cam`. The `Activation` step's summary names each
-camera whose driver has a cooler and whose activation does not cool
-it.
+- With the reason `Activated`, when the resource's next activation
+  begins.
+- With the reason `Acknowledged`, when a person writes the resource's
+  `SetUp` condition after the request, as
+  `kubectl liken observatory take-down` does. The condition's message
+  is then the message of that `SetUp`, such as `Taken down by ada`.
 
-A `job` is for what the other actions lack, such as a dew heater's
-relay or a webhook. The operator creates a `batch/v1` `Job` in the
-resource's namespace, owned by the resource, and the action ends when the `Job`
-ends: `Done` when it succeeds, and `Failed` when it fails. A failed
-action's summary gives the exit code of the `Job`'s container and the
-last lines, at most 300 bytes, of its termination message, such as
+When the operator expires `SetUp` at dawn, `AttentionNeeded` does not
+change. A resource that never ran a `notify` has no `AttentionNeeded`.
+
+A cooler cannot warm a sensor above the air around it, so on a cold
+night a `warm` can reach its timeout before the sensor reaches the
+setpoint. The action then still switches the cooler off and does not
+fail, and its summary gives the sensor's temperature at the timeout,
+such as `warmed Camera east-main to 2.5 °C by the timeout`.
+
+When a camera's driver restarts, the operator sends it the setpoint
+of the camera's first `cool` action again. The `Setpoint` column of
+`kubectl get cam` shows that value. The `Activation` step's summary
+names each camera that has a cooler and no `cool` action in its
+activation.
+
+A `job` is for what the other actions cannot do, such as switching a
+dew heater's relay or calling a webhook. The operator creates a
+`batch/v1` `Job` in the resource's namespace, owned by the resource,
+and the action ends when the `Job` ends: `Done` when it succeeds, and
+`Failed` when it fails. A failed action's summary contains the exit
+code of the `Job`'s container and the end of its termination message,
+at most 300 bytes, such as
 `Job observatory-lab-activation-a799431dd4 failed: exit code 3: checking the dew heater`.
 The container's `terminationMessagePolicy` is `FallbackToLogsOnError`,
-so a script that writes no termination message gives the end of its
-log. When no pod reports how its container ended, such as after
-`activeDeadlineSeconds`, the summary gives the `Job`'s own reason and
-message. The `Job` runs its pod once, with no retry, and
+so a script that writes no termination message leaves the end of its
+log there instead. When no pod reports how its container ended, such
+as after `activeDeadlineSeconds`, the summary contains the `Job`'s own
+reason and message. The `Job` runs its pod once, with no retry, and
 its `activeDeadlineSeconds` is the action's timeout. Kubernetes
-deletes it an hour after it ends, so its logs stay that long. The
-container runs as user 1000 with no capabilities and the
+deletes the `Job` an hour after it ends, so you can read its logs for
+that hour.
+
+The container runs as user 1000 with no capabilities and the
 `RuntimeDefault` seccomp profile, on a read-only root filesystem with
 a writable `/tmp`, so the pod meets the `restricted` Pod Security
-level. The operator adds these variables to its environment, after
-the action's own `env`, and its values replace a variable of the same
-name:
+level. The operator adds the variables below to the container's
+environment after the action's own `env`, and replaces a variable of
+the same name:
 
 | Variable | Value |
 |---|---|
@@ -99,13 +110,13 @@ name:
 | `LIKEN_TRIGGER` | the trigger, such as `activation` or `triggers[0]` |
 | `INDI_HOST`, `INDI_PORT` | the resource's INDI server, such as `lab-observatory.observatory.svc` and `7624` |
 
-The `Job`'s name holds the resource, the trigger, and a hash of the
-transition and of the action's place in the run, such as
-`observatory-lab-activation-a799431dd4`. An operator that restarts
-during a run finds the `Job` it created, and creates no second one. A
-run that runs again, such as a failed activation after the retry
-annotation, deletes the `Job` of the earlier run and creates a new
-one.
+The `Job`'s name contains the resource, the trigger, and a hash of
+the transition and of the action's position in the run, such as
+`observatory-lab-activation-a799431dd4`. When the operator restarts
+during a run, it finds the `Job` it created and does not create a
+second one. When a run starts again, such as a failed activation
+after the retry annotation, the operator deletes the `Job` of the
+earlier run and creates a new one.
 
 ```sh
 kubectl get jobs -n observatory -l observatory.liken.sh/role=job
@@ -113,57 +124,59 @@ kubectl get jobs -n observatory -l observatory.liken.sh/role=job
 
 Every action also takes these fields:
 
-- `timeout`, a duration such as `20m`, bounds the action and its
-  waits. An action that passes it fails.
+- `timeout`, a duration such as `20m`, limits how long the action and
+  its waits may take. An action that exceeds it fails.
 - `requires` lists conditions, as `{kind, name, type, status}`, that
-  must hold before the action runs. `status` is `"True"` unless the
-  field says otherwise. The operator waits for each one until the
-  timeout, and the action's summary names what it waits for, such as
-  `Waiting for WeatherStation lab Safe=True`. `requires` binds only the
-  operator's own actions: a move that a person makes in KStars is
-  stopped only by the drivers' park locks.
-- `after` lists resources, as `{kind, name}`, whose runs for the same
-  step must end first. `{kind: Mount}` with no name means every
+  must hold before the action runs. `status` is `"True"` unless you
+  set it. The operator waits for each condition until the timeout, and
+  the action's summary says what it waits for, such as
+  `Waiting for WeatherStation lab Safe=True`. `requires` applies only
+  to the operator's own actions. When a person moves a mount in KStars,
+  only the drivers' park locks can stop the move.
+- `after` lists resources, as `{kind, name}`, whose runs in the same
+  step must end before this action starts. `{kind: Mount}` with no name means every
   `Mount` in the observatory. A resource with no run in the step is not
   waited for.
 
-A reference with no `kind` names the resource itself. A `kind` of
-`Observatory` or `Telescope` with no `name` names the resource's own.
-A reference that names nothing that exists fails the action, and the
-message names the field, such as `after[0]: no Mount north`.
+A reference with no `kind` refers to the resource itself. A `kind` of
+`Observatory` or `Telescope` with no `name` refers to the
+`Observatory` or `Telescope` that the resource belongs to. A reference
+to a resource that does not exist fails the action, and the message
+names the field, such as `after[0]: no Mount north`.
 
-The tree orders the runs. Activation runs the `Observatory` and then
-its devices, then the `Telescope` and then its own devices, then the
-devices of its trains. Deactivation runs the same tiers in reverse.
-The runs of one tier run in parallel. So the dome unparks before the
-mount, and the mount parks before the dome, with no `after`. An
-`after` that names a resource of a later tier waits until the
-action's timeout, and the action then fails. The observatory's tiers
-run when the first reservation in it activates, under a lock, and a
-second reservation finds those runs `Done`. They run again at
-deactivation when the last telescope in the observatory ends.
+Activation runs the resources in tiers: the `Observatory`, then its
+devices, then the `Telescope`, then the telescope's own devices, then
+the devices of its trains. Deactivation runs the same tiers in
+reverse. The runs within one tier run in parallel. So the dome
+unparks before the mount and the mount parks before the dome, with no
+`after`. An `after` that names a resource in a later tier waits until
+the action's timeout, and then the action fails.
+
+The observatory's tiers run once, when the first reservation in it
+activates, and a later reservation finds those runs `Done`. The tiers run again at deactivation, when the last telescope
+in the observatory ends.
 
 A `Telescope` and an `Observatory` report the condition `Active`. A
 telescope is `Active` from the start of its reservation's `Activation`
 step until the start of its `Deactivation` step. An observatory is
 `Active` from the `Activation` step of the first reservation in it
 until the `Deactivation` step of the last one. The `Observatory`'s
-`Active` message names the reservations that hold telescopes in it
-now, such as `Active for Reservation west-tonight`, and a change of
-holders keeps its `lastTransitionTime`. Each run records the
-`lastTransitionTime` of `Active` that it answers, in `since`, so a
-trigger runs once for each transition.
+`Active` message names the reservations that currently hold
+telescopes in it, such as `Active for Reservation west-tonight`, and
+a change of holders keeps its `lastTransitionTime`. Each run records
+in `since` the `lastTransitionTime` of the `Active` transition that
+started it, so a trigger runs once for each transition.
 
-A resource's `status.procedures` holds the last run of each trigger:
-its `trigger`, `since`, `state`, start and stop times, `summary`, and
-each action with its state, times, and summary. The reservation's
+A resource's `status.procedures` records the last run of each
+trigger: its `trigger`, `since`, `state`, start and stop times,
+`summary`, and each action with its state, times, and summary. The reservation's
 `Activation` and `Deactivation` steps copy the actions they waited on
 into `status.steps[].actions`, each with its resource, so
-`kubectl describe reservation` shows the whole activation. A run that
-an operator restart interrupted resumes from the record, and runs
-again each action that is not `Done`. A failed action fails its run
-and the step, and the retry annotation runs the failed run again,
-while a run that is `Done` stays `Done`. Each run posts an Event on its
+`kubectl describe reservation` shows the whole activation. When an
+operator restart interrupts a run, the run resumes from its record and
+runs each action that is not `Done` again. A failed action fails its
+run and the step. The retry annotation runs a failed run again, and a
+run that is `Done` stays `Done`. Each run posts an Event on its
 resource when it starts and when it ends: `ProcedureStarted`,
 `ProcedureDone`, or the Warning `ProcedureFailed`.
 
@@ -175,55 +188,58 @@ kubectl get rsv east-tonight -n observatory \
 
 ## Triggers
 
-A trigger runs its actions once for each transition of its condition
-to the status it names, while its resource is active: from the end of
-its activation run, or from the start of its `Telescope`'s or
-`Observatory`'s activity when it has no activation, until its
-deactivation begins. `when` is `{kind, name, type, status, for}`, with
-the same rules as a reference in `requires`. Each run records the
-condition's `lastTransitionTime` in `since`. A condition that holds
-when the resource's activation ends runs the trigger then, so a dome
-that unparks in bad weather with no `requires` parks again at once.
+A trigger runs its actions once each time its condition changes to
+the status it names, while its resource is active. A resource is
+active from the end of its activation run until its deactivation
+begins. A resource with no activation is active as soon as its
+`Telescope` or `Observatory` is `Active`. `when` is
+`{kind, name, type, status, for}`, with the same rules as a reference
+in `requires`. Each run records the condition's `lastTransitionTime`
+in `since`. When the condition already has that status as the
+resource's activation ends, the trigger runs then, so a dome that
+unparks in bad weather with no `requires` parks again at once.
 
-`for` delays the run until the status has held that long, such as
-`for: 20m`, and a change of the status before then cancels it, as
-`for` does in a Prometheus alert rule. A trigger whose condition names
-nothing records one `Failed` run and one Warning.
+`for` delays the run until the status has lasted that long, such as
+`for: 20m`. If the status changes before then, the trigger does not
+run, as with `for` in a Prometheus alert rule. A trigger whose condition
+refers to a resource that does not exist records one `Failed` run and
+posts one Warning.
 
-A run's record keeps `trigger: triggers[0]` as its key, and its
+A run's record uses `trigger: triggers[0]` as its key, and its
 summary starts with the condition, such as
 `When WeatherStation lab Safe=False: parked Dome lab`. The run's
-Events name the condition too:
+Events include the condition too:
 `Procedure triggers[0] (WeatherStation lab Safe=False) started: state: Parked`.
 
-A run that began runs to its end, whatever its condition does
-meanwhile, so a weather station that flaps, or that reconnects and
+A run that has started continues to its end, whatever its condition
+does meanwhile. A weather station that flaps, or that reconnects and
 reports `Safe` as `Unknown` for a moment, does not stop a park
-halfway. Only the resource's deactivation, or the operator's stop,
-ends a run. The deactivation ends it as `Skipped` with the reason, and
-a new copy of the operator resumes a run that the stop interrupted.
-A new copy writes no status until it has read each device whose phase
-is `Connected` from its INDI server, for at most 30 seconds. So a
-restart keeps the `lastTransitionTime` of each condition, and a
-trigger does not run again for a transition it already answered.
+halfway. Only the resource's deactivation or the operator's stop ends
+a run. Deactivation ends it as `Skipped` with the reason, and a new
+copy of the operator resumes a run that the stop interrupted.
 
-A resource runs one procedure at a time, its activation and
-deactivation included, so its device never receives two targets at
-once. A run that becomes due while another run of the resource goes
-on is `Pending`, with a summary such as
+After a restart, the operator writes no status until it has read
+each device whose phase is `Connected` from its INDI server, or until
+30 seconds have passed. So a restart keeps the `lastTransitionTime` of
+each condition, and a trigger does not run again for a transition
+that it already handled.
+
+A resource runs one procedure at a time, including its activation and
+deactivation, so its device never receives two targets at once. A run
+that becomes due while another run of the same resource is in progress
+is `Pending`, with a summary such as
 `When WeatherStation lab Safe=True for 20m: waiting for the run of triggers[0] (WeatherStation lab Safe=False) to end`.
-When that run ends, the
-waiting run begins only if its condition still holds with the same
-transition time. Otherwise its record is `Skipped`, with a summary
-such as
+When the other run ends, the waiting run begins only if its condition
+still has the same status and transition time. Otherwise its record is
+`Skipped`, with a summary such as
 `When WeatherStation lab Safe=True for 20m: WeatherStation lab Safe is no longer True, so the run did not begin`.
-A waiting run whose resource's deactivation began does not begin
-either.
+A waiting run does not begin either when its resource's deactivation
+has begun.
 
-The tree gives no order to a trigger, so `after` orders the runs of
-one transition: in a trigger, `after` waits for the runs of the other
-resources' triggers on the same condition and status. A resource with
-no such trigger, or one that is not active, is not waited for.
+The tiers do not order triggers. To order the runs for one
+transition, give a trigger's action an `after`. It waits for the runs
+of other resources' triggers on the same condition and status. The trigger does
+not wait for a resource that has no such trigger or is not active.
 
 ```yaml
 kind: Dome
@@ -237,7 +253,7 @@ spec:
     run: [state: Unparked]
 ```
 
-The [example observatory](/examples/simulators.yaml) states a whole site this way: the dome
+The [example observatory](/examples/simulators.yaml) declares a whole site this way: the dome
 unparks while the weather station reports `Safe`, the mounts unpark,
 the cap opens, and the camera cools to -10 °C. When the weather turns
 unsafe, the mounts park and then the dome parks, and after 20 minutes
@@ -247,15 +263,16 @@ park, and the dome parks.
 
 ## Testing procedures against the simulators
 
-The INDI server images hold `indi_getprop` and `indi_setprop`. They
-run through `kubectl exec` with no shell, so a person can drive each
-simulator from your desktop while a reservation holds a telescope. The
-observatory's devices run on the pod `lab-observatory`, and each
-telescope's devices on its own pod, such as `east-telescope`.
+The INDI server images contain `indi_getprop` and `indi_setprop`.
+Because you run them through `kubectl exec`, which needs no shell in
+the image, you can drive each simulator from your workstation while a
+reservation holds a telescope. The observatory's devices run in the
+pod `lab-observatory`, and each telescope's devices run in their own
+pod, such as `east-telescope`.
 
-The weather simulator decides `Safe` from its weather parameters. A
-strong wind turns it unsafe. The simulator publishes its parameters
-each 60 seconds, so the second command asks it to publish them now:
+The weather simulator sets `Safe` from its weather parameters, and a
+strong wind makes it unsafe. The simulator publishes its parameters
+every 60 seconds, so the second command makes it publish them now:
 
 ```sh
 kubectl -n observatory exec lab-observatory -- indi_setprop "Weather Simulator.WEATHER_CONTROL.Wind;Gust=40;30"
@@ -271,23 +288,22 @@ kubectl -n observatory exec lab-observatory -- indi_setprop "Weather Simulator.W
 kubectl -n observatory exec lab-observatory -- indi_setprop "Weather Simulator.WEATHER_REFRESH.REFRESH=On"
 ```
 
-A person parks a mount by hand the same way, and reads a property
-with `indi_getprop`:
+You can park a mount by hand the same way, and read a property with
+`indi_getprop`:
 
 ```sh
 kubectl -n observatory exec east-telescope -- indi_setprop "Telescope Simulator.TELESCOPE_PARK.PARK=On"
 kubectl -n observatory exec lab-observatory -- indi_getprop "Weather Simulator.SAFETY_STATUS.*"
 ```
 
-Each resource's `status.procedures` holds the last run of each
-trigger, and its `Event`s give each run's start and end:
+Read the dome's `status.procedures`, as shown earlier, or its
+`Event`s, to see each run start and end:
 
 ```sh
-kubectl get dome lab -n observatory -o jsonpath='{.status.procedures}'
 kubectl get events -n observatory --field-selector involvedObject.kind=Dome,involvedObject.name=lab
 ```
 
-The simulators keep their park state in the pod. A device whose pod
-starts again comes back unparked, and a dome comes back with its
-shutter as the simulator starts it. A real driver reads its park
-state from the hardware.
+The simulators keep their park state in memory, so a device whose
+pod restarts comes back unparked, with a dome's shutter in the
+simulator's starting state. A real driver reads its park state from
+the hardware.

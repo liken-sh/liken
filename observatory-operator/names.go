@@ -1,13 +1,12 @@
 package main
 
-// The names and labels of the objects the operator creates. Each pod
-// and Service takes the name <resource-name>-<kind>: the Camera
-// east-main runs in the pod east-main-camera, and the INDI server of the
-// Telescope east runs in the pod east-telescope. The resource's name
-// comes first, so kubectl get pods lists one telescope's objects
-// together. The kind keeps apart two resources of one name, such as the
-// Mount east and the Telescope east. A kind's name holds no "-", so two
-// resources never share a generated name.
+// Each pod and Service that the operator creates is named
+// <resource-name>-<kind>: the Camera east-main runs in the pod
+// east-main-camera, and the INDI server of the Telescope east runs in
+// the pod east-telescope. The resource name comes first, so
+// kubectl get pods lists one telescope's pods together. The kind suffix
+// keeps the Mount east and the Telescope east apart, and because no
+// kind name contains "-", two resources never get the same name.
 
 import (
 	"fmt"
@@ -17,22 +16,19 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The labels on every object the operator creates. The watches select
-// pods and Services by managedBy, so the operator reads its own objects
-// and no others.
+// The watches select pods and Services by labelManagedBy, so the
+// operator reads only its own objects.
 const (
 	labelManagedBy = "app.kubernetes.io/managed-by"
 	labelPartOf    = "app.kubernetes.io/part-of"
-	// labelName is the selector of each object's Service, as in the
-	// manifests of plan 03.
+	// labelName is the label that each Service selects its pod by.
 	labelName = "app.kubernetes.io/name"
-	// labelRole is server or device.
 	labelRole = Group + "/role"
-	// labelServer names the INDI server a pod belongs to: the server's
-	// own pod, and each device pod that it reaches through a shim.
+	// labelServer names the INDI server of a pod: the server's own pod,
+	// or the server that connects to a device pod.
 	labelServer = Group + "/server"
-	// labelKind and labelResource name the resource that caused the
-	// object.
+	// labelKind and labelResource name the resource that the operator
+	// created the object for.
 	labelKind     = Group + "/kind"
 	labelResource = Group + "/resource"
 
@@ -41,45 +37,41 @@ const (
 	roleServer = "server"
 	roleDevice = "device"
 
-	// annotationSpec holds a digest of the pod the operator built. A
-	// pod whose digest differs from the pod the operator builds now,
-	// such as one from an older image, is replaced.
+	// annotationSpec is a digest of the pod spec. The operator replaces
+	// a pod whose digest differs from the digest of the spec it would
+	// build now.
 	annotationSpec = Group + "/spec"
-	// annotationDrivers lists the devices of a server, one address on
-	// each line, such as east-mount:7625. The server's pod reads it as
-	// a file, and its shim starts and stops each driver to match
-	// (drivers.go).
+	// annotationDrivers lists the devices of a server, one address per
+	// line, such as east-mount:7625. The server's pod mounts it as a
+	// file, and its shim starts and stops drivers to match the list.
 	annotationDrivers = Group + "/drivers"
 )
 
-// Group is the API group of the observatory's resources.
 const Group = observatory.Group
 
-// The ports of plan 03: indiserver listens on INDI's own port, and
-// socat in each device pod listens on the next one.
+// indiserver listens on INDI's standard port. socat in each device pod
+// listens on the next port.
 const (
 	serverPort = 7624
 	devicePort = 7625
 )
 
-// serviceName matches a DNS-1035 label, which is what a Service name
-// must be. A resource name can hold a dot or start with a digit, so a
-// generated name that does not match is refused with a message.
+// serviceName matches a DNS-1035 label, which a Service name must be.
+// A resource name can contain a dot or start with a digit, so a
+// generated name can fail it.
 var serviceName = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)
 
-// maxName is the longest DNS label. The shims dial each device by its
-// Service name, so a longer name cannot be used.
+// maxName is the longest DNS label.
 const maxName = 63
 
-// generatedName answers the name of the pod and the Service that the
-// operator creates for one resource, with no check.
+// generatedName returns the name of a resource's pod and Service,
+// without validating it.
 func generatedName(kind observatory.Kind, name string) string {
 	return name + "-" + strings.ToLower(kind.Name)
 }
 
-// objectName answers the name of the pod and the Service that the
-// operator creates for one resource. The error states how to fix a
-// resource's name when the generated name is no Service name.
+// objectName returns the name of a resource's pod and Service, or an
+// error that says how to change the resource name.
 func objectName(kind observatory.Kind, name string) (string, error) {
 	object := generatedName(kind, name)
 	if len(object) > maxName {
@@ -92,7 +84,6 @@ func objectName(kind observatory.Kind, name string) (string, error) {
 	return object, nil
 }
 
-// labels answers the labels of one object the operator creates.
 func labels(object, role, server string, kind observatory.Kind, resource string) map[string]string {
 	return map[string]string{
 		labelManagedBy: managedBy,
@@ -105,7 +96,6 @@ func labels(object, role, server string, kind observatory.Kind, resource string)
 	}
 }
 
-// serviceHost answers the DNS name of a Service in the cluster.
 func serviceHost(name, namespace string) string {
 	return name + "." + namespace + ".svc"
 }

@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// The metadata answers the key of a watch's store, namespace/name, and
-// the version of the copy.
-func TestAnObjectAnswersItsMetadata(t *testing.T) {
+func TestAnObjectReturnsItsMetadata(t *testing.T) {
 	mount := &Mount{Metadata: ObjectMeta{Name: "east-mount", Namespace: "observatory", ResourceVersion: "42"}}
 	meta := mount.GetObjectMeta()
 	got := []string{meta.GetNamespace(), meta.GetName(), meta.GetResourceVersion()}
@@ -19,7 +17,7 @@ func TestAnObjectAnswersItsMetadata(t *testing.T) {
 	}
 }
 
-func TestAKindAnswersTheURLOfItsCollection(t *testing.T) {
+func TestAKindReturnsTheURLOfItsCollection(t *testing.T) {
 	cases := []struct {
 		kind Kind
 		want string
@@ -35,9 +33,7 @@ func TestAKindAnswersTheURLOfItsCollection(t *testing.T) {
 	}
 }
 
-// A procedure names a kind by its name, and a name that is no kind
-// names nothing.
-func TestANameAnswersItsKind(t *testing.T) {
+func TestKindNamedFindsAKindByName(t *testing.T) {
 	cases := []struct {
 		name  string
 		want  Kind
@@ -56,10 +52,10 @@ func TestANameAnswersItsKind(t *testing.T) {
 	}
 }
 
-// A device names its parent through the struct that its spec embeds,
-// such as TrainDevice, so the operator finds the parent of any device
-// with one method.
-func TestADeviceAnswersItsParent(t *testing.T) {
+// A device's spec embeds the struct with its parent field, such as
+// TrainDevice, and that struct's Parent method returns the zero Parent
+// when the field is empty.
+func TestADeviceReturnsItsParent(t *testing.T) {
 	cases := []struct {
 		name   string
 		device interface{ Parent() Parent }
@@ -73,10 +69,10 @@ func TestADeviceAnswersItsParent(t *testing.T) {
 			Parent{TelescopeKind, "east"}},
 		{"a switch on the observatory", SwitchSpec{TelescopeOrObservatoryDevice: TelescopeOrObservatoryDevice{Observatory: "lab"}},
 			Parent{ObservatoryKind, "lab"}},
-		{"a mount on the shelf", MountSpec{}, Parent{}},
-		{"a camera on the shelf", CameraSpec{}, Parent{}},
-		{"a dome on the shelf", DomeSpec{}, Parent{}},
-		{"a switch on the shelf", SwitchSpec{}, Parent{}},
+		{"a mount with no parent", MountSpec{}, Parent{}},
+		{"a camera with no parent", CameraSpec{}, Parent{}},
+		{"a dome with no parent", DomeSpec{}, Parent{}},
+		{"a switch with no parent", SwitchSpec{}, Parent{}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -87,8 +83,8 @@ func TestADeviceAnswersItsParent(t *testing.T) {
 	}
 }
 
-// The parent field and the shared fields are embedded, so they are at
-// the top of the spec on the wire, where the CRD declares them.
+// The embedded structs marshal at the top level of the spec, where the
+// CRD declares their fields.
 func TestTheSharedDeviceFieldsAreAtTheTopOfTheSpec(t *testing.T) {
 	spec := CameraSpec{TrainDevice: TrainDevice{
 		OpticalTrain: "east-imaging",

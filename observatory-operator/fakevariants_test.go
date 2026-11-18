@@ -1,14 +1,14 @@
 package main
 
-// Drivers that no simulator is, made from the transcripts of the
-// simulators that are. A Flip-Flat is a dust cap and a flat panel in
-// one driver, and no simulator serves both interfaces, so its fake
-// joins the dust cover's transcripts and the light panel's under one
-// device. An SBIG camera claims INDI's filter interface with no wheel
-// attached, so its fake is the guide camera with the FILTER bit set in
-// DRIVER_INTERFACE. A mount with a GPS joins the telescope simulator's
-// transcripts and the GPS simulator's. A test names a variant as a
-// driver, with an image, because the indi images hold no such driver.
+// Fake drivers for hardware that has no simulator, built by combining
+// the transcripts of simulators. A Flip-Flat is a dust cap and a flat
+// panel in one driver, and no simulator serves both interfaces, so its
+// fake combines the dust cover's transcripts and the light panel's
+// under one device. An SBIG camera reports INDI's filter interface
+// with no wheel attached, so its fake is the guide camera simulator
+// with the FILTER bit set in DRIVER_INTERFACE. A mount with a GPS
+// combines the telescope simulator's transcripts and the GPS
+// simulator's.
 
 import (
 	"slices"
@@ -20,32 +20,33 @@ import (
 // fakeVariant is one driver made from the transcripts of simulators.
 type fakeVariant struct {
 	// simulators are the directories of indi/inditest/testdata/ whose
-	// definitions the driver joins, the first one's first.
+	// definitions the driver combines. When two simulators define the
+	// same property, the earlier one's definition is used.
 	simulators []string
-	// device is the name the driver gives its device.
+	// device is the INDI device name that the driver reports.
 	device string
-	// bits is the driver's DRIVER_INTERFACE.
+	// bits is the value of the driver's DRIVER_INTERFACE property.
 	bits string
 }
 
 var fakeVariants = map[string]fakeVariant{
-	// DUSTCAP is 1<<9 and LIGHTBOX 1<<10, with AUX, 1<<15
-	// (libs/indidevice/basedevice.h).
+	// DUSTCAP (1<<9), LIGHTBOX (1<<10), and AUX (1<<15), from
+	// libs/indidevice/basedevice.h.
 	"indi_fake_flipflat": {simulators: []string{"lightpanel", "dustcover"}, device: "Flip-Flat Simulator", bits: "34304"},
 	// CCD, GUIDER, and FILTER.
 	"indi_fake_sbig": {simulators: []string{"guide"}, device: "SBIG Simulator", bits: "22"},
-	// TELESCOPE and GPS: a mount with a GPS receiver of its own. The
+	// TELESCOPE and GPS: a mount with its own GPS receiver. The
 	// device keeps the telescope simulator's name, so PHD2 and the
 	// mount's locks find it as they find that simulator.
 	"indi_fake_gpsmount": {simulators: []string{"telescope", "gps"}, device: "Telescope Simulator", bits: "65"},
 }
 
-// variantImage is an image for a variant's driver, which a resource names
-// because drivers.Resolve knows no variant.
+// variantImage is the image that a test gives a resource whose driver
+// is a variant, because drivers.Resolve has no entry for a variant.
 const variantImage = "ghcr.io/example/indi-fake:1.0"
 
-// transcripts joins the definitions of the variant's simulators under
-// its device's name, with the variant's own DRIVER_INFO.
+// transcripts combines the definitions of the variant's simulators
+// under the variant's device name, with the variant's own DRIVER_INFO.
 func (v fakeVariant) transcripts(t *testing.T, exec string) transcriptPair {
 	var out transcriptPair
 	join := func(into []*inditest.Property, from []*inditest.Property) []*inditest.Property {

@@ -1,9 +1,8 @@
-# The operator's identity. It reads the resources of the group in every
-# namespace and runs each observatory's pods, Services, ConfigMaps,
-# claims, and Jobs in the namespace of its resources, so a ClusterRole
-# grants what it needs. The cluster owner chooses the namespaces, and
-# the operator writes nothing outside the ones that hold the group's
-# resources, apart from its Lease in its own namespace.
+# The operator watches the observatory.liken.sh resources in every
+# namespace and creates their pods, Services, ConfigMaps, resource claim
+# templates, and Jobs in the namespace of each resource, so it needs a
+# ClusterRole. It writes only in namespaces that hold those resources,
+# except for its Lease, which is in its own namespace.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -15,9 +14,8 @@ kind: ClusterRole
 metadata:
   name: observatory-operator
 rules:
-  # A watch of each kind reads the inventory, the reservations, and the
-  # saved horizons, and get reads one reservation again after a write
-  # that met a conflict.
+  # The operator watches every kind. It also reads one resource with get
+  # before it patches that resource's finalizers.
   - apiGroups: [observatory.liken.sh]
     resources:
       - observatories
@@ -41,9 +39,8 @@ rules:
       - reservations
       - horizons
     verbs: [get, list, watch]
-  # The operator writes every status with a PUT to the status
-  # subresource, which is the update verb, and never writes a spec. A
-  # Horizon has no status.
+  # The operator writes status with a PUT to the status subresource,
+  # which needs update. A Horizon has no status.
   - apiGroups: [observatory.liken.sh]
     resources:
       - observatories/status
@@ -66,10 +63,9 @@ rules:
       - guiders/status
       - reservations/status
     verbs: [update]
-  # A merge patch of the metadata of a reservation, a device, a
-  # telescope, or an observatory adds and removes its finalizer, and a
-  # merge patch of any resource with procedures removes its retry
-  # annotation.
+  # Merge patches add and remove the operator's finalizer, and remove
+  # the observatory.liken.sh/retry annotation after the operator reruns
+  # the failed runs.
   - apiGroups: [observatory.liken.sh]
     resources:
       - reservations
@@ -89,41 +85,43 @@ rules:
       - switches
       - receivers
     verbs: [patch]
-  # The topology: a pod and a Service for each device and each INDI
-  # server. The watches select them by the operator's label.
+  # A pod and a Service for each device and each INDI server. The
+  # operator watches them with the label selector for its own objects.
   - apiGroups: [""]
     resources: [pods, services]
     verbs: [get, list, watch, create, delete]
-  # A merge patch of a server pod's annotation changes the devices that
-  # its running server starts.
+  # The operator patches an annotation on an INDI server's pod to change
+  # which drivers the running server starts.
   - apiGroups: [""]
     resources: [pods]
     verbs: [patch]
-  # Each guider's ConfigMap holds PHD2's profile and weston's config.
-  # The operator replaces it with an update when the profile changes.
+  # Each guider's ConfigMap holds the PHD2 profile and the weston
+  # configuration. The operator updates it when the profile changes.
   - apiGroups: [""]
     resources: [configmaps]
     verbs: [get, list, watch, create, update, delete]
-  # The PowerOn step reads the claim that a reservation's spec.outbox
-  # names, once, to fail with its name when it does not exist. The
-  # operator does not watch the claims, so it needs get alone.
+  # PowerOn reads the PersistentVolumeClaim that a reservation's
+  # spec.outbox names, and fails before it creates a pod when the claim
+  # does not exist. The operator does not watch claims.
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
     verbs: [get]
-  # The claim template of a device on real hardware, made from its
-  # spec.claim. Each pod makes its own claim from the template, and the
-  # claim ends with the pod, so the operator writes no claims.
+  # A device on real hardware gets a ResourceClaimTemplate built from
+  # its spec.claim. Kubernetes creates a ResourceClaim from the template
+  # for each pod and deletes it with the pod, so the operator never
+  # writes a ResourceClaim.
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaimtemplates]
     verbs: [create, delete]
-  # The Job of each job action. The watch selects the Jobs by the
-  # operator's label, and a run that runs again deletes the Job of the
-  # earlier run before it creates its own.
+  # One Job for each job action. The operator watches Jobs with the
+  # label selector for its own objects. A run that starts again deletes
+  # the Job of the earlier run before it creates a new one.
   - apiGroups: [batch]
     resources: [jobs]
     verbs: [list, watch, create, delete]
-  # The Events of each resource's transitions and each reservation's
-  # steps. A repeat of an Event within 10 minutes patches its count.
+  # Events for the condition transitions of each resource and the steps
+  # of each reservation. A repeated Event patches the count of the
+  # existing one.
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]
@@ -141,12 +139,11 @@ subjects:
     name: observatory-operator
     namespace: liken-system
 ---
-# The Lease that elects the one copy of the operator that acts
-# (leader.go). client-go's election reads the Lease with a get, takes
-# and renews it with an update, and releases it with an update. A
-# namespaced Role, because the Lease is in the operator's own namespace
-# and every kubelet's heartbeat is a Lease in kube-node-lease that this
-# operator has no reason to read.
+# The Lease that elects the operator copy that acts (leader.go).
+# client-go's election reads the Lease with get, and takes, renews, and
+# releases it with update. This is a namespaced Role because the Lease
+# is in the operator's own namespace. A ClusterRole would also reach the
+# Leases in kube-node-lease, which are the kubelets' heartbeats.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -156,8 +153,8 @@ rules:
     resources: [leases]
     resourceNames: [observatory-operator]
     verbs: [get, update]
-  # create carries no resourceNames, because RBAC cannot read a name off
-  # a create. The first copy to start creates the Lease.
+  # RBAC cannot match resourceNames on create, so the create rule has
+  # none. The first copy to start creates the Lease.
   - apiGroups: [coordination.k8s.io]
     resources: [leases]
     verbs: [create]

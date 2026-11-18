@@ -1,21 +1,20 @@
 // record runs INDI drivers under indiserver in Docker and records what
-// the server sends. It runs on a workstation after a bump of the INDI
-// images, never in a test and never in CI. `make captures` runs it
-// twice:
+// the server sends. Run it on a workstation after the INDI images
+// change. No test and no CI job runs it. `make captures` runs it twice:
 //
 //	go run ./indi/capture/record -image IMAGE standard indi/standard
 //	go run ./indi/capture/record -image IMAGE simulators indi/inditest/testdata
 //
 // standard runs each bare driver in the image of indi/standard/bare/
-// and writes one capture for each, the union of every definition it
-// saw. simulators runs each simulator in the indi-simulators image and
-// writes the transcripts that the replay tests serve. Names after the
-// directory record only those captures or simulators.
+// and writes one capture for each, containing every definition the
+// driver sent. simulators runs each simulator in the indi-simulators
+// image and writes the transcripts that the replay tests serve. Names
+// after the directory limit the run to those captures or simulators.
 //
-// Each driver runs in its own container, with indiserver in the same
-// container. The record refuses an image whose indi-bin is not the
-// version in indi/package.toml, so a capture never describes another
-// libindi than the images ship.
+// Each driver runs under its own indiserver in its own container.
+// record refuses an image whose indi-bin version differs from the one
+// in indi/package.toml, so a capture always describes the libindi that
+// the images ship.
 package main
 
 import (
@@ -51,7 +50,7 @@ func main() {
 	case "simulators":
 		err = r.simulators()
 	default:
-		err = fmt.Errorf("record: %q is neither standard nor simulators", flag.Arg(0))
+		err = fmt.Errorf("unknown mode %q, want standard or simulators", flag.Arg(0))
 	}
 	if err != nil {
 		log.Fatal(err)
@@ -68,7 +67,8 @@ func (r recorder) wanted(name string) bool {
 }
 
 // standard records each bare driver. The capture of DefaultDevice comes
-// first, and every other capture leaves out the properties it names.
+// first, and every other capture leaves out the properties that
+// DefaultDevice already defines.
 func (r recorder) standard() error {
 	for _, bare := range capture.Bares {
 		if !r.wanted(bare.Name) {
@@ -76,18 +76,18 @@ func (r recorder) standard() error {
 		}
 		version, device, replies, err := r.run(bare.Driver, bare.Script)
 		if err != nil {
-			return fmt.Errorf("%s: %w", bare.Name, err)
+			return fmt.Errorf("recording %s: %w", bare.Name, err)
 		}
 		kept, err := capture.WriteCapture(r.dir, bare, version, device, replies)
 		if err != nil {
-			return fmt.Errorf("%s: %w", bare.Name, err)
+			return fmt.Errorf("recording %s: %w", bare.Name, err)
 		}
-		log.Printf("%s: %d properties", bare.Name, kept)
+		log.Printf("recorded %d properties of %s", kept, bare.Name)
 	}
 	return nil
 }
 
-// simulators records each simulator's transcripts, one file for each
+// simulators records each simulator's transcripts, with one file per
 // phase.
 func (r recorder) simulators() error {
 	for _, simulator := range capture.Simulators {
@@ -97,19 +97,19 @@ func (r recorder) simulators() error {
 		script := func(device string) capture.Script { return capture.SimulatorScript(simulator, device) }
 		_, device, replies, err := r.run("indi_simulator_"+simulator, script)
 		if err != nil {
-			return fmt.Errorf("%s: %w", simulator, err)
+			return fmt.Errorf("recording %s: %w", simulator, err)
 		}
 		if err := capture.WriteTranscripts(filepath.Join(r.dir, simulator), replies); err != nil {
 			return err
 		}
-		log.Printf("%s: %q, %d phases", simulator, device, len(replies))
+		log.Printf("recorded %d phases of %s, device %q", len(replies), simulator, device)
 	}
 	return nil
 }
 
-// run starts one driver under indiserver in a container of its own,
-// checks the container's INDI version against the pin, and runs the
-// script against it.
+// run starts one driver under indiserver in its own container, checks
+// the container's INDI version against the pin, and runs the script
+// against it.
 func (r recorder) run(driver string, script func(device string) capture.Script) (string, string, []capture.Reply, error) {
 	c, err := start(r.image, driver)
 	if err != nil {
@@ -121,21 +121,20 @@ func (r recorder) run(driver string, script func(device string) capture.Script) 
 		return "", "", nil, err
 	}
 	if version != r.pinned {
-		return "", "", nil, fmt.Errorf("%s holds indi-bin %s, and indi/package.toml pins %s", r.image, version, r.pinned)
+		return "", "", nil, fmt.Errorf("image %s holds indi-bin %s, but indi/package.toml pins %s", r.image, version, r.pinned)
 	}
 	device, replies, err := c.record(script)
 	return version, device, replies, err
 }
 
-// record waits for the driver, then dials the server again and runs
-// the script. When indiserver starts a driver, it asks the driver for
-// its properties, and it sends the answer to every client that has
-// asked for them. A client that connects in that moment receives every
-// definition twice. So a first connection takes the baseline and
-// throws it away: once it goes quiet, the driver has answered the
-// server. Docker's port forward accepts a connection before indiserver
-// listens, and then closes it, so the first connection is dialed again
-// until a deadline.
+// record connects to the server twice and runs the script on the second
+// connection. When indiserver starts a driver, it asks the driver for
+// its properties and forwards the reply to every client that has asked
+// for them, so a client that connects during that exchange receives
+// every definition twice. The first connection reads the baseline until
+// the server goes quiet and discards it. Docker's port forward accepts
+// a connection before indiserver listens and then closes it, so the
+// first connection is retried for up to 30 seconds.
 func (c container) record(script func(device string) capture.Script) (string, []capture.Reply, error) {
 	baseline := func(string) capture.Script {
 		return capture.Script{Phases: []capture.Phase{{Name: "baseline", Message: capture.Baseline}}}

@@ -8,7 +8,7 @@
 // A kind's fields file, <plural>-fields.yaml, names the kind's INDI
 // interfaces, the properties that show that a device serves them, and
 // one entry for each standard property of those interfaces. An entry
-// names the property's field, gives its role, states the unit of each
+// names the property's field, gives its role, gives the unit of each
 // number, and describes the field. The role decides where the field
 // goes:
 //
@@ -23,7 +23,7 @@
 //     device, such as ACTIVE_DEVICES or GEOGRAPHIC_COORD. Status only,
 //     so a person and the operator never write the same property.
 //
-// A number with one member states its unit in `unit`, and a property
+// A number with one member gives its unit in `unit`, and a property
 // with several members names each member's field and unit in
 // `members`. A switch names no members: a field of a switch holds the
 // names of the members that are on, as INDI names them. `elements:
@@ -34,9 +34,9 @@
 // parameter, such as DIGITAL_OUTPUT_1, and its field is a list with
 // one item for each.
 //
-// Every entry, and every member it names, has a `description`: what
-// the field is for, and its unit in the unit's one word, such as "in
-// degrees Celsius". `kubectl explain` prints it, so it follows
+// Every entry, and every member it names, has a `description` that says
+// what the field is for and names its unit in the unit's word, such as
+// "in degrees Celsius". `kubectl explain` prints it, so it follows
 // brand/voice.md. The generator adds the property's name and who
 // changes it.
 //
@@ -60,7 +60,6 @@ import (
 
 const fieldsSuffix = "-fields.yaml"
 
-// The roles of a typed field.
 const (
 	roleSetting = "setting"
 	roleReading = "reading"
@@ -68,7 +67,6 @@ const (
 	roleTree    = "tree"
 )
 
-// The families of a property.
 const (
 	familyNumbered = "numbered"
 	familyNamed    = "named"
@@ -102,8 +100,8 @@ type memberEntry struct {
 }
 
 // A kind is one fields file joined with the standard set of its
-// interfaces: each standard property beside its entry, in the order of
-// the captures.
+// interfaces: each standard property paired with its entry, in the
+// order of the captures.
 type kind struct {
 	curated
 	Plural string
@@ -136,8 +134,8 @@ func readKind(path string, sets map[string]standard.Interface) (kind, error) {
 			return kind{}, fmt.Errorf("%s names the interface %q, which has no capture", path, name)
 		}
 		for _, p := range set.Properties {
-			e, held := c.Properties[p.Name]
-			if !held {
+			e, hasEntry := c.Properties[p.Name]
+			if !hasEntry {
 				return kind{}, fmt.Errorf("%s has no entry for the standard property %s of %s", path, p.Name, name)
 			}
 			if seen[p.Name] {
@@ -153,22 +151,22 @@ func readKind(path string, sets map[string]standard.Interface) (kind, error) {
 	}
 	for _, name := range sortedKeys(c.Properties) {
 		if !seen[name] {
-			return kind{}, fmt.Errorf("%s has an entry for %s, which is no standard property of %v", path, name, c.Interfaces)
+			return kind{}, fmt.Errorf("%s has an entry for %s, which is not a standard property of the interfaces %v", path, name, c.Interfaces)
 		}
 	}
 	for _, name := range c.Detect {
 		if !seen[name] {
-			return kind{}, fmt.Errorf("%s detects the kind by %s, which is no standard property of %v", path, name, c.Interfaces)
+			return kind{}, fmt.Errorf("%s detects the kind by %s, which is not a standard property of the interfaces %v", path, name, c.Interfaces)
 		}
 	}
 	return k, nil
 }
 
-// check refuses an entry that does not fit its property.
+// check returns an error for an entry that does not fit its property.
 func (p property) check() error {
 	switch {
 	case !validName(p.Field):
-		return fmt.Errorf("the field %q is no JSON name in lower camel case", p.Field)
+		return fmt.Errorf("the field %q is not a lowerCamelCase JSON name", p.Field)
 	case !slices.Contains([]string{roleSetting, roleReading, roleCommand, roleTree}, p.Role):
 		return fmt.Errorf("the role %q is none of setting, reading, command, and tree", p.Role)
 	case p.Role == roleSetting && (p.Perm == indi.ReadOnly || p.Type == indi.LightType || p.Type == indi.BLOBType):
@@ -180,7 +178,7 @@ func (p property) check() error {
 	case p.Family != "" && p.driverElements():
 		return fmt.Errorf("a family's members are fixed, so it cannot take elements: driver")
 	case (p.Family == familyNamed) != (p.NamedBy != ""):
-		return fmt.Errorf("a named family, and only a named family, names the property whose members name it in namedBy")
+		return fmt.Errorf("a named family must set namedBy, and no other entry may set it: namedBy is the property whose members give the names of the family's properties")
 	case strings.TrimSpace(p.Text) == "":
 		return fmt.Errorf("the entry has no description")
 	case p.Unit != "" && units[p.Unit].sentence == "":
@@ -191,16 +189,20 @@ func (p property) check() error {
 	return p.checkMembers()
 }
 
-// checkMembers refuses members and units that do not fit the
-// property's type. A number states a unit for each member, a property
-// with several fixed members names a field for each, and a switch, a
-// BLOB, or a property whose elements the driver chooses names none.
+// checkMembers returns an error for members and units that do not fit
+// the property's type. A switch, a BLOB, and a property whose elements
+// the driver chooses have no member entries. A number with one member,
+// or with the driver's elements, gives its unit in unit. Any other
+// property gives each member a field and a description in members, and
+// a number gives each member a unit too.
 func (p property) checkMembers() error {
 	listed := p.Type == indi.SwitchType || p.Type == indi.BLOBType || p.driverElements()
 	single := len(p.Property.Members) == 1
 	switch {
+	case listed && p.driverElements() && len(p.MemberUnits) > 0:
+		return fmt.Errorf("a %s whose members the driver chooses cannot list members in its entry", p.Type)
 	case listed && len(p.MemberUnits) > 0:
-		return fmt.Errorf("a %s whose members %s names no members", p.Type, map[bool]string{true: "the driver chooses", false: "are fixed"}[p.driverElements()])
+		return fmt.Errorf("a %s cannot list members in its entry", p.Type)
 	case p.Type == indi.NumberType && (single || p.driverElements()) && len(p.MemberUnits) == 0 && p.Unit == "":
 		return fmt.Errorf("a number needs a unit")
 	case p.Unit != "" && (p.Type != indi.NumberType || (!single && !p.driverElements())):
@@ -209,16 +211,16 @@ func (p property) checkMembers() error {
 		return nil
 	}
 	for _, m := range p.Property.Members {
-		me, held := p.MemberUnits[m.Name]
+		me, hasEntry := p.MemberUnits[m.Name]
 		switch {
-		case !held:
+		case !hasEntry:
 			return fmt.Errorf("the member %s has no entry", m.Name)
 		case !validName(me.Field):
-			return fmt.Errorf("the member %s names the field %q, which is no JSON name in lower camel case", m.Name, me.Field)
+			return fmt.Errorf("the member %s names the field %q, which is not a lowerCamelCase JSON name", m.Name, me.Field)
 		case p.Type == indi.NumberType && units[me.Unit].sentence == "":
 			return fmt.Errorf("the member %s needs one of the units %v", m.Name, sortedKeys(units))
 		case p.Type != indi.NumberType && me.Unit != "":
-			return fmt.Errorf("the member %s is no number, so it has no unit", m.Name)
+			return fmt.Errorf("the member %s is not a number, so it cannot have a unit", m.Name)
 		case strings.TrimSpace(me.Description) == "":
 			return fmt.Errorf("the member %s has no description", m.Name)
 		case !namesUnit(me.Description, me.Unit):
@@ -233,18 +235,19 @@ func (p property) checkMembers() error {
 	return nil
 }
 
-// jsonName is a field's name: lower camel case. YAML 1.1, which
-// sigs.k8s.io/yaml reads, takes a bare y, n, yes, no, on, or off as a
-// boolean, and the name true or false shows that a fields file left
-// one of them unquoted.
 var jsonName = regexp.MustCompile(`^[a-z][A-Za-z0-9]*$`)
 
-// namesUnit reports whether a description names its unit, in the one
-// word that the unit has.
+// namesUnit reports whether the description contains the word that
+// names the unit.
 func namesUnit(description, unit string) bool {
 	return strings.Contains(description, units[unit].word)
 }
 
+// validName reports whether name is a JSON field name in lower camel
+// case. sigs.k8s.io/yaml reads YAML 1.1, where an unquoted on, yes, or
+// y decodes as true, and off, no, or n as false. So it rejects true and
+// false as field names, because one of them means that a fields file
+// named such a field without quotes.
 func validName(name string) bool {
 	return jsonName.MatchString(name) && name != "true" && name != "false"
 }

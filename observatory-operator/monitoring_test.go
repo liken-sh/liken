@@ -1,8 +1,7 @@
 package main
 
-// deploy/monitoring against the Deployment and the registry: the
-// PodMonitor scrapes the port that the operator listens on, and the
-// dashboard reads only series that the operator serves.
+// Checks of deploy/monitoring against the Deployment and the metrics
+// that the operator serves.
 
 import (
 	"encoding/json"
@@ -16,8 +15,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// metricsContainer reads the operator's labels, its metrics port, and
-// its listener's address from deploy/operator.yaml.
+// metricsContainer holds the fields of the operator's Deployment that
+// the tests read.
 type metricsContainer struct {
 	Spec struct {
 		Template struct {
@@ -49,9 +48,6 @@ type podMonitor struct {
 	} `json:"spec"`
 }
 
-// The PodMonitor selects the operator's pod and scrapes the named port
-// on which the operator listens, and puts the pod's node in the node
-// label, as root plan 65 gives every PodMonitor.
 func TestThePodMonitorScrapesTheOperatorsListener(t *testing.T) {
 	t.Parallel()
 	var d metricsContainer
@@ -61,25 +57,25 @@ func TestThePodMonitorScrapesTheOperatorsListener(t *testing.T) {
 
 	for key, value := range m.Spec.Selector.MatchLabels {
 		if d.Spec.Template.Metadata.Labels[key] != value {
-			t.Errorf("the PodMonitor selects %s=%s, which the pod does not carry", key, value)
+			t.Errorf("the PodMonitor selects %s=%s, which the pod does not have", key, value)
 		}
 	}
 	operator := d.Spec.Template.Spec.Containers[0]
 	endpoint := m.Spec.PodMetricsEndpoints[0]
 	if !slices.Contains(operator.Ports, containerPort{Name: endpoint.Port, ContainerPort: 9200}) {
-		t.Errorf("the PodMonitor scrapes port %q; the container declares %+v", endpoint.Port, operator.Ports)
+		t.Errorf("the PodMonitor scrapes port %q, and the container declares %+v", endpoint.Port, operator.Ports)
 	}
 	if !slices.Contains(operator.Env, envVar{Name: metricsAddressVariable, Value: ":9200"}) {
 		t.Errorf("the container does not set %s to :9200: %+v", metricsAddressVariable, operator.Env)
 	}
 	relabel := endpoint.Relabelings[0]
 	if !slices.Equal(relabel.SourceLabels, []string{"__meta_kubernetes_pod_node_name"}) || relabel.TargetLabel != "node" {
-		t.Errorf("relabelings = %+v", endpoint.Relabelings)
+		t.Errorf("the PodMonitor relabelings are %+v, want pod_node_name copied to node", endpoint.Relabelings)
 	}
 }
 
-// servedNames answers the name of every series that the registry
-// declares, from the descriptions of its collectors.
+// servedNames returns the name of every series that the operator's
+// collectors describe, with the extra series of a histogram.
 func servedNames(t *testing.T) map[string]bool {
 	t.Helper()
 	m := newMetrics("dev")
@@ -108,9 +104,8 @@ func servedNames(t *testing.T) map[string]bool {
 	return names
 }
 
-// The dashboard names its datasource through a template variable, as
-// root plan 65 requires of a provisioned dashboard, and each query
-// reads only series that the operator serves.
+// A provisioned dashboard must take its datasource from a template
+// variable.
 func TestTheDashboardReadsOnlyServedSeries(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("deploy/monitoring/dashboards/observatory-operator.json")
@@ -139,7 +134,7 @@ func TestTheDashboardReadsOnlyServedSeries(t *testing.T) {
 		t.Fatal(err)
 	}
 	if dashboard.Inputs != nil || len(dashboard.Templating.List) != 1 || dashboard.Templating.List[0].Type != "datasource" || dashboard.Templating.List[0].Name != "datasource" {
-		t.Errorf("templating = %+v, inputs = %v", dashboard.Templating, dashboard.Inputs)
+		t.Errorf("the dashboard templating is %+v and its inputs are %v, want one datasource variable and no inputs", dashboard.Templating, dashboard.Inputs)
 	}
 	served := servedNames(t)
 	series := regexp.MustCompile(`\b(?:observatory|liken)_[a-z_]+\b`)
@@ -157,9 +152,8 @@ func TestTheDashboardReadsOnlyServedSeries(t *testing.T) {
 	}
 }
 
-// The component adds the PodMonitor and the dashboard, and sets no
-// namespace of its own, which would move the dashboard out of the
-// monitoring namespace.
+// The kustomize component sets no namespace, because that would also
+// move the dashboard's ConfigMap out of the monitoring namespace.
 func TestTheMonitoringComponentAddsItsFiles(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("deploy/monitoring/kustomization.yaml")
@@ -179,7 +173,7 @@ func TestTheMonitoringComponentAddsItsFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	if component.Kind != "Component" || component.Namespace != "" || component.Generator[0].Namespace != "monitoring" {
-		t.Errorf("component = %+v", component)
+		t.Errorf("the component is %+v, want kind Component, no namespace, and a generator in monitoring", component)
 	}
 	for _, file := range append(component.Resources, component.Generator[0].Files...) {
 		if _, err := os.Stat("deploy/monitoring/" + strings.TrimSpace(file)); err != nil {

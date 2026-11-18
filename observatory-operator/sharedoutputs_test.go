@@ -1,8 +1,8 @@
 package main
 
-// A Switch output that powers devices on more than one server. The
-// release of one server leaves on each output that a device on another
-// running server still names, because that device still draws from it.
+// A Switch output can power devices on more than one server. When one
+// server's reservation is released, the operator leaves on each output
+// that powers a device on another running server.
 
 import (
 	"slices"
@@ -14,8 +14,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// labOutput answers the change that sets one output of an observatory
-// Switch lab to member.
+// labOutput returns the change that sets one output of the
+// observatory's Switch lab to member.
 func labOutput(output, member string) string {
 	if member == "OFF" {
 		return "lab-observatory Simulator IO.DIGITAL_OUTPUT_" + output + " OFF=On ON=Off"
@@ -23,8 +23,6 @@ func labOutput(output, member string) string {
 	return "lab-observatory Simulator IO.DIGITAL_OUTPUT_" + output + " OFF=Off ON=On"
 }
 
-// powerFrom sets the spec.power of a device and keeps the rest of its
-// spec.
 func (w *world) powerFrom(kind observatory.Kind, name, sw string, output int) {
 	object, _ := w.api.object(kindCollection(kind), name)
 	spec := object["spec"].(map[string]any)
@@ -33,8 +31,8 @@ func (w *world) powerFrom(kind observatory.Kind, name, sw string, output int) {
 }
 
 // The observatory's Switch lab powers the east focuser and the west
-// camera from output 1, and the east rotator alone from output 2. The
-// release of east switches off output 2, and leaves output 1 on for the
+// camera from output 1, and the east rotator alone from output 2.
+// Releasing east switches off output 2 and leaves output 1 on for the
 // west camera.
 func TestAReleaseLeavesOnAnOutputThatAnotherServerStillUses(t *testing.T) {
 	t.Parallel()
@@ -60,13 +58,13 @@ func TestAReleaseLeavesOnAnOutputThatAnotherServerStillUses(t *testing.T) {
 	})
 }
 
-// Two releases that overlap switch off an output that only their own
-// devices name. Each release finds the other server's pod while it
-// switches its outputs off, so the output goes off only when a release
-// counts no device whose server stops. The hold on the mounts' park
-// keeps both releases in their Deactivation step until both have
-// begun, and the holds on the servers' pods keep each one terminating
-// until both have stopped.
+// Two releases that overlap must still switch off an output that only
+// their own devices use. Each release still finds the other server's
+// pod when it switches off its outputs, so it must not count a device
+// whose server is stopping. Holding the mounts' park keeps both
+// releases in their Deactivation step until both have started, and
+// a finalizer on each server's pod keeps both pods terminating until
+// the operator has deleted both.
 func TestOverlappingReleasesSwitchOffASharedOutput(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

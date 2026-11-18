@@ -5,14 +5,13 @@ import (
 	"strings"
 )
 
-// width is the column that a folded description wraps at, the width of
-// the CRDs that people wrote by hand before they were generated.
+// width is the column at which a folded description wraps.
 const width = 72
 
-// wrap breaks text into lines of at most width columns after an
-// indent, filling each line with as many words as fit. A word longer
-// than a line gets a line of its own. The narrowest line holds 32
-// columns of text, so a deep field still reads as prose.
+// wrap breaks text into lines that fit in width columns after indent
+// spaces. A line always has room for at least 32 columns of text, so a
+// deeply indented field still wraps at a readable length. A word longer
+// than a line gets a line of its own.
 func wrap(text string, indent int) []string {
 	room := max(width-indent, 32)
 	var lines []string
@@ -34,16 +33,16 @@ func wrap(text string, indent int) []string {
 	return lines
 }
 
-// folded is the key of a folded block scalar, such as "description:
-// >-". YAML joins the lines of such a block with single spaces, so its
-// words can be wrapped again without a change of meaning.
+// folded matches the key line of a folded block scalar, such as
+// "description: >-". YAML joins the lines of such a block with single
+// spaces, so the lines can be wrapped again without changing the
+// value.
 var folded = regexp.MustCompile(`^( *)(- )?[A-Za-z][A-Za-z0-9-]*: >-$`)
 
-// tidy removes the lines that hold only spaces, which the template
-// directives leave behind, and wraps each folded block again for the
-// indentation it ends up at. A fragment that one template includes at
-// two depths then wraps the same way as a field written at either
-// depth.
+// tidy removes the blank lines that template directives leave in the
+// rendered YAML, and wraps each folded block again at its indentation
+// in the output. A fragment that a template includes at two depths
+// then wraps correctly at both.
 func tidy(rendered string) string {
 	var out []string
 	lines := strings.Split(rendered, "\n")

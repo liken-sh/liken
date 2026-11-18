@@ -1,10 +1,11 @@
 package main
 
-// The operator's cost while a reservation holds the east telescope and
-// its devices report readings: the mount reports its coordinates four
-// times a second as it tracks, and both cameras report their
-// temperatures once a second as they cool. The work should follow what
-// changed, not the size of the telescope.
+// These tests measure the work of the operator while a reservation
+// holds the east telescope and its devices report readings. The mount
+// reports its coordinates four times a second as it tracks, and both
+// cameras report their temperatures once a second as they cool. The
+// work should grow with what changed, not with the size of the
+// telescope.
 
 import (
 	"os"
@@ -33,11 +34,11 @@ func (w *indiWorld) stream(span time.Duration) {
 	}
 }
 
-// cpuTime answers the CPU time the process has used.
+// cpuTime returns the CPU time that the process has used.
 func cpuTime(t *testing.T) time.Duration {
 	var usage syscall.Rusage
 	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &usage); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the process CPU time: %v", err)
 	}
 	return time.Duration(usage.Utime.Nano() + usage.Stime.Nano())
 }
@@ -50,14 +51,14 @@ type profiler struct{ start, stop chan struct{} }
 func startProfiler(t *testing.T, path string) *profiler {
 	file, err := os.Create(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the CPU profile %s: %v", path, err)
 	}
 	p := &profiler{start: make(chan struct{}), stop: make(chan struct{})}
 	go func() {
 		defer file.Close()
 		<-p.start
 		if err := pprof.StartCPUProfile(file); err != nil {
-			t.Error(err)
+			t.Errorf("starting the CPU profile: %v", err)
 		}
 		p.start <- struct{}{}
 		<-p.stop
@@ -93,12 +94,11 @@ func TestStreamingReadingsCost(t *testing.T) {
 	})
 }
 
-// A reading wakes the status writer, which waits for its window, and
-// nothing else. The supervisor and the runner of a Ready telescope read
-// only the stores and the devices that each server defines, and a
-// reading changes neither. When every goroutine read the stores again
-// and the runner built each pod spec again, a reading cost about 1,460
-// allocations.
+// A reading wakes only the status writer, which then waits for its
+// window. The supervisor and the runner of a Ready telescope read only
+// the stores and the devices that each server defines, and a reading
+// changes neither, so they must not run. The test checks this through
+// the allocations of one reading.
 //
 // AllocsPerRun counts the whole process, so the test does not run in
 // parallel with others.
@@ -117,9 +117,9 @@ func TestAReadingWakesOnlyTheStatusWriter(t *testing.T) {
 	})
 }
 
-// A device with spec.claim gets its ResourceClaim once. The claim
-// cannot change, and the runner of a Ready telescope does not create it
-// again while readings arrive and statuses change.
+// While readings arrive and statuses change, the runner of a Ready
+// telescope sends no create for a pod, a Service, or the
+// ResourceClaimTemplate of a device with spec.claim.
 func TestReadingsCreateNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

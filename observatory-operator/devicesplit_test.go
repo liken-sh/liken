@@ -1,11 +1,8 @@
 package main
 
-// Each property of an INDI device is in the status of one resource: a
-// standard property in the typed fields of the resource whose interface
-// defines it, and every other property in status.properties of the
-// resource that runs the driver. The example's FilterWheel east is
-// served by Camera east-main, whose CCD simulator defines the wheel's
-// properties beside its own.
+// In the example, Camera east-main serves FilterWheel east, and the
+// camera's CCD simulator defines the wheel's properties together with
+// its own.
 
 import (
 	"encoding/json"
@@ -20,7 +17,6 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// propertyNames answers the names in a status's property list.
 func propertyNames(list []observatory.Property) []string {
 	var names []string
 	for _, p := range list {
@@ -29,8 +25,9 @@ func propertyNames(list []observatory.Property) []string {
 	return names
 }
 
-// A new slot moves the FilterWheel, and the camera that serves it holds
-// nothing of the wheel, so its status is not written again.
+// A new filter slot is written to the FilterWheel's status only. The
+// camera's status does not contain the wheel's properties, so the camera
+// is not written again.
 func TestAFilterSlotUpdateWritesTheFilterWheelAlone(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -53,10 +50,10 @@ func TestAFilterSlotUpdateWritesTheFilterWheelAlone(t *testing.T) {
 	})
 }
 
-// The CCD simulator's own properties, such as SIMULATOR_SETTINGS, and
-// DefaultDevice's DEBUG are in the camera's list alone. The camera's
-// standard properties are typed fields, and the wheel's standard
-// properties are the FilterWheel's.
+// Vendor-specific properties such as SIMULATOR_SETTINGS, and
+// DefaultDevice's DEBUG, appear only in the camera's status.properties.
+// The camera's standard properties are in typed fields, and the wheel's
+// standard properties are in the FilterWheel's status.
 func TestAVendorPropertyIsInTheOwnersListAlone(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -70,22 +67,23 @@ func TestAVendorPropertyIsInTheOwnersListAlone(t *testing.T) {
 		}
 		for _, typed := range []string{"CCD_GAIN", "CCD_TEMPERATURE", "FILTER_SLOT", "FILTER_NAME"} {
 			if slices.Contains(names, typed) {
-				t.Errorf("Camera east-main's properties hold %s, which a typed field holds", typed)
+				t.Errorf("Camera east-main's properties include %s, want it only in a typed field", typed)
 			}
 		}
 		wheel, _ := w.api.object(kindCollection(observatory.FilterWheelKind), "east")
 		body, _ := json.Marshal(wheel["status"])
 		for _, vendor := range []string{"SIMULATOR_SETTINGS", "EQUATORIAL_PE", "DEBUG", "\"properties\""} {
 			if strings.Contains(string(body), vendor) {
-				t.Errorf("FilterWheel east's status holds %s: %s", vendor, body)
+				t.Errorf("FilterWheel east's status contains %s, want it absent: %s", vendor, body)
 			}
 		}
 	})
 }
 
-// A camera's wheel with no FilterWheel to hold it stays in the camera's
-// list, so a person still reads it.
-func TestAWheelThatNoResourceIsStaysInTheCamerasList(t *testing.T) {
+// When no FilterWheel resource exists for a camera's wheel, the wheel's
+// properties stay in the camera's status.properties, so kubectl still
+// shows them.
+func TestWheelPropertiesStayInTheCamerasListWithoutAFilterWheel(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -102,11 +100,13 @@ func TestAWheelThatNoResourceIsStaysInTheCamerasList(t *testing.T) {
 	})
 }
 
-// heldBy answers the standard properties that a transcript defines, by
-// the JSON name of the typed field of a kind that holds each one: the
-// property that the field's tag names, each numbered property of a
-// family, or each property that a member of the kind's NamedBy names.
-func heldBy(t *testing.T, kind observatory.Kind, simulator string) map[string][]string {
+// definedByField returns the standard properties that a simulator's
+// baseline and connect transcripts define, keyed by the JSON name of the
+// kind's typed field that holds them. A slice of items with a Name
+// collects the properties that the members of the kind's NamedBy
+// properties name. Any other slice collects the numbered family of its
+// indi tag. Any other field holds the one property its indi tag names.
+func definedByField(t *testing.T, kind observatory.Kind, simulator string) map[string][]string {
 	t.Helper()
 	defined := map[string]*inditest.Property{}
 	var order []string
@@ -145,8 +145,9 @@ func heldBy(t *testing.T, kind observatory.Kind, simulator string) map[string][]
 	return out
 }
 
-// Each typed field holds the property that the simulator defines, for
-// each kind, and no list holds a property that a typed field holds.
+// For each kind, each typed field is set from the properties that the
+// simulator defines, and status.properties does not repeat a property
+// that a typed field holds.
 func TestEachTypedFieldHoldsWhatTheSimulatorDefines(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -180,7 +181,7 @@ func TestEachTypedFieldHoldsWhatTheSimulatorDefines(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.kind.Name+"/"+c.name, func(t *testing.T) {
 			status := statuses[c.kind.Name+"/"+c.name]
-			held := heldBy(t, c.kind, c.simulator)
+			held := definedByField(t, c.kind, c.simulator)
 			if len(held) == 0 {
 				t.Fatalf("the %s transcript defines no standard property of a %s", c.simulator, c.kind.Name)
 			}
@@ -188,14 +189,14 @@ func TestEachTypedFieldHoldsWhatTheSimulatorDefines(t *testing.T) {
 			for field, names := range held {
 				value, present := status[field]
 				if !present {
-					t.Errorf("status.%s is absent, and the simulator defines %v", field, names)
+					t.Errorf("status.%s is absent, want it to hold %v from the simulator", field, names)
 				}
 				if items, family := value.([]any); family && len(items) != len(names) {
-					t.Errorf("status.%s holds %d items, and the simulator defines %v", field, len(items), names)
+					t.Errorf("status.%s holds %d items, want %d for %v from the simulator", field, len(items), len(names), names)
 				}
 				for _, name := range names {
 					if strings.Contains(string(listed), `"name":"`+name+`"`) {
-						t.Errorf("status.properties holds %s, which status.%s holds", name, field)
+						t.Errorf("status.properties lists %s, want it only in status.%s", name, field)
 					}
 				}
 			}
@@ -203,12 +204,10 @@ func TestEachTypedFieldHoldsWhatTheSimulatorDefines(t *testing.T) {
 	}
 }
 
-// A reserved camera's status holds each definition once: the schema
-// describes each typed field, and the status holds its value. On the
-// CCD simulator's transcripts, Camera east-main writes 12.5 KB: 3.1 KB
-// of typed fields, 1.4 KB of limits, 6.7 KB of the simulator's own
-// properties and DefaultDevice's in status.properties, and 1.3 KB of
-// the rest. With every property in status.properties, it wrote 23.6 KB.
+// A reserved camera's status lists each property once, and a typed field
+// holds only the value, because the CRD's schema describes the field. A
+// status that also repeated the typed properties in status.properties
+// would exceed this limit.
 func TestAReservedCamerasStatusHoldsEachDefinitionOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -221,9 +220,8 @@ func TestAReservedCamerasStatusHoldsEachDefinitionOnce(t *testing.T) {
 	})
 }
 
-// A mount that serves a GPS gives GEOGRAPHIC_COORD, which both standard
-// sets hold, to the GPS: the served resource exists only to show its
-// interface, and the mount keeps the rest.
+// When a mount serves a GPS, GEOGRAPHIC_COORD goes to the GPS, though
+// the standard sets of both kinds contain it.
 func TestAPropertyOfTwoInterfacesGoesToTheServedResource(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -239,33 +237,34 @@ func TestAPropertyOfTwoInterfacesGoesToTheServedResource(t *testing.T) {
 		}
 		mount, _ := decode[observatory.Mount](t, w.api, kindCollection(observatory.MountKind), "east")
 		if mount.Status.Location != nil || slices.Contains(propertyNames(mount.Status.Properties), "GEOGRAPHIC_COORD") {
-			t.Errorf("the mount holds GEOGRAPHIC_COORD: location %+v", mount.Status.Location)
+			t.Errorf("the mount has location %+v or lists GEOGRAPHIC_COORD, want neither", mount.Status.Location)
 		}
 		if mount.Status.Equatorial == nil {
-			t.Error("the mount lost EQUATORIAL_EOD_COORD")
+			t.Error("the mount has no equatorial coordinates, want EQUATORIAL_EOD_COORD")
 		}
 	})
 }
 
-// shelveWheel puts the example's FilterWheel east on the shelf, before
-// a session.
-func shelveWheel(w *world) {
+// putUninstalledWheel creates the example's FilterWheel east in Inventory: it
+// names its owner but no telescope or optical train, so no server
+// places it. Call it before a session starts.
+func putUninstalledWheel(w *world) {
 	w.put(observatory.FilterWheelKind, "east", map[string]any{
 		"device": map[string]any{"kind": "Camera", "name": "east-main"}, "filters": []any{"L"}})
 }
 
-// A served device on the shelf reads nothing of the owner's INDI
-// device: it is Inventory, and its wheel's properties stay in the
-// camera's list.
-func TestAServedDeviceOnTheShelfReadsNothingOfItsOwner(t *testing.T) {
+// A served device in Inventory reads nothing of the owner's INDI
+// device, and the wheel's properties stay in the camera's
+// status.properties.
+func TestAServedDeviceInInventoryReadsNothingOfItsOwner(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
-		shelveWheel(w)
+		putUninstalledWheel(w)
 		readyOf(w)
 		wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
 		if s := wheel.Status; s.Phase != observatory.DeviceInventory || s.IndiDevice != "" || s.Endpoint != nil || s.Slot != nil {
-			t.Errorf("the shelved filter wheel = %s on %q at %+v, slot %+v", s.Phase, s.IndiDevice, s.Endpoint, s.Slot)
+			t.Errorf("the filter wheel in Inventory is %s on %q at %+v with slot %+v, want phase Inventory with no INDI device, endpoint, or slot", s.Phase, s.IndiDevice, s.Endpoint, s.Slot)
 		}
 		camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
 		if names := propertyNames(camera.Status.Properties); !slices.Contains(names, "FILTER_SLOT") {
@@ -274,23 +273,24 @@ func TestAServedDeviceOnTheShelfReadsNothingOfItsOwner(t *testing.T) {
 	})
 }
 
-// A served device placed on its owner takes the owner's properties from
-// one of its kind on the shelf, whatever the order of their names.
-func TestAPlacedServedDeviceTakesThePropertiesFromOneOnTheShelf(t *testing.T) {
+// When a served device in Inventory and a placed one of the same kind
+// name the same owner, the placed one reads the owner's INDI device,
+// whatever the order of their names.
+func TestAPlacedServedDeviceReadsTheOwnerWhileOneInInventoryReadsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
-		shelveWheel(w)
+		putUninstalledWheel(w)
 		w.put(observatory.FilterWheelKind, "east-new", map[string]any{"opticalTrain": "east-imaging",
 			"device": map[string]any{"kind": "Camera", "name": "east-main"}, "filters": []any{"L"}})
 		readyOf(w)
 		placed, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east-new")
 		if placed.Status.Slot == nil {
-			t.Error("the new filter wheel does not read the camera's wheel")
+			t.Error("the placed filter wheel has no slot, want it to read the camera's wheel")
 		}
-		shelved, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
-		if shelved.Status.Slot != nil || shelved.Status.IndiDevice != "" {
-			t.Errorf("the shelved filter wheel reads slot %+v on %q", shelved.Status.Slot, shelved.Status.IndiDevice)
+		inventoried, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
+		if inventoried.Status.Slot != nil || inventoried.Status.IndiDevice != "" {
+			t.Errorf("the filter wheel in Inventory has slot %+v and INDI device %q, want neither", inventoried.Status.Slot, inventoried.Status.IndiDevice)
 		}
 	})
 }

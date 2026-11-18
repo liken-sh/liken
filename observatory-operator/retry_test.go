@@ -1,9 +1,5 @@
 package main
 
-// The retry annotation on a resource with procedures runs its failed
-// trigger runs again, while their conditions hold with the same
-// transition time, and the operator then removes the annotation.
-
 import (
 	"testing"
 	"testing/synctest"
@@ -12,10 +8,10 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The dome refuses its park in bad weather, so its trigger's run
-// fails. The person retries it while the weather is still unsafe, and
-// the run parks the dome, or retries it after the weather turned safe,
-// and the run stays Failed: its transition is over.
+// The dome's driver refuses the park that bad weather triggers, so the
+// run fails. A retry while the weather is still unsafe parks the dome.
+// A retry after the weather turned safe leaves the run Failed, because
+// its transition has ended.
 func TestTheRetryAnnotationRerunsAFailedTriggersRun(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {

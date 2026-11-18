@@ -6,12 +6,11 @@ import (
 	"sync"
 )
 
-// Conn is the server's end of one client connection. It queues what
-// the server writes, the way a socket's send buffer does, and a
-// goroutine of its own writes the queue to the pipe. A net.Pipe has no
-// buffer, so a write blocks until the client reads, and a fake that
-// writes while it holds its lock would stop a client that waits for
-// that lock. So Send never blocks.
+// Conn is the server's end of one client connection. A net.Pipe has no
+// buffer, so a write blocks until the client reads. A fake server that
+// wrote while it held its own lock could deadlock with a client that
+// waits for that lock. So Send only queues the text, and a goroutine
+// writes the queue to the connection.
 type Conn struct {
 	net.Conn
 	mu    sync.Mutex
@@ -19,14 +18,14 @@ type Conn struct {
 	ready chan struct{}
 }
 
-// NewConn starts the writer of one connection.
+// NewConn returns a Conn over conn and starts its writer goroutine.
 func NewConn(conn net.Conn) *Conn {
 	c := &Conn{Conn: conn, ready: make(chan struct{}, 1)}
 	go c.write()
 	return c
 }
 
-// Send queues text for the client.
+// Send queues text to be written to the client.
 func (c *Conn) Send(text string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -37,8 +36,9 @@ func (c *Conn) Send(text string) {
 	}
 }
 
-// write writes the queue until a write fails, as each one does after
-// either end closes the pipe. Close wakes it to find that out.
+// write writes the queued text until a write fails, which happens once
+// either end has closed the pipe. Close sends an empty text so that
+// write wakes, fails, and returns.
 func (c *Conn) write() {
 	for range c.ready {
 		c.mu.Lock()
@@ -53,7 +53,7 @@ func (c *Conn) write() {
 	}
 }
 
-// Close closes the connection, and ends its writer.
+// Close closes the connection and stops the writer goroutine.
 func (c *Conn) Close() error {
 	err := c.Conn.Close()
 	c.Send("")

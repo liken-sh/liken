@@ -4,33 +4,32 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
-// A field is one field of a generated type, and of the schema that
-// the CRD gives it. Both emitters read the same fields, so the Go
-// types and the CRDs cannot differ.
+// field describes one field of a generated Go type and of its CRD
+// schema. The Go emitter and the CRD emitter read the same fields, so
+// the Go types and the CRDs cannot differ.
 type field struct {
 	JSON        string
 	Go          string
 	INDI        string
 	Description string
 	Type        *shape
-	// Required fields are never absent, so they hold a value, not a
+	// A required field is always present, so its Go type is not a
 	// pointer.
 	Required bool
 }
 
-// A shape is the type of a field.
 type shape struct {
 	Kind shapeKind
 	Enum []string
 	Item *shape
 	Name string
 	Doc  string
-	// Description describes an object in a list, for the CRD.
+	// Description is the CRD description of the objects in a list.
 	Description string
 	Fields      []field
 	MinLength   int
-	// Shared is a type that several kinds use, which the Go emitter
-	// declares once, beside the kinds' own types.
+	// The Go emitter declares a Shared type once, for all the kinds
+	// that use it.
 	Shared bool
 }
 
@@ -53,21 +52,19 @@ func object(name, doc string, fields ...field) *shape {
 	return &shape{Kind: objectShape, Name: name, Doc: doc, Fields: fields}
 }
 
-// stateField is the light of a property, which every field in status
-// holds beside the values.
+// stateField is the INDI state that every property in status has
+// beside its values.
 func stateField() field {
 	return field{JSON: "state", Go: "State", Type: &shape{Kind: stateShape}, Description: "The property's state: " +
 		"`Busy` while the driver carries out a change, `Ok` when the last change ended well, " +
 		"`Alert` when it failed, and `Idle` before the first change."}
 }
 
-// values answers the fields of a property's members, for status, or
-// for spec when forSpec. A number or a text gives one field for each
-// member, named by the entry, or value for a property with one member.
-// A light gives one state for each member. A switch gives one field,
-// value, with the name of the member that is on, or values with the
-// names of the members that are on. A BLOB gives none,
-// because the operator never asks for BLOB data.
+// values returns the fields for the members of a property. A number,
+// text, or light property gets one field for each member, named value
+// when MemberUnits gives the member no field name. A switch property
+// gets the one field from switchField. A BLOB property gets no fields,
+// because the operator does not request BLOB data.
 func (p property) values(names namer, forSpec bool) []field {
 	switch p.Type {
 	case indi.SwitchType:
@@ -96,14 +93,14 @@ func (p property) values(names namer, forSpec bool) []field {
 	return out
 }
 
-// switchField is the field of a switch that names the members that
-// are on: one name for a switch whose rule lets one member at most be
-// on, and a list for a switch whose rule lets any number be on. Spec
-// holds an enum of the members that libindi defines. Status holds no
-// enum, because a driver can define more members, and the API server
-// refuses a status with a value that its enum lacks. The field is
-// named value, not on, because YAML 1.1, which kubectl reads, takes a
-// bare on key as the boolean true.
+// switchField returns the field that names the members of a switch
+// property that are on: a string named value, or a list named values
+// when the rule is AnyOfMany. In spec the field has an enum of the
+// members that libindi defines, unless the driver defines them. Status
+// has no enum, because a driver can define more members, and the API
+// server rejects a status value that is not in its enum. The field is
+// not named on, because YAML 1.1, which kubectl reads, parses a bare
+// on key as the boolean true.
 func (p property) switchField(forSpec bool) field {
 	value := text()
 	if forSpec && !p.driverElements() {

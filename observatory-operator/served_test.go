@@ -1,10 +1,9 @@
 package main
 
-// One INDI device serves several resources: the example's filter wheel
-// is the main camera's, and a Flip-Flat is a dust cap and a flat panel
-// in one driver (fakevariants_test.go). The served resource acts
-// through its owner's device, starts with its owner, and stops before
-// it.
+// These tests cover resources that another resource's driver serves:
+// the example's filter wheel is on the main camera's INDI device, and
+// the fake Flip-Flat of fakevariants_test.go serves a dust cap and a
+// flat panel from one driver.
 
 import (
 	"slices"
@@ -16,12 +15,12 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The CCD simulator serves INDI's filter interface beside its own, so
-// the example's FilterWheel names the main camera and runs no driver.
-// The camera's ACTIVE_FILTER then names the camera itself, which is
-// how INDI's camera reads the filter of its own wheel. The fake camera
-// starts naming another device, so the name it ends with is the one
-// the operator wrote.
+// The CCD simulator defines INDI's filter interface on its own device,
+// so the example's FilterWheel sets spec.device to the main camera and
+// runs no driver. The operator then sets the camera's ACTIVE_FILTER to
+// the camera itself, which is how an INDI camera uses its own wheel.
+// The fake camera's ACTIVE_FILTER starts as another device, so the
+// final value proves that the operator wrote it.
 func TestAFilterWheelThatACameraServesIsReady(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -35,13 +34,13 @@ func TestAFilterWheelThatACameraServesIsReady(t *testing.T) {
 		wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
 		endpoint := observatory.Endpoint{Service: "east-telescope", Host: "east-telescope.observatory.svc", Port: 7624}
 		if s := wheel.Status; s.Phase != observatory.DeviceConnected || s.IndiDevice != "CCD Simulator" || s.Endpoint == nil || *s.Endpoint != endpoint || s.Pod != "" {
-			t.Errorf("filter wheel = %s on %q at %+v, pod %q", s.Phase, s.IndiDevice, s.Endpoint, s.Pod)
+			t.Errorf("filter wheel is %s on %q at %+v with pod %q, want Connected on \"CCD Simulator\" at the telescope endpoint with no pod", s.Phase, s.IndiDevice, s.Endpoint, s.Pod)
 		}
 		if wheel.Status.Readings.Filter != "Luminance" {
-			t.Errorf("filter wheel readings = %+v", wheel.Status.Readings)
+			t.Errorf("filter wheel readings are %+v, want filter Luminance", wheel.Status.Readings)
 		}
-		if !holdsFinalizer(wheel.Metadata) {
-			t.Error("the filter wheel holds no finalizer while its camera runs")
+		if !hasOperatorFinalizer(wheel.Metadata) {
+			t.Error("the filter wheel has no finalizer while its camera runs, want one")
 		}
 		if pods := w.api.names(podsCollection); slices.Contains(pods, "east-filterwheel") {
 			t.Errorf("pods = %v, want none for the filter wheel", pods)
@@ -52,11 +51,11 @@ func TestAFilterWheelThatACameraServesIsReady(t *testing.T) {
 			"ACTIVE_FILTER=CCD Simulator",
 		} {
 			if !strings.Contains(changes, want) {
-				t.Errorf("changes = %s\nwant %q", changes, want)
+				t.Errorf("INDI changes are %s\nwant %q", changes, want)
 			}
 		}
 		if connect := stepOf(r, observatory.StepConnect).Summary; !strings.Contains(connect, "Camera east-main with FilterWheel east") {
-			t.Errorf("Connect = %q", connect)
+			t.Errorf("the Connect step says %q, want Camera east-main with FilterWheel east", connect)
 		}
 	})
 }
@@ -95,7 +94,7 @@ func TestAServedResourceWhoseOwnerLacksTheInterfaceReportsError(t *testing.T) {
 					t.Errorf("camera = %s", camera.Status.Phase)
 				}
 				if connect := stepText(stepOf(r, observatory.StepConnect)); !strings.Contains(connect, "FilterWheel east-guide is not served: "+lacks) {
-					t.Errorf("Connect = %q", connect)
+					t.Errorf("the Connect step says %q, want Camera east-main with FilterWheel east", connect)
 				}
 				if changes := strings.Join(w.indi.changes(), "\n"); strings.Contains(changes, c.device+".FILTER_NAME") {
 					t.Errorf("changes = %s, want no FILTER_NAME", changes)
@@ -137,8 +136,8 @@ const (
 	stopFlipFlat  = "east-telescope Flip-Flat Simulator.CONNECTION CONNECT=Off DISCONNECT=On"
 )
 
-// order answers the index of each change in the changes the clients
-// sent, or -1 for a change that none sent.
+// order returns the index of each change in the changes that the
+// clients sent, or -1 for a change that none sent.
 func order(w *world, changes ...string) []int {
 	sent := w.indi.changes()
 	var out []int
@@ -178,7 +177,7 @@ func TestADustCapAndAFlatPanelOnOneDeviceActivateAndDeactivate(t *testing.T) {
 		time.Sleep(time.Minute)
 		synctest.Wait()
 		if at := order(w, darkFlipFlat); at[0] >= 0 {
-			t.Errorf("changes = %q\nthe light went off while the cap closed", w.indi.changes())
+			t.Errorf("INDI changes are %q\nthe light went off while the cap closed, want it on", w.indi.changes())
 		}
 		w.indi.setState("east-telescope", "Flip-Flat Simulator", "CAP_PARK", "Ok")
 		w.gone(observatory.ReservationKind, "east-tonight", 10*time.Minute)
@@ -216,7 +215,7 @@ func TestADeleteOfEitherResourceOnOneDeviceWaitsForItsDeactivation(t *testing.T)
 				readyOf(w)
 				w.api.deleteNamed(kindCollection(c.deleted), "east")
 				if _, ok := w.api.object(kindCollection(c.deleted), "east"); !ok {
-					t.Fatalf("the %s went before its deactivation", c.deleted.Name)
+					t.Fatalf("the %s was deleted before its deactivation", c.deleted.Name)
 				}
 				w.gone(c.deleted, "east", 5*time.Minute)
 
@@ -225,20 +224,19 @@ func TestADeleteOfEitherResourceOnOneDeviceWaitsForItsDeactivation(t *testing.T)
 					t.Errorf("changes = %q\nwant %q in order", w.indi.changes(), c.sent)
 				}
 				if running := slices.Contains(w.indi.connected("east-telescope"), "Flip-Flat Simulator"); running != c.running {
-					t.Errorf("the Flip-Flat runs: %t, want %t", running, c.running)
+					t.Errorf("the Flip-Flat runs = %t, want %t", running, c.running)
 				}
 				if r, _ := w.reservation("east-tonight"); r.Status.Phase != observatory.ReservationReady {
-					t.Errorf("the reservation is %s", r.Status.Phase)
+					t.Errorf("the Reservation is %s, want %s", r.Status.Phase, observatory.ReservationReady)
 				}
 			})
 		})
 	}
 }
 
-// A served resource names a resource on its own server, because one
-// INDI device runs on one server, and one device serves one resource of
-// each kind. The tree refuses any other, and the telescope still
-// starts.
+// spec.device must name a resource that runs a driver on the same
+// server and serves no other resource of the same kind. The tree
+// refuses any other, and the telescope still starts.
 func TestAServedResourceThatCannotShareItsOwnersDeviceIsRefused(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -266,8 +264,8 @@ func TestAServedResourceThatCannotShareItsOwnersDeviceIsRefused(t *testing.T) {
 				if ready := conditionOf(wheel.Status.Conditions, observatory.ConditionReady); wheel.Status.Phase != observatory.DeviceError || ready.Message != "Failed: "+c.refusal {
 					t.Errorf("filter wheel = %s, Ready = %+v", wheel.Status.Phase, ready)
 				}
-				if holdsFinalizer(wheel.Metadata) {
-					t.Error("a refused filter wheel holds the finalizer")
+				if hasOperatorFinalizer(wheel.Metadata) {
+					t.Error("a refused filter wheel has the finalizer, want none")
 				}
 				served, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
 				if served.Status.Phase != observatory.DeviceConnected {
@@ -288,9 +286,9 @@ func servedOn(kind observatory.Kind, name string, by *device) *device {
 	return d
 }
 
-// A device powers the others when its INDI device serves a Switch,
-// whichever resource runs its driver, so a power box that a Focuser
-// owns connects in PowerOn with the Switch it serves.
+// A device connects in the PowerOn step when its INDI device
+// serves a Switch, whichever resource runs its driver. So a power box
+// whose driver a Focuser runs connects with the Switch that it serves.
 func TestTheDevicesThatServeASwitchPowerTheOthers(t *testing.T) {
 	t.Parallel()
 	installed := func(d *device) *device {
@@ -304,16 +302,16 @@ func TestTheDevicesThatServeASwitchPowerTheOthers(t *testing.T) {
 	tr := &tree{devices: []*device{relays, box, boxOutputs, mount}, pods: map[string]*pod{}}
 	switches, others := tr.partition(tr.devicesOn(serverRef{observatory.TelescopeKind, "east"}))
 	if got := names(switches); got != "Switch east, Focuser east-box, Switch east-box" {
-		t.Errorf("the devices that power the others = %q", got)
+		t.Errorf("the devices that power the others are %q, want \"Switch east, Focuser east-box, Switch east-box\"", got)
 	}
 	if got := names(others); got != "Mount east" {
-		t.Errorf("the others = %q", got)
+		t.Errorf("the other devices are %q, want \"Mount east\"", got)
 	}
 }
 
-// A served resource created during a session waits for the next one,
-// though its owner's device runs: the session started its owner without
-// it. The next session gives it the finalizer and its settings.
+// A served resource created during a session waits for the next
+// session, even though its owner's driver runs. The next session gives
+// it the finalizer and writes its settings.
 func TestAServedResourceCreatedDuringASessionWaitsForTheNext(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -328,7 +326,7 @@ func TestAServedResourceCreatedDuringASessionWaitsForTheNext(t *testing.T) {
 		synctest.Wait()
 
 		wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east-new")
-		if wheel.Status.Phase != observatory.DeviceIdle || wheel.Status.IndiDevice != "" || holdsFinalizer(wheel.Metadata) {
+		if wheel.Status.Phase != observatory.DeviceIdle || wheel.Status.IndiDevice != "" || hasOperatorFinalizer(wheel.Metadata) {
 			t.Errorf("during the session, filter wheel = %s on %q, finalizers %v", wheel.Status.Phase, wheel.Status.IndiDevice, wheel.Metadata.Finalizers)
 		}
 		if slices.ContainsFunc(w.indi.changes(), named) {
@@ -344,16 +342,16 @@ func TestAServedResourceCreatedDuringASessionWaitsForTheNext(t *testing.T) {
 			t.Errorf("changes = %q, want %q", w.indi.changes(), want)
 		}
 		wheel, _ = decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east-new")
-		if wheel.Status.Phase != observatory.DeviceConnected || !holdsFinalizer(wheel.Metadata) {
+		if wheel.Status.Phase != observatory.DeviceConnected || !hasOperatorFinalizer(wheel.Metadata) {
 			t.Errorf("filter wheel = %s, finalizers %v", wheel.Status.Phase, wheel.Metadata.Finalizers)
 		}
 	})
 }
 
-// A resource whose device defines its interface only after the step
-// that connected it decided that it lacks the interface heals: it
-// reports Connected, gets its settings, and runs its activation.
-func TestAResourceWhoseInterfaceArrivesLateHeals(t *testing.T) {
+// When an INDI device defines a resource's interface only after the
+// Connect step reported it missing, the resource reports Connected,
+// gets its settings, and runs its activation.
+func TestAResourceWhoseInterfaceAppearsLateBecomesConnected(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name             string
@@ -380,27 +378,26 @@ func TestAResourceWhoseInterfaceArrivesLateHeals(t *testing.T) {
 					t.Errorf("before the property, %s east is %s, want Error", c.kind.Name, lacking.Status.Phase)
 				}
 				if slices.ContainsFunc(w.indi.changes(), func(s string) bool { return strings.HasPrefix(s, c.want) }) {
-					t.Fatalf("changes = %q, sent before the property", w.indi.changes())
+					t.Fatalf("INDI changes are %q, want none before the property exists", w.indi.changes())
 				}
 
 				w.indi.reveal(c.device, c.property)
-				w.until(time.Minute, "the resource does not heal", func() bool {
+				w.until(time.Minute, "the resource does not recover", func() bool {
 					return slices.ContainsFunc(w.indi.changes(), func(s string) bool { return strings.HasPrefix(s, c.want) })
 				})
 				time.Sleep(2 * statusWindow)
 				synctest.Wait()
-				healed, _ := decode[deviceObject](t, w.api, kindCollection(c.kind), "east")
-				if healed.Status.Phase != observatory.DeviceConnected {
-					t.Errorf("%s east is %s, want Connected", c.kind.Name, healed.Status.Phase)
+				recovered, _ := decode[deviceObject](t, w.api, kindCollection(c.kind), "east")
+				if recovered.Status.Phase != observatory.DeviceConnected {
+					t.Errorf("%s east is %s, want Connected", c.kind.Name, recovered.Status.Phase)
 				}
 			})
 		})
 	}
 }
 
-// Of two served resources of one kind on one owner, the one that holds
-// the finalizer keeps the device, so one that waits for the next
-// session never displaces it, and then the older one.
+// When two served resources of one kind name one owner, the one that
+// holds the finalizer is served, and otherwise the older one.
 func TestTheServedResourceThatKeepsTheDevice(t *testing.T) {
 	t.Parallel()
 	early, late := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
@@ -432,8 +429,8 @@ func TestTheServedResourceThatKeepsTheDevice(t *testing.T) {
 				trains: map[string]*observatory.OpticalTrain{"east-imaging": {Spec: observatory.OpticalTrainSpec{Telescope: "east"}}}}
 			winner, _ := tr.device(observatory.FilterWheelKind, c.winner)
 			loser, _ := tr.device(observatory.FilterWheelKind, c.loser)
-			if tr.verdict(winner).owner != camera || tr.verdict(loser).owner != nil {
-				t.Errorf("%s served by %v, %s refused with %q", c.winner, tr.verdict(winner).owner, c.loser, tr.verdict(loser).refusal)
+			if tr.ownershipOf(winner).owner != camera || tr.ownershipOf(loser).owner != nil {
+				t.Errorf("%s served by %v, %s refused with %q", c.winner, tr.ownershipOf(winner).owner, c.loser, tr.ownershipOf(loser).refusal)
 			}
 		})
 	}

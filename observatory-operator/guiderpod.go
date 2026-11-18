@@ -1,13 +1,12 @@
 package main
 
-// The guider's objects: a ConfigMap with PHD2's profile and weston's
-// config, a pod that runs PHD2 beside a headless weston, and a Service
-// for PHD2's event server. PHD2 is a GTK program with no headless mode,
-// so it draws on the compositor through a Wayland socket that the two
-// containers share in an emptyDir. PHD2 rewrites its config while it
-// runs, so the image's entrypoint copies the profile from the
-// ConfigMap into $HOME before each start, and PHD2 keeps nothing
-// between starts.
+// A Guider runs as a ConfigMap with PHD2's profile and weston's config,
+// a pod that runs PHD2 beside a headless weston, and a Service for
+// PHD2's event server. PHD2 is a GTK program with no headless mode, so
+// it draws on weston through a Wayland socket in an emptyDir that both
+// containers mount. PHD2 rewrites its config while it runs, so the
+// image's entrypoint copies the profile from the ConfigMap into $HOME
+// before each start, and every start uses the operator's profile.
 
 import (
 	"fmt"
@@ -19,13 +18,11 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/phd2"
 )
 
-// roleGuider is the role of a guider's pod and Service.
 const roleGuider = "guider"
 
-// The paths that the image of indi/images/phd2 sets in its environment:
-// PHD2's $HOME, where it writes its config, its logs, and its instance
-// lock, the Wayland runtime directory, and the directory whose
-// PHDGuidingV2 the entrypoint copies to $HOME/.PHDGuidingV2.
+// These paths must match the environment of the indi/images/phd2 image.
+// PHD2 writes its config, logs, and instance lock in guiderHome, and the
+// entrypoint copies profileDir/PHDGuidingV2 to $HOME/.PHDGuidingV2.
 const (
 	guiderHome    = "/home/phd2"
 	waylandDir    = "/run/wayland"
@@ -34,19 +31,19 @@ const (
 	profileKey    = "PHDGuidingV2"
 )
 
-// The compositor reads its config from the ConfigMap, and its layout
-// module writes its control socket in /etc/weston, so that directory is
-// an emptyDir of its own.
+// weston reads its config from the read-only ConfigMap mount, and its
+// layout module writes a control socket in westonRunDir, so that
+// directory is a separate, writeable emptyDir.
 const (
 	westonConfigDir = "/etc/weston-config"
 	westonKey       = "weston.ini"
 	westonRunDir    = "/etc/weston"
 )
 
-// westonConfig is the config of weston/smoke/weston.sh, the one the
-// image's smoke check proves: ivi-shell with the layout module that
-// display-operator also loads, the GL renderer, and no input device.
-// The headless backend draws to memory, and no person watches it.
+// westonConfig is the config that weston/smoke/weston.sh tests, with
+// the layout module that display-operator also loads. The pod has no
+// monitor or input device, so weston runs the headless backend and
+// does not require input.
 const westonConfig = `[core]
 shell=ivi-shell.so
 modules=liken-layout.so
@@ -54,9 +51,9 @@ renderer=gl
 require-input=false
 `
 
-// guiderEquipment is what PHD2's profile names: the INDI devices of
-// the guide camera and the mount, as the telescope's server names
-// them, and the guide tube's focal length.
+// guiderEquipment is the equipment that PHD2's profile selects: the
+// INDI device names of the guide camera and the mount on the
+// telescope's INDI server, and the guide tube's focal length.
 type guiderEquipment struct {
 	camera string
 	// mount is empty for a telescope with no Mount.
@@ -65,31 +62,31 @@ type guiderEquipment struct {
 	focalLength float64
 }
 
-// guiderProfile writes PHD2's whole config, with one profile. Each key
-// is the one PHD2 reads (OpenPHDGuiding/phd2, src/):
+// guiderProfile returns PHD2's whole config, with one profile. The
+// keys are the ones that PHD2 reads (OpenPHDGuiding/phd2, src/):
 //
 //   - ConfigVersion is CURRENT_CONFIG_VERSION in phdconfig.h. With no
 //     version, PhdConfig treats the config as new, and PHD2 opens its
 //     modal first-light wizard (phdconfig.cpp, phd.cpp).
 //   - currentProfile selects profile 1 (PhdConfig::InitializeProfile).
-//   - /camera/LastMenuChoice and /scope/LastMenuChoice select the gear
-//     (GearDialog::Initialize). The INDI names are the ones that
-//     camera.cpp and scope.cpp list: "INDI Camera [<device>]" and
-//     "INDI Mount [<device>]". "On-camera" sends the pulses through the
-//     camera's ST-4 port (Scope::MountList).
+//   - /camera/LastMenuChoice and /scope/LastMenuChoice select the
+//     equipment (GearDialog::Initialize). The INDI choices are the
+//     strings that camera.cpp and scope.cpp list: "INDI Camera
+//     [<device>]" and "INDI Mount [<device>]". "On-camera" sends guide
+//     pulses through the camera's ST-4 port (Scope::MountList).
 //   - /indi/INDIhost, INDIport, INDIcam, INDIcam_ccd, and INDImount
-//     name the server and the devices (cam_indi.cpp, scope_indi.cpp).
-//     A device name left at its default makes PHD2 open its modal
-//     setup dialog when it connects.
+//     are the server and the devices (cam_indi.cpp, scope_indi.cpp).
+//     When a device name is left at its default, PHD2 opens a modal
+//     setup dialog as it connects.
 //   - /frame/focalLength is the guide tube's focal length, an integer
 //     in millimeters (MyFrame::LoadProfileSettings). PHD2 computes the
 //     pixel scale from it and the camera's pixel size.
-//   - AutoLoadDarks and AutoLoadDefectMap are off: no dark library
-//     exists in a new $HOME.
+//   - AutoLoadDarks and AutoLoadDefectMap are off, because a new $HOME
+//     has no dark library.
 //
-// The profile leaves /camera/pixelsize out, so PHD2 reads the pixel
-// size from the driver. A stored size that differs from the driver's
-// by 1% opens the modal "Camera Change Warning" (gear_dialog.cpp).
+// The profile has no /camera/pixelsize, so PHD2 reads the pixel size
+// from the driver. When a stored size differs from the driver's by 1%,
+// PHD2 opens the modal "Camera Change Warning" (gear_dialog.cpp).
 func guiderProfile(guider string, pulses observatory.PulseTarget, server string, gear guiderEquipment) string {
 	scope := "On-camera"
 	if pulses == observatory.PulsesMount {
@@ -109,8 +106,8 @@ func guiderProfile(guider string, pulses observatory.PulseTarget, server string,
 	return b.String()
 }
 
-// guiderPod answers the ConfigMap, the pod, and the Service of one
-// Guider, whose PHD2 is a client of the server ref.
+// guiderPod returns the ConfigMap, the pod, and the Service of one
+// Guider. Its PHD2 is a client of the INDI server ref.
 func guiderPod(namespace string, ref serverRef, guider *observatory.Guider, gear guiderEquipment) (*configMap, *pod, *service, error) {
 	name, err := objectName(observatory.GuiderKind, guider.Metadata.Name)
 	if err != nil {
@@ -130,9 +127,10 @@ func guiderPod(namespace string, ref serverRef, guider *observatory.Guider, gear
 	compositor := container{
 		Name:  "compositor",
 		Image: drivers.CompositorImage(),
-		// A native sidecar starts before PHD2, and the kubelet starts
-		// PHD2 only when the startup probe passes, so PHD2 never starts
-		// before the Wayland socket exists.
+		// As a native sidecar (an init container with RestartPolicy
+		// Always), weston starts first, and the kubelet starts PHD2
+		// only after the startup probe passes. So the Wayland socket
+		// exists before PHD2 starts.
 		RestartPolicy:   "Always",
 		Args:            []string{"--backend=headless", "--config=" + westonConfigDir + "/" + westonKey, "--socket=" + waylandSocket},
 		Env:             []envVar{{Name: "XDG_RUNTIME_DIR", Value: waylandDir}, {Name: "WAYLAND_DISPLAY", Value: waylandSocket}},
@@ -142,8 +140,7 @@ func guiderPod(namespace string, ref serverRef, guider *observatory.Guider, gear
 			{Name: "files", MountPath: westonConfigDir, ReadOnly: true},
 			{Name: "weston", MountPath: westonRunDir},
 		},
-		// wayland-info connects to the socket and lists the globals,
-		// and fails while weston is not serving it.
+		// wayland-info fails until weston serves the socket.
 		StartupProbe: &probe{Exec: &execAction{Command: []string{"/usr/bin/wayland-info"}}, PeriodSeconds: 1, FailureThreshold: 30},
 	}
 	guide := container{
@@ -157,9 +154,10 @@ func guiderPod(namespace string, ref serverRef, guider *observatory.Guider, gear
 			{Name: "home", MountPath: guiderHome},
 			{Name: "tmp", MountPath: tmpDir},
 		},
-		// The operator opens its connection to the event server when the
-		// pod is Ready. PHD2 sends a new client its catch-up events, and
-		// a probe that closes at once costs it nothing more.
+		// The operator connects to the event server once the pod is
+		// Ready. The probe opens a TCP connection and closes it at once,
+		// which does no harm, because PHD2 only sends each new client its
+		// current state.
 		ReadinessProbe: &probe{TCPSocket: &tcpSocket{Port: "events"}, PeriodSeconds: 10},
 	}
 	p := &pod{
@@ -167,10 +165,10 @@ func guiderPod(namespace string, ref serverRef, guider *observatory.Guider, gear
 		Metadata: meta{Name: name, Namespace: namespace, Labels: podLabels, OwnerReferences: owners},
 		Spec: podSpec{
 			RestartPolicy: "Always",
-			// PHD2 and weston run as process 1 of their containers, and
-			// neither handles SIGTERM, so a stop waits out the grace
-			// period. PHD2 holds no state to save: the profile comes
-			// from the ConfigMap at each start.
+			// PHD2 and weston run as process 1 of their containers and
+			// neither handles SIGTERM, so a stop would wait out the
+			// whole grace period. PHD2 has no state to save, because the
+			// profile comes from the ConfigMap at each start.
 			TerminationGracePeriodSeconds: int64Pointer(1),
 			EnableServiceLinks:            boolPointer(false),
 			AutomountServiceAccountToken:  boolPointer(false),
@@ -183,15 +181,15 @@ func guiderPod(namespace string, ref serverRef, guider *observatory.Guider, gear
 				{Name: "home", EmptyDir: &emptyDir{}},
 				{Name: "tmp", EmptyDir: &emptyDir{}},
 			},
-			// PHD2 reads each guide frame from the server, about once a
-			// second, so it runs on the server's node (placement.go).
+			// PHD2 downloads every guide frame from the INDI server, so
+			// the pod runs on the server's node (placement.go).
 			Affinity: besideServer(ref),
 		},
 	}
 	return files, stampedWith(p, files.Data[profileKey]), serviceFor(namespace, name, podLabels, owners, "events", phd2.Port), nil
 }
 
-// guiderEndpoint answers the address of a guider's event server.
+// guiderEndpoint returns the address of a guider's event server.
 func guiderEndpoint(namespace, guider string) observatory.Endpoint {
 	name := generatedName(observatory.GuiderKind, guider)
 	return observatory.Endpoint{Service: name, Host: serviceHost(name, namespace), Port: phd2.Port}

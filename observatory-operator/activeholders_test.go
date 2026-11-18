@@ -1,8 +1,8 @@
 package main
 
-// The Observatory's Active condition names the reservations that hold
-// telescopes in it now, and keeps its transition time while they
-// change.
+// The message of an Observatory's Active condition lists the
+// reservations that currently hold its telescopes. The condition keeps
+// its lastTransitionTime when that list changes.
 
 import (
 	"testing"
@@ -12,7 +12,7 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-func TestTheObservatorysActiveNamesItsHoldersNow(t *testing.T) {
+func TestTheObservatorysActiveConditionListsItsReservations(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := bothReady(t)
@@ -32,7 +32,7 @@ func TestTheObservatorysActiveNamesItsHoldersNow(t *testing.T) {
 			return after.Message == "Active for Reservation west-tonight"
 		})
 		if after.Status != observatory.ConditionTrue || !after.LastTransitionTime.Equal(before.LastTransitionTime) {
-			t.Errorf("Active = %s since %v, want True since %v", after.Status, after.LastTransitionTime, before.LastTransitionTime)
+			t.Errorf("Active is %s since %v, want True since %v", after.Status, after.LastTransitionTime, before.LastTransitionTime)
 		}
 	})
 }

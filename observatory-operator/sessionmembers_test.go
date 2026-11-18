@@ -1,10 +1,10 @@
 package main
 
-// Once a session records what it starts, the record alone decides
-// which devices, trains, tubes, and Guiders belong to the session. A
-// pod, a drivers annotation, or a name that a new object reuses does
-// not add one, and a spec edit does not change where the record says
-// that a device runs.
+// Once a session records what it starts, only the record decides which
+// devices, trains, tubes, and Guiders belong to the session. A pod, a
+// drivers annotation, or a new object with a recorded name does not add
+// one, and a spec edit does not move a recorded device to another
+// server.
 
 import (
 	"slices"
@@ -15,9 +15,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// waitsFor asserts that a device has no pod and no finalizer, and
-// reads Idle with the message of a device that waits for a session to
-// end.
+// waitsFor fails the test unless the device has no pod and no
+// finalizer, and is Idle with the message that it starts at the next
+// reservation.
 func waitsFor(t *testing.T, w *world, kind observatory.Kind, name, pod, reservation string) {
 	t.Helper()
 	if slices.Contains(w.api.names(podsCollection), pod) {
@@ -26,7 +26,7 @@ func waitsFor(t *testing.T, w *world, kind observatory.Kind, name, pod, reservat
 	d, _ := decode[deviceObject](t, w.api, kindCollection(kind), name)
 	ready := conditionOf(d.Status.Conditions, observatory.ConditionReady)
 	want := "Starts at the next reservation, after Reservation " + reservation + " ends"
-	if d.Status.Phase != observatory.DeviceIdle || ready.Message != want || holdsFinalizer(d.Metadata) {
+	if d.Status.Phase != observatory.DeviceIdle || ready.Message != want || hasOperatorFinalizer(d.Metadata) {
 		t.Errorf("%s %s = %s %q, finalizers %v; want Idle %q and no finalizer", kind.Name, name, d.Status.Phase, ready.Message, d.Metadata.Finalizers, want)
 	}
 }
@@ -57,9 +57,9 @@ func TestADomeCreatedDuringASessionOfAnEmptyObservatoryWaits(t *testing.T) {
 
 // The main camera's pod is gone while the operator is down, and a
 // person creates a focuser that the camera's driver serves. The
-// session did not record the new focuser, so it waits for the next
-// session, though no pod of its owner exists to show that the session
-// started without it.
+// session did not record the new focuser, so the focuser waits for the
+// next session. No pod of the camera exists to show that the session
+// started without the focuser, so only the record tells.
 func TestAServedDeviceCreatedWhileItsOwnersPodIsGoneWaits(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -78,11 +78,10 @@ func TestAServedDeviceCreatedWhileItsOwnersPodIsGoneWaits(t *testing.T) {
 	})
 }
 
-// A person deletes the focuser while PowerOn waits for the pod of a
-// Switch, after the server's pod lists the focuser's driver, and
-// creates it again.
-// The new focuser is not the one that the session recorded, so it
-// waits for the next session.
+// A person deletes the focuser and creates it again while PowerOn
+// waits for the pod of a Switch, after the server's pod lists the
+// focuser's driver. The new focuser is not the one that the session
+// recorded, so it waits for the next session.
 func TestADeviceCreatedAgainDuringActivationWaits(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -116,11 +115,12 @@ func TestAGuiderCreatedAgainDuringASessionWaits(t *testing.T) {
 		w := readyGuider(t)
 		spec, _ := w.api.object(kindCollection(observatory.GuiderKind), "east")
 		w.api.deleteNamed(kindCollection(observatory.GuiderKind), "east")
-		// The garbage collector deletes the pod after its owner is
-		// gone. Pods and Guiders come through separate watches, so an
-		// operator that saw the pod go first would still hold the
-		// Guider and create its pod again, and the fake API server
-		// has no garbage collector to delete that pod.
+		// In a cluster, the garbage collector deletes the pod after its
+		// owner is gone. The fake API server has none, so the test
+		// deletes the pod itself, after the operator has seen the Guider
+		// go. The operator watches pods and Guiders separately, and if it
+		// saw the pod go first, it would still have the Guider and create
+		// the pod again.
 		synctest.Wait()
 		w.api.deleteNamed(podsCollection, "east-guider")
 		w.settle()
@@ -136,8 +136,9 @@ func TestAGuiderCreatedAgainDuringASessionWaits(t *testing.T) {
 
 // A person moves the train east-imaging to west during the session.
 // The session keeps the train's devices on east, and their ParentFound
-// says that they move. A focuser placed on the train goes where the
-// train's spec places it now, so it does not wait for east's session.
+// says that they move. A focuser created on the train belongs to west,
+// where the train's spec places it now, so it does not wait for east's
+// session.
 func TestATrainMovedDuringASessionMovesItsDevicesAtTheEnd(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

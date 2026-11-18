@@ -1,9 +1,5 @@
 package main
 
-// The declared FITS keywords of plan 20: the session records the merged
-// list of each imaging camera, and Configure writes it to the camera's
-// FITS_HEADER.
-
 import (
 	"slices"
 	"strings"
@@ -14,21 +10,22 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// headerWrites answers each write to a FITS_HEADER that clients sent
-// since the change from, as the server, the device, and the members.
+// headerWrites returns the FITS_HEADER writes among the INDI changes
+// from index from onward, each as the server, the device, and the
+// members.
 func headerWrites(w *world, from int) []string {
 	return slices.DeleteFunc(slices.Clone(w.indi.changes()[from:]), func(c string) bool {
 		return !strings.Contains(c, ".FITS_HEADER ")
 	})
 }
 
-// written answers the change that writes one keyword to the east
+// written returns the change that writes one keyword to the east
 // telescope's imaging camera.
 func written(name, value, comment string) string {
 	return "east-telescope CCD Simulator.FITS_HEADER KEYWORD_NAME=" + name + " KEYWORD_VALUE=" + value + " KEYWORD_COMMENT=" + comment
 }
 
-// declare sets the spec.fitsKeywords of one resource, and removes the
+// declare sets spec.fitsKeywords on one resource, and removes the
 // field when keywords is empty.
 func (w *world) declare(kind observatory.Kind, name string, keywords ...map[string]any) {
 	w.t.Helper()
@@ -53,12 +50,12 @@ func fitsKeyword(name, value, comment string) map[string]any {
 	return k
 }
 
-// cleared is the write that removes every keyword that a client wrote
-// to the east telescope's imaging camera before.
+// cleared is the write that removes every keyword that a client
+// already wrote to the east telescope's imaging camera.
 var cleared = written("INDI_CLEAR", "", "")
 
-// exampleKeywords are the writes of the keywords that the example
-// declares: OBSERVER on the Observatory lab, and TELESCOP on the
+// exampleKeywords are the writes for the keywords that the example
+// declares: OBSERVER on the Observatory lab and TELESCOP on the
 // Telescope east, after the write that clears the camera's keywords.
 var exampleKeywords = []string{
 	cleared,
@@ -66,11 +63,12 @@ var exampleKeywords = []string{
 	written("TELESCOP", "East refractor", "the Telescope's own name"),
 }
 
-// Configure clears the imaging camera's keywords and writes the merged
-// keywords of the four levels to it, one write for each keyword, in the
-// order of first appearance with the most specific value. The guide
-// camera gets no write, even when its own spec declares keywords. With
-// no keywords at any level, the imaging camera gets the clear alone.
+// Configure clears the imaging camera's keywords and writes the
+// keywords merged from every level, one write per keyword. The order
+// is the order of first appearance, and each keyword has its most
+// specific value. The guide camera gets no write, even when its own
+// spec declares keywords. With no keywords at any level, the imaging
+// camera gets only the clear.
 func TestConfigureWritesTheMergedKeywordsToTheImagingCamera(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -119,11 +117,11 @@ func TestConfigureWritesTheMergedKeywordsToTheImagingCamera(t *testing.T) {
 	}
 }
 
-// The session records the merged keywords of the imaging camera, and
-// an edit during the session changes neither the record nor what a
-// driver that restarts gets. A driver that restarts starts with no
-// keywords, so it gets every keyword of the record again. The next
-// session records the edit.
+// The session records the merged keywords of the imaging camera. An
+// edit during the session changes neither the record nor what a
+// restarted driver receives. A restarted driver has no keywords, so it
+// receives every keyword of the record again. The next session records
+// the edit.
 func TestAKeywordEditWaitsForTheNextSession(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -159,10 +157,10 @@ func TestAKeywordEditWaitsForTheNextSession(t *testing.T) {
 	})
 }
 
-// A retry is a person saying that the specs are fixed, so a retry that
-// changes the keywords records them again and runs Configure again,
-// which clears the camera's keywords and writes the new list. A
-// keyword that the retry removes leaves the driver with the clear.
+// A retry means a person has fixed the specs, so a retry that changes
+// the keywords records them again and runs Configure again. Configure
+// clears the camera's keywords and writes the new list. A keyword that
+// the retry removes is gone from the driver after the clear.
 func TestARetryThatChangesTheKeywordsRunsConfigureAgain(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

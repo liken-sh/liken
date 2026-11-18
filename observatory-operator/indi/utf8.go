@@ -5,15 +5,15 @@ import (
 	"unicode/utf8"
 )
 
-// validUTF8 replaces each byte that is not part of valid UTF-8 with
-// U+FFFD. encoding/xml refuses invalid UTF-8 and stops, and a stopped
-// decoder would end the connection over one stray byte in a driver's
-// label or message, such as a degree sign in Latin-1.
+// validUTF8 is an io.Reader that replaces each byte that is not part of
+// valid UTF-8 with U+FFFD. encoding/xml fails on invalid UTF-8, and a
+// failed decoder would end the connection over one stray byte in a
+// driver's label or message, such as a Latin-1 degree sign.
 type validUTF8 struct {
 	from   io.Reader
 	buffer []byte
-	// pending holds the first bytes of a character that a read split.
-	// They wait for the next read to complete the character.
+	// pending holds the leading bytes of a multi-byte character that
+	// the end of a read cut off. The next read completes it.
 	pending []byte
 	out     []byte
 	err     error

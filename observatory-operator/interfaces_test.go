@@ -1,10 +1,5 @@
 package main
 
-// A resource serves its interface while its INDI device defines the
-// interface's detection properties (interfaces.go). The verdict changes
-// when the device defines them or deletes them, and the operator asks
-// the driver for its properties only when it has a reason to.
-
 import (
 	"io"
 	"strings"
@@ -15,30 +10,29 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// dialAsClient opens a connection to a server as a client such as
-// KStars does, and answers a function that sends one message on it.
+// dialAsClient connects to a server as a client such as KStars does,
+// and returns a function that sends one message on that connection.
 func (w *world) dialAsClient(server string) func(message string) {
 	w.t.Helper()
 	client, err := w.indi.DialContext(w.t.Context(), "tcp", server+".observatory.svc:7624")
 	if err != nil {
-		w.t.Fatal(err)
+		w.t.Fatalf("connecting to the INDI server %s: %v", server, err)
 	}
 	w.t.Cleanup(func() { client.Close() })
 	go func() { _, _ = io.Copy(io.Discard, client) }()
 	return func(message string) { _, _ = client.Write([]byte(message)) }
 }
 
-// wheelPhase answers the phase of the example's FilterWheel east.
 func wheelPhase(w *world) observatory.DevicePhase {
 	wheel, _ := decode[observatory.FilterWheel](w.t, w.api, kindCollection(observatory.FilterWheelKind), "east")
 	return wheel.Status.Phase
 }
 
-// A device that deletes its interface's properties during a session
-// and defines them again heals without its settings, because they went
-// out once for the reservation, and a client such as a sequencer may
-// have changed one since.
-func TestAResourceThatHealsDuringASessionKeepsWhatAClientChanged(t *testing.T) {
+// When a device deletes its interface's properties during a session
+// and defines them again, the operator does not write the settings a
+// second time, because a client such as a sequencer may have changed
+// one since.
+func TestADeviceThatDefinesItsInterfaceAgainKeepsWhatAClientChanged(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
@@ -53,7 +47,7 @@ func TestAResourceThatHealsDuringASessionKeepsWhatAClientChanged(t *testing.T) {
 		w.indi.conceal("CCD Simulator", "FILTER_SLOT")
 		w.until(time.Minute, "the filter wheel does not lack its interface", func() bool { return wheelPhase(w) == observatory.DeviceError })
 		w.indi.reveal("CCD Simulator", "FILTER_SLOT")
-		w.until(time.Minute, "the filter wheel does not heal", func() bool { return wheelPhase(w) == observatory.DeviceConnected })
+		w.until(time.Minute, "the filter wheel is not Connected again", func() bool { return wheelPhase(w) == observatory.DeviceConnected })
 		time.Sleep(time.Minute)
 		synctest.Wait()
 		if n := w.indi.count("east-telescope", "CCD Simulator.FILTER_NAME"); n != before+1 {
@@ -62,11 +56,11 @@ func TestAResourceThatHealsDuringASessionKeepsWhatAClientChanged(t *testing.T) {
 	})
 }
 
-// A driver that does not answer a request for its properties gets a
-// verdict that says so, and the operator asks it again only when the
-// device's CONNECTION changes, not on each change that wakes the
+// When a driver does not answer a request for its properties, Ready
+// says so, and the operator sends the request again only when the
+// device's CONNECTION changes, not on every change that wakes the
 // runner.
-func TestADriverThatDoesNotAnswerIsAskedAgainWhenItsConnectionChanges(t *testing.T) {
+func TestADriverThatDoesNotAnswerIsAskedAgainOnlyWhenItsConnectionChanges(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -84,7 +78,7 @@ func TestADriverThatDoesNotAnswerIsAskedAgainWhenItsConnectionChanges(t *testing
 			synctest.Wait()
 		}
 		if n := w.indi.requests("CCD Simulator") - asked; n != 0 {
-			t.Errorf("the operator asked the silent driver %d more times, want none until CONNECTION changes", n)
+			t.Errorf("the operator sent the silent driver %d more getProperties requests, want none until CONNECTION changes", n)
 		}
 
 		w.indi.unsilence("CCD Simulator")

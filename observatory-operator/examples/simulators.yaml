@@ -27,8 +27,8 @@
 #            └─ OpticalTrain west-imaging
 #                 Camera
 #
-#   the shelf                       Focuser spare
-#   the saved horizons              Horizon yard, which east names,
+#   Inventory (no optical train)    Focuser spare
+#   Saved horizons                  Horizon yard, which east names,
 #                                   Horizon roof
 #
 # Each resource names its parent in its spec. A device takes the name
@@ -38,45 +38,42 @@
 # `kubectl get pods` lists `east-mount`, `east-main-camera`, and the
 # server `east-telescope` together.
 #
-# The operator starts nothing for these resources until a Reservation
-# activates their telescope.
+# The operator starts nothing until a Reservation activates a
+# telescope.
 #
-# Each resource states its own procedures: what the operator does with
-# the equipment when the resource's Telescope or Observatory turns
-# `Active`, in `activation`, and when it stops being `Active`, in
-# `deactivation`. An action is a target state, such as `state: Parked`,
-# so the operator can run it twice, and run it again after a restart,
-# with no harm. The tree orders the procedures: activation runs the
+# A resource lists the actions that the operator runs when the
+# resource's Telescope or Observatory turns `Active`, in `activation`,
+# and when it stops being `Active`, in `deactivation`. Most actions
+# name a target state, such as `state: Parked`, so the operator can run
+# one again after a restart with no harm. Activation runs the
 # Observatory and its devices first, then each Telescope and its
-# devices, then the devices of each OpticalTrain, and deactivation runs
-# in the reverse order. The Reservation's `Activation` and
-# `Deactivation` steps wait for them, and the Reservation's status
-# copies their actions.
+# devices, then the devices of each OpticalTrain. Deactivation runs in
+# the reverse order. The Reservation's `Activation` and `Deactivation`
+# steps wait for these actions and list them in the step's status.
 #
-# A resource can also react to a condition while it is active, in
-# `triggers`: each trigger names a condition and the status that fires
-# it, and runs its actions once for each transition to that status.
+# While a resource is active, its `triggers` run actions when a
+# condition changes. A trigger names a condition and a status, and runs
+# its actions once each time the condition changes to that status.
 #
-# The Reservation at the end starts the `east` telescope, and `west`
-# stays down, because each telescope has its own INDI server. Each
-# device of `west` is `Idle`, and the focuser on the shelf is
-# `Inventory`.
+# Each telescope has its own INDI server, so the Reservation at the end
+# starts `east` alone. Each device of `west` stays `Idle`, and the spare
+# focuser is `Inventory`.
 
 # The site. The location is Cerro Tololo Inter-American Observatory in
 # Chile, a public observatory. The operator writes it to each mount and
-# GPS. The observatory has a dome, so the park locks hold: a mount does
+# GPS. The observatory has a dome, so the park locks apply: a mount does
 # not unpark while the dome is parked, and the dome does not park while
 # the mount of `east` or of `west` is unparked. The dome closes its
-# shutter when it parks, and opens it when it unparks. The dome runs on
-# the observatory's server and each mount on its telescope's, so the
-# operator relays each park state that a lock needs between the
-# servers. The condition `LocksRelayed` on the `Observatory` reports
-# the relay.
+# shutter when it parks, and opens it when it unparks. An INDI driver
+# reads another device's park state only on its own server. The dome
+# runs on the observatory's server and each mount on its telescope's,
+# so the operator copies each park state between the servers, and the
+# `Observatory`'s condition `LocksRelayed` reports whether that works.
 #
 # The observatory's activation runs a `job`: a container that the
-# operator runs once as a Kubernetes `Job`, for what no other action
-# does. This one prints the variables that the operator adds to its
-# environment: the observatory, the resource, the trigger, and the
+# operator runs once as a Kubernetes `Job`, for work that no other
+# action does. This one prints the variables that the operator adds to
+# its environment: the observatory, the resource, the trigger, and the
 # address of the observatory's INDI server. Read them with
 # `kubectl logs -n observatory -l app.kubernetes.io/part-of=observatory,observatory.liken.sh/role=job`.
 # A real site would switch on a dew heater's relay here, or post to a
@@ -84,9 +81,10 @@
 # action ends when the `Job` succeeds, and fails the `Activation` step
 # when the `Job` fails.
 #
-# `fitsKeywords` names who observes in the header of every frame that a
-# camera here takes. The telescope, the camera, and the reservation can
-# declare keywords too, and the most specific level wins.
+# `fitsKeywords` writes the observer into the header of every frame
+# that a camera of this observatory takes. The telescope, the camera,
+# and the reservation can declare keywords too, and the most specific
+# one wins.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Observatory
 metadata:
@@ -114,9 +112,9 @@ spec:
 # the telescopes', so the mounts are parked first, and the park lock
 # lets the dome park.
 #
-# The dome also parks when the weather turns unsafe, for any length of
-# time. A trigger has no tree order, so `after` makes the park wait for
-# the run of every mount's own trigger on the same transition: the park
+# The dome also parks as soon as the weather turns unsafe. Triggers do
+# not run in tree order, so `after` makes the park wait until every
+# mount's own trigger for the same change has run, because the park
 # lock refuses a park while a mount is unparked. The dome unparks again
 # after the weather has been safe for 20 minutes, so a station that
 # flaps between safe and unsafe does not open and close the roof each
@@ -157,7 +155,7 @@ spec:
 # a line, the azimuth and then the altitude in degrees. Between two
 # points, the altitude changes in a straight line, and the last point
 # joins the first through 360 degrees. The telescope names the horizon
-# of where it stands now in `spec.horizon`, so a move from the yard to
+# of its current place in `spec.horizon`, so a move from the yard to
 # the roof is one edit.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Horizon
@@ -190,12 +188,12 @@ spec:
 # The first telescope has a device of every kind. Its mount, its trains,
 # and its other devices run on one INDI server, because a camera snoops
 # the mount and the focuser of its train only on the same server. It
-# stands in the yard. A telescope that names a `Horizon` reports the
+# is in the yard. A telescope that names a `Horizon` reports the
 # condition `HorizonFound`, which is `False` while the `Horizon` does
 # not exist. The telescope runs either way, because no component reads
-# a horizon's profile today, and no slew checks it. The driver writes the name of the INDI mount,
-# `Telescope Simulator`, in `TELESCOP`, so the telescope declares its
-# own name in its place.
+# a horizon's profile and no slew checks it. The INDI mount driver
+# writes its own name, `Telescope Simulator`, in `TELESCOP`, so the
+# telescope declares its own name to replace that value.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Telescope
 metadata:
@@ -207,10 +205,10 @@ spec:
   - {name: TELESCOP, value: East refractor, comment: the Telescope's own name}
 ---
 # The mount unparks on activation, after the dome unparked, and parks on
-# deactivation, before the dome parks. The operator leaves tracking off,
-# because the holder aligns and calibrates the mount first. It parks
-# when the weather turns unsafe, and stays parked when the weather
-# turns safe again: the holder decides when to unpark it.
+# deactivation, before the dome parks. The operator does not turn
+# tracking on, because the holder aligns and calibrates the mount
+# first. The mount parks when the weather turns unsafe. No trigger
+# unparks it when the weather is safe again, so the holder does that.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Mount
 metadata:
@@ -244,9 +242,9 @@ spec:
   driver: {name: indi_simulator_pac}
 ---
 # A relay board with four outputs, which powers the imaging train. The
-# devices below name an output in spec.power. Activation switches each
-# named output on before the device's pod starts, and deactivation
-# switches it off after the pod stops.
+# devices below name an output in `spec.power`. The Reservation's
+# `PowerOn` step switches each named output on before the device's pod
+# starts, and its `PowerOff` step switches it off after the pod stops.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Switch
 metadata:
@@ -390,11 +388,11 @@ spec:
   - state: Dark
 ---
 # The guide camera, behind the guide scope. It has no power output, so
-# a person powers it by hand. The guide simulator draws 2.4 µm pixels
-# and 6 arc-seconds of seeing, so behind the 200 mm guide scope a star
-# spans about 2.4 pixels at 2.5 arc-seconds per pixel, which PHD2 can
-# find and follow. The CCD simulator's 5.2 µm pixels and 3.5
-# arc-seconds would draw stars smaller than a pixel there.
+# a person switches it on. The guide simulator has 2.4 µm pixels and
+# 6 arc-seconds of seeing. Behind the 200 mm guide scope that gives 2.5
+# arc-seconds per pixel, so a star spans about 2.4 pixels, which PHD2
+# can find and follow. With the CCD simulator's 5.2 µm pixels and 3.5
+# arc-seconds of seeing, a star would be smaller than a pixel.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Camera
 metadata:
@@ -472,18 +470,16 @@ spec:
   opticalTrain: west-imaging
   driver: {name: indi_simulator_ccd}
 ---
-# A spare focuser on the shelf. It names no optical train, so it is
-# installed nowhere: its phase is `Inventory`, and the operator creates
-# no pod, no `Service`, and no `ResourceClaim` for it, even while a
-# reservation is active. A `ResourceClaim` would reserve the real
-# hardware, so the operator creates none for a device on the shelf,
-# even when its spec has a `claim`. To install it, set `opticalTrain`.
-# While the train's telescope is reserved, its running INDI server
-# keeps the devices it started, so the spare starts at the telescope's
-# next reservation. On a train of `east`, that reservation's `PowerOn`
-# step fails, because `Focuser east` runs `indi_simulator_focus` on
-# the same server, and the step's message names both focusers and the
-# driver.
+# A spare focuser. It names no optical train, so its phase is
+# `Inventory`, and the operator creates no pod, no `Service`, and no
+# `ResourceClaim` for it, even while a reservation is active. That
+# holds even when its spec has a `claim`, because the claim would
+# reserve the real hardware. To install it, set `opticalTrain`. A
+# running INDI server keeps the devices it started with, so the spare
+# starts at the telescope's next reservation. On a train of `east`,
+# that reservation's `PowerOn` step fails, because `Focuser east` runs
+# `indi_simulator_focus` on the same server, and the step's message
+# names both focusers and the driver.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Focuser
 metadata:

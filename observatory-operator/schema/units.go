@@ -1,16 +1,15 @@
 package schema
 
-// A unit is the unit of a number: the word that the field's
-// description must hold, so the curated text names the same unit as
-// its entry, and the sentence that a generated description ends with.
+// A unit is the measurement unit of a numeric field. The generator
+// fails when a hand-written description of the field does not contain
+// word. sentence ends a generated description.
 type unit struct {
 	word, sentence string
 }
 
-// units holds each unit by the short name that a fields file gives.
-// The list is closed, so a misspelled unit fails the generator, and
-// each unit has one word, so every description names it the same way.
-// A count and a factor have no word.
+// units maps the short name that a fields file uses to its unit. The
+// generator fails on a short name that is not in this map, so a typo
+// cannot reach a description.
 var units = map[string]unit{
 	"s":        {"seconds", "The unit is seconds."},
 	"ms":       {"milliseconds", "The unit is milliseconds."},

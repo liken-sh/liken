@@ -1,53 +1,47 @@
 # The operator's image: one static Go binary and nothing else. The
-# operator holds the credentials that create pods in its namespace, so
-# the image carries no shell, no libc, and no tools, which is the least
-# there is to attack. It speaks TLS only to the API server, with the CA
-# that the kubelet mounts, so it needs no trust store.
+# operator's service account can create pods, so the image has no shell,
+# no libc, and no tools that an attacker could use. The operator uses
+# TLS only to reach the API server, and it verifies that connection
+# with the CA file that the kubelet mounts, so the image needs no CA
+# bundle.
 
 FROM golang AS build
-# proxy.golang.org sometimes drops a module download partway through
-# the stream. With the default comma, `go` tries the origin only when
-# the proxy answers 404 or 410, so a dropped stream fails the build.
-# With a pipe, `go` fetches the module from its origin after any proxy
-# error, with the git that this image includes. `GOSUMDB` keeps its
-# default, so the checksum database still verifies a module that `go`
-# fetched from its origin.
+# proxy.golang.org sometimes drops a module download partway through.
+# After a comma, `go` tries the origin only when the proxy returns 404
+# or 410. After a pipe, it tries the origin after any proxy error. The
+# default `GOSUMDB` still verifies a module fetched from its origin.
 ENV GOPROXY="https://proxy.golang.org|direct"
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.
 COPY go.mod go.sum ./
-# go.mod replaces the shared kubernetes module with ../kubernetes, and
-# the build takes that directory as a second build context named
-# kubernetes. It lands at /kubernetes, the same place relative to /src
-# that kubernetes/ has relative to this component. Its module file
-# comes first for the same reason as this module's.
+# go.mod replaces the kubernetes module with ../kubernetes, so the
+# build context named kubernetes is copied to /kubernetes. Its go.mod
+# and go.sum come first, for the same caching reason.
 COPY --from=kubernetes go.mod go.sum /kubernetes/
 RUN go mod download
 COPY --from=kubernetes . /kubernetes/
-# The operator's package and the four packages it imports: the INDI
-# client, the PHD2 client, the resources' types, and the map of images.
+# The operator's package and the packages it imports: the INDI client,
+# the PHD2 client, the resource types, and the map of driver images.
 COPY *.go ./
 COPY indi/*.go ./indi/
 COPY phd2/*.go ./phd2/
 COPY observatory/*.go ./observatory/
 COPY drivers/*.go ./drivers/
-# The version reaches the binary through -ldflags, so liken_build_info
-# names the release that runs and not dev.
+# The build writes the version into the binary through -ldflags, so the
+# liken_build_info metric reports the release version and not dev.
 ARG VERSION=dev
-# CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
-# static binary with no paths from the build machine in it. It runs
-# from scratch, where there is no loader to need.
+# CGO_ENABLED=0 builds a static binary, which runs on scratch.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /observatory-operator .
-# The license files of the Go standard library and of each module that
-# the binary links. notices/go.sh says why the image needs them.
+# The license files of the Go standard library and of each module the
+# binary links. notices/go.sh explains why the image carries them.
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices .
 
 FROM scratch
 COPY --from=build /observatory-operator /observatory-operator
 COPY --from=build /notices /
-# deploy/operator.yaml runs the operator as this user, and the image
-# names the same one, so `docker run` runs it the same way.
+# deploy/operator.yaml runs the operator as this user. The image sets
+# the same user, so `docker run` behaves the same way.
 USER 65534:65534
 ENTRYPOINT ["/observatory-operator"]

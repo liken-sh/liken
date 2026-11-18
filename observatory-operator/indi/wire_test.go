@@ -10,8 +10,9 @@ import (
 	"time"
 )
 
-// subscribed replays the focuser's baseline to a client, and opens a
-// subscription once the client has applied the whole baseline.
+// subscribed replays the focuser's baseline to a client, and returns a
+// subscription that opens after the client has stored the whole
+// baseline, so it receives only the changes that a test sends.
 func subscribed(t *testing.T) (*Client, *replayServer, <-chan Event, <-chan error) {
 	t.Helper()
 	server := startReplay(t, "focus")
@@ -48,7 +49,7 @@ func TestMessage(t *testing.T) {
 		got := next(t, events, kind(Message))
 		want := time.Date(2026, 10, 5, 19, 53, 26, 500_000_000, time.UTC)
 		if got.Device != "Focuser Simulator" || got.Message != "[INFO] Focuser moved" || !got.Timestamp.Equal(want) {
-			t.Errorf("message event = %+v", got)
+			t.Errorf("message event = %+v, want device Focuser Simulator, message \"[INFO] Focuser moved\", and time %v", got, want)
 		}
 	})
 }
@@ -65,7 +66,7 @@ func TestVectorMessage(t *testing.T) {
 	})
 }
 
-func TestUpdateChangesOnlyWhatItCarries(t *testing.T) {
+func TestUpdateChangesOnlyTheMembersItHas(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server, events, _ := subscribed(t)
 		before, _ := c.Property(server.device, "POLLING_PERIOD")
@@ -104,7 +105,7 @@ func TestOnePropertyDeletion(t *testing.T) {
 		server.send(`<delProperty device="Focuser Simulator" name="POLLING_PERIOD"/>`)
 		got := next(t, events, kind(Deleted))
 		if got.Property != "POLLING_PERIOD" {
-			t.Errorf("deletion event = %+v", got)
+			t.Errorf("deletion event = %+v, want property POLLING_PERIOD", got)
 		}
 		if _, ok := c.Property(server.device, "POLLING_PERIOD"); ok {
 			t.Error("POLLING_PERIOD is still in the store")
@@ -189,9 +190,9 @@ func TestInvalidVectorIsReportedAndSkipped(t *testing.T) {
 func TestUnknownElementsAreSkipped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		_, server, events, _ := subscribed(t)
-		// indiserver passes another client's new*Vector to drivers only,
-		// but a chained server or a future protocol can send elements this
-		// client does not read.
+		// indiserver sends a client's new*Vector to drivers only. A
+		// chained server or a later protocol version can still send
+		// elements that this client does not read.
 		server.send(`<newSwitchVector device="Focuser Simulator" name="CONNECTION"><oneSwitch name="CONNECT">On</oneSwitch></newSwitchVector>
 	<getProperties version="1.7"/><futureThing a="b"><nested/></futureThing>
 	<message device="Focuser Simulator" message="after"/>`)
@@ -255,7 +256,7 @@ func TestBLOBDataGoesToSubscribersOnly(t *testing.T) {
 				defer cancel()
 				events := c.Subscribe(ctx)
 				if err := c.EnableBLOB(server.device, property, BLOBAlso); err != nil {
-					t.Fatal(err)
+					t.Fatalf("EnableBLOB(BLOBAlso): %v", err)
 				}
 				if r := server.awaitElement("enableBLOB", 1); r.Name != property || r.Text != "Also" {
 					t.Errorf("enableBLOB = %+v, want %q with Also", r, property)
@@ -295,10 +296,10 @@ func TestEnableBLOBFollowsGetPropertiesOnEachConnection(t *testing.T) {
 		server := startReplay(t, "focus")
 		c := server.newClient()
 		if err := c.EnableBLOB(server.device, "", BLOBNever); err != nil {
-			t.Fatal(err)
+			t.Fatalf("EnableBLOB(BLOBNever): %v", err)
 		}
 		if err := c.EnableBLOB(server.device, "", BLOBOnly); err != nil {
-			t.Fatal(err)
+			t.Fatalf("EnableBLOB(BLOBOnly): %v", err)
 		}
 		done := run(t, c)
 		waitFor(t, c, "the baseline", defined(server.device, "CONNECTION"))
@@ -344,10 +345,6 @@ func TestEventKindNames(t *testing.T) {
 	}
 }
 
-// libindi's XML parser (libs/indicore/lilxml.cpp) decodes the five named
-// entities and no numeric reference, so a client that sends &#39; for
-// an apostrophe gives the driver the six characters "&#39;", and the
-// driver's answer never matches the value sent.
 func TestTextIsEscapedWithTheEntitiesThatLibindiDecodes(t *testing.T) {
 	cases := []struct {
 		text, want string

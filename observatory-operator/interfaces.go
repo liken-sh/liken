@@ -1,19 +1,17 @@
 package main
 
-// Each device kind is one INDI interface, and what the operator does
-// with a device follows from the interface: which property shows that
-// the device serves it, which switch reaches each state, and which
-// property aborts its motion. A resource acts through the INDI device
-// that serves it (served.go), so a device that serves two interfaces,
-// such as a Flip-Flat that serves a DustCap and a FlatPanel, takes the
-// actions of each through the resource of each.
+// Each device kind maps to one INDI interface, which gives the switch
+// that moves a device to each state and the property that aborts its
+// motion. One INDI device can implement two interfaces, such as a
+// Flip-Flat that is a dust cap and a flat panel. Then a resource of
+// each kind acts on the same device.
 //
-// A device serves an interface when it defines one of the interface's
-// detection properties after it connects. DRIVER_INTERFACE in
-// DRIVER_INFO is a hint only: a QHY camera sets FILTER only when it
-// finds a wheel at connect, an SBIG camera sets it with no wheel, and a
-// Receiver and an INDI::Spectrograph set the same bit. The properties
-// answer each of those cases.
+// The operator treats a device as implementing an interface when the
+// device defines one of the interface's detection properties after it
+// connects. It does not trust the DRIVER_INTERFACE bits in
+// DRIVER_INFO: a QHY camera sets the filter wheel bit only when it
+// finds a wheel at connect, an SBIG camera sets it when it has no
+// wheel, and a receiver and an INDI::Spectrograph set the same bit.
 
 import (
 	"context"
@@ -26,25 +24,24 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// iface is what the operator does with one INDI interface.
 type iface struct {
-	// states maps each state of the kind's state action to the switch
-	// that reaches it.
+	// states maps each value of the state action to the switch that
+	// sets it.
 	states map[string]switchTarget
-	// abort is the property that ends the interface's motion, and
-	// watched the property that is Busy while it moves.
+	// abort is the property that stops the device's motion, and
+	// watched is the property that is Busy while it moves.
 	abort, watched string
-	// cooler is true for an interface whose cool and warm actions
-	// drive CCD_TEMPERATURE and CCD_COOLER.
+	// cooler is true when the cool and warm actions drive
+	// CCD_TEMPERATURE and CCD_COOLER.
 	cooler bool
-	// locks is true for an interface whose park the park locks
-	// decide, so the operator relays the locks before a move.
+	// locks is true for a mount and a dome, whose drivers can refuse a
+	// park or an unpark because of the other's park state. Before a
+	// state change, the operator sends each driver the current park
+	// states (locks.go).
 	locks bool
 }
 
-// interfaces holds what the operator does with each interface, by the
-// kind that is the interface. A kind that is absent has no action of
-// its own.
+// A kind that is not in interfaces has no actions of its own.
 var interfaces = map[observatory.Kind]iface{
 	observatory.DomeKind: {states: map[string]switchTarget{
 		string(observatory.StateParked):   {"DOME_PARK", "PARK", "parking", "parked", "parked"},
@@ -65,14 +62,12 @@ var interfaces = map[observatory.Kind]iface{
 	observatory.CameraKind: {abort: "CCD_ABORT_EXPOSURE", watched: "CCD_EXPOSURE", cooler: true},
 }
 
-// propertyReader is what an INDI client or a store holds of the
-// properties that the devices define.
+// propertyReader reads the properties that devices have defined, from
+// an INDI client or from a store.
 type propertyReader interface {
 	Property(device, name string) (indi.Property, bool)
 }
 
-// serves reports whether a resource's INDI device defines one of the
-// detection properties of the resource's interface now.
 func serves(c propertyReader, device string, kind observatory.Kind) bool {
 	for _, name := range observatory.Standards[kind].Detect {
 		if _, ok := c.Property(device, name); ok {
@@ -82,152 +77,134 @@ func serves(c propertyReader, device string, kind observatory.Kind) bool {
 	return false
 }
 
-// missingInterface is the fault of a connected device that does not
-// serve its resource's interface.
 func missingInterface(h handle) error {
 	return fmt.Errorf("INDI device %s defines no %s after it connects, so it serves no %s",
 		h.name, strings.Join(observatory.Standards[h.d.kind].Detect, " or "), h.d.kind.Name)
 }
 
-// verdict is the operator's last decision on whether a resource's INDI
-// device serves the resource's interface. It caches what the device
-// defined when the operator last looked, and what the operator wrote
-// to it since, for the current connection of the driver.
-type verdict struct {
-	// lacking says why the device does not serve the interface, or is
-	// "" while it does.
+// interfaceCheck is the result of the last check of whether a resource's INDI
+// device implements the resource's interface.
+type interfaceCheck struct {
+	// lacking is the reason the device does not implement the
+	// interface, or "" when it does.
 	lacking string
 	// silent is true when the driver did not answer a request for its
-	// properties (indi.Client.Sync), and connection is the revision of
-	// the device's CONNECTION then. The operator asks again only after
-	// CONNECTION changes, because each request makes the driver define
-	// every property again, and indiserver sends that burst to every
-	// client.
+	// properties, and connection is then the revision of the device's
+	// CONNECTION property. The operator sends the request again only
+	// after CONNECTION changes, because each request makes the driver
+	// define every property again, and indiserver sends all of them to
+	// every client.
 	silent     bool
 	connection uint64
-	// unwritten is true while the resource's settings have not gone to
-	// the device, because the device did not serve the interface when
-	// the operator would have written them (configureDevice). The
-	// settings go out once for each connection of the driver, so a
-	// device that stops defining the interface for a while and defines
-	// it again keeps what a client such as a sequencer changed.
+	// unwritten is true when the resource's settings may not be on the
+	// device, because the device did not implement the interface when
+	// configureDevice ran, or at the first check after the operator
+	// started (recordCheck). checkInterfaces writes the settings when the
+	// interface appears only while unwritten is true. So a device that
+	// drops its interface and defines it again keeps the values that a
+	// client such as a sequencer set in the meantime.
 	unwritten bool
 }
 
-// syncLimit bounds the wait for a driver to answer a request for its
-// properties. A driver answers within a second, so one that has not
-// answered in this time does not answer. It is a deadline.
+// syncLimit is how long detect waits for a driver to answer a request
+// for its properties. A driver normally answers within a second.
 const syncLimit = 30 * time.Second
 
-// detect decides whether a connected device serves the interface of a
-// resource on it, and records the verdict. The properties of an
-// interface arrive in the burst that follows CONNECTION, and the dust
-// cover simulator defines CAP_PARK just after CONNECTION, so a device
-// that defines none of them yet may still be on its way. detect then
-// waits for the driver to answer a getProperties (indi.Client.Sync),
-// which it does after everything it wrote before, and decides from
-// what the device defines then. A driver that does not answer within
-// syncLimit gets a verdict that says so. A resource whose device does
-// not serve its interface stays connected, because the other resources
-// that its driver serves still need it, and the steps leave it out.
+// detect checks whether a connected device implements its resource's
+// interface, records the check, and returns the result. A driver
+// defines an interface's properties in the burst that follows
+// CONNECTION, and the dust cap simulator defines CAP_PARK slightly
+// after that burst. So when the device defines none of them yet,
+// detect sends a getProperties and waits for the driver's answer
+// (indi.Client.Sync), which arrives after everything the driver sent
+// before. A device that does not implement its interface stays
+// connected, because other resources on the same driver still need
+// the connection, and the steps skip its resource.
 func (o *operator) detect(ctx context.Context, h handle) bool {
 	if !h.serving() {
 		wait, cancel := context.WithTimeout(ctx, syncLimit)
 		err := h.client().Sync(wait, h.name)
 		cancel()
 		if err != nil {
-			// A caller that stops records nothing about the driver.
+			// A failure caused by the caller's cancel says nothing
+			// about the driver, so record no check.
 			if ctx.Err() == nil {
-				o.judge(h.d, false, verdict{silent: true, connection: h.client().Revision(h.name, "CONNECTION"),
+				o.recordCheck(h.d, false, interfaceCheck{silent: true, connection: h.client().Revision(h.name, "CONNECTION"),
 					lacking: fmt.Sprintf("INDI device %s did not answer a request for its properties: %v", h.name, err)})
 			}
 			return false
 		}
 	}
 	serving := h.serving()
-	v := verdict{}
+	v := interfaceCheck{}
 	if !serving {
 		v.lacking = missingInterface(h).Error()
 	}
-	o.judge(h.d, serving, v)
+	o.recordCheck(h.d, serving, v)
 	return serving
 }
 
-// judge records a verdict on a resource. The first verdict on a
-// resource since the operator started marks its settings unwritten
-// when the device does not serve the interface, because the operator
-// cannot tell whether they went out before. Every later verdict keeps
-// the mark of the one before.
-func (o *operator) judge(d *device, serving bool, v verdict) {
+// recordCheck records a check and keeps unwritten from the check
+// before. When the first check after the operator starts finds no
+// interface, recordCheck sets unwritten, because the operator cannot tell
+// whether its previous process wrote the settings.
+func (o *operator) recordCheck(d *device, serving bool, v interfaceCheck) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	before, judged := o.verdicts[d.key()]
-	v.unwritten = before.unwritten || (!judged && !serving)
-	o.verdicts[d.key()] = v
+	before, checked := o.interfaceChecks[d.key()]
+	v.unwritten = before.unwritten || (!checked && !serving)
+	o.interfaceChecks[d.key()] = v
 }
 
-// written records whether a resource's settings went to its device.
 func (o *operator) written(d *device, sent bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	v := o.verdicts[d.key()]
+	v := o.interfaceChecks[d.key()]
 	v.unwritten = !sent
-	o.verdicts[d.key()] = v
+	o.interfaceChecks[d.key()] = v
 }
 
-// verdictOf answers the last verdict on a resource, and false when it
-// has none.
-func (o *operator) verdictOf(d *device) (verdict, bool) {
+func (o *operator) interfaceCheckOf(d *device) (interfaceCheck, bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	v, ok := o.verdicts[d.key()]
+	v, ok := o.interfaceChecks[d.key()]
 	return v, ok
 }
 
-// lackingOf answers why a resource's device does not serve its
-// interface, by the last verdict, or "" when it serves it or has no
-// verdict.
+// lackingOf returns "" when there is no check yet.
 func (o *operator) lackingOf(d *device) string {
-	v, _ := o.verdictOf(d)
+	v, _ := o.interfaceCheckOf(d)
 	return v.lacking
 }
 
-// serving reports whether a handle's device serves its resource's
-// interface now.
 func (h handle) serving() bool { return serves(h.client(), h.name, h.d.kind) }
 
-// judgeInterfaces keeps the verdict of each connected device on a
-// server current, on each change that the runner wakes for:
+// checkInterfaces checks the connected devices on a server again each
+// time the runner's steady loop wakes, for the cases that
+// needsInterfaceCheck lists. When a device that lacked its interface now
+// implements it, checkInterfaces writes its unwritten settings, and the
+// trigger controller runs the activation that the Activation step
+// skipped (lateactivation.go).
 //
-//   - A device with no verdict, such as one the operator finds after a
-//     restart, is judged once (detect), and so is a device that stops
-//     defining its interface's properties.
-//   - A device whose driver did not answer is asked again when its
-//     CONNECTION changes, and not before.
-//   - A resource whose device defines its interface's properties after
-//     a verdict that it lacked them heals. It gets the settings that
-//     did not go out, and its activation runs then
-//     (lateactivation.go), because the Activation step left it out.
-//
-// The work holds the server's lock, and the site's for the
-// observatory's server, which the runners of several telescopes share
-// (holding). Another runner may have judged a device while this one
-// waited, so each device is checked again under the locks.
-func (r *runner) judgeInterfaces(ctx context.Context, t *tree, ref serverRef) {
+// The checks run under the server's lock, and for the observatory's
+// server also under the site's lock (locksOf). Another runner can check
+// a device while this one waits for the locks, so needsInterfaceCheck runs
+// again once the locks are held.
+func (r *runner) checkInterfaces(ctx context.Context, t *tree, ref serverRef) {
 	_, site, err := r.siteOf(t)
 	if err != nil {
 		return
 	}
 	all := r.o.handlesOf(t, ref, t.devicesOn(ref))
-	if !slices.ContainsFunc(all, r.o.needsJudging) {
+	if !slices.ContainsFunc(all, r.o.needsInterfaceCheck) {
 		return
 	}
-	err = holding(ctx, r.o.locksOf(ref, all[0].server), func(ctx context.Context) error {
+	err = withLocks(ctx, r.o.locksOf(ref, all[0].server), func(ctx context.Context) error {
 		for _, h := range all {
-			if !r.o.needsJudging(h) {
+			if !r.o.needsInterfaceCheck(h) {
 				continue
 			}
-			before, _ := r.o.verdictOf(h.d)
+			before, _ := r.o.interfaceCheckOf(h.d)
 			if !r.o.detect(ctx, h) {
 				continue
 			}
@@ -237,23 +214,26 @@ func (r *runner) judgeInterfaces(ctx context.Context, t *tree, ref serverRef) {
 				r.o.fault(h.d, err)
 			}
 			if before.lacking != "" {
-				r.o.logf("%s now serves its interface on %s", h, ref)
+				r.o.logf("%s now implements its interface on %s", h, ref)
 			}
 		}
 		return nil
 	})
 	if err != nil {
-		r.o.logf("judging the interfaces on %s: %v", ref, err)
+		r.o.logf("checking the interfaces on %s: %v", ref, err)
 	}
 }
 
-// needsJudging reports whether a connected device's verdict is stale
-// (judgeInterfaces).
-func (o *operator) needsJudging(h handle) bool {
+// needsInterfaceCheck reports whether a connected device needs a new check: a
+// device without its interface and with no check, such as one the
+// operator finds after a restart, a device that gained or lost its
+// interface since its check, a serving device whose settings are
+// unwritten, and a silent driver whose CONNECTION changed.
+func (o *operator) needsInterfaceCheck(h handle) bool {
 	if !h.connected() {
 		return false
 	}
-	v, judged := o.verdictOf(h.d)
+	v, checked := o.interfaceCheckOf(h.d)
 	serving := h.serving()
 	switch {
 	case serving:
@@ -261,5 +241,5 @@ func (o *operator) needsJudging(h handle) bool {
 	case v.silent:
 		return h.client().Revision(h.name, "CONNECTION") != v.connection
 	}
-	return !judged || v.lacking == ""
+	return !checked || v.lacking == ""
 }

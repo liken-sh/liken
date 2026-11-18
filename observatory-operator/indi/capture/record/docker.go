@@ -13,7 +13,6 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi/capture"
 )
 
-// dockerTimeout bounds each docker command.
 const dockerTimeout = 2 * time.Minute
 
 func docker(args ...string) ([]byte, error) {
@@ -23,7 +22,7 @@ func docker(args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("docker %s: %w: %s", strings.Join(args, " "), err, stderr.Bytes())
+		return nil, fmt.Errorf("running docker %s: %w: %s", strings.Join(args, " "), err, stderr.Bytes())
 	}
 	return stdout.Bytes(), nil
 }
@@ -49,9 +48,9 @@ func start(image, driver string) (container, error) {
 	return c, nil
 }
 
-// indiVersion reads /etc/indi-versions from the container. docker cp
-// works on an image with no shell, such as the indi images, and writes
-// the file as a tar stream.
+// indiVersion reads /etc/indi-versions from the container with docker
+// cp, because the indi images have no shell to run cat. docker cp with
+// "-" writes a tar stream to stdout.
 func (c container) indiVersion() (string, error) {
 	out, err := docker("cp", c.id+":/etc/indi-versions", "-")
 	if err != nil {

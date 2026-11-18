@@ -51,17 +51,17 @@ func TestOperatorVersionReadsTheImageTag(t *testing.T) {
 	clientset := fake.NewSimpleClientset(labeledDeployment("ghcr.io/liken-sh/observatory-operator:2026.09.03-007"))
 	got, err := operatorVersion(context.Background(), clientset)
 	if err != nil {
-		t.Fatalf("operatorVersion: %v", err)
+		t.Fatalf("reading the operator version: %v", err)
 	}
 	if got != "2026.09.03-007" {
-		t.Fatalf("operatorVersion = %q, want 2026.09.03-007", got)
+		t.Fatalf("operatorVersion returns %q, want 2026.09.03-007", got)
 	}
 }
 
 func TestOperatorVersionWithoutADeployment(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	if _, err := operatorVersion(context.Background(), clientset); err == nil {
-		t.Fatal("operatorVersion returned no error with no labeled Deployment")
+		t.Fatal("operatorVersion returns no error when no Deployment has the label, want an error")
 	}
 }
 
@@ -70,20 +70,20 @@ func TestOperatorVersionWithNoContainer(t *testing.T) {
 	deployment.Spec.Template.Spec.Containers = nil
 	clientset := fake.NewSimpleClientset(deployment)
 	if _, err := operatorVersion(context.Background(), clientset); err == nil {
-		t.Fatal("operatorVersion returned no error with no container")
+		t.Fatal("operatorVersion returns no error when the Deployment has no container, want an error")
 	}
 }
 
-// --by wins, and a review that names no user falls back to the
-// kubeconfig's user. The fake clientset answers a review with the
-// review it was sent, which names no user, as a cluster that refuses
-// the review does in effect.
+// --by takes precedence, and a review that returns no user falls back
+// to the kubeconfig's user. The fake clientset returns the review it
+// was sent, which has no user, so it behaves like a cluster that
+// refuses the review.
 func TestPersonFallsBackToTheKubeconfigsUser(t *testing.T) {
 	c := clients{typed: fake.NewSimpleClientset(), kubeUser: "admin"}
 	if got := person(context.Background(), c, "Ada"); got != "Ada" {
-		t.Errorf("person with --by = %q", got)
+		t.Errorf("person with --by Ada returns %q, want Ada", got)
 	}
 	if got := person(context.Background(), c, ""); got != "admin" {
-		t.Errorf("person with no review = %q", got)
+		t.Errorf("person with no review and no --by returns %q, want admin", got)
 	}
 }

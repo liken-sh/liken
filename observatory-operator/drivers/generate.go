@@ -1,12 +1,15 @@
 package drivers
 
-// generate writes generated.go from the lists of the indi build, and
-// the tag of the weston image from weston/package.toml. A
-// list is one file in indi/images/ for each image, named for the
-// image's family: zwo is the image indi-zwo. Each line "driver <name>"
-// puts one driver in that image. The list named unpublished holds the
-// drivers that no image holds, and the lists named indi and simulators
-// hold whole packages and files, and no driver line.
+// generate returns the source of generated.go, built from the driver
+// lists in indi/images/ and the image tags in the package.toml files of
+// indi and weston.
+//
+// Each file in indi/images/ lists what one image installs, and the
+// file's name is the image's family: zwo is the image indi-zwo. A line
+// "driver <name>" puts that driver in the image. The list named
+// unpublished holds the drivers that no image ships. Lists such as indi
+// and simulators install whole packages and have no driver lines, so the
+// drivers in those packages are not in the map.
 
 import (
 	"bufio"
@@ -19,7 +22,7 @@ import (
 	"strings"
 )
 
-// unpublishedList names the list of drivers that no image holds.
+// unpublishedList is the list of drivers that no image ships.
 const unpublishedList = "unpublished"
 
 func generate(imagesDir, packageToml, westonToml string) ([]byte, error) {
@@ -47,7 +50,7 @@ func generate(imagesDir, packageToml, westonToml string) ([]byte, error) {
 		}
 		for _, driver := range drivers {
 			if other, seen := families[driver]; seen {
-				return nil, fmt.Errorf("%s is in the lists %q and %q", driver, other, list.Name())
+				return nil, fmt.Errorf("driver %s is in both the list %q and the list %q", driver, other, list.Name())
 			}
 			families[driver] = family
 		}
@@ -75,7 +78,7 @@ func generate(imagesDir, packageToml, westonToml string) ([]byte, error) {
 	return format.Source(out.Bytes())
 }
 
-// listedDrivers reads the driver lines of one list.
+// listedDrivers returns the names on the driver lines of one list.
 func listedDrivers(path string) ([]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -93,9 +96,10 @@ func listedDrivers(path string) ([]string, error) {
 	return drivers, scanner.Err()
 }
 
-// pinnedTag reads <version>-<revision> from the [package] table of a
-// pinned component's package.toml, the tag that CI publishes its
-// images under.
+// pinnedTag returns <version>-<revision> from a pinned component's
+// package.toml, which is the tag that CI publishes its images under. It
+// reads the first version and revision lines anywhere in the file, and
+// does not parse TOML tables.
 func pinnedTag(path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -112,7 +116,7 @@ func pinnedTag(path string) (string, error) {
 		}
 	}
 	if values["version"] == "" || values["revision"] == "" {
-		return "", fmt.Errorf("%s names no version and revision", path)
+		return "", fmt.Errorf("%s does not set both version and revision", path)
 	}
 	return values["version"] + "-" + values["revision"], scanner.Err()
 }

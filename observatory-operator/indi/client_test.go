@@ -15,7 +15,7 @@ import (
 const testTimeout = 10 * time.Second
 
 // run starts the client's Run in the background until the test ends,
-// and returns the channel that Run's result arrives on.
+// and returns the channel that receives Run's result.
 func run(t *testing.T, c *Client) <-chan error {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -57,7 +57,8 @@ func definedNames(data []byte) []string {
 	return names
 }
 
-// distinct keeps the first of each name.
+// distinct returns the names with duplicates removed, in the order of
+// first appearance.
 func distinct(names []string) []string {
 	var out []string
 	for _, name := range names {
@@ -224,7 +225,7 @@ func TestReconnectReplacesTheStore(t *testing.T) {
 		done := run(t, c)
 		waitFor(t, c, "the baseline", defined(server.device, "CONNECTION"))
 		if err := connectDevice(t, c, server.device); err != nil {
-			t.Fatal(err)
+			t.Fatalf("connecting %s: %v", server.device, err)
 		}
 		server.drop()
 		if err := <-done; err == nil {
@@ -356,8 +357,8 @@ func TestSubscribersReceiveEveryEventInOrder(t *testing.T) {
 	})
 }
 
-// A caller that names its own dialer reaches the server through it,
-// the way the operator's tests reach a server over an in-memory pipe.
+// A client with its own dialer connects through it, as the operator's
+// tests connect to a server over an in-memory pipe.
 func TestADialerReplacesTheNetwork(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := startReplay(t, "focus")

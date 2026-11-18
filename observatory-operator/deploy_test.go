@@ -1,6 +1,7 @@
 package main
 
-// The manifests in deploy/ against what the operator reads and writes.
+// Checks the manifests in deploy/ against what the operator reads and
+// writes.
 
 import (
 	"bytes"
@@ -16,27 +17,28 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The operator runs in liken-system, one replica, and reads no
-// namespace of its own to watch, because it watches every namespace.
+// The base puts the operator in liken-system and defines no namespace
+// of its own.
 func TestTheDeploymentRunsInLikenSystem(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("deploy/kustomization.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading deploy/kustomization.yaml: %v", err)
 	}
 	var base struct {
 		Transformers []string `json:"transformers"`
 		Resources    []string `json:"resources"`
 	}
 	if err := yaml.Unmarshal(raw, &base); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the manifest: %v", err)
 	}
 	if !setsLikenSystem(t, base.Transformers) || slices.Contains(base.Resources, "namespace.yaml") {
 		t.Errorf("base = %+v, want liken-system and no namespace of its own", base)
 	}
 }
 
-// deployment reads the operator's Deployment from deploy/operator.yaml.
+// deployment holds the fields of the operator's Deployment in
+// deploy/operator.yaml that these tests read.
 type deployment struct {
 	Spec struct {
 		Replicas int `json:"replicas"`
@@ -64,20 +66,21 @@ type deployment struct {
 	} `json:"spec"`
 }
 
-// manifest reads the one document of a kind from a file in deploy/.
-// The kind is the one at the top of the document, so a RoleBinding's
-// roleRef does not read as a Role.
+// manifest reads the first document of the given kind from a file in
+// deploy/ into the value that into points to. It matches the kind at the
+// top level of the document, so the roleRef of a RoleBinding does not
+// match as a Role.
 func manifest(t *testing.T, file, kind string, into any) {
 	t.Helper()
 	raw, err := os.ReadFile("deploy/" + file)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading deploy/%s: %v", file, err)
 	}
 	top := regexp.MustCompile(`(?m)^kind: ` + kind + `$`)
 	for _, document := range bytes.Split(raw, []byte("\n---\n")) {
 		if top.Match(document) {
 			if err := yaml.Unmarshal(document, into); err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the manifest: %v", err)
 			}
 			return
 		}
@@ -85,10 +88,10 @@ func manifest(t *testing.T, file, kind string, into any) {
 	t.Fatalf("deploy/%s holds no %s", file, kind)
 }
 
-// A rollout starts the new copy before it stops the old one, because
-// the election keeps the new copy waiting until the old one releases
-// the Lease. The downward API gives the pod's name and namespace,
-// which name the Lease and its holder.
+// A rollout starts the new pod before it stops the old one. The new pod
+// waits in the leader election until the old one releases the Lease.
+// The operator reads its pod name and namespace from the downward API
+// to identify itself in the Lease.
 func TestTheDeploymentRollsOverToACopyThatWaits(t *testing.T) {
 	t.Parallel()
 	var d deployment
@@ -103,8 +106,8 @@ func TestTheDeploymentRollsOverToACopyThatWaits(t *testing.T) {
 		t.Fatalf("containers = %+v, want one", containers)
 	}
 	env := map[string]string{}
-	// The downward API's variables. The metrics address is a plain
-	// value, which monitoring_test.go holds.
+	// Only the variables that come from the downward API. The metrics
+	// address is a plain value, which monitoring_test.go checks.
 	for _, v := range containers[0].Env {
 		if v.ValueFrom.FieldRef.FieldPath != "" {
 			env[v.Name] = v.ValueFrom.FieldRef.FieldPath
@@ -116,9 +119,9 @@ func TestTheDeploymentRollsOverToACopyThatWaits(t *testing.T) {
 	}
 }
 
-// The Role grants the election every request it sends of the Lease:
-// get and update of the Lease by its name, and create, which RBAC
-// cannot limit by name. The RoleBinding gives the Role to the
+// The Role grants the requests that the leader election sends for the
+// Lease: get and update on the Lease by name, and create, which RBAC
+// cannot limit by name. The RoleBinding binds the Role to the
 // operator's ServiceAccount.
 func TestTheRoleGrantsTheLease(t *testing.T) {
 	t.Parallel()
@@ -159,12 +162,13 @@ func TestTheRoleGrantsTheLease(t *testing.T) {
 	}
 }
 
-// The ClusterRole grants every verb the operator sends, for every kind.
+// The ClusterRole grants every verb that the operator sends, for every
+// kind.
 func TestTheClusterRoleGrantsWhatTheOperatorSends(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("deploy/rbac.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading deploy/rbac.yaml: %v", err)
 	}
 	type rule struct {
 		APIGroups []string `json:"apiGroups"`
@@ -178,7 +182,7 @@ func TestTheClusterRoleGrantsWhatTheOperatorSends(t *testing.T) {
 	for _, document := range bytes.Split(raw, []byte("\n---\n")) {
 		if bytes.Contains(document, []byte("kind: ClusterRole\n")) {
 			if err := yaml.Unmarshal(document, &role); err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the manifest: %v", err)
 			}
 		}
 	}
@@ -200,8 +204,8 @@ func TestTheClusterRoleGrantsWhatTheOperatorSends(t *testing.T) {
 			needs = append(needs, need{observatory.Group, kind.Plural + "/status", "update"})
 		}
 	}
-	// A merge patch removes the retry annotation of any resource with
-	// procedures, and adds and removes the finalizer of a device, a
+	// A merge patch removes the retry annotation from any resource that
+	// has procedures, and adds and removes the finalizer on a device, a
 	// Telescope, or an Observatory.
 	for _, kind := range append([]observatory.Kind{observatory.ObservatoryKind, observatory.TelescopeKind}, observatory.DeviceKinds...) {
 		needs = append(needs, need{observatory.Group, kind.Plural, "patch"})
@@ -231,9 +235,8 @@ func TestTheClusterRoleGrantsWhatTheOperatorSends(t *testing.T) {
 	}
 }
 
-// setsLikenSystem answers whether one of a base's transformers sets the
-// namespace liken-system on every object that states none, the way every
-// base of the repository sets it.
+// setsLikenSystem reports whether one of a base's transformers sets the
+// namespace liken-system on every object that has no namespace.
 func setsLikenSystem(t *testing.T, transformers []string) bool {
 	t.Helper()
 	for _, raw := range transformers {
@@ -245,7 +248,7 @@ func setsLikenSystem(t *testing.T, transformers []string) bool {
 			UnsetOnly bool `json:"unsetOnly"`
 		}
 		if err := yaml.Unmarshal([]byte(raw), &transformer); err != nil {
-			t.Fatal(err)
+			t.Fatalf("parsing the manifest: %v", err)
 		}
 		if transformer.Kind == "NamespaceTransformer" && transformer.Metadata.Namespace == "liken-system" && transformer.UnsetOnly {
 			return true

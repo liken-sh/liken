@@ -1,7 +1,6 @@
 # A `Guider` runs PHD2 for one `Telescope` while a `Reservation` holds
-# the telescope, and its status reports what PHD2 reports on its event
-# server. The singular, `guider`, is already short, so the kind has no
-# short name.
+# the telescope, and its status shows what PHD2 reports on its event
+# server. The kind has no short name because `guider` is already short.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -61,25 +60,29 @@ spec:
           x-kubernetes-validations:
             - rule: size(self.metadata.name) <= 32
               message: >-
-                a Guider name is at most 32 characters, because
-                observatory-operator names its pod and Service
-                <name>-guider, and a Service name holds at most 63
-                characters
+                a Guider name is at most 32 characters.
+                observatory-operator names the Guider's pod and Service
+                <name>-guider, and Kubernetes limits those names to 63
+                characters. Every observatory.liken.sh kind has the same
+                limit of 32, which leaves room for a suffix longer than
+                any that the operator adds.
           description: >-
             A `Guider` runs PHD2 for one `Telescope`, as a client of the
             telescope's INDI server, and guides with the camera of one
             `OpticalTrain`. A guide scope is a train with its own small
             tube, and an off-axis guider is a train on the imaging
             train's tube. While a `Reservation` holds the telescope,
-            the operator runs PHD2, connects it to the guide camera and
-            the mount, and leaves it idle. The holder calibrates and
+            the operator runs PHD2 and connects it to the guide camera
+            and the mount, but does not start guiding. The client that
+            the reservation's `spec.holder` names, such as a person at
+            KStars or `astrophotography-operator`, calibrates and
             guides through PHD2's event server at `status.endpoint`.
           required: [spec]
           properties:
             spec:
               type: object
               required: [telescope, opticalTrain, pulses]
-              description: "What the guider guides, and how."
+              description: "The telescope to guide, the train whose camera guides, and where PHD2 sends its corrections."
               properties:
                 telescope:
                   type: string
@@ -106,8 +109,7 @@ spec:
             status:
               type: object
               description: >-
-                What the operator observes. The operator writes it, and
-                a person reads it.
+                What the operator observes.
               properties:
                 observedGeneration:
                   type: integer
@@ -120,8 +122,8 @@ spec:
                   required: [service, host, port]
                   description: >-
                     PHD2's event server, while the guider's pod exists.
-                    KStars and `astrophotography-operator` drive PHD2 at
-                    its `host` and `port`.
+                    KStars and `astrophotography-operator` connect to PHD2
+                    at its `host` and `port`.
                   properties:
                     service:
                       type: string
@@ -143,24 +145,25 @@ spec:
                   type: string
                   enum: [Stopped, Selected, Calibrating, Guiding, LostLock, Paused, Looping]
                   description: >-
-                    PHD2's state, as its event server names it, while
+                    PHD2's state, as its event server reports it, while
                     the operator's connection to that server is open.
-                    `Stopped`: no exposures run. `Selected`: a star is
-                    selected, and no exposures run. `Looping`: PHD2
-                    takes exposures and does not guide. `Calibrating`,
-                    `Guiding`, and `Paused` name what PHD2 does.
-                    `LostLock`: PHD2 guides and lost its star.
+                    `Stopped`: PHD2 takes no exposures. `Selected`: a
+                    star is selected, and PHD2 takes no exposures.
+                    `Looping`: PHD2 takes exposures and does not guide.
+                    `Calibrating`, `Guiding`, `Paused`: PHD2 is
+                    calibrating, guiding, or paused. `LostLock`: PHD2 is
+                    guiding and has lost its star.
                 calibrated:
                   type: boolean
                   description: >-
-                    `true` while PHD2 holds a calibration of the mount.
+                    `true` while PHD2 has a calibration of the mount.
                 pixelScale:
                   type: number
                   description: >-
                     The guide camera's scale in arc-seconds per pixel,
                     from the camera's pixel size and the guide tube's
-                    focal length. It is absent while PHD2 does not know
-                    one of them.
+                    focal length. It is absent while PHD2 has no value
+                    for one of them.
                 rms:
                   type: object
                   required: [ra, dec, total, steps, since]
@@ -170,10 +173,11 @@ spec:
                     arc-seconds, along the mount's axes and in total.
                     It covers at most the last 100 steps that the
                     operator received since guiding started, and
-                    `since` gives the time of the first of them. PHD2
-                    sends a new connection no earlier steps, so the
+                    `since` is the time of the first of them. PHD2 does
+                    not send earlier steps to a new connection, so the
                     window also starts again when the operator restarts.
-                    It is absent while PHD2's pixel scale is not known.
+                    It is absent until PHD2 has a pixel scale and has
+                    sent a guide step.
                   properties:
                     ra:
                       type: number
@@ -237,13 +241,15 @@ spec:
                   type: string
                   enum: [Idle, Activating, Ready, Deactivating, Error]
                   description: >-
-                    The state in one word. `Idle`: no reservation needs
-                    it, and nothing runs. `Activating`: a
-                    reservation's activation steps run. `Ready`:
-                    everything it needs runs and is connected.
-                    `Deactivating`: a reservation's deactivation steps
-                    run. `Error`: a step failed, and the `Ready`
-                    condition gives the reason.
+                    The phase of the guider. `Idle`: no reservation
+                    holds the telescope. `Activating`: the reservation
+                    is activating, or PHD2 is not yet connected to its
+                    camera and mount. `Ready`: PHD2 runs, and its camera
+                    and mount are connected. `Deactivating`: the
+                    reservation's deactivation steps are running.
+                    `Error`: the reservation failed, or the operator
+                    failed to run or connect PHD2. The message of the
+                    `Ready` condition says which.
                 conditions:
                   type: array
                   description: >-

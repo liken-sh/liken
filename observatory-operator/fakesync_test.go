@@ -2,14 +2,10 @@ package main
 
 import "github.com/liken-sh/liken/observatory-operator/indi/inditest"
 
-// A client asks for the properties of every device with a
-// getProperties when it connects, and asks a driver for its properties
-// with a getProperties that names the device (indi.Client.Sync). These
-// helpers make a server or a driver that does not answer, and count how
-// often the operator asks.
-
-// silence makes the driver of a device leave each getProperties that
-// names the device unanswered, as a driver that is stuck does.
+// silence makes the driver of a device ignore each getProperties that
+// names the device, as a stuck driver does. A getProperties that names
+// no device, which a client sends when it connects, is still answered.
+// indi.Client.Sync sends one that names the device.
 func (w *indiWorld) silence(device string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -23,17 +19,18 @@ func (w *indiWorld) unsilence(device string) {
 	delete(w.silent, device)
 }
 
-// requests answers how many times a client sent a getProperties that
-// names a device.
+// requests returns how many getProperties naming the device the fake
+// servers received.
 func (w *indiWorld) requests(device string) int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.asked[device]
 }
 
-// define answers a getProperties that names device, or every device
-// when device is empty. indiserver hands a getProperties that names a
-// device to that device's driver alone.
+// define answers a getProperties with the definitions of device's
+// properties, or of every device's when device is empty. As in
+// indiserver, a getProperties that names a device reaches only that
+// device's driver.
 func (w *indiWorld) define(s *fakeServer, c *inditest.Conn, device string) {
 	for _, link := range sortedKeys(s.drivers) {
 		if w.silent[device] {
@@ -49,17 +46,17 @@ func (w *indiWorld) define(s *fakeServer, c *inditest.Conn, device string) {
 	}
 }
 
-// answerLater makes a server leave the getProperties that a new client
-// sends first unanswered, as a server whose drivers are slow to answer
-// does, so the client is connected and knows no device.
-func (w *indiWorld) answerLater(server string) {
+// delayDefinitions makes a server delay its response to each getProperties
+// that names no device, as a server with slow drivers does. A client is
+// then connected but has no devices yet.
+func (w *indiWorld) delayDefinitions(server string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.late[server] = true
 }
 
-// answerLate answers each getProperties that answerLater held.
-func (w *indiWorld) answerLate(server string) {
+// sendDelayedDefinitions sends the definitions that delayDefinitions held back.
+func (w *indiWorld) sendDelayedDefinitions(server string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	delete(w.late, server)

@@ -1,13 +1,12 @@
 // Package capture records what a real indiserver sends with one driver
-// behind it. Two kinds of file come from it: the transcripts of the
-// simulators in indi/inditest/testdata/, which the replay tests serve back, and
-// the captures of the bare drivers in indi/standard/, which hold the
-// standard properties of each INDI interface. One command makes both,
-// so both are made the same way after a bump of the INDI images.
+// behind it. It writes the transcripts of the simulators in
+// indi/inditest/testdata/, which the replay tests serve, and the
+// captures of the bare drivers in indi/standard/, which hold the
+// standard properties of each INDI interface.
 //
-// A capture writes raw XML to the server and parses nothing with the
-// indi package's client, so a bug in the client cannot shape its own
-// fixtures.
+// A capture sends raw XML and does not parse the replies with the indi
+// package's client, so a bug in that client cannot change the fixtures
+// that its own tests use.
 package capture
 
 import (
@@ -21,46 +20,47 @@ import (
 	"time"
 )
 
-// A phase of a capture ends when the server sends nothing for Quiet,
-// or after Most, whichever is first. Both are clocks: a connected
-// telescope sends its coordinates on every poll and never goes quiet,
-// and a turning dome reports its position until it stops. Quiet is
-// longer than the slowest answer of a simulator: the CCD simulator
-// waits 1.5 to 2 s before it reports a new filter slot.
+// A phase of a capture ends at the first boundary between top-level
+// elements after the server sends nothing for Quiet, or after Most.
+// Most is needed because a connected telescope reports its coordinates
+// on every poll and never goes quiet. Quiet is longer than the slowest
+// reply of a simulator: the CCD simulator waits 1.5 to 2 seconds before
+// it reports a new filter slot.
 const (
 	Quiet = 3 * time.Second
 	Most  = 30 * time.Second
 )
 
-// Baseline is the first message of every capture. The device's name is
-// in the reply, and the later messages name it.
+// Baseline is the first message of every capture. The reply names the
+// device, and the later messages address it by that name.
 const Baseline = `<getProperties version="1.7"/>`
 
-// A Phase is one message that a capture sends and the name of the
-// server's reply to it.
+// A Phase is one message that a capture sends, and the name under which
+// the server's reply to it is recorded.
 type Phase struct {
 	Name    string
 	Message string
 }
 
-// A Script is what a capture sends to one device after the baseline.
-// Setup holds the messages that the server does not answer, such as an
-// enableBLOB, and they go before the phases. Phases begin with the
-// baseline, which Run has sent already.
+// A Script is what a capture sends to one device. Setup holds messages
+// that the server does not reply to, such as an enableBLOB. Run sends
+// Baseline itself and records its reply under the name of Phases[0],
+// so the Message of Phases[0] is not sent. Then it sends Setup, and
+// then each later phase.
 type Script struct {
 	Setup  []string
 	Phases []Phase
 }
 
-// A Reply is the bytes that the server sent in reply to one phase.
+// A Reply is the bytes that the server sent in response to one phase.
 type Reply struct {
 	Phase string
 	Data  []byte
 }
 
-// Run sends the baseline, finds the device's name in its reply, and
+// Run sends the baseline, reads the device's name from the reply, and
 // then sends the script for that device, one phase at a time. Each
-// reply ends between two elements, so it parses on its own.
+// reply ends between two top-level elements, so it parses on its own.
 func Run(conn net.Conn, script func(device string) Script) (string, []Reply, error) {
 	if err := send(conn, Baseline); err != nil {
 		return "", nil, err
@@ -145,7 +145,7 @@ var deviceAttribute = regexp.MustCompile(`device="([^"]+)"`)
 func firstDevice(data []byte) (string, error) {
 	match := deviceAttribute.FindSubmatch(data)
 	if match == nil {
-		return "", fmt.Errorf("the baseline names no device: %q", data)
+		return "", fmt.Errorf("the baseline has no device attribute: %q", data)
 	}
 	return string(match[1]), nil
 }

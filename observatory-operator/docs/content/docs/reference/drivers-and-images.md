@@ -5,18 +5,21 @@ weight: 15
 
 # Drivers and images
 
-A device names its INDI driver in `spec.driver.name`, and the
-operator runs the driver from an image that the `indi` build
-publishes on `ghcr.io/liken-sh`. Each operator build pins the tag of
-those images, so the drivers it runs are the ones it was tested with.
+A device sets its INDI driver in `spec.driver.name`, and the operator
+runs the driver from an image that the `indi` build publishes on
+`ghcr.io/liken-sh`. Each operator build pins the tag of those images,
+so it runs the driver versions that it was tested with.
+[Describe your equipment](/docs/guides/describe-your-equipment/)
+shows how to declare a device.
 
-The operator picks the image from the driver's name:
+The operator chooses the image from the driver's name, in this order:
 
 1. A device with `spec.driver.image` runs that image, as written.
-2. A vendor's driver runs from its vendor's image, in the table below.
+2. A vendor's driver runs from the image for that vendor in the
+   table below.
 3. A simulator, a driver whose name starts with `indi_simulator_`,
    runs from `indi-simulators`, which adds the star catalog that the
-   camera simulators draw from.
+   camera simulators use.
 4. Every other driver runs from `indi`, which holds INDI's own
    drivers: the mounts, focusers, domes, weather stations, and the
    rest of the `indi-bin` package. `indi_lx200generic`,
@@ -29,7 +32,7 @@ The operator picks the image from the driver's name:
 | `indi-qhy` | QHY cameras |
 | `indi-playerone` | Player One cameras and filter wheel |
 | `indi-svbony` | SVBony cameras on SVBony's own SDK |
-| `indi-touptek` | the eleven brands on the ToupTek SDK: ToupTek, Altair, Bresser, Mallincam, Meade, NNCam, Ogma, Omegon, StarShoot, SVBony, and TS |
+| `indi-touptek` | the brands on the ToupTek SDK: ToupTek, Altair, Bresser, Mallincam, Meade, NNCam, Ogma, Omegon, StarShoot, SVBony, and TS |
 | `indi-atik` | Atik cameras and filter wheels |
 | `indi-fli` | Finger Lakes Instrumentation cameras, focusers, and filter wheels, and the Kepler cameras |
 | `indi-sbig` | SBIG cameras |
@@ -39,36 +42,36 @@ The operator picks the image from the driver's name:
 | `indi-astroasis` | the Astroasis Oasis focuser and filter wheel |
 | `indi-gphoto` | Canon, Nikon, Sony, Fuji, and Pentax cameras through gphoto2 |
 
-Each image's list in the repository names its drivers exactly:
-[`indi/images/`](https://github.com/liken-sh/liken/tree/main/indi/images).
-Three third-party drivers are in no image: the Fishcamp and iNova PLx
-cameras, which their vendors no longer sell, and the LimeSDR radio
-receiver. A device that names one of them must name an image in
-`spec.driver.image`. Without one, the reservation's step that starts
-the device fails, and its message says that no image holds the
-driver.
+The lists in [`indi/images/`](https://github.com/liken-sh/liken/tree/main/indi/images)
+give the exact drivers of each image. The drivers of the Fishcamp
+and iNova PLx cameras, which their vendors no longer sell, and of the
+LimeSDR radio receiver are in no image. A device that uses one of
+them must set `spec.driver.image`. Without it, the reservation's step
+that starts the device fails, and its message says that no image
+contains the driver.
 
-An image that holds a driver does not mean the driver's hardware can
-reach a pod. Most of the cameras in the table connect through their
-vendor's library with no kernel driver, and `liken` publishes such a
-device whole, with its USB node. A QHY camera that powers up with no
-firmware needs `firmware-operator` to load the firmware first, and a QHY
-camera on an FX3 chip that needs firmware does not work yet.
+A driver in an image does not mean that a pod can reach the driver's
+hardware. Most of the cameras in the table
+connect through their vendor's library with no kernel driver, and
+`liken` publishes such a device as a whole, with its USB node. A QHY
+camera that starts with no firmware needs `firmware-operator` to load
+the firmware first, and a QHY camera on an FX3 chip that needs
+firmware does not work yet.
 [Connect USB equipment](/docs/guides/connect-usb-equipment/#what-can-reach-a-pod)
-gives the details.
+has the details.
 
 ## Your own image
 
 `spec.driver.image` runs any image. The image must:
 
-* hold `/usr/bin/socat`, because the device's pod serves the driver
+* contain `/usr/bin/socat`, because the device's pod serves the driver
   with `socat` on port 7625
-* hold the driver on `PATH`, under the name in `spec.driver.name`
+* contain the driver on `PATH`, under the name in `spec.driver.name`
 * run as user 1000, with a read-only root filesystem and a writable
   `/tmp`
 
-The images of the `indi` build hold only the programs they run and the
-libraries those programs load. Only `indi-simulators` and `indi-phd2`
-have a shell. The
+The images of the `indi` build contain only the programs they run and
+the libraries that those programs load. Only `indi-simulators` and
+`indi-phd2` have a shell. The
 [`indi` README](https://github.com/liken-sh/liken/tree/main/indi)
 describes how they are built.

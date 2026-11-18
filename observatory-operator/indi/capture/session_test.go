@@ -11,9 +11,9 @@ import (
 	"time"
 )
 
-// A fakeServer reads each line a capture sends and writes the chunks
-// that its answer lists, waiting gap between two chunks, as a server
-// that sends a reply in parts does. A line with no answer gets no
+// A fakeServer answers each line it reads with the chunks that
+// answers lists for that line, with gap between chunks, as a server
+// does when it sends a reply in parts. A line with no entry gets no
 // reply.
 type fakeServer struct {
 	answers map[string][]string
@@ -49,7 +49,7 @@ func (s *fakeServer) lines() []string {
 }
 
 // record runs a script against the fake in a synctest bubble, so the
-// quiet that ends each phase passes on the fake clock.
+// quiet period that ends each phase passes on the fake clock.
 func record(t *testing.T, server *fakeServer, script func(device string) Script) (string, []Reply) {
 	t.Helper()
 	var device string
@@ -61,7 +61,7 @@ func record(t *testing.T, server *fakeServer, script func(device string) Script)
 		var err error
 		device, replies, err = Run(client, script)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("running the script: %v", err)
 		}
 	})
 	return device, replies
@@ -98,8 +98,8 @@ func TestRunSendsTheSetupAndRecordsEachPhase(t *testing.T) {
 	}
 }
 
-// A pause inside an element does not end a phase, so each reply parses
-// on its own.
+// A pause inside an element does not end a phase, so each reply ends
+// between elements and parses on its own.
 func TestRunWaitsForTheEndOfAnElement(t *testing.T) {
 	half := len(definition) / 2
 	server := &fakeServer{gap: 2 * Quiet, answers: map[string][]string{
@@ -119,8 +119,8 @@ func TestRunRefusesABaselineWithNoDevice(t *testing.T) {
 		go (&fakeServer{answers: map[string][]string{Baseline: {`<message message="no driver"/>`}}}).serve(end)
 		defer client.Close()
 		_, _, err := Run(client, func(string) Script { return Script{} })
-		if err == nil || !strings.Contains(err.Error(), "names no device") {
-			t.Errorf("err = %v, want the baseline named no device", err)
+		if err == nil || !strings.Contains(err.Error(), "no device attribute") {
+			t.Errorf("err = %v, want an error that the baseline has no device attribute", err)
 		}
 	})
 }
@@ -130,7 +130,7 @@ func TestRunReportsAClosedConnection(t *testing.T) {
 		client, end := net.Pipe()
 		end.Close()
 		if _, _, err := Run(client, func(string) Script { return Script{} }); err == nil {
-			t.Error("Run succeeded on a closed connection")
+			t.Error("Run returned no error on a closed connection, want one")
 		}
 	})
 }

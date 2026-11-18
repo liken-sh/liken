@@ -1,14 +1,13 @@
 package main
 
-// A runner runs one Reservation's steps, one at a time, in the order of
-// observatory.ActivationSteps and then observatory.DeactivationSteps.
-// The reservation's status is the runner's record: each step's state,
-// start, finish, and message. A runner that starts reads that record
-// and continues from the first step that is not Done or Skipped, so an
-// operator that restarts in the middle of a step runs the step again.
-// Each step reads what the cluster and the devices report before it
-// changes anything, so a step that runs again changes only what is
-// still needed.
+// A runner runs one Reservation's steps in order: first
+// observatory.ActivationSteps, then observatory.DeactivationSteps. The
+// Reservation's status records each step's state, start time, stop
+// time, and message. A new runner reads that status and continues from
+// the first step that is not Done or Skipped, so an operator that
+// restarts during a step runs that step again. Each step reads the
+// state of the cluster and the devices before it changes anything, so
+// a step that runs again changes only what is still missing.
 
 import (
 	"context"
@@ -23,28 +22,28 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// errEnding is the cause that ends an activation step when the
-// reservation must deactivate (ending).
+// errEnding is the context cause that stops an activation step when
+// ending reports that the reservation must deactivate.
 var errEnding = errors.New("reservation ended")
 
 type runner struct {
 	o    *operator
 	uid  string
 	name string
-	// res is the last copy of the reservation read from the stores. Its
-	// status is not the record: the runner writes the status, and
-	// status holds what it wrote last.
+	// res is the last copy of the reservation that the runner read.
+	// After the first refresh, the runner does not read its status from
+	// res, because status is what the runner last wrote.
 	res    *observatory.Reservation
 	status observatory.ReservationStatus
-	// logged is the last phase that the log names, so each phase
-	// change writes one line.
+	// logged is the last phase that the runner wrote to the log.
 	logged observatory.ReservationPhase
-	// session is the EditsPending condition that the runner last
-	// judged (editspending.go), or nil for none.
+	// session is the EditsPending condition that updateEditsPending last set,
+	// or nil when there is none.
 	session *observatory.Condition
-	// guiderLink names the guider's pod and the INDI server's pod, by
-	// their UIDs, whose PHD2 the runner last saw with its equipment
-	// connected (guidersteady.go).
+	// guiderLink has the UIDs of the guider's pod and the INDI server's
+	// pod when the runner last saw PHD2 with its equipment connected.
+	// When either pod changes, the runner checks PHD2's equipment again
+	// (guidersteady.go).
 	guiderLink string
 }
 
@@ -52,7 +51,7 @@ func newRunner(o *operator, r *observatory.Reservation) *runner {
 	return &runner{o: o, uid: r.Metadata.UID, name: r.Metadata.Name, res: r, status: r.Status, logged: r.Status.Phase}
 }
 
-// stage is what the record says the runner does next.
+// stage is what the runner does next, decided from the status.
 type stage int
 
 const (
@@ -64,18 +63,18 @@ const (
 )
 
 func (r *runner) run(ctx context.Context) {
-	// The supervisor starts a runner from its snapshot, whose copy of
-	// the reservation can be older than the operator's own last write:
-	// a runner that released the reservation and removed its finalizer
-	// a moment ago. A new runner that took that record would add the
-	// finalizer again and release again, in a loop with no clock. So
-	// the record comes from the first read, which the memo keeps no
-	// older than the last write.
+	// The supervisor starts a runner from its snapshot, whose copy of the
+	// reservation can be older than the operator's last write. When the
+	// previous runner has just released the reservation and removed its
+	// finalizer, a runner that used the older copy would add the
+	// finalizer and release again, in a loop with no delay. So the runner
+	// takes its status from its first refresh, which is never older than
+	// the operator's last write.
 	first := true
 	for ctx.Err() == nil {
 		if !r.refresh() {
-			// The reservation is gone. Its telescope goes back to the
-			// pool, and the supervisor's sweep stops any pod it left.
+			// The reservation is deleted. Free its telescope. The
+			// supervisor's sweep stops any pod that it left.
 			r.o.claims.release(r.res)
 			return
 		}
@@ -84,9 +83,9 @@ func (r *runner) run(ctx context.Context) {
 			r.status.Steps = renameStoredSteps(r.res.Status.Steps)
 			r.session = storedSession(r.res.Status)
 			if finished(r.res) {
-				// A Released reservation that a person edits has no step
-				// to run, so this write alone keeps its
-				// status.observedGeneration current (edited).
+				// A finished reservation has no step to run, but a person
+				// can still edit it, so observe updates
+				// status.observedGeneration (see edited).
 				r.observe(ctx)
 				return
 			}
@@ -124,9 +123,10 @@ func (r *runner) run(ctx context.Context) {
 	}
 }
 
-// refresh reads the reservation, and answers false when it is gone. It
-// reads the store's copy, unless the copy is older than the operator's
-// own last write, and then it reads the API server's (informer.ReadOne).
+// refresh reads the reservation into r.res and returns false when the
+// reservation is deleted or replaced by one with another UID. It uses
+// the informer's copy, unless that copy is older than the operator's
+// last write, and then it reads from the API server (informer.ReadOne).
 func (r *runner) refresh() bool {
 	key := r.o.namespace + "/" + r.name
 	held := informer.Held{View: r.o.stores.kinds[observatory.ReservationKind].View(), Versions: r.o.versions}
@@ -135,9 +135,8 @@ func (r *runner) refresh() bool {
 	case errors.Is(err, apiclient.ErrNotFound):
 		return false
 	case err != nil:
-		// The API server does not answer. The runner keeps its last
-		// copy, and its next write meets the same failure and is
-		// logged.
+		// Keep the last copy. When the API server is still
+		// unavailable, the next status write fails and logs it.
 		return true
 	case res.Metadata.UID != r.uid:
 		return false
@@ -146,16 +145,17 @@ func (r *runner) refresh() bool {
 	return true
 }
 
-// ending reports whether the reservation must deactivate: a person
-// deleted it, spec.end came, or a person deleted the telescope it
-// holds or that telescope's observatory (deletedParent).
+// ending reports whether the reservation must deactivate: it is being
+// deleted, spec.end has passed, or the telescope it holds or that
+// telescope's observatory is being deleted (see deletedParent).
 func ending(t *tree, res *observatory.Reservation, now time.Time) bool {
 	return deleting(res.Metadata) || (res.Spec.End != nil && !now.Before(*res.Spec.End)) || heldParentDeleted(t, res) != ""
 }
 
-// heldParentDeleted answers the parent that a person deleted, such as
-// "Telescope east", when the reservation holds that telescope, or "".
-// A reservation that has not taken its telescope waits instead (wait).
+// heldParentDeleted returns the deleted parent of the reservation's
+// telescope, such as "Telescope east", when the reservation holds the
+// telescope, and "" otherwise. Before it holds the telescope, the
+// activation step reports a deleted parent (activation.go).
 func heldParentDeleted(t *tree, res *observatory.Reservation) string {
 	telescope, ok := t.telescopes[res.Spec.Telescope]
 	if !ok || !holds(res) {
@@ -164,10 +164,10 @@ func heldParentDeleted(t *tree, res *observatory.Reservation) string {
 	return deletedParent(t, telescope)
 }
 
-// deletedParent answers "Telescope <name>" for a telescope that a
-// person deleted, "Observatory <name>" for one whose observatory a
-// person deleted, or "". The finalizer keeps both in the tree until
-// the reservation that holds the telescope is Released.
+// deletedParent returns "Telescope <name>" when the telescope is being
+// deleted, "Observatory <name>" when its observatory is being deleted,
+// or "". Finalizers keep both objects in the tree until the
+// reservation that holds the telescope is Released.
 func deletedParent(t *tree, telescope *observatory.Telescope) string {
 	if deleting(telescope.Metadata) {
 		return "Telescope " + telescope.Metadata.Name
@@ -195,7 +195,7 @@ func (r *runner) stage() stage {
 	switch {
 	case deactivating && allFinished(r.status.Steps):
 		return stageReleased
-	case deactivating, ending(t, r.res, time.Now()), gaveUp(r.status.Steps):
+	case deactivating, ending(t, r.res, time.Now()), endedAtDawn(r.status.Steps):
 		return stageDeactivate
 	case allFinished(r.status.Steps):
 		return stageReady
@@ -212,14 +212,12 @@ func isDeactivation(name observatory.StepName) bool {
 	return false
 }
 
-// renameStoredSteps answers a copy of stored steps with a step named
-// Abort renamed StopWork. An operator that names the step Abort can
-// stop partway through a deactivation, and the operator that replaces
-// it reads that status. Without the rename, deactivate finds no
-// StopWork step and adds every deactivation step again, so the status
-// holds each of them twice. The next status write stores the new name.
-// The slice is copied because the stored one belongs to the watch's
-// cache.
+// renameStoredSteps returns a copy of the stored steps with the step
+// named Abort renamed StopWork. A status written by an older operator
+// during a deactivation can have the name Abort. Without the rename,
+// deactivate finds no StopWork step and adds every deactivation step
+// again, so the status lists each of them twice. The slice is copied
+// because the stored one belongs to the informer's cache.
 func renameStoredSteps(stored []observatory.Step) []observatory.Step {
 	steps := slices.Clone(stored)
 	for i := range steps {
@@ -257,20 +255,20 @@ func (r *runner) step(name observatory.StepName) *observatory.Step {
 	return nil
 }
 
-// stepWork is what a step function receives: the runner, and a way to
-// say what the step waits for now.
 type stepWork struct {
 	r    *runner
 	name observatory.StepName
-	// report records what the step does or waits for in the step's
-	// message, and writes the status when the message or the spec
-	// changed (edited).
+	// report sets the step's summary to a message that says what the
+	// step is doing or waiting for. It writes the status when the
+	// summary changed or the spec was edited (see edited).
 	report func(string)
-	// last is the last message that report received.
+	// last is the last message that report received. A step that times
+	// out gives it as the reason.
 	last string
 }
 
-// outcome is how a step ended.
+// outcome is the result of a step that returned no error. A skipped
+// step needed no work. message becomes the step's summary.
 type outcome struct {
 	skipped bool
 	message string
@@ -286,9 +284,9 @@ func skipped(format string, args ...any) (outcome, error) {
 
 type stepFunc func(ctx context.Context, w *stepWork) (outcome, error)
 
-// runStep runs one step from its record. A Pending step starts now; a
-// Running step continues with its first start time, so its deadline
-// stays where it was before an operator restart.
+// runStep runs one step from its status. A Pending step starts now. A
+// Running step keeps its original start time, so its deadline does not
+// move when the operator restarts.
 func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn stepFunc) error {
 	s := r.step(name)
 	now := stamp()
@@ -322,13 +320,13 @@ func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn step
 	s = r.step(name)
 	finish := stamp()
 	s.StopTime = &finish
-	gave, gaveUpNow := isGaveUp(err)
+	dawn, atDawn := asDawnError(err)
 	switch {
-	case gaveUpNow:
-		// A gate's step ends the reservation at dawn (requires.go): it
-		// is Skipped with what it waited for, and stage then
-		// deactivates.
-		s.State, s.Summary = observatory.StepSkipped, gave.summary
+	case atDawn:
+		// Dawn came before the step's requirement was met
+		// (requires.go). Mark the step Skipped with what it waited
+		// for, so that stage returns stageDeactivate.
+		s.State, s.Summary = observatory.StepSkipped, dawn.summary
 		r.save(ctx)
 		r.o.logf("Reservation %s: %s", r.name, stepLine(s))
 		r.o.record(r.res, string(name), sentence(strings.TrimPrefix(stepLine(s), string(name)+" ")))
@@ -339,8 +337,8 @@ func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn step
 		r.o.logf("Reservation %s: %s", r.name, stepLine(s))
 		return errEnding
 	case err != nil && ctx.Err() != nil:
-		// The operator stops. The step stays Running, and the next
-		// copy of the operator continues it.
+		// The operator is stopping. Leave the step Running, so the next
+		// operator process continues it.
 		s.StopTime = nil
 		return ctx.Err()
 	case err != nil && errors.Is(stepCtx.Err(), context.DeadlineExceeded):
@@ -372,7 +370,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// The reasons of a failed step, in the Ready condition and the Event.
+// The reasons of a failed step, for the Ready condition and the Event.
 const (
 	reasonFailed   = "StepFailed"
 	reasonTimedOut = "StepTimedOut"
@@ -386,8 +384,8 @@ func (r *runner) failure(ctx context.Context, s *observatory.Step, reason string
 	r.o.recorder.Warning(reference(observatory.ReservationKind, r.res.Metadata), reason, failedMessage(s))
 }
 
-// clearStep empties status.step of a reservation that is Ready or
-// Released, so its printer column shows no step that ended.
+// clearStep empties status.step, so the printer column does not show a
+// step that ended.
 func (r *runner) clearStep(ctx context.Context) {
 	if r.status.Step != "" {
 		r.status.Step = ""
@@ -395,8 +393,7 @@ func (r *runner) clearStep(ctx context.Context) {
 	}
 }
 
-// began answers when the first of some steps started, to give the
-// time that activation or deactivation took.
+// began returns the earliest start time of the named steps, or now.
 func (r *runner) began(names []observatory.StepName) time.Time {
 	first := time.Now()
 	for _, s := range r.status.Steps {
@@ -407,7 +404,7 @@ func (r *runner) began(names []observatory.StepName) time.Time {
 	return first
 }
 
-// took answers how long a finished step ran, or zero.
+// took returns how long a finished step ran, or zero.
 func (r *runner) took(name observatory.StepName) time.Duration {
 	if s := r.step(name); s != nil && s.StartTime != nil && s.StopTime != nil {
 		return s.StopTime.Sub(*s.StartTime)
@@ -415,7 +412,7 @@ func (r *runner) took(name observatory.StepName) time.Duration {
 	return 0
 }
 
-// phaseOf answers the phase while a step runs.
+// phaseOf returns the reservation's phase while the step runs.
 func phaseOf(name observatory.StepName) observatory.ReservationPhase {
 	switch {
 	case name == observatory.StepWait:
@@ -426,11 +423,11 @@ func phaseOf(name observatory.StepName) observatory.ReservationPhase {
 	return observatory.ReservationActivating
 }
 
-// save writes the record to the reservation's status, with the phase's
-// conditions and endpoint, and writes nothing when the status holds it
-// already. A failed write is retried with the next save, and the record
-// in memory stays as it is. The error is for a caller that must know
-// that the write landed (recordSession).
+// save writes the runner's status, with the conditions and endpoint
+// that compose sets, and writes nothing when the stored status is
+// equal. After a failed write, the next save writes the status again.
+// A caller that must know the write succeeded, such as recordSession,
+// reads the error.
 func (r *runner) save(ctx context.Context) error {
 	r.compose()
 	if r.status.Phase != r.logged {
@@ -451,10 +448,10 @@ func (r *runner) save(ctx context.Context) error {
 			return true
 		})
 	if wrote {
-		// The runner's own Events cover the transitions of Ready and
-		// SafeToPowerOff (events.go). EditsPending changes on an
-		// edit, when no step changes, so its transitions post their
-		// own Events, after the write lands.
+		// Ready and SafeToPowerOff change only when a step ends or the
+		// phase changes, and the runner posts an Event for each of
+		// those (events.go). EditsPending changes when a person edits
+		// a spec, so save posts its Event.
 		for _, c := range transitions {
 			if c.Type == observatory.ConditionEditsPending {
 				r.o.recorder.Transition(reference(observatory.ReservationKind, r.res.Metadata), c, "")
@@ -470,31 +467,30 @@ func (r *runner) save(ctx context.Context) error {
 }
 
 // edited reports whether the spec changed since the runner last wrote
-// the status. The runner writes the status when a step changes, and a
-// reservation that is Ready, Failed, Released, or waits in the Wait
-// step changes no step. Without a write on the edit alone, status.observedGeneration
-// stays behind metadata.generation, and a client such as `kubectl wait`
-// cannot tell that the operator read the edit. A mid-session edit takes
-// effect at the next session (records.go), so this write records that
-// the operator read the edit, not that it applied it.
+// the status. A reservation that is Ready, Failed, Released, or in the
+// Wait step changes no step, so without a write for the edit alone,
+// status.observedGeneration stays behind metadata.generation and
+// `kubectl wait` cannot tell that the operator read the edit. The
+// write records that the operator read the edit, not that it applied
+// it, because an edit during a session takes effect at the next
+// session (records.go).
 func (r *runner) edited() bool {
 	return r.status.ObservedGeneration != r.res.Metadata.Generation
 }
 
 // observe writes the status when the spec changed since the last write
-// (edited), or when an edit of a spec changed the EditsPending
-// condition (judgeSession). An edit of an Observatory, a Telescope, or
-// a Camera moves no generation of the reservation, so the condition is
-// judged on each wake of the bell structure, which every watch event
-// rings and an INDI reading does not.
+// (see edited), or when updateEditsPending changed the EditsPending
+// condition. An edit of an Observatory, a Telescope, or a Camera does
+// not change the reservation's generation, so the runner's waits call
+// observe each time o.structure notifies, which every watch event does.
 func (r *runner) observe(ctx context.Context) {
-	if judged := r.judgeSession(r.o.snapshot()); judged || r.edited() {
+	if judged := r.updateEditsPending(r.o.snapshot()); judged || r.edited() {
 		r.save(ctx)
 	}
 }
 
 // compose sets the conditions, the endpoint, and the observed
-// generation that the phase gives.
+// generation of the status from the current phase and step.
 func (r *runner) compose() {
 	s := &r.status
 	s.ObservedGeneration = r.res.Metadata.Generation
@@ -504,9 +500,9 @@ func (r *runner) compose() {
 		reason, message = string(step.Name), firstNonEmpty(step.Summary, "Running")
 	}
 	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, reason, message)
-	// SafeToPowerOff says why the devices are not safe to power off
-	// yet: activation waits to start or runs, the holder uses the
-	// telescope, or deactivation runs.
+	// SafeToPowerOff is False until the Released phase. Its reason and
+	// message say why: activation is waiting or running, the holder is
+	// using the telescope, deactivation is running, or a step failed.
 	telescope := "Telescope " + r.res.Spec.Telescope
 	safe := condition(observatory.ConditionSafeToPowerOff, observatory.ConditionFalse, string(s.Phase), string(s.Phase)+" "+telescope)
 	switch s.Phase {

@@ -1,8 +1,8 @@
 package observatory
 
-// The devices of the site: the dome and the weather station belong to
-// the Observatory, and a switch or a receiver belongs to either the
-// Observatory or one Telescope.
+// The device kinds of the site. A Dome or a WeatherStation belongs to
+// an Observatory. A Switch or a Receiver belongs to an Observatory or
+// to one Telescope.
 
 type (
 	Dome           = Object[DomeSpec, DomeStatus]
@@ -13,7 +13,8 @@ type (
 
 // DomeSpec describes a device with INDI's DOME_INTERFACE: a dome or a
 // roll-off roof. While an Observatory has a dome, the dome and the
-// mounts lock each other's park, and the shutter follows the park.
+// mounts refuse the park changes that could damage the telescope
+// (locks.go), and the shutter follows the dome's park.
 type DomeSpec struct {
 	ObservatoryDevice
 	Procedures[ParkAction]
@@ -44,8 +45,8 @@ type WeatherStationStatus struct {
 	WeatherStationStandard
 }
 
-// Safety is a weather verdict. INDI's weather base class reports it as
-// a light: Ok is Safe, Busy is Warning, Alert is Danger, and Idle is
+// Safety is the safety level that a weather station reports, converted from an INDI
+// state: Ok is Safe, Busy is Warning, Alert is Danger, and Idle is
 // Unknown.
 type Safety string
 
@@ -58,7 +59,7 @@ const (
 
 // SwitchSpec describes a device with INDI's OUTPUT_INTERFACE or
 // INPUT_INTERFACE: a relay board, or a power box's outputs. A
-// device's spec.power names one of its outputs.
+// device's spec.power refers to one of its outputs.
 type SwitchSpec struct {
 	TelescopeOrObservatoryDevice
 	Procedures[Action]
@@ -73,8 +74,8 @@ type SwitchStatus struct {
 
 // SwitchDisplay holds the numbers of the outputs that are on, such as
 // 1, 2, 3, for the printer columns. A printer column shows only the
-// first value of a JSONPath that matches several, so no column can
-// list them from status.outputs.
+// first match of its JSONPath, so it cannot list them from
+// status.outputs.
 type SwitchDisplay struct {
 	On string `json:"on,omitempty"`
 }

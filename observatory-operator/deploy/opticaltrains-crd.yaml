@@ -42,22 +42,28 @@ spec:
           x-kubernetes-validations:
             - rule: size(self.metadata.name) <= 32
               message: >-
-                a OpticalTrain name is at most 32 characters, because
-                observatory-operator builds the names of its pods,
-                Services, and Job labels from the names of observatory
-                resources, and Kubernetes limits those to 63 characters
+                an OpticalTrain name is at most 32 characters, the limit
+                of every observatory.liken.sh kind. observatory-operator
+                builds the names of pods and Services, and the values of
+                Job labels, from the names of observatory.liken.sh
+                resources, and Kubernetes limits each of those to 63
+                characters. The limit of 32 leaves room for a suffix
+                longer than any that the operator adds.
           description: >-
             An `OpticalTrain` is one light path: an `OpticalTube`, and
-            the devices behind it, which name the train in their
-            `spec.opticalTrain`. The operator writes each camera's
-            `ACTIVE_DEVICES` from its train, so the train sets which
-            mount, focuser, filter wheel, and rotator the camera snoops.
+            the camera, filter wheel, focuser, and rotator behind it. A
+            device joins the train when its `spec.opticalTrain` is the
+            train's name. The operator writes each camera's INDI
+            `ACTIVE_DEVICES` property so that the camera reads the
+            focuser, filter wheel, and rotator of its own train and the
+            mount of its telescope. It also writes the tube's aperture
+            and focal length into the camera's `SCOPE_INFO`.
           required: [spec]
           properties:
             spec:
               type: object
               required: [telescope, opticalTube]
-              description: "The train's place and its tube."
+              description: "The telescope the train is on, and its tube."
               properties:
                 telescope:
                   type: string
@@ -73,12 +79,12 @@ spec:
                   pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
                   description: >-
                     The name of the `OpticalTube` that collects the
-                    train's light. Two trains can name one tube.
+                    train's light. Two trains can use the same tube.
             status:
               type: object
               description: >-
-                What the operator observes. The operator writes it, and
-                a person reads it.
+                What the operator observes. Only the operator writes
+                it.
               properties:
                 observedGeneration:
                   type: integer
@@ -89,8 +95,9 @@ spec:
                 conditions:
                   type: array
                   description: >-
-                    `ParentFound` is `False` when the `Telescope`, its
-                    `Observatory`, or the `OpticalTube` does not exist.
+                    The `ParentFound` condition is `False` when the
+                    `Telescope`, its `Observatory`, or the `OpticalTube`
+                    does not exist.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:
@@ -108,7 +115,7 @@ spec:
                         type: string
                         enum: ["True", "False", Unknown]
                         description: >-
-                          Whether the condition holds: `True`, `False`,
+                          Whether the condition is met: `True`, `False`,
                           or `Unknown`.
                       observedGeneration:
                         type: integer
@@ -126,26 +133,28 @@ spec:
                         type: string
                         maxLength: 32768
                         description: >-
-                          The cause, for a person to read. It can be
-                          empty.
+                          A sentence for a person that explains the
+                          reason. It can be empty.
                       lastTransitionTime:
                         type: string
                         format: date-time
                         description: >-
-                          When `status` last changed. A write with the
-                          same status keeps this time.
+                          When `status` last changed. A write that
+                          leaves `status` unchanged keeps this time.
                 devices:
                   type: array
                   description: >-
-                    Each device whose `spec.opticalTrain` names this
-                    train. While a session holds a device, the train
-                    that the session recorded counts, until the session
+                    Each device whose `spec.opticalTrain` is this
+                    train's name. While a reservation's session holds a
+                    device, the list uses the train that the session
+                    recorded when it started, because a change to
+                    `spec.opticalTrain` takes effect when the session
                     ends.
                   x-kubernetes-list-type: atomic
                   items:
                     type: object
                     required: [kind, name]
-                    description: "One device, with its phase."
+                    description: "One device and its phase."
                     properties:
                       kind:
                         type: string

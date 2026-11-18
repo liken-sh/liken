@@ -1,7 +1,7 @@
 package main
 
-// Each condition transition of a resource that the status writer
-// writes posts one Event, with the condition's reason and message.
+// The status writer posts one Event for each condition transition of a
+// resource, with the condition's reason and message.
 
 import (
 	"slices"
@@ -13,8 +13,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// typedEvents answers the type, the reason, and the message of each
-// Event about one object, in the order the operator wrote them.
+// typedEvents returns "type reason: message" for each Event about one
+// object, oldest first.
 func typedEvents(a *fakeAPI, kind observatory.Kind, name string) []string {
 	var out []string
 	for _, e := range a.recorded.About(kind.Name, name) {
@@ -23,11 +23,8 @@ func typedEvents(a *fakeAPI, kind observatory.Kind, name string) []string {
 	return out
 }
 
-// A device posts an Event for each condition it first reports, and
-// each time its Ready condition changes its reason. The activation
-// that connects it ends on one Connected Event. The camera's Cooling
-// condition, which appears once it is connected, posts the last one,
-// and stateconditions_test.go holds that.
+// The camera's Cooling condition appears after the camera connects, so
+// stateconditions_test.go tests its Event.
 func TestADevicePostsItsReadyTransitions(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -43,7 +40,7 @@ func TestADevicePostsItsReadyTransitions(t *testing.T) {
 		}
 		for _, event := range want {
 			if !slices.Contains(got, event) {
-				t.Errorf("no Event %q in %q", event, got)
+				t.Errorf("the Events are %q, want %q among them", got, event)
 			}
 		}
 		if got[len(got)-1] != want[1] || len(slices.Compact(slices.Clone(got))) != len(got) {
@@ -52,8 +49,6 @@ func TestADevicePostsItsReadyTransitions(t *testing.T) {
 	})
 }
 
-// A device that fails posts a Warning with the failure, and a resource
-// whose parent is missing posts a Warning that names it.
 func TestAFailureAndAMissingParentPostWarnings(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -63,11 +58,11 @@ func TestAFailureAndAMissingParentPostWarnings(t *testing.T) {
 		fault := "Warning Error: Failed: "
 		missing := "Warning ParentMissing: Missing Telescope east"
 
-		w.until(time.Minute, "no Warning is written", func() bool {
+		w.until(time.Minute, "no Warning Event has the reason Error", func() bool {
 			return slices.ContainsFunc(typedEvents(w.api, observatory.CameraKind, "east-main"), func(e string) bool { return strings.HasPrefix(e, fault) })
 		})
 		w.api.deleteNamed(kindCollection(observatory.TelescopeKind), "east")
-		w.until(time.Minute, "no Warning is written", func() bool {
+		w.until(time.Minute, "no Warning Event has the reason ParentMissing", func() bool {
 			return slices.Contains(typedEvents(w.api, observatory.MountKind, "east"), missing)
 		})
 	})

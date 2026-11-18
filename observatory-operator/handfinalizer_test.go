@@ -1,9 +1,9 @@
 package main
 
-// A person can remove the operator's finalizer from a device by hand.
-// The finalizer only holds a deleted device's object, so a device that
-// the tree places on a server and whose pod runs there is still in the
-// release's care.
+// The operator's finalizer on a device only keeps the object while the
+// device is being deleted. When a person removes the finalizer by hand
+// from a device whose pod runs, the release of the reservation still
+// parks and disconnects the device.
 
 import (
 	"slices"
@@ -37,7 +37,7 @@ func TestAReleaseParksADustCapWhoseFinalizerAPersonRemoved(t *testing.T) {
 		sent := w.indi.changes()[before:]
 		for _, want := range []string{parkCap, "east-telescope Dust Cover Simulator.CONNECTION CONNECT=Off DISCONNECT=On"} {
 			if !slices.Contains(sent, want) {
-				t.Errorf("changes = %q, want %q", sent, want)
+				t.Errorf("the changes sent after the release are %q, want %q among them", sent, want)
 			}
 		}
 	})

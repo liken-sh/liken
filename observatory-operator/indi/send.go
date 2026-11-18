@@ -6,25 +6,28 @@ import (
 	"math"
 )
 
-// Sent identifies one change that the client sent, for Settle.
+// Sent identifies a change that the client sent, so that Settle,
+// Answered, and Accepted can find the device's reply to it.
 type Sent struct {
 	Device   string
 	Property string
-	// connection, defined, and sequence record the store as it was at
-	// the send: the connection, the definition of the property, and
-	// the last change applied.
+	// connection, defined, and sequence are read from the store at the
+	// send: the connection number, the sequence number at which the
+	// property was defined, and the last sequence number applied. A
+	// reply is an update after sequence, on the same connection, to the
+	// same definition of the property.
 	connection uint64
 	defined    uint64
 	sequence   uint64
-	// sent is the property as the client sent it, and changed names
+	// sent is the property as the client wrote it, and changed lists
 	// the members whose values the change sets.
 	sent    Property
 	changed []string
 }
 
-// carries reports whether a property holds the values that the change
-// set.
-func (s Sent) carries(p Property) bool {
+// matches reports whether p has the value of each member that the
+// change set. Numbers compare with a relative tolerance of 1e-9.
+func (s Sent) matches(p Property) bool {
 	for _, name := range s.changed {
 		want, _ := s.sent.Member(name)
 		got, ok := p.Member(name)
@@ -36,11 +39,11 @@ func (s Sent) carries(p Property) bool {
 	return true
 }
 
-// SetNumbers sends a newNumberVector that gives the named members new
-// values. It sends every member of the property, and the members it
-// does not name keep the values in the store, because a driver such as
-// the telescope simulator ignores a coordinate that arrives without
-// its pair.
+// SetNumbers sends a newNumberVector that sets the members in values.
+// The vector has every member of the property, and a member that
+// values does not name keeps its value from the store, because a
+// driver such as the telescope simulator ignores a coordinate that
+// arrives without its pair.
 func (c *Client) SetNumbers(device, property string, values map[string]float64) (Sent, error) {
 	return c.send(device, property, NumberType, func(p *Property) ([]string, error) {
 		var changed []string
@@ -56,8 +59,8 @@ func (c *Client) SetNumbers(device, property string, values map[string]float64) 
 	})
 }
 
-// SetTexts sends a newTextVector that gives the named members new
-// values. It sends every member, as SetNumbers does.
+// SetTexts sends a newTextVector that sets the named members. Like
+// SetNumbers, it sends every member of the property.
 func (c *Client) SetTexts(device, property string, values map[string]string) (Sent, error) {
 	return c.send(device, property, TextType, func(p *Property) ([]string, error) {
 		var changed []string
@@ -73,13 +76,13 @@ func (c *Client) SetTexts(device, property string, values map[string]string) (Se
 	})
 }
 
-// SetSwitches sends a newSwitchVector that turns the named members On
-// or Off, and follows the property's rule. Under OneOfMany and
-// AtMostOne, a member turned On turns every other member Off, as a
-// radio button does. The result must leave exactly one member On under
-// OneOfMany, and at most one under AtMostOne, or SetSwitches refuses
-// it. Under AnyOfMany the members it does not name keep their state.
-// It sends every member.
+// SetSwitches sends a newSwitchVector that turns the members in values
+// On or Off, and applies the property's rule. Under OneOfMany and
+// AtMostOne, turning a member On turns every other member Off, like a
+// radio button. Under AnyOfMany, a member that values does not name
+// keeps its state. SetSwitches returns ErrInvalid when the result has
+// no member On or more than one under OneOfMany, or more than one
+// under AtMostOne. The vector has every member of the property.
 func (c *Client) SetSwitches(device, property string, values map[string]bool) (Sent, error) {
 	return c.send(device, property, SwitchType, func(p *Property) ([]string, error) {
 		for name, on := range values {
@@ -99,8 +102,9 @@ func (c *Client) SetSwitches(device, property string, values map[string]bool) (S
 		if (p.Rule == OneOfMany && on != 1) || (p.Rule == AtMostOne && on > 1) {
 			return nil, fmt.Errorf("%w: %s.%s is %s, and the change leaves %d members On", ErrInvalid, device, property, p.Rule, on)
 		}
-		// Under OneOfMany and AtMostOne, a change to one member sets the
-		// others, so the device's answer must carry every member.
+		// Under OneOfMany and AtMostOne, a change to one member also
+		// changes the others, so the device's reply must have the value
+		// of every member.
 		var changed []string
 		for _, m := range p.Members {
 			changed = append(changed, m.Name)
@@ -111,7 +115,7 @@ func (c *Client) SetSwitches(device, property string, values map[string]bool) (S
 
 // send checks a change against the property's definition, applies it
 // to a copy of the property, and writes the copy as a new*Vector. The
-// store keeps its values until the device reports the change.
+// store keeps the old values until the device sends an update.
 func (c *Client) send(device, property string, t Type, change func(*Property) ([]string, error)) (Sent, error) {
 	c.mutex.Lock()
 	if !c.store.connected {
@@ -144,10 +148,9 @@ func (c *Client) send(device, property string, t Type, change func(*Property) ([
 	return sent, c.write(newVector(p))
 }
 
-// AlertError is the error of a change that the device answered with
-// the state Alert. Property is the property as the device reported it.
-// A driver usually sends its reason as a Message event, after the
-// update.
+// AlertError is the error for a change that the device replied to with
+// the state Alert. Property is the property as the device sent it. A
+// driver usually sends the reason in a message after the update.
 type AlertError struct {
 	Property Property
 }
@@ -156,48 +159,45 @@ func (e *AlertError) Error() string {
 	return fmt.Sprintf("indi: %s.%s is Alert", e.Property.Device, e.Property.Name)
 }
 
-// Settle waits until the device answers a change that the client
-// sent. It returns the property when the state is Ok or Idle, an
-// AlertError when the state is Alert, ErrDeleted when the device
-// deleted the property, ErrDisconnected when the connection ended, or
-// the error of ctx. The property's own timeout is the driver's
-// estimate, so the caller sets the limit with ctx.
+// Settle waits for the device's reply to a change. It returns the
+// property when the state is Ok or Idle, an AlertError when the state
+// is Alert, ErrDeleted when the device deleted the property,
+// ErrDisconnected when the connection ended, or the error of ctx. The
+// caller sets the time limit with ctx, because the property's own
+// timeout is only the driver's estimate.
 //
-// INDI carries no identifier for a request, so Settle reads the
-// device's answer from the updates after the send. A device answers in
-// one of two ways: it sets Busy while it works and then Ok, as a dome
-// that turns does, or it sets Ok at once with the new values, as the
-// focuser simulator does. So an update counts as the answer when it is
-// not Busy, and either a Busy update came after the send or the update
-// carries the values sent. Without that rule, an update that the
-// device sent before it read the change, such as the dome's position
-// on its poll, would end the wait early. Alert ends the wait at once.
+// INDI messages have no request identifier, so Settle reads the reply
+// from the updates that arrive after the send. Some devices set Busy
+// while they work and then Ok, like a dome that turns. Others set Ok at
+// once with the new values, like the focuser simulator. So an update
+// that is not Busy ends the wait only when a Busy update came after the
+// send, or when the update has the values sent. Without that rule, the
+// position that a dome sends on each poll, before it reads the change,
+// would end the wait early.
 func (c *Client) Settle(ctx context.Context, sent Sent) (Property, error) {
 	return c.settle(ctx, sent, true)
 }
 
-// Answered waits for the driver's answer to a sent change, as Settle
-// does, but accepts an answer whatever its values. A switch that starts
+// Answered is Settle for a reply with any values. A switch that starts
 // an action, such as CONFIG_PROCESS, turns its members Off again when
-// the action ends, so its answer never carries the change. A report
-// that the driver sends on a poll would end the wait early, so Answered
-// suits only a property that the driver reports in answer to a change.
+// the action ends, so its reply never has the values sent. Answered
+// ends on the first update after the send that is not Busy, so use it
+// only for a property that the driver does not also send on a poll.
 func (c *Client) Answered(ctx context.Context, sent Sent) (Property, error) {
 	return c.settle(ctx, sent, false)
 }
 
-// Accepted waits until the device answers a change that the client
-// sent with the values sent, in any state but Alert. It fails as Settle
-// does. A property whose Busy state means that the change is in
-// effect never turns Ok, so Settle would wait until its limit: INDI's
-// telescope base answers TRACK_ON with TELESCOPE_TRACK_STATE Busy, and
-// keeps it Busy for as long as the mount tracks. Accepted ends on that
-// Busy answer.
+// Accepted waits for an update that has the values sent, in any state
+// but Alert, and returns the errors that Settle returns. Use it for a
+// property that stays Busy while the change is in effect, where Settle
+// would wait until ctx ends. INDI's telescope base replies to TRACK_ON
+// with TELESCOPE_TRACK_STATE Busy, and keeps it Busy while the mount
+// tracks.
 func (c *Client) Accepted(ctx context.Context, sent Sent) (Property, error) {
 	var accepted Property
 	err := c.waitFor(ctx, func(s *Store) (bool, error) {
-		e, err := s.answer(sent)
-		if e == nil || err != nil || !sent.carries(e.property) {
+		e, err := s.reply(sent)
+		if e == nil || err != nil || !sent.matches(e.property) {
 			return false, err
 		}
 		accepted = e.property.clone()
@@ -206,14 +206,14 @@ func (c *Client) Accepted(ctx context.Context, sent Sent) (Property, error) {
 	return accepted, err
 }
 
-func (c *Client) settle(ctx context.Context, sent Sent, carries bool) (Property, error) {
+func (c *Client) settle(ctx context.Context, sent Sent, matchValues bool) (Property, error) {
 	var settled Property
 	err := c.waitFor(ctx, func(s *Store) (bool, error) {
-		e, err := s.answer(sent)
+		e, err := s.reply(sent)
 		if e == nil || err != nil || e.property.State == Busy {
 			return false, err
 		}
-		if carries && e.busy <= sent.sequence && !sent.carries(e.property) {
+		if matchValues && e.busy <= sent.sequence && !sent.matches(e.property) {
 			return false, nil
 		}
 		settled = e.property.clone()
@@ -222,11 +222,11 @@ func (c *Client) settle(ctx context.Context, sent Sent, carries bool) (Property,
 	return settled, err
 }
 
-// answer reads the property of a sent change once the device updated
-// it after the send. It answers nil while no update came, and an error
-// when the connection ended, the device deleted the property, or the
-// update is Alert.
-func (s *Store) answer(sent Sent) (*entry, error) {
+// reply returns the entry of the property that a change was sent to,
+// once the device has updated it after the send. It returns nil while
+// no update has arrived, and an error when the connection ended, the
+// device deleted the property, or the update is Alert.
+func (s *Store) reply(sent Sent) (*entry, error) {
 	if !s.connected || s.connection != sent.connection {
 		return nil, fmt.Errorf("%w: waiting for %s.%s", ErrDisconnected, sent.Device, sent.Property)
 	}
@@ -243,8 +243,8 @@ func (s *Store) answer(sent Sent) (*entry, error) {
 	return e, nil
 }
 
-// BLOBMode says which messages a server sends this client for a
-// device or a property.
+// BLOBMode is the enableBLOB mode: which messages the server sends
+// this client for a device or a property.
 type BLOBMode string
 
 const (
@@ -262,11 +262,11 @@ type blobRequest struct {
 	mode             BLOBMode
 }
 
-// EnableBLOB asks the server for BLOBs from one device, or from one
-// property when property is not empty. The client sends no enableBLOB
-// unless a caller asks, so by default it receives no frame data. The
-// client sends the request now when it has a connection, and again
-// after getProperties on each new connection.
+// EnableBLOB sets the BLOB mode for one device, or for one property
+// when property is not empty. Until a caller enables BLOBs, the client
+// receives no frame data. EnableBLOB sends the request at once when the
+// client has a connection, and the client sends it again after
+// getProperties on each new connection.
 //
 // indiserver applies an enableBLOB that names no property to the
 // client as a whole, whatever device it names
@@ -295,9 +295,9 @@ func (c *Client) EnableBLOB(device, property string, mode BLOBMode) error {
 	return c.write(enableBLOB(r))
 }
 
-// wantsBLOBs reports whether a caller asked for the BLOBs of a
-// property. The client keeps the data of no other BLOB. The caller
-// holds c.mutex.
+// wantsBLOBs reports whether a caller enabled the BLOBs of a property.
+// The client discards the data of every other BLOB. The caller holds
+// c.mutex.
 func (c *Client) wantsBLOBs(device, property string) bool {
 	wanted := false
 	for _, r := range c.blobs {

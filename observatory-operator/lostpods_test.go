@@ -1,8 +1,9 @@
 package main
 
-// What a session records outlives every pod of its server: an eviction
-// that deletes them all, during the session or during its release,
-// leaves the record in the reservation's status.
+// A session's record of its devices is in the reservation's status,
+// so it survives the deletion of every pod of the server. These tests
+// delete all of a server's pods, during the session or during its
+// release, and check that the operator still uses the recorded specs.
 
 import (
 	"slices"
@@ -13,8 +14,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// podsOf answers the names of the pods of one server: its own pod and
-// the pod of each device that it runs.
+// podsOf returns the sorted names of the pods of one server: its own
+// pod and the pod of each device that it runs.
 func (w *world) podsOf(server string) []string {
 	var out []string
 	for _, name := range w.api.names(podsCollection) {
@@ -28,8 +29,9 @@ func (w *world) podsOf(server string) []string {
 }
 
 // evictServer deletes every pod of a server while the operator is
-// down, as a node that fails does, and waits until the operator
-// creates the server's pod again and its mount connects.
+// stopped, as a failing node would. It then restarts the operator and
+// waits until the server's pod exists again and the telescope
+// simulator is connected.
 func (w *world) evictServer(server string) {
 	w.t.Helper()
 	w.halt()
@@ -43,13 +45,13 @@ func (w *world) evictServer(server string) {
 	w.settle()
 }
 
-// The focuser draws from output 1 of Switch lab and runs
-// indi_simulator_focus when east-tonight starts. A person edits its
-// spec, and then an eviction deletes every pod of east's server. The
-// server comes back with the focuser as the session started it: the
-// same driver, and the release switches off output 1 and not the
-// output that the spec names now.
-func TestAServerWhosePodsAllGoKeepsItsSessionsSpecs(t *testing.T) {
+// When east-tonight starts, the focuser is powered from output 1 of
+// Switch lab and runs indi_simulator_focus. A person edits the
+// focuser's spec, and then every pod of east's server is deleted. The
+// recreated server runs the focuser as the session started it, with
+// the same driver. The release switches off output 1, not the output
+// that the edited spec names.
+func TestAServerWhosePodsAreAllDeletedKeepsItsSessionsSpecs(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name  string
@@ -87,12 +89,12 @@ func TestAServerWhosePodsAllGoKeepsItsSessionsSpecs(t *testing.T) {
 	}
 }
 
-// An eviction deletes every pod of east's server during its release,
-// after StopDevices deleted the focuser's pod and before PowerOff. The
-// focuser's pod terminates slowly, so StopDevices waits while the
-// other pods go. PowerOff still switches off output 1 of Switch lab,
-// which the session switched on for the focuser.
-func TestAReleaseWhoseServerPodsAllGoSwitchesOffItsOutputs(t *testing.T) {
+// Every pod of east's server is deleted during the release, after
+// StopDevices deleted the focuser's pod and before PowerOff. The
+// focuser's pod terminates slowly, so StopDevices is still waiting
+// when the other pods are deleted. PowerOff still switches off output 1 of
+// Switch lab, which the session switched on for the focuser.
+func TestAReleaseWhoseServerPodsAreAllDeletedSwitchesOffItsOutputs(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := heldWorld(t, false)
@@ -117,12 +119,13 @@ func TestAReleaseWhoseServerPodsAllGoSwitchesOffItsOutputs(t *testing.T) {
 	})
 }
 
-// The reservations of east and west share the observatory's server,
-// and each records the Dome as it started. A person gives the Dome
-// another driver, one reservation ends, in either order, and then an
-// eviction deletes every pod of the observatory's server. The server
-// comes back with the Dome's recorded driver, because the reservation
-// that still holds the server keeps its own record.
+// The reservations of east and west share the observatory's server, and
+// each records the Dome as it was when the reservation started. A
+// person gives the Dome another driver, one of the two reservations
+// ends (the test tries both), and then every pod of the observatory's
+// server is deleted. The recreated server runs the Dome's recorded
+// driver, because the reservation that still holds the server keeps
+// its own record.
 func TestAnObservatorysServerKeepsItsSessionsSpecsWhileAnyReservationHoldsIt(t *testing.T) {
 	t.Parallel()
 	for _, ended := range []string{"east-tonight", "west-tonight"} {

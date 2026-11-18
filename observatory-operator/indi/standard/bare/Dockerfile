@@ -1,22 +1,23 @@
-# The bare drivers, built against the libindi of the indi images. The
-# build installs from the same dated snapshots as indi/Dockerfile, with
-# the same keys, the same CA bundle, and the same InRelease digests, so
-# the captures describe the libindi that the images ship. snapshot.sh
-# reads the digests from snapshot.sha256 beside it. VERSION is the date
-# in indi/package.toml, and the make target passes it.
+# The bare drivers, built against the same libindi as the indi images.
+# The build installs from the same dated package snapshots as
+# indi/Dockerfile, with the same keys, CA bundle, and InRelease digests,
+# so the captures describe the libindi that the indi images ship.
+# snapshot.sh reads the digests from snapshot.sha256. VERSION is the
+# date in indi/package.toml, and the make target passes it.
 #
-# The image runs on a workstation only, to capture the drivers, and is
-# never published. It keeps the compiler and the headers, because it
-# is thrown away after the capture.
+# This image runs only on a workstation, to capture the drivers, and is
+# never published. It keeps the compiler and the headers because it is
+# deleted after the capture.
 FROM ubuntu
 ARG VERSION
 COPY --from=trust / /
 COPY --from=indi mutlaqja.asc pch.asc /etc/apt/trusted.gpg.d/
 COPY --from=indi snapshot.sh snapshot.sha256 /
-# libindi-dev does not depend on the headers that its own headers
-# include: libastro.h includes libnova, and indiccdchip.h includes
-# fitsio.h. /etc/indi-versions records the package the drivers link,
-# as it does in the indi images, and the capture reads it from there.
+# libindi-dev does not depend on the packages that provide the headers
+# its own headers include: libastro.h includes libnova headers, and
+# indiccdchip.h includes fitsio.h. /etc/indi-versions records the
+# version of the package the drivers link against, as it does in the
+# indi images, and the capture reads it from there.
 RUN sh /snapshot.sh "$VERSION" \
     && apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \

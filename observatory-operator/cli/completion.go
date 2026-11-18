@@ -1,9 +1,10 @@
 package main
 
-// How the CLI completes a command line for the shell, same
-// contract as media-operator's completion.go: a kubectl_complete-liken-
-// observatory shim runs this binary's hidden __complete verb, which
-// answers in cobra's completion protocol.
+// Shell completion for the CLI. kubectl runs the plugin's
+// kubectl_complete-liken-observatory shim, which runs this binary's
+// hidden __complete verb. The verb prints in cobra's completion
+// protocol: one candidate per line, then ":N", where N is the
+// ShellCompDirective bitmask.
 
 import (
 	"context"
@@ -17,27 +18,27 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-// The ShellCompDirective bits this CLI emits; same numbering as
-// media-operator's completion.go.
+// The cobra ShellCompDirective values that this CLI prints.
 const (
 	compDirectiveError      = 1
 	compDirectiveNoFileComp = 4
 	compDirectiveDefault    = 0
 )
 
-// The verbs set-up and take-down; both take the same positionals, a
-// kind and a name, so completion treats them alike everywhere but the
-// verb word itself.
+// completionVerbs are the verbs that completion offers. Both take a kind
+// and a name.
 var completionVerbs = []string{setUpVerb, takeDownVerb}
 
-// One flag the CLI accepts, and whether it reads a value from the
-// next word.
+// completionFlag is a flag the CLI accepts, and whether the word after
+// it is its value.
 type completionFlag struct {
 	name       string
 	takesValue bool
 }
 
-// Every flag run() binds, in the completion table's own form.
+// completionFlags must list every flag that run binds. run passes a
+// completion request to runComplete before it builds its flag set, so
+// completion keeps its own list.
 var completionFlags = []completionFlag{
 	{name: "--version"},
 	{name: "--until", takesValue: true},
@@ -49,8 +50,10 @@ var completionFlags = []completionFlag{
 	{name: "-n", takesValue: true},
 }
 
-// What the words before the cursor amount to: positionals, the
-// cluster-selecting flag values, and the flag pending a value.
+// completionParse holds what the words before the cursor set: the
+// positional arguments, the flags that select a cluster, and
+// pendingValueFlag, a flag that ends the words and takes the word under
+// the cursor as its value.
 type completionParse struct {
 	positionals      []string
 	namespace        string
@@ -59,13 +62,14 @@ type completionParse struct {
 	pendingValueFlag string
 }
 
-// A source of the names of one kind's resources for the resolved
-// namespace and context; the real one queries the cluster, a test
-// hands back a fixed list.
+// resourceLister returns the names of the resources of one kind in the
+// namespace and context that the parse selects. Tests replace the real
+// one, which queries the cluster, with a fixed list.
 type resourceLister func(parse completionParse, kind confirmable) []string
 
-// runComplete answers a __complete request and writes the
-// protocol to stdout; stays silent on failure.
+// runComplete handles a __complete request. It prints one candidate per
+// line and then the directive, and returns no error, so a failed
+// completion prints no message into the user's shell.
 func runComplete(ctx context.Context, args []string, stdout io.Writer) error {
 	candidates, directive := completeArgs(args, realResourceLister(ctx))
 	for _, candidate := range candidates {
@@ -75,9 +79,9 @@ func runComplete(ctx context.Context, args []string, stdout io.Writer) error {
 	return nil
 }
 
-// completeArgs reads the request words and returns the candidates;
-// the whole of the completion logic, so a test drives it with words and
-// a stub lister.
+// completeArgs returns the candidates and the directive for the words
+// of a request, where the last word is the one under the cursor. It
+// takes the lister as a parameter so a test needs no cluster.
 func completeArgs(args []string, lister resourceLister) ([]string, int) {
 	if len(args) == 0 {
 		return completionVerbs, compDirectiveNoFileComp
@@ -85,20 +89,18 @@ func completeArgs(args []string, lister resourceLister) ([]string, int) {
 	toComplete := args[len(args)-1]
 	parse := parseCompletionArgs(args[:len(args)-1])
 
-	// The word under the cursor is the value of a flag that
-	// reads one.
+	// The word under the cursor is the value of the flag before it.
 	if parse.pendingValueFlag != "" {
 		return completeFlagValue(parse.pendingValueFlag, toComplete)
 	}
 
-	// The word under the cursor starts a flag
+	// The word under the cursor starts a flag name.
 	if strings.HasPrefix(toComplete, "-") {
 		return filterByPrefix(flagNames(), toComplete), compDirectiveNoFileComp
 	}
 
-	// The word is a positional: with none given yet it names a
-	// verb; after set-up or take-down it names a kind, and then a
-	// resource of that kind, so both verbs reach the same lister call.
+	// The word is a positional argument. First it is a verb, then a
+	// kind, then the name of a resource of that kind.
 	verb := len(parse.positionals) > 0 && (parse.positionals[0] == setUpVerb || parse.positionals[0] == takeDownVerb)
 	switch {
 	case len(parse.positionals) == 0:
@@ -115,9 +117,9 @@ func completeArgs(args []string, lister resourceLister) ([]string, int) {
 	return nil, compDirectiveNoFileComp
 }
 
-// parseCompletionArgs walks the words before the cursor into
-// their positionals and the cluster-selecting flag values, and marks a
-// flag left waiting for its value.
+// parseCompletionArgs sorts the words before the cursor into positional
+// arguments and the values of --context, --kubeconfig, and --namespace.
+// A value flag that ends the words becomes pendingValueFlag.
 func parseCompletionArgs(prior []string) completionParse {
 	var parse completionParse
 	for i := 0; i < len(prior); i++ {
@@ -145,7 +147,7 @@ func parseCompletionArgs(prior []string) completionParse {
 	return parse
 }
 
-// record stores a flag value against the field it selects.
+// record stores the value of a flag that selects a cluster.
 func (parse *completionParse) record(name, value string) {
 	switch name {
 	case "--context":
@@ -157,8 +159,8 @@ func (parse *completionParse) record(name, value string) {
 	}
 }
 
-// splitFlag splits a "--name=value" word into its name and value, and
-// reports a bare "--name" as a name with no value.
+// splitFlag splits "--name=value" into name and value. For a word with
+// no "=" it returns the word and false.
 func splitFlag(token string) (name, value string, hasEquals bool) {
 	if equals := strings.IndexByte(token, '='); equals >= 0 {
 		return token[:equals], token[equals+1:], true
@@ -166,7 +168,6 @@ func splitFlag(token string) (name, value string, hasEquals bool) {
 	return token, "", false
 }
 
-// lookupCompletionFlag finds a flag by its exact name.
 func lookupCompletionFlag(name string) (completionFlag, bool) {
 	for _, flag := range completionFlags {
 		if flag.name == name {
@@ -176,7 +177,6 @@ func lookupCompletionFlag(name string) (completionFlag, bool) {
 	return completionFlag{}, false
 }
 
-// flagNames lists every flag name completion can offer.
 func flagNames() []string {
 	names := make([]string, 0, len(completionFlags))
 	for _, flag := range completionFlags {
@@ -185,9 +185,9 @@ func flagNames() []string {
 	return names
 }
 
-// completeFlagValue offers the values a flag accepts; kubeconfig
-// names a file so the shell completes a path; the rest have open
-// values.
+// completeFlagValue offers no candidates for a flag value. The
+// directive for --kubeconfig lets the shell complete file paths. The
+// other flags take values that no list can predict.
 func completeFlagValue(flag, toComplete string) ([]string, int) {
 	switch flag {
 	case "--kubeconfig":
@@ -197,7 +197,6 @@ func completeFlagValue(flag, toComplete string) ([]string, int) {
 	}
 }
 
-// filterByPrefix keeps the candidates the cursor's word begins.
 func filterByPrefix(items []string, prefix string) []string {
 	var kept []string
 	for _, item := range items {
@@ -208,30 +207,29 @@ func filterByPrefix(items []string, prefix string) []string {
 	return kept
 }
 
-// A dynamic client for the resolved namespace, built from a
-// parse; the real factory reads the standard kube flags, a test hands
-// back a fake client.
+// clientFactory returns a dynamic client and the namespace to list in,
+// for the cluster that the parse selects. Tests replace the real one
+// with a factory that returns a fake client.
 type clientFactory func(parse completionParse) (dynamic.Interface, string, error)
 
-// realResourceLister queries the cluster for the names of a kind's
-// resources over the standard kube flags; every failure yields no
-// names.
+// realResourceLister lists resource names from the cluster that the
+// standard kube flags select. Any failure returns no names.
 func realResourceLister(ctx context.Context) resourceLister {
 	return newResourceLister(ctx, kubeClientFactory)
 }
 
-// newResourceLister lists the names of a kind's resources through a
-// client the factory builds; it bounds the query so a completion gives
-// up quickly.
+// newResourceLister lists the names of the resources of a kind through
+// the client that the factory builds. The 5 second timeout keeps an
+// unreachable cluster from freezing the user's shell.
 func newResourceLister(ctx context.Context, factory clientFactory) resourceLister {
 	return func(parse completionParse, kind confirmable) []string {
 		client, namespace, err := factory(parse)
 		if err != nil {
 			return nil
 		}
-		reach, cancel := context.WithTimeout(ctx, 5*time.Second)
+		listCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		list, err := client.Resource(kind.resource()).Namespace(namespace).List(reach, metav1.ListOptions{})
+		list, err := client.Resource(kind.resource()).Namespace(namespace).List(listCtx, metav1.ListOptions{})
 		if err != nil {
 			return nil
 		}
@@ -243,9 +241,9 @@ func newResourceLister(ctx context.Context, factory clientFactory) resourceListe
 	}
 }
 
-// kubeClientFactory builds a dynamic client from the standard
-// kube flags, honoring the context, kubeconfig, and namespace the
-// completion words carry.
+// kubeClientFactory builds a dynamic client from the standard kube
+// flags, with the context, kubeconfig, and namespace that the words
+// before the cursor set. The namespace falls back to the kubeconfig's.
 func kubeClientFactory(parse completionParse) (dynamic.Interface, string, error) {
 	flags := genericclioptions.NewConfigFlags(true)
 	if parse.context != "" {
@@ -273,20 +271,20 @@ func kubeClientFactory(parse completionParse) (dynamic.Interface, string, error)
 	return client, namespace, nil
 }
 
-// completionScript prints the bash script that completes a
-// direct invocation of the binary; kubectl instead runs the
-// kubectl_complete-liken-observatory shim, which runs the same verb.
+// completionScript prints the bash script for running the binary
+// directly. kubectl does not use it, because it runs the
+// kubectl_complete-liken-observatory shim.
 func completionScript(shell string, stdout io.Writer) error {
 	if shell != "bash" {
-		return fmt.Errorf("completion supports bash, not %q", shell)
+		return fmt.Errorf("unknown shell %q, want bash", shell)
 	}
 	fmt.Fprint(stdout, bashCompletionScript)
 	return nil
 }
 
-// The bash completion for a direct kubectl-liken-observatory call; a
-// sibling CLI copies this text and changes only the binary name and the
-// two function names.
+// bashCompletionScript completes a direct kubectl-liken-observatory
+// call. The sibling CLIs use the same text with their own binary name
+// and function names.
 const bashCompletionScript = `# bash completion for kubectl-liken-observatory
 __kubectl_liken_observatory_complete()
 {
@@ -294,8 +292,8 @@ __kubectl_liken_observatory_complete()
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
 
-    # The words after the binary name and before the cursor, then the
-    # word under it, go to the hidden __complete verb.
+    # Send the hidden __complete verb the words after the binary name,
+    # ending with the word under the cursor.
     args=("${COMP_WORDS[@]:1:COMP_CWORD-1}")
     out="$("${COMP_WORDS[0]}" __complete "${args[@]}" "$cur" 2>/dev/null)"
 
@@ -304,15 +302,15 @@ __kubectl_liken_observatory_complete()
     directive="${directive#:}"
     [[ "$directive" =~ ^[0-9]+$ ]] || directive=0
 
-    # Every other line is a candidate; a tab and a description may follow
-    # the value, so keep only the value.
+    # Every other line is a candidate. A tab and a description can
+    # follow the value, so keep only the value.
     while IFS= read -r comp; do
         [[ -z "$comp" || "$comp" == :* ]] && continue
         COMPREPLY+=("${comp%%$'\t'*}")
     done <<< "${out%$'\n'*}"
 
-    # Bit 2 keeps the cursor against the completion; bit 4 stops the file
-    # fallback the "complete -o default" registration would otherwise add.
+    # Bit 2 adds no space after the candidate. Bit 4 turns off the file
+    # name fallback that "complete -o default" would otherwise add.
     (( (directive & 2) != 0 )) && compopt -o nospace 2>/dev/null
     (( (directive & 4) != 0 )) && compopt +o default 2>/dev/null
 }

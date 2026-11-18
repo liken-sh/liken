@@ -1,17 +1,16 @@
 package main
 
-// One run of one procedure: the actions of one trigger of one
-// resource, in order. A run records the transition time of the
-// condition it answers, so a trigger runs once for each transition,
-// and a run that an operator restart interrupted resumes from its
-// record: each action that is not Done runs again. The actions are
-// target states, so running one again changes only what is still
-// needed.
+// A run of a procedure: the actions of one trigger of one resource,
+// run in order. A run records the transition time of the condition
+// that started it, so a trigger runs once for each transition. When an
+// operator restart interrupts a run, the run resumes from its record
+// and runs each action that has not ended. The actions describe target
+// states, so running one again changes only what is still needed.
 //
-// A resource runs one procedure at a time, the lifecycle's included.
-// A run that becomes due while another run of the resource goes on
-// waits for it, and its record is Pending with the trigger it waits
-// for.
+// A resource runs one procedure at a time, including its activation
+// and deactivation. A run that becomes due while another run of the
+// same resource is in progress waits for it, and its record is Pending
+// and names the trigger of the run it waits for.
 
 import (
 	"context"
@@ -24,33 +23,33 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The reasons of a run's Events: one when it starts, and one when it
-// ends.
+// Reasons of a run's Events. The message of reasonProcedureDone says
+// whether the run was Done or Skipped.
 const (
 	reasonProcedureStarted = "ProcedureStarted"
 	reasonProcedureDone    = "ProcedureDone"
 	reasonProcedureFailed  = "ProcedureFailed"
 )
 
-// membership is the run of one resource that answers an event: its
-// trigger, the transition time it answers, and the start of the
-// resource's activity, which a trigger's run must not predate.
+// membership is the trigger, since, and period that find one
+// resource's run record for an event. since and period mean the same
+// as in procCall.
 type membership struct {
 	trigger       string
 	since, period time.Time
 }
 
-// event is what an action's after waits on: the runs that answer the
-// same lifecycle step, or the same transition of the same condition.
-// member answers the run of a resource that answers the event, and
-// false for a resource with no such run, which after does not wait for.
+// An event groups the runs that one change starts across several
+// resources: one lifecycle step, or one transition of one condition.
+// An action's `after` waits only for runs of the same event. member
+// returns a resource's run for the event, or false when the resource
+// has no run in it, and then `after` does not wait for that resource.
 type event struct {
 	member func(t *tree, key string) (membership, bool)
-	// over answers why the event ended, such as a condition that
-	// changed, or nil while it holds. Nil for a lifecycle step. A run
-	// that waited for its turn starts only while its event holds, and
-	// after does not wait for a run that never began before the event
-	// ended, because none will begin.
+	// over returns why the event ended, such as a condition that
+	// changed back, or nil while it continues. It is nil for a
+	// lifecycle step. A run that has not begun when its event ends
+	// never begins, so `after` does not wait for it.
 	over func(t *tree) error
 }
 
@@ -58,36 +57,35 @@ type event struct {
 type procCall struct {
 	res     resource
 	trigger string
-	// condition names the condition of a trigger in spec.triggers, such
-	// as "WeatherStation lab Safe=False", and is "" for activation and
-	// deactivation. A person reads it in the run's summary and Events,
-	// where triggers[0] alone says nothing.
+	// condition is the condition of a trigger in spec.triggers, such
+	// as "WeatherStation lab Safe=False", and "" for activation and
+	// deactivation. Summaries and Events show it, because a trigger's
+	// name, such as triggers[0], tells a person nothing.
 	condition string
 	actions   []action
-	// since is the transition time that the run answers.
+	// since is the time of the condition transition that started the
+	// run.
 	since time.Time
 	// period is the start of the resource's current activity, or zero.
-	// A run that started before it answered the same transition in an
-	// earlier activity, so the trigger runs again.
+	// A record of the same transition that started before period
+	// belongs to an earlier activity, so the trigger runs again.
 	period time.Time
-	// rerun runs a Failed run of the same transition again, as a
-	// lifecycle step does, so the retry annotation runs its actions
-	// again.
+	// rerun starts a Failed run of the same transition again. The
+	// lifecycle steps always set it, because the session decides when a
+	// step runs again. A trigger and a late activation set it only when
+	// the resource has the retry annotation.
 	rerun bool
-	// ending skips each action on a device that is not connected, as
-	// deactivation does after an activation that failed before it
-	// connected every device.
+	// ending makes the run skip each action on a device that is not
+	// connected. Deactivation sets it, because an activation can fail
+	// before it connects every device.
 	ending bool
-	// on is the server whose driver the run acts through, for a
-	// device that left that server and whose driver still runs there
-	// (leaves.go). It is zero for every other run, which acts through
-	// the device's own server.
+	// on is the server to act through when the device has left it but
+	// its driver still runs there (leaves.go). When on is zero, the run
+	// acts through the device's own server.
 	on    serverRef
 	event event
 }
 
-// label names the trigger's run for a person: the trigger, and the
-// condition of a trigger in spec.triggers.
 func (c procCall) label() string {
 	if c.condition == "" {
 		return c.trigger
@@ -95,8 +93,6 @@ func (c procCall) label() string {
 	return c.trigger + " (" + c.condition + ")"
 }
 
-// summary answers the summary of a run's record, which starts with the
-// condition of a trigger in spec.triggers.
 func (c procCall) summary(text string) string {
 	if c.condition == "" {
 		return sentence(text)
@@ -104,9 +100,10 @@ func (c procCall) summary(text string) string {
 	return "When " + c.condition + ": " + lowerFirst(text)
 }
 
-// answers reports whether a run answers a transition in an activity
-// that began at period.
-func answers(run observatory.ProcedureRun, since, period time.Time) bool {
+// isRunFor reports whether run is the record of the run for the
+// transition at since, in the activity that began at period. A zero
+// period matches any activity.
+func isRunFor(run observatory.ProcedureRun, since, period time.Time) bool {
 	if run.Since == nil || !run.Since.Equal(since) {
 		return false
 	}
@@ -117,18 +114,18 @@ func ended(state observatory.StepState) bool {
 	return state == observatory.StepDone || state == observatory.StepSkipped
 }
 
-// sameActions reports whether a run's record holds the actions that
-// the spec states now. A spec that changed starts a new run.
+// sameActions reports whether a run's record lists the actions that the
+// spec has now. When the actions changed, a new run starts.
 func sameActions(run observatory.ProcedureRun, actions []action) bool {
 	return slices.EqualFunc(run.Actions, actions, func(r observatory.ActionRun, a action) bool { return r.Action == a.String() })
 }
 
-// settled reports whether the run of a call's transition has ended,
-// with the error of a run that failed and that the call does not run
-// again.
+// settled reports whether the run for the call's transition needs no
+// more work: it ended, or it failed and rerun is false. For a failed
+// run it returns the failure.
 func (o *operator) settled(c procCall) (bool, error) {
 	run, found := o.runs.get(c.res.record(), c.trigger)
-	if !found || !answers(run, c.since, c.period) || !sameActions(run, c.actions) {
+	if !found || !isRunFor(run, c.since, c.period) || !sameActions(run, c.actions) {
 		return false, nil
 	}
 	switch {
@@ -140,12 +137,10 @@ func (o *operator) settled(c procCall) (bool, error) {
 	return false, nil
 }
 
-// runProcedure runs one trigger's actions, and answers an error that
-// names the resource when an action fails. A run that answered the
-// transition already is not run again, unless it failed and the call
-// reruns it. A run that started runs to its end: only its context
-// ends it, when the resource's deactivation begins or the operator
-// stops.
+// runProcedure runs the actions of one trigger, and returns an error
+// that names the resource when an action fails. A run that has begun
+// does not stop when its event ends. Only its context stops it, when
+// the resource's deactivation begins or the operator stops.
 func (o *operator) runProcedure(ctx context.Context, c procCall) error {
 	if len(c.actions) == 0 {
 		return nil
@@ -156,9 +151,9 @@ func (o *operator) runProcedure(ctx context.Context, c procCall) error {
 	key := c.res.record()
 	pending := false
 	err := o.runs.acquire(ctx, key, c.label(), func(holder string) {
-		if run, found := o.runs.get(key, c.trigger); found && answers(run, c.since, c.period) && run.State == observatory.StepRunning {
-			// A run that an operator restart interrupted keeps its
-			// record while it waits.
+		if run, found := o.runs.get(key, c.trigger); found && isRunFor(run, c.since, c.period) && run.State == observatory.StepRunning {
+			// An operator restart interrupted this run. Its record stays
+			// Running while it waits, so it resumes.
 			return
 		}
 		pending = true
@@ -166,9 +161,10 @@ func (o *operator) runProcedure(ctx context.Context, c procCall) error {
 	})
 	if err != nil {
 		if pending && !errors.Is(err, context.Canceled) {
-			// The deactivation ended the run's wait. An operator that
-			// stops leaves the record Pending, and the next copy starts
-			// the run again.
+			// The wait ended before the run began, for example because
+			// the resource's deactivation began. When the operator is
+			// stopping instead, the record stays Pending and the next
+			// operator process starts the run.
 			o.runs.put(key, skippedRun(c, err))
 		}
 		return err
@@ -178,7 +174,9 @@ func (o *operator) runProcedure(ctx context.Context, c procCall) error {
 		return err
 	}
 	run, found := o.runs.get(key, c.trigger)
-	same := found && answers(run, c.since, c.period) && sameActions(run, c.actions)
+	same := found && isRunFor(run, c.since, c.period) && sameActions(run, c.actions)
+	// A run that resumes after a restart has begun already, so it
+	// continues even when its event has ended.
 	if resumed := same && run.State == observatory.StepRunning; !resumed && c.event.over != nil {
 		if why := c.event.over(o.snapshot()); why != nil {
 			o.runs.put(key, skippedRun(c, why))
@@ -187,9 +185,10 @@ func (o *operator) runProcedure(ctx context.Context, c procCall) error {
 	}
 	switch {
 	case same && run.State == observatory.StepRunning:
-		// An operator restart interrupted the run: it resumes, and
-		// posts no second start.
+		// The run resumes after a restart, with no second start Event.
 	case same:
+		// A Pending or Failed run starts. Actions that ended keep their
+		// state and do not run again.
 		now := stamp()
 		run.State, run.StartTime, run.StopTime, run.Summary = observatory.StepRunning, &now, nil, ""
 		for i := range run.Actions {
@@ -234,8 +233,8 @@ func (o *operator) runProcedure(ctx context.Context, c procCall) error {
 	return nil
 }
 
-// pendingRun is the record of a run that waits for the run of another
-// trigger of its resource to end.
+// pendingRun returns the record of a run that is waiting for the run of
+// another trigger of the same resource to end.
 func pendingRun(c procCall, holder string) observatory.ProcedureRun {
 	since := c.since
 	run := observatory.ProcedureRun{Trigger: c.trigger, Since: &since, State: observatory.StepPending,
@@ -246,8 +245,8 @@ func pendingRun(c procCall, holder string) observatory.ProcedureRun {
 	return run
 }
 
-// skippedRun is the record of a run that waited for its turn while its
-// condition changed, so it never began.
+// skippedRun returns the record of a run that never began. why is the
+// reason.
 func skippedRun(c procCall, why error) observatory.ProcedureRun {
 	run := pendingRun(c, "")
 	now := stamp()
@@ -267,8 +266,8 @@ func (o *operator) procedureStarted(c procCall) {
 		fmt.Sprintf("Procedure %s started: %s", c.label(), strings.Join(described, ", ")))
 }
 
-// runAction runs one action of a run, and records its state in the
-// run as it goes.
+// runAction runs action i of a run, and writes the action's progress
+// into run's record.
 func (o *operator) runAction(ctx context.Context, c procCall, run *observatory.ProcedureRun, i int) error {
 	key, a := c.res.record(), c.actions[i]
 	record := &run.Actions[i]
@@ -301,13 +300,14 @@ func (o *operator) runAction(ctx context.Context, c procCall, run *observatory.P
 	case isSkip(err):
 		record.State, record.Summary = observatory.StepSkipped, sentence(err.Error())
 	case ctx.Err() != nil && errors.Is(context.Cause(ctx), context.Canceled):
-		// The operator stops. The run stays Running, and the next copy
-		// of the operator resumes it.
+		// The operator is stopping. The run stays Running, and the
+		// next operator process resumes it.
 		return ctx.Err()
 	case ctx.Err() != nil:
-		// The run's work ended for a reason that is no failure, such as
-		// a reservation that ended during its Activation step, or the
-		// deactivation of the resource while a trigger's run went on.
+		// The run's context ended for a reason that is not a failure,
+		// such as a reservation that ended during its Activation step,
+		// or the resource's deactivation starting during a trigger's
+		// run. The run is Skipped with that reason.
 		cause := err
 		if ctx.Err() != nil {
 			cause = context.Cause(ctx)
@@ -319,8 +319,8 @@ func (o *operator) runAction(ctx context.Context, c procCall, run *observatory.P
 	default:
 		record.State, record.Summary = observatory.StepFailed, sentence(err.Error())
 		run.State, run.StopTime = observatory.StepFailed, &stop
-		// The summary starts with the action as its YAML reads, such as
-		// "state: Parked", so the action keeps its lower case.
+		// The summary starts with the action as the YAML spells it,
+		// such as "state: Parked", so it is not capitalized.
 		text := a.String() + ": " + err.Error()
 		run.Summary = text
 		if c.condition != "" {
@@ -335,17 +335,19 @@ func (o *operator) runAction(ctx context.Context, c procCall, run *observatory.P
 	return nil
 }
 
-// place is where an action is in its run: its index, the start of
-// the run, and the action's timeout. A job's name and deadline come
-// from it.
+// place locates an action within its run, for runJob. index is the
+// action's position in the run, and runJob puts it in the Job's name.
+// start is the time the run started: a Job with that name created
+// before start belongs to an earlier run, so runJob deletes it. limit
+// is the action's deadline, and runJob sets it on the Job.
 type place struct {
 	index int
 	start time.Time
 	limit time.Duration
 }
 
-// perform waits for what an action requires and for the runs it comes
-// after, and then carries it out. wait holds the action's deadline.
+// perform waits for the action's `requires` and `after`, and then
+// performs the action. wait is ctx with the action's deadline.
 func (o *operator) perform(ctx, wait context.Context, c procCall, a action, at place, report func(string)) (string, error) {
 	if err := o.requirements(wait, c, a, report); err != nil {
 		return "", err
@@ -354,14 +356,14 @@ func (o *operator) perform(ctx, wait context.Context, c procCall, a action, at p
 		return "", err
 	}
 	if a.Job != nil {
-		// A job needs no device, so any resource runs one.
+		// A job needs no device, so any resource can run one.
 		return o.runJob(wait, c, *a.Job, at, report)
 	}
 	if a.Notify != "" {
-		// A request to a person needs no device either, and it is done
-		// once it is recorded: the status writer reads the record and
-		// sets AttentionNeeded (attention.go).
-		return "asked: " + a.Notify, nil
+		// A notify action needs no device either. It is done once the
+		// run records it, and the status writer sets AttentionNeeded
+		// from the record (attention.go).
+		return "notified: " + a.Notify, nil
 	}
 	if c.res.device == nil {
 		return "", fmt.Errorf("a %s has no %s", c.res.kind.Name, a)
@@ -374,9 +376,10 @@ func (o *operator) perform(ctx, wait context.Context, c procCall, a action, at p
 	return summary, o.explainRefusal(c, h, a, err)
 }
 
-// asNow answers the resource of a call as the tree holds it now, so
-// a reference resolves against the tree's current shape. A device that
-// left its server keeps the place it left, because its run acts there.
+// asNow returns the call's resource from the current tree, so that
+// `requires` and `after` resolve against the current specs. A call with
+// `on` set keeps the resource as it was, because the device has left
+// its server and the run still acts there.
 func asNow(t *tree, c procCall) resource {
 	if c.on != (serverRef{}) {
 		return c.res
@@ -387,8 +390,8 @@ func asNow(t *tree, c procCall) resource {
 	return c.res
 }
 
-// conditionStatus answers the status that a reference asks for: True
-// when it names none.
+// conditionStatus returns the status that a reference requires. It
+// defaults to True.
 func conditionStatus(s observatory.ConditionStatus) observatory.ConditionStatus {
 	if s == "" {
 		return observatory.ConditionTrue
@@ -396,8 +399,6 @@ func conditionStatus(s observatory.ConditionStatus) observatory.ConditionStatus 
 	return s
 }
 
-// requirements waits until each condition that the action requires
-// holds.
 func (o *operator) requirements(ctx context.Context, c procCall, a action, report func(string)) error {
 	if len(a.Requires) == 0 {
 		return nil
@@ -419,9 +420,10 @@ func (o *operator) requirements(ctx context.Context, c procCall, a action, repor
 	})
 }
 
-// predecessors waits until the run of each resource that the action
-// comes after has ended, for the same event. A resource with no such
-// run is not waited for, and a run that failed fails the action.
+// predecessors waits until the run of each resource in the action's
+// `after` has ended, for the same event. It skips the resource itself
+// and each resource with no run for the event, and fails the action
+// when one of those runs failed.
 func (o *operator) predecessors(ctx context.Context, c procCall, a action, report func(string)) error {
 	if len(a.After) == 0 || c.event.member == nil {
 		return nil
@@ -440,15 +442,15 @@ func (o *operator) predecessors(ctx context.Context, c procCall, a action, repor
 				}
 				x, _ := t.resource(g.kind, g.name)
 				run, found := o.runs.get(x.record(), m.trigger)
-				answered := found && answers(run, m.since, m.period)
+				recorded := found && isRunFor(run, m.since, m.period)
 				switch {
-				case answered && run.State == observatory.StepFailed:
+				case recorded && run.State == observatory.StepFailed:
 					return false, "", fmt.Errorf("after[%d]: %s failed: %s", i, g, lowerFirst(run.Summary))
-				case answered && ended(run.State):
+				case recorded && ended(run.State):
 					continue
-				case !answered && c.event.over != nil && c.event.over(t) != nil:
-					// The event ended before this resource's run of it
-					// began, so that run never begins.
+				case !recorded && c.event.over != nil && c.event.over(t) != nil:
+					// The event ended before this resource's run began,
+					// so that run never begins.
 					continue
 				}
 				return false, "waiting for " + g.String(), nil
@@ -458,12 +460,14 @@ func (o *operator) predecessors(ctx context.Context, c procCall, a action, repor
 	})
 }
 
-// deviceHandle answers the INDI device that serves a call's resource
-// on its server, connected. A run that ends the device's activity
-// skips a device that is not connected, and any other run fails on
-// one. A run skips a served resource that the tree refuses, and a
-// resource whose device does not serve its interface, because each
-// reports Error already and the rest of the telescope goes on.
+// deviceHandle returns the connected INDI device that serves the
+// call's resource. It skips the action when the operator refuses to
+// serve the resource, when the resource has no server, and when the
+// device does not have the resource's INDI interface. A refusal and a
+// missing interface already show as Error in the resource's status,
+// so a skip lets the rest of the telescope continue. When the device
+// is not connected, a run with `ending` set skips the action, and any
+// other run fails it.
 func (o *operator) deviceHandle(ctx context.Context, c procCall, report func(string)) (handle, error) {
 	t := o.snapshot()
 	d, ok := t.device(c.res.kind, c.res.name())
@@ -473,18 +477,17 @@ func (o *operator) deviceHandle(ctx context.Context, c procCall, report func(str
 	ref, placed := t.server(d)
 	if c.on != (serverRef{}) {
 		ref, placed = c.on, true
-	} else if refusal := t.verdict(d).refusal; refusal != "" {
+	} else if refusal := t.ownershipOf(d).refusal; refusal != "" {
 		return handle{}, skip(fmt.Sprintf("%s is not served: %s", c.res, refusal))
 	}
 	if !placed && c.ending {
-		// A device that a person deleted, or whose train a person
-		// deleted, runs its deactivation in the reservation's
-		// Deactivation step through the driver that still runs on the
-		// server it left.
+		// A device that a person deleted, or whose OpticalTrain a
+		// person deleted, has no server, but its driver still runs on
+		// the server it left, and deactivation acts through it.
 		ref, placed = t.runningOn(d)
 	}
 	if !placed {
-		return handle{}, skip(fmt.Sprintf("%s is on the shelf", c.res))
+		return handle{}, skip(fmt.Sprintf("%s is not installed", c.res))
 	}
 	var h handle
 	if c.ending {
@@ -503,9 +506,9 @@ func (o *operator) deviceHandle(ctx context.Context, c procCall, report func(str
 			return handle{}, fmt.Errorf("%s is not connected", c.res)
 		}
 	}
-	// After an operator restart, the connection to the server defines
-	// each device again, and the interface's properties can follow the
-	// device's CONNECTION, so the check waits for them (detect).
+	// After an operator restart, the server sends each device's
+	// definitions again, and an interface's properties can arrive after
+	// CONNECTION, so detect waits for them.
 	if !o.detect(ctx, h) {
 		return handle{}, skip(firstNonEmpty(o.lackingOf(h.d), missingInterface(h).Error()))
 	}

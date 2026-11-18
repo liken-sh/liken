@@ -1,32 +1,23 @@
-# This Makefile names the checks a change must pass. `make test` runs
-# every check CI runs, in the same commands, so a change that passes
-# here passes there.
-#
-# The coverage floor is the one number the gate enforces, in
-# .testcoverage.yml. CI reads the same file, so the floor moves in one
-# place.
+# `make test` runs every check that CI runs, with the same commands, so
+# a change that passes here passes there. The coverage floor is in
+# .testcoverage.yml, which CI reads too.
 
-# A recipe that fails, or a build that is killed during one, leaves its
-# target partly written and newer than its inputs. make deletes that
-# target, so the next build makes it again and does not take it as
-# current.
+# A recipe that fails, or is killed, leaves its target partly written
+# and newer than its inputs. make deletes that target, so the next
+# build makes it again.
 .DELETE_ON_ERROR:
 
 .PHONY: test
 test: test-go test-docs
 
-# One run of the tests gives both the race check and the coverage
-# profile, because -race with -covermode=atomic does both.
-#
-# go-test-coverage is a pinned tool dependency (the `tool` directive
-# in go.mod), so the gate needs nothing installed beyond the Go
-# toolchain.
-
-# A package with no test file writes no rows to the profile, so the
-# gate never measures it and cannot fail it. This lists such
-# packages, and test-go fails on the first one.
+# A package with no test file writes no rows to the coverage profile,
+# so the gate never measures it and cannot fail it. test-go-lint lists
+# such packages and fails when there is one.
 UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./...
 
+# One run of the tests does the race check and writes the coverage
+# profile. go-test-coverage is a tool dependency in go.mod, so the gate
+# needs nothing installed beyond the Go toolchain.
 .PHONY: test-go
 test-go: test-go-lint
 	go test -race -covermode=atomic -coverprofile=coverage.out ./...
@@ -40,13 +31,13 @@ test-go-lint:
 	go vet ./...
 
 # Each test of the operator's package starts the operator against the
-# fake API server, and -race makes each one cost seconds of processor
-# time. So CI splits the tests into SHARDS jobs, which package.toml
-# sets, and each job runs the tests of its SHARD: every SHARDS-th name
-# of the sorted list of test names in the module. A name that two
-# packages share goes to one shard, which runs it in both packages, so
-# each test runs once. Each shard writes the coverage profile of every
-# package, with zero counts for the tests that the other shards run.
+# fake API server, and -race makes each one slow. So CI splits the
+# tests into SHARDS jobs, which package.toml sets. Shard SHARD runs
+# every SHARDS-th name of the sorted list of test names in the module.
+# A name that two packages share goes to one shard, which runs it in
+# both packages, so each test runs once. Each shard writes a coverage
+# profile of every package, with zero counts for the code that only
+# the other shards' tests reach.
 SHARD ?= 1
 SHARDS ?= 1
 
@@ -57,10 +48,10 @@ test-go-shard:
 		test -n "$$names" && \
 		go test -race -covermode=atomic -coverprofile=coverage.out -run "^($$names)$$" ./...
 
-# The gate job of CI downloads each shard's profile into
-# coverage-shards/<artifact>/coverage.out, sums the count of each
-# block over the shards into coverage.out, and checks the sum against
-# the floor. The lint job of CI runs test-go-lint beside the shards.
+# CI's gate job downloads each shard's profile into
+# coverage-shards/<artifact>/coverage.out. This target sums the count
+# of each block over the shards into coverage.out and checks the sum
+# against the floor. CI's lint job runs test-go-lint beside the shards.
 .PHONY: test-go-gate
 test-go-gate:
 	awk 'FNR == 1 { next } { key = $$1 " " $$2; if (!(key in count)) order[++n] = key; count[key] += $$3 } \
@@ -68,13 +59,12 @@ test-go-gate:
 		coverage-shards/*/coverage.out >coverage.out
 	go tool go-test-coverage --config=.testcoverage.yml
 
-# `liken plugins sync` installs the plugin of a release, so a developer
-# who tests a change to cli/ against the dev cluster builds it from the
-# checkout instead. kubectl finds a plugin by the name
-# kubectl-liken-observatory on PATH, so BINDIR must be a directory on
-# PATH. The binary reports the version dev unless VERSION names
-# another, so it warns that its version differs from an operator that
-# runs a release; --force silences the warning.
+# `liken plugins sync` installs the plugin of a release, so to test a
+# change to cli/, build the plugin from the checkout with this target.
+# kubectl finds the plugin as kubectl-liken-observatory on PATH, so
+# BINDIR must be a directory on PATH. The binary reports the version
+# dev unless VERSION sets another, so it warns that its version differs
+# from the operator's, and --force silences the warning.
 BINDIR ?= $(HOME)/.local/bin
 VERSION ?= dev
 
@@ -87,15 +77,15 @@ install-plugin:
 # drivers/generated.go maps each driver to the image that holds it, from
 # indi/images/ and the tag in indi/package.toml, and holds the tag of
 # the weston image from weston/package.toml. A test fails when the file
-# is stale; this writes it again.
+# is stale. This target writes it again.
 .PHONY: drivers
 drivers:
 	go test ./drivers -run TestTheMapIsCurrent -update
 
 # deploy/firmware/qhy.yaml holds one Firmware for each bare QHY camera
 # chip that a rule of firmware/85-qhyccd.rules loads, on the indi-qhy
-# tag of drivers/generated.go. A test fails when the file is stale;
-# this writes it again. Run it after make drivers.
+# tag of drivers/generated.go. A test fails when the file is stale.
+# This target writes it again. Run it after make drivers.
 .PHONY: firmware
 firmware:
 	go test ./firmware -run TestTheQHYFirmwareIsCurrent -update
@@ -116,7 +106,7 @@ firmware-rules:
 # The schema comes from schema/ and from the standard properties of
 # each INDI interface in indi/standard/: the CRD in deploy/ of each kind
 # with procedures, and the typed fields in observatory/generated_*.go. A
-# test fails when one of them is stale; this writes them again.
+# test fails when one of them is stale. This target writes them again.
 .PHONY: schema
 schema:
 	go test ./schema -run TestTheSchemaIsCurrent -update
@@ -162,39 +152,31 @@ transcripts:
 
 .PHONY: test-docs
 test-docs:
-# The reference pages are generated and committed, so a checkout
-# carries them. make decides that a page is current by comparing file
-# times, and a fresh checkout gives each file the time that git wrote
-# it. So in CI, make cannot be trusted to rebuild a page, and a change
-# to a generator in brand/ can leave a stale page that the site
-# publishes. The check runs the generate target with -B, which
-# regenerates every page whatever the times say. It fails when the
-# result differs from what git has staged, or adds an untracked file,
-# as the skills check below does.
+# The reference pages are generated and committed. make compares file
+# times to decide whether a page is current, and a fresh checkout gives
+# each file the time that git wrote it, so in CI make can skip a page
+# that a change to a generator in brand/ made stale. -B regenerates
+# every page whatever the times say. The check fails when the result
+# differs from what git has staged, or adds an untracked file.
 	$(MAKE) -C docs -B generate
 	git diff --quiet -- docs/content/docs/reference \
 		&& test -z "$$(git ls-files --others --exclude-standard -- docs/content/docs/reference)" \
 		|| { git status --short -- docs/content/docs/reference; exit 1; }
 	$(MAKE) -C docs test
-# skills/ is generated from the guides and committed, so a checkout
-# carries it. The check regenerates it and fails when the result differs
-# from what git has staged, or adds an untracked file, which means a
-# guide changed and nobody ran `make -C docs skills`. The comparison is
-# with the index, not with the last commit, so a commit that stages a
-# guide and its regenerated skill together passes.
+# skills/ is generated from the guides and committed. The check
+# regenerates it and fails the same way, which means that a guide
+# changed and nobody ran `make -C docs skills`. It compares with the
+# index, not with the last commit, so a commit that stages a guide and
+# its regenerated skill together passes.
 	$(MAKE) -C docs skills
 	git diff --quiet -- skills && test -z "$$(git ls-files --others --exclude-standard -- skills)" \
 		|| { git status --short -- skills; exit 1; }
 	$(MAKE) -C docs build
 
-# The coverage report is the profile the gate already measured, drawn
-# as one HTML page for the site to publish. `test` does not depend on
-# it: the gate decides whether a change passes, and the report only
-# shows a reader what the tests reached, so a report that fails to
-# render never fails a build.
-#
-# coverage is a tool of the docs module, the way Hugo and crdref are,
-# so the command runs from docs/ and names the paths above it.
+# The coverage report draws the gate's profile as one HTML page for the
+# site to publish. `test` does not depend on it, so a report that fails
+# to render never fails a build. coverage is a tool of the docs module,
+# so the command runs from docs/.
 .PHONY: coverage-report
 coverage-report: coverage.out
 	cd docs && go tool coverage \

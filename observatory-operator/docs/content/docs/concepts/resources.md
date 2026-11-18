@@ -6,61 +6,61 @@ weight: 10
 
 # The resources
 
-You describe an observatory with 20 kinds of resource in the API
-group `observatory.liken.sh/v1alpha1`. Most of them describe the
-site, the telescopes, and each piece of equipment. A `Reservation`
-gives someone the use of a telescope, and an `OpticalTrain` and a
-`Guider` describe how light reaches a camera and how the telescope
-guides. A `Horizon` saves the part of the sky that trees and buildings
-block from one place, and a `Telescope` names the one for where it
-stands now. `astrophotography-operator` images no target below it,
-and `observatory-operator` checks no slew against it. Each kind has its own reference page with every field.
+You describe an observatory with resources in the API group
+`observatory.liken.sh/v1alpha1`. Most of them describe the site, the
+telescopes, and each piece of equipment. A `Reservation` gives one
+holder, the person or program that `spec.holder` names, the use of a
+telescope. An `OpticalTrain` describes the light
+path to a camera, and a `Guider` sets up PHD2 to guide the telescope.
+A `Horizon` records the part of the sky that trees and buildings block
+at one place. `astrophotography-operator` does not image a target
+below the `Horizon`, but `observatory-operator` does not check a slew
+against it. Each kind has its own reference page with every field.
 
-Every kind is namespaced, and every kind is in the category `astro`,
-so `kubectl get astro` lists the whole observatory. Each resource names
-its parent by name in its spec, and a name resolves in the resource's
-own namespace, so one observatory's resources all go in one namespace.
-Two namespaces can each hold an observatory, with the same names, and
-the operator runs them apart. Every reference points up the tree:
+Every kind is namespaced and in the category `astro`, so
+`kubectl get astro` lists the whole observatory. A resource refers to
+its parent by name, and the operator looks the name up in the
+resource's own namespace. So all the resources of one observatory go
+in one namespace, and two namespaces can each hold an observatory
+with the same names. Every reference points up the tree:
 
 ```
 Observatory          the site: location, Dome, WeatherStation
  └─ Telescope        one Mount, one INDI server, one Guider
-     ├─ OpticalTube  aperture and focal length; no driver
-     └─ OpticalTrain one light path; names one OpticalTube
+     ├─ OpticalTube  aperture and focal length, no driver
+     └─ OpticalTrain one light path to one OpticalTube
           Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel
 ```
 
-A device resource is inventory: it describes the hardware and its
-settings, and the operator starts nothing for it. A `Reservation`
-gives one holder the use of one `Telescope`, and the operator starts
-the telescope's pods only while the reservation is active. [Plan
-06](https://github.com/liken-sh/liken/blob/main/observatory-operator/plans/completed/06-the-resources.md) gives the reasons for the
-names and the tree.
+A device resource describes the hardware and its settings. The
+operator starts the pods of a telescope and of its observatory only
+while a `Reservation` of that telescope is active.
 
-Each device's parent field is optional. A device with no parent is on
-the shelf: its spec describes it in full, with its driver, image,
-power, and claim, but it is installed nowhere. The operator creates
-no pod, no `Service`, and no `ResourceClaimTemplate` for it, because a claim
-would reserve the hardware. A `Switch` or a `Receiver` names at most
-one of `telescope` and `observatory`. To install a device, set its
-parent field.
+A device's parent field is optional. A device with no parent is not
+installed anywhere, but its spec can still describe it in full, with
+its driver, image, power, and claim. The operator creates no pod, no
+`Service`, and no `ResourceClaimTemplate` for it, because a claim
+would reserve the hardware. To install the device, set its parent
+field. A `Switch` or a `Receiver` sets at most one of `telescope` and
+`observatory`.
 
 Each device kind is one INDI interface, such as `CCD` for a `Camera`
 and `FILTER` for a `FilterWheel`. One INDI driver can serve several
 interfaces on one device: a camera with a built-in filter wheel, or a
 Flip-Flat, which is a dust cap and a flat panel. So a device resource
-either runs a driver in `spec.driver`, or names in `spec.device` the
-resource whose driver serves it, on the same INDI server. The
+either runs a driver, set in `spec.driver`, or sets `spec.device` to
+the resource whose driver serves it on the same INDI server. The
 resource that runs the driver gets the pod, the claim, and the power.
-A device serves its interface when its driver defines the
-interface's properties after it connects, and a resource whose device
-does not reports `Error`. The interface bit in the driver's
-`DRIVER_INTERFACE` does not decide, because some drivers set a bit late
-or claim an interface whose properties they never define. [Describe
-your
+
+The operator treats a device as serving an interface when its driver
+defines the property in the table below after the device connects. A
+resource whose device does not define it reports `Error`. The
+operator ignores the interface bits of the driver's
+`DRIVER_INTERFACE`, because some drivers set a bit only after they
+find the hardware, and some set a bit for an interface whose
+properties they never define. [Describe your
 equipment](/docs/guides/describe-your-equipment/#a-device-that-another-device-serves)
-shows how to write one.
+shows how to describe a device that another resource's driver serves.
 
 | Kind | INDI interface | A device serves it when it defines |
 |---|---|---|
@@ -102,46 +102,52 @@ shows how to write one.
 | `Horizon` | none | none | its age |
 
 `GPS`, `Dome`, `Guider`, and `Horizon` have no short name, because the
-singular is already short. A `Horizon` has no parent: a `Telescope`
-names it in `spec.horizon`, and several telescopes can name one.
-`equipment-operator` also has a `Receiver` kind, so name this one as
-`rx` or `receivers.observatory.liken.sh`. Each CRD
-declares its parent fields as `selectableFields`, so
+singular is already short. A `Horizon` has no parent. A `Telescope`
+refers to the `Horizon` of the place where it is set up in
+`spec.horizon`, and several telescopes can refer to the same one.
+`equipment-operator` also has a `Receiver` kind, so refer to this one
+as `rx` or `receivers.observatory.liken.sh`.
+
+Each CRD lists its parent fields in `selectableFields`, so
 `kubectl get cam --field-selector spec.opticalTrain=east-imaging` lists
 one train's cameras. A `Reservation` selects on `spec.holder` too, so
 `kubectl get rsv --field-selector spec.holder=astrophotography-operator`
-lists the reservations that `astrophotography-operator` holds, and that
+lists the reservations that `astrophotography-operator` holds. That
 operator watches only those.
 
 Every device kind shares these spec fields:
 
-- `driver.name` is the INDI driver, such as `indi_simulator_ccd`. With
-  no `driver.image`, the name must match `^indi_[a-z0-9_]+$`, and the
-  operator runs the image that the `indi` build lists for it.
-- `driver.image` is an image used as written. It must hold
-  `/usr/bin/socat` and the driver on `PATH`, and run as user 1000 with
-  a read-only root filesystem and a writable `/tmp`.
-- `power` is `{switch, output}`: the `Switch` output that powers the
-  device, from output 1. Activation switches it on before the device's
-  pod starts, and deactivation switches it off after the pod stops.
+- `driver.name` is the INDI driver, such as `indi_simulator_ccd`. When
+  `driver.image` is not set, the name must match `^indi_[a-z0-9_]+$`,
+  and the operator runs the image of the `indi` build that has that
+  driver.
+- `driver.image` is the image to run for the driver. It must contain
+  `/usr/bin/socat` and the driver on `PATH`, and it must run as user
+  1000 with a read-only root filesystem and a writable `/tmp`.
+- `power` is `{switch, output}`: the `Switch` and the output number
+  (counted from 1) that power the device. Activation switches it on
+  before the device's pod starts, and deactivation switches it off
+  after the pod stops.
 - `claim` is a `ResourceClaimSpec` for real hardware. A simulator needs
   none.
 - `device` is `{kind, name}`: the resource whose driver serves this
-  one, in place of `driver`.
+  one. Set it instead of `driver`.
 
-A device resource names `driver` or `device`, never both, and a
-served resource takes no `power` and no `claim`. `spec.device` cannot
-change, and a resource cannot gain it or lose it after it is created.
+A device resource sets `driver` or `device`, never both, and a
+resource that sets `device` cannot set `power` or `claim`. You cannot
+change `spec.device`, add it, or remove it after the resource is
+created.
 
 Each device kind's spec also has a field for each standard property of
 its INDI interface that a person sets, such as a camera's `gain` and
 `offset`, a filter wheel's `filters`, and a focuser's `maxPosition`.
-The reservation's `Configure` step writes each one that the spec
-states, once. The operator writes them again only when the device's
-driver restarts, so a client such as Ekos can change a camera's gain
-for one frame. The settings that the tree decides, such as `ACTIVE_DEVICES`
-and `GEOGRAPHIC_COORD`, are never spec fields. The other kinds' spec
-fields are `Observatory.spec.location`, the tube's `aperture` and
+The reservation's `Configure` step writes each field that the spec sets
+to the driver once. The operator writes them again only when the
+device's driver restarts, so a client such as Ekos can change a
+camera's gain for one frame. A property that the operator computes
+from other resources, such as `ACTIVE_DEVICES` and `GEOGRAPHIC_COORD`,
+has no spec field. The spec fields of the other kinds are
+`Observatory.spec.location`, the tube's `aperture` and
 `focalLength` in millimeters, the guider's `opticalTrain` and
 `pulses`, the reservation's `telescope`, `holder`, `start`, and
 `end`, the telescope's `horizon`, and the horizon's `profile`.
@@ -149,5 +155,5 @@ fields are `Observatory.spec.location`, the tube's `aperture` and
 A device kind's status has a typed field for each standard property of
 its INDI interface, and the resource that runs the driver lists every
 other property in `status.properties`. [Reading the
-status](/docs/reference/reading-the-status/) states which object holds
-each property. `kubectl explain` prints every field with its unit.
+status](/docs/reference/reading-the-status/) says where each property
+appears. `kubectl explain` prints every field with its unit.

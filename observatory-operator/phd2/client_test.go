@@ -24,7 +24,7 @@ func running(t *testing.T, f Dialer) *Client {
 }
 
 // settled waits until every goroutine in the bubble is blocked, and
-// answers the client's state then.
+// returns the client's state.
 func settled(c *Client) State {
 	synctest.Wait()
 	return c.State()
@@ -39,13 +39,13 @@ func TestTheBaselineReadsTheStateAfterTheStreamOpens(t *testing.T) {
 		c := running(t, f)
 		s := settled(c)
 		if !s.Open || s.Version != "2.6.14" || s.AppState != "Looping" {
-			t.Errorf("state = %+v", s)
+			t.Errorf("the state is %+v, want Open, version 2.6.14, and app state Looping", s)
 		}
 		if s.Calibrated == nil || !*s.Calibrated || s.Equipment == nil || !*s.Equipment {
-			t.Errorf("calibrated = %v, equipment = %v", s.Calibrated, s.Equipment)
+			t.Errorf("calibrated is %v and equipment is %v, want both true", s.Calibrated, s.Equipment)
 		}
 		if s.PixelScale == nil || *s.PixelScale != 2.48 {
-			t.Errorf("pixel scale = %v", s.PixelScale)
+			t.Errorf("the pixel scale is %v, want 2.48", s.PixelScale)
 		}
 		if got, want := f.Received(), "get_app_state get_calibrated get_connected get_pixel_scale"; got != want {
 			t.Errorf("requests = %q, want %q", got, want)
@@ -96,9 +96,10 @@ func TestEventsMoveTheAppState(t *testing.T) {
 	}
 }
 
-// PHD2 sends AppState only to a new connection, and no event says
-// where a stop leaves it: a guider that stops guiding can still loop.
-// So the client reads the state again after each stop.
+// PHD2 sends AppState only to a new connection, and no event says what
+// state a stop leaves it in, because a guider that stops guiding can
+// still be looping. So the client reads the app state again after each
+// stop.
 func TestAStopReadsTheAppStateAgain(t *testing.T) {
 	for _, stop := range []string{"GuidingStopped", "LoopingExposuresStopped", "LockPositionLost", "StarLost"} {
 		t.Run(stop, func(t *testing.T) {
@@ -115,7 +116,7 @@ func TestAStopReadsTheAppStateAgain(t *testing.T) {
 					t.Errorf("app state = %q, want Looping", s.AppState)
 				}
 				if got := f.Received(); got != "get_app_state" {
-					t.Errorf("requests = %q", got)
+					t.Errorf("the requests after the stop are %q, want get_app_state", got)
 				}
 			})
 		})
@@ -130,11 +131,11 @@ func TestCalibrationEventsMoveCalibrated(t *testing.T) {
 		settled(c)
 		f.Broadcast(phd2test.Event("StartCalibration", map[string]any{"Mount": "INDI Mount [Telescope Simulator]"}))
 		if s := settled(c); s.Calibrated == nil || *s.Calibrated {
-			t.Errorf("calibrated during calibration = %v", s.Calibrated)
+			t.Errorf("during calibration calibrated is %v, want false", s.Calibrated)
 		}
 		f.Broadcast(phd2test.Event("CalibrationComplete", map[string]any{"Mount": "INDI Mount [Telescope Simulator]"}))
 		if s := settled(c); s.Calibrated == nil || !*s.Calibrated {
-			t.Errorf("calibrated after calibration = %v", s.Calibrated)
+			t.Errorf("after calibration calibrated is %v, want true", s.Calibrated)
 		}
 	})
 }
@@ -147,7 +148,7 @@ func TestAFailedCalibrationIsAnAlert(t *testing.T) {
 		f.Broadcast(phd2test.Event("CalibrationFailed", map[string]any{"Mount": "INDI Mount [Telescope Simulator]", "Reason": "star did not move enough"}))
 		s := settled(c)
 		if s.Alert == nil || s.Alert.Type != "error" || s.Alert.Message != "Calibration failed: star did not move enough" {
-			t.Errorf("alert = %+v", s.Alert)
+			t.Errorf("the alert is %+v, want an error of Calibration failed: star did not move enough", s.Alert)
 		}
 	})
 }
@@ -162,20 +163,20 @@ func TestGuideStepsGiveTheRMSOfTheirDistances(t *testing.T) {
 		f.Broadcast(phd2test.GuideStep(2, -1, 4))
 		s := settled(c)
 		if s.RMS.Steps != 2 || s.RMS.RA != math.Sqrt(5) || s.RMS.Dec != math.Sqrt(8) || s.RMS.Total != math.Sqrt(13) {
-			t.Errorf("rms = %+v", s.RMS)
+			t.Errorf("the RMS is %+v, want 2 steps, RA sqrt(5), Dec sqrt(8), and total sqrt(13)", s.RMS)
 		}
 		if want := time.Unix(1790000000, 500_000_000).UTC(); !s.RMS.Since.Equal(want) {
-			t.Errorf("rms since %v, want %v", s.RMS.Since, want)
+			t.Errorf("the RMS starts at %v, want %v", s.RMS.Since, want)
 		}
 		if s.Step == nil || s.Step.Frame != 2 || s.Step.SNR != 41.25 || s.Step.HFD != 2.31 {
-			t.Errorf("step = %+v", s.Step)
+			t.Errorf("the last step is %+v, want frame 2, SNR 41.25, and HFD 2.31", s.Step)
 		}
 		if want := time.Unix(1790000000, 500_000_000).UTC(); !s.Step.Time.Equal(want) {
-			t.Errorf("step time = %v, want %v", s.Step.Time, want)
+			t.Errorf("the last step is at %v, want %v", s.Step.Time, want)
 		}
 		f.Broadcast(phd2test.Event("StartGuiding", nil))
 		if s := settled(c); s.RMS.Steps != 0 {
-			t.Errorf("rms after a new start = %+v", s.RMS)
+			t.Errorf("after StartGuiding the RMS is %+v, want no steps", s.RMS)
 		}
 	})
 }
@@ -198,10 +199,10 @@ func TestTheRMSCoversTheLastWindowOfSteps(t *testing.T) {
 		}
 		s := settled(c)
 		if s.RMS.Steps != RMSWindow || s.RMS.RA != 1 || s.RMS.Dec != 1 {
-			t.Errorf("rms = %+v", s.RMS)
+			t.Errorf("the RMS is %+v, want %d steps and RA and Dec of 1", s.RMS, RMSWindow)
 		}
 		if want := time.Unix(1790000002, 0).UTC(); !s.RMS.Since.Equal(want) {
-			t.Errorf("rms since %v, want the second step's %v", s.RMS.Since, want)
+			t.Errorf("the RMS starts at %v, want the second step's %v", s.RMS.Since, want)
 		}
 	})
 }
@@ -217,13 +218,13 @@ func TestAnAlertIsKeptAndReadsTheEquipmentAgain(t *testing.T) {
 		f.Broadcast(phd2test.Event("Alert", map[string]any{"Msg": "INDI camera disconnected", "Type": "error"}))
 		s := settled(c)
 		if s.Alert == nil || s.Alert.Message != "INDI camera disconnected" || s.Alert.Type != "error" {
-			t.Errorf("alert = %+v", s.Alert)
+			t.Errorf("the alert is %+v, want an error of INDI camera disconnected", s.Alert)
 		}
 		if s.Equipment == nil || *s.Equipment {
 			t.Errorf("equipment = %v, want false", s.Equipment)
 		}
 		if got := f.Received(); got != "get_calibrated get_connected get_pixel_scale" {
-			t.Errorf("requests = %q", got)
+			t.Errorf("the requests after the alert are %q, want get_calibrated get_connected get_pixel_scale", got)
 		}
 	})
 }
@@ -233,18 +234,18 @@ func TestSetConnectedConnectsTheEquipment(t *testing.T) {
 		f := phd2test.New()
 		c := running(t, f)
 		if err := c.WaitFor(t.Context(), func(s State) bool { return s.Open }); err != nil {
-			t.Fatal(err)
+			t.Fatalf("waiting for the connection to open: %v", err)
 		}
 		if err := c.SetConnected(t.Context(), true); err != nil {
-			t.Fatal(err)
+			t.Fatalf("connecting the equipment: %v", err)
 		}
 		if s := settled(c); s.Equipment == nil || !*s.Equipment {
-			t.Errorf("equipment = %v", s.Equipment)
+			t.Errorf("equipment is %v after SetConnected(true), want true", s.Equipment)
 		}
 	})
 }
 
-func TestARefusedConnectAnswersPHD2sMessage(t *testing.T) {
+func TestARefusedConnectReturnsPHD2sMessage(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := phd2test.New()
 		f.Set(func(f *phd2test.Server) { f.Refuse = "equipment failed to connect: camera" })
@@ -252,7 +253,7 @@ func TestARefusedConnectAnswersPHD2sMessage(t *testing.T) {
 		settled(c)
 		err := c.SetConnected(t.Context(), true)
 		if err == nil || err.Error() != "phd2: set_connected: equipment failed to connect: camera" {
-			t.Errorf("err = %v", err)
+			t.Errorf("SetConnected returned %v, want PHD2's refusal message after set_connected", err)
 		}
 	})
 }
@@ -264,10 +265,10 @@ func TestStopCaptureStopsPHD2(t *testing.T) {
 		c := running(t, f)
 		settled(c)
 		if err := c.StopCapture(t.Context()); err != nil {
-			t.Fatal(err)
+			t.Fatalf("stopping capture: %v", err)
 		}
 		if s := settled(c); s.AppState != "Stopped" {
-			t.Errorf("app state = %q", s.AppState)
+			t.Errorf("the app state is %q after StopCapture, want Stopped", s.AppState)
 		}
 	})
 }
@@ -275,7 +276,7 @@ func TestStopCaptureStopsPHD2(t *testing.T) {
 func TestACallWithNoConnectionFails(t *testing.T) {
 	c := NewClient("east-guider.observatory.svc:4400")
 	if err := c.StopCapture(t.Context()); !errors.Is(err, ErrNotConnected) {
-		t.Errorf("err = %v", err)
+		t.Errorf("StopCapture returned %v, want ErrNotConnected", err)
 	}
 }
 
@@ -289,10 +290,10 @@ func TestTheStateEmptiesWhenTheConnectionEnds(t *testing.T) {
 		settled(c)
 		f.Cut()
 		if err := <-ended; !errors.Is(err, ErrDisconnected) {
-			t.Errorf("run ended with %v", err)
+			t.Errorf("Run returned %v, want ErrDisconnected", err)
 		}
 		if s := c.State(); s.Open || s.AppState != "" || s.Equipment != nil {
-			t.Errorf("state after the end = %+v", s)
+			t.Errorf("after the connection ended the state is %+v, want closed and empty", s)
 		}
 	})
 }
@@ -308,7 +309,7 @@ func TestACallInFlightFailsWhenTheConnectionEnds(t *testing.T) {
 		synctest.Wait()
 		f.Cut()
 		if err := <-failed; !errors.Is(err, ErrDisconnected) {
-			t.Errorf("err = %v", err)
+			t.Errorf("StopCapture returned %v, want ErrDisconnected", err)
 		}
 	})
 }
@@ -319,7 +320,7 @@ func TestASecondRunIsRefused(t *testing.T) {
 		c := running(t, f)
 		settled(c)
 		if err := c.Run(t.Context()); !errors.Is(err, ErrRunning) {
-			t.Errorf("err = %v", err)
+			t.Errorf("the second Run returned %v, want ErrRunning", err)
 		}
 	})
 }
@@ -327,8 +328,8 @@ func TestASecondRunIsRefused(t *testing.T) {
 func TestEachChangeCallsNotify(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := phd2test.New()
-		rings := make(chan struct{}, 100)
-		c := NewClient("east-guider.observatory.svc:4400", WithDialer(f), WithNotify(func(State) { rings <- struct{}{} }))
+		notifications := make(chan struct{}, 100)
+		c := NewClient("east-guider.observatory.svc:4400", WithDialer(f), WithNotify(func(State) { notifications <- struct{}{} }))
 		ctx, cancel := context.WithCancel(t.Context())
 		done := make(chan struct{})
 		go func() {
@@ -336,11 +337,11 @@ func TestEachChangeCallsNotify(t *testing.T) {
 			_ = c.Run(ctx)
 		}()
 		settled(c)
-		before := len(rings)
+		before := len(notifications)
 		f.Broadcast(phd2test.GuideStep(1, 1, 1))
 		settled(c)
-		if len(rings) != before+1 {
-			t.Errorf("notify ran %d times for one step", len(rings)-before)
+		if len(notifications) != before+1 {
+			t.Errorf("notify ran %d times for one step", len(notifications)-before)
 		}
 		cancel()
 		<-done

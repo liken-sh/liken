@@ -9,16 +9,15 @@ import (
 )
 
 // An Interface is the standard set of one INDI interface: every
-// property that a bare driver for it defined, in any of its variants,
-// and the conventions of the interface. Name is the name of its
-// captures, such as ccd for ccd.xml or telescope for
-// telescope-ra-dec.xml.
+// property that a bare driver for it defines in any of its variants,
+// plus the properties that the conventions file lists for it. Name is
+// the prefix of its capture files, such as ccd for ccd.xml or telescope
+// for telescope-ra-dec.xml.
 type Interface struct {
 	Name       string
 	Properties []Property
 }
 
-// Property answers the property of a name.
 func (i Interface) Property(name string) (Property, bool) {
 	for _, p := range i.Properties {
 		if p.Name == name {
@@ -28,7 +27,10 @@ func (i Interface) Property(name string) (Property, bool) {
 	return Property{}, false
 }
 
-// The sources in the directory of the captures.
+// The files in the captures directory that are not the capture of an
+// interface. ConventionsFile lists the properties that libindi does
+// not define, and defaultDevice holds the properties that no interface
+// owns.
 const (
 	ConventionsFile = "conventions.yaml"
 	defaultDevice   = "device.xml"
@@ -36,11 +38,11 @@ const (
 
 // Load reads the standard set of each interface from the captures and
 // the conventions in dir, and checks the conventions against the
-// simulator transcripts in transcripts. It answers each interface by
-// its name, and the disagreements between the sources, sorted. A
-// disagreement never decides the result: a property's structure is
-// its capture's, or its convention's for a property that libindi does
-// not define.
+// simulator transcripts in transcripts. It returns the interfaces by
+// name and the sorted disagreements between the sources. A
+// disagreement does not change the result: a property's structure
+// comes from its capture, or from its convention when libindi does not
+// define the property.
 func Load(dir, transcripts string) (map[string]Interface, []string, error) {
 	interfaces, report, err := readCaptures(dir)
 	if err != nil {
@@ -70,18 +72,20 @@ func Load(dir, transcripts string) (map[string]Interface, []string, error) {
 	return interfaces, slices.Compact(report), nil
 }
 
-// readCaptures reads every capture in dir but the one of
-// DefaultDevice, and merges the variants of each interface: the union
-// of their properties by name, and of each property's members. A
-// property that two variants define with another type, permission, or
-// rule is a disagreement, and the first variant's structure stands.
+// readCaptures reads every capture in dir except the one for
+// DefaultDevice, and merges the variants of each interface into the
+// union of their properties by name and, within a property, the union
+// of its members. When two variants define a property with a different
+// type, permission, or rule, the report records a disagreement and the
+// first variant's structure is kept.
 func readCaptures(dir string) (map[string]Interface, []string, error) {
 	files, err := filepath.Glob(filepath.Join(dir, "*.xml"))
 	if err != nil {
 		return nil, nil, err
 	}
-	// The capture of the interface's first variant, such as focuser.xml
-	// before focuser-timer.xml, sets the order of the properties.
+	// Read the captures with fewer hyphens first, such as focuser.xml
+	// before focuser-timer.xml, so that an interface's base capture
+	// sets the order of the properties.
 	slices.SortStableFunc(files, func(a, b string) int {
 		return strings.Count(filepath.Base(a), "-") - strings.Count(filepath.Base(b), "-")
 	})
@@ -99,7 +103,7 @@ func readCaptures(dir string) (map[string]Interface, []string, error) {
 		}
 		props, err := definitionsOf(data)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", file, err)
+			return nil, nil, fmt.Errorf("reading the definitions in %s: %w", file, err)
 		}
 		name, _, _ := strings.Cut(strings.TrimSuffix(base, ".xml"), "-")
 		i := interfaces[name]

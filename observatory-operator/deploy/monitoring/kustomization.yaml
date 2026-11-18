@@ -1,32 +1,30 @@
-# The monitoring component: this operator's half of the contract in
-# plans/completed/65-prometheus-metrics.md at the top of the
-# repository. It adds one PodMonitor and a dashboard ConfigMap, and
-# changes nothing in the base, so a cluster owner with no
-# prometheus-operator never takes this directory.
-#
-# An owner who runs the prometheus-operator adds it beside the base:
+# Optional monitoring for observatory-operator: a PodMonitor for the
+# operator's pod and a Grafana dashboard ConfigMap, under the metrics
+# contract in plans/completed/65-prometheus-metrics.md at the top of
+# the repository. The base does not include it, because the PodMonitor
+# CRD exists only on a cluster that runs the prometheus-operator. Such
+# a cluster adds it beside the base:
 #
 #   resources:
 #     - https://github.com/liken-sh/liken//observatory-operator/deploy?ref=<version>
 #   components:
 #     - https://github.com/liken-sh/liken//observatory-operator/deploy/monitoring?ref=<version>
 #
-# This Component sets no top-level namespace, because that would move
-# the dashboard ConfigMap into liken-system too, where the
-# kube-prometheus-stack sidecar that loads it does not look. The
-# PodMonitor names its own namespace instead.
+# This Component sets no top-level namespace, because that would also
+# move the dashboard ConfigMap into liken-system, where the
+# kube-prometheus-stack dashboard sidecar does not look. The PodMonitor
+# sets its own namespace.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
 resources:
   - podmonitor.yaml
 
-# The dashboard is a ConfigMap with the grafana_dashboard: "1" label.
-# The kube-prometheus-stack runs a sidecar beside Grafana that loads
-# every ConfigMap with that label, so the dashboard needs no Grafana
-# API call and no provisioning file. disableNameSuffixHash keeps the
-# name stable, so an edit replaces the ConfigMap in place and Grafana
-# does not load the old version beside the new one.
+# The kube-prometheus-stack's Grafana sidecar loads every ConfigMap
+# labeled grafana_dashboard: "1". disableNameSuffixHash keeps the name
+# fixed, so an edit replaces the ConfigMap. With a hash suffix, the old
+# and new ConfigMaps would both exist and Grafana would load both
+# dashboards.
 configMapGenerator:
   - name: observatory-operator-dashboard
     namespace: monitoring

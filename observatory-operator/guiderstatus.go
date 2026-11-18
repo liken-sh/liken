@@ -1,9 +1,9 @@
 package main
 
 // The status of a Guider: its pod, and what PHD2 reports on its event
-// server. The status writer composes it with the others, at most once
-// a statusWindow, so PHD2's guide steps, about one a second, cost at
-// most one write a second.
+// server. The status writer builds it with the other statuses, at most
+// once per statusWindow, so PHD2's guide steps do not each cause a
+// status write.
 
 import (
 	"fmt"
@@ -13,11 +13,11 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/phd2"
 )
 
-// guiderKey is a guider's key among the operator's faults.
+// guiderKey is the key of a guider's entry in o.faults.
 func guiderKey(name string) string { return observatory.GuiderKind.Name + "/" + name }
 
-// guiderFault records the last failure of the steady runner's work on a
-// guider, or clears it.
+// guiderFault records the latest failure of keepGuider on a guider, or
+// clears the record when err is nil.
 func (o *operator) guiderFault(name string, err error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -73,12 +73,12 @@ func (o *operator) guiderStatus(t *tree, guider *observatory.Guider) observatory
 	return next
 }
 
-// guiderWaiting says what a guider that is not ready waits for. kept
-// is true while the reservation is Ready, when its runner, not
-// StartGuider, creates a pod that is gone.
-func guiderWaiting(name string, p *pod, hasPod bool, s phd2.State, kept bool) string {
+// guiderWaiting returns what a guider that is not ready waits for. A
+// missing pod is created by the StartGuider step, and by keepGuider
+// once the reservation is Ready.
+func guiderWaiting(name string, p *pod, hasPod bool, s phd2.State, reservationReady bool) string {
 	switch {
-	case !hasPod && kept:
+	case !hasPod && reservationReady:
 		return "Creating pod " + name
 	case !hasPod:
 		return "Waiting for StartGuider to create pod " + name
@@ -91,8 +91,8 @@ func guiderWaiting(name string, p *pod, hasPod bool, s phd2.State, kept bool) st
 }
 
 // guiderReadings copies what PHD2 reports into a Guider's status. PHD2
-// measures distances in pixels, and the status gives them in
-// arc-seconds, so the RMS needs the pixel scale.
+// reports the RMS in pixels, and the status uses arc-seconds, so the
+// RMS is written only when PHD2 reports a pixel scale.
 func guiderReadings(next *observatory.GuiderStatus, s phd2.State) {
 	if !s.Open {
 		return
@@ -118,7 +118,7 @@ func guiderReadings(next *observatory.GuiderStatus, s phd2.State) {
 	}
 }
 
-// guiderRef answers the Guider in its telescope's status.
+// guiderRef returns the entry for a Guider in its Telescope's status.
 func guiderRef(name string, s observatory.GuiderStatus) *observatory.GuiderRef {
 	ready := conditionOf(s.Conditions, observatory.ConditionReady)
 	return &observatory.GuiderRef{
@@ -127,8 +127,8 @@ func guiderRef(name string, s observatory.GuiderStatus) *observatory.GuiderRef {
 	}
 }
 
-// guiderColumn answers the Telescope's Guider column: the phase, and
-// PHD2's state while the operator reads it.
+// guiderColumn returns the Telescope's Guider printer column: the
+// phase, followed by PHD2's state when the operator has read one.
 func guiderColumn(ref *observatory.GuiderRef) string {
 	if ref.State == "" {
 		return string(ref.Phase)

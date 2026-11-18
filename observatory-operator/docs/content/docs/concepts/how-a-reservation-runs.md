@@ -6,194 +6,195 @@ weight: 30
 
 # How a reservation runs
 
-A `Reservation` gives one holder the use of one `Telescope`, from
-`spec.start`, or from its creation when it has no start, until
-`spec.end`, or until it is deleted when it has no end. When it starts,
-the operator brings the equipment up: it starts each device's INDI
-driver, connects the devices, configures them, and runs the activation
-procedures. When it ends, the operator runs the deactivation
-procedures, such as parking the mount and warming the cameras, stops
-what it started in reverse order, and reports when the telescope is
-safe to power off. The observatory's own devices keep running while
-another telescope's reservation there is active.
+A `Reservation` gives one holder, the person or program that
+`spec.holder` names, the use of one `Telescope`. It starts
+at `spec.start`, or when you create it if it has no start. It ends at
+`spec.end`, or when you delete it if it has no end. When it starts, the
+operator starts each device's INDI driver, connects the devices,
+configures them, and runs the activation procedures. When it ends, the
+operator runs the deactivation procedures, such as parking the mount
+and warming the cameras, stops everything it started in reverse order,
+and reports when the telescope is safe to power off. The observatory's
+own devices keep running while a reservation of another telescope in
+that observatory is active.
 
-The operator runs one step at a time, in a fixed order, and a step
-starts only when the step before it is `Done` or `Skipped`. Each step
-reads what the cluster and the devices report before it changes
-anything, and records what it did in its summary. A step with nothing
-to do is `Skipped`. A device whose driver lacks a property, such as a
-guide camera with no cooler, is named in the summary, and the step
-goes on.
+The operator runs the steps below one at a time, in this order. A step
+starts only when the step before it is `Done` or `Skipped`, and it
+records what it did in its summary. A step with nothing to do is
+`Skipped`. When a device's driver lacks a property, such as a guide
+camera with no cooler, the summary names the device and the step goes
+on.
 
 | Step | What it does | Deadline |
 |---|---|---|
-| `Wait` | Waits for `spec.start`, for the telescope to exist with no delete pending on it or its observatory, for each condition that the `spec.requires` of the `Observatory` and of the devices on its server names, and for no other reservation to hold the telescope. | none: [dawn](#requirements-and-dawn) |
-| `StartSite` | Starts the observatory's server and its devices, connects them, and writes the dome's `DOME_SHUTTER_PARK_POLICY` and its `MOUNT_POLICY`. Another reservation in the observatory may have started them already. Fails when two devices of the observatory name one driver. | 10 min |
-| `Requires` | Waits for each condition that the `spec.requires` of the `Telescope` and of the devices on its server names, such as a person's `SetUp` or a `WeatherStation`'s `Safe`. The summary names each condition it waits for. Nothing of the telescope runs yet. `Skipped` when nothing is required. | none: [dawn](#requirements-and-dawn) |
-| `PowerOn` | Starts the telescope's server with a link to every device, starts and connects its `Switch` devices, and switches on each output that a device's `spec.power` names. Fails when two devices of the telescope name one driver, and fails before it starts the server when the `PersistentVolumeClaim` that `spec.outbox` names does not exist. | 10 min |
-| `StartDevices` | Starts the pod of every other device, and waits until each pod is Ready and its driver defines its device on the server. A device on real hardware waits here for its claim. While no node fits a pod, the summary gives the scheduler's message. | 10 min |
-| `Connect` | Connects the mount, the GPS, the polar aligner, the focusers, the filter wheels, the rotators, the dust caps, the flat panels, the receivers, and the cameras, in that order. A device that another resource serves connects with that resource. Then it checks that each device defines the properties of its resource's interface, and a resource whose device does not reports `Error` while the others go on. | 2 min |
-| `Configure` | Writes each setting that a device's spec states, such as a camera's gain and offset and the filter names, once for the reservation. It also writes the settings that the tree decides: the observatory's location and the `DOME_POLICY` to the mount, the location to the GPS, each camera's `ACTIVE_DEVICES` from its train, the tube's focal length and aperture, the upload settings of each camera that mounts the [outbox](#the-outbox), and the [FITS keywords](/docs/concepts/fits-keywords/) of each imaging camera. It then relays the dome's park state to the mount, before a procedure unparks it. | 2 min |
-| `Activation` | Runs the activation procedures, from the top of the tree down: the `Observatory`'s and its devices', unless another reservation in the observatory ran them, then the `Telescope`'s and its devices', then those of the devices of its trains. [Procedures](/docs/concepts/procedures/) states what they do. | none: each action's timeout |
-| `StartGuider` | Starts the guider's pod, waits for PHD2's event server, sends `set_connected`, and waits until PHD2 reports its camera and mount connected. A telescope with no `Guider` skips it. | 10 min |
-| `StopWork` | Stops what the equipment still does, at every end of a reservation: PHD2's exposures and guiding with `stop_capture`, then each exposure, and the mount if it moves. At a normal end it often stops only PHD2, and it is `Skipped` when nothing runs. | 2 min |
-| `Deactivation` | Runs the deactivation procedures, from the bottom of the tree up: those of the devices of the telescope's trains, then the `Telescope`'s own devices' and its own. When the last telescope in the observatory ends, it then runs the observatory's devices' and the `Observatory`'s own. Every device is still connected. | none: each action's timeout |
+| `Wait` | Waits until `spec.start` has passed, the telescope exists, and neither the telescope nor its observatory is being deleted. It also waits for each condition in the `spec.requires` of the `Observatory` and of the devices on its server, and until no other reservation holds the telescope. | none, but [dawn](#requirements-and-dawn) ends it |
+| `StartSite` | Starts the observatory's server and its devices, connects them, and writes the dome's `DOME_SHUTTER_PARK_POLICY` and `MOUNT_POLICY`. Another reservation in the observatory may have started them already. Fails when two devices of the observatory use the same driver. | 10 min |
+| `Requires` | Waits for each condition in the `spec.requires` of the `Telescope` and of the devices on its server, such as a person's `SetUp` or a `WeatherStation`'s `Safe`. Nothing of the telescope runs yet. `Skipped` when nothing is required. | none, but [dawn](#requirements-and-dawn) ends it |
+| `PowerOn` | Starts the telescope's server, starts and connects its `Switch` devices, and switches on each output that a device's `spec.power` names. Fails when two devices of the telescope use the same driver, and fails before it starts the server when the `PersistentVolumeClaim` in `spec.outbox` does not exist. | 10 min |
+| `StartDevices` | Starts the pod of every other device, and waits until each pod is Ready and its driver defines its device on the server. A device on real hardware waits here for its claim. While no node can run a pod, the summary gives the scheduler's message. | 10 min |
+| `Connect` | Connects the mount, the GPS, the polar aligner, the focusers, the filter wheels, the rotators, the dust caps, the flat panels, the receivers, and the cameras, in that order. A device that another resource's driver serves connects with that resource. Then it checks that each device defines the properties of its resource's interface. A device that does not is `Error`, and the others go on. | 2 min |
+| `Configure` | Writes each setting in a device's spec, such as a camera's gain and offset and the filter names. It also writes the observatory's location and `DOME_POLICY` to the mount, the location to the GPS, each camera's `ACTIVE_DEVICES` from its train, the tube's focal length and aperture, the upload settings of each camera that mounts the [outbox](#the-outbox), and the [FITS keywords](/docs/concepts/fits-keywords/) of each imaging camera. Then it copies the dome's park state to the mount, before a procedure unparks it. | 2 min |
+| `Activation` | Runs the activation procedures from the top down: those of the `Observatory` and its devices, unless another reservation in the observatory already ran them, then those of the `Telescope` and its devices, then those of the devices of its trains. [Procedures](/docs/concepts/procedures/) describes them. | none, but each action has a timeout |
+| `StartGuider` | Starts the guider's pod, waits for PHD2's event server, sends `set_connected`, and waits until PHD2 reports its camera and mount connected. `Skipped` for a telescope with no `Guider`. | 10 min |
+| `StopWork` | Stops whatever the equipment is still doing: PHD2's exposures and guiding with `stop_capture`, then each exposure, then the mount if it moves. `Skipped` when nothing runs. | 2 min |
+| `Deactivation` | Runs the deactivation procedures from the bottom up: those of the devices of the telescope's trains, then those of the `Telescope`'s own devices and the `Telescope`. When the last active telescope in the observatory ends, it then runs those of the observatory's devices and the `Observatory`. Every device is still connected. | none, but each action has a timeout |
 | `StopGuider` | Deletes the guider's pod, `Service`, and `ConfigMap`, while its camera and mount are still connected. | 2 min |
 | `Disconnect` | Disconnects the devices in the reverse order of `Connect`. | 2 min |
-| `StopDevices` | Stops the drivers of the devices that are not `Switch` devices, and deletes their pods, the pods of the devices that a person deleted included. | 2 min |
-| `PowerOff` | Switches the outputs off, except an output that a device on another server still draws from, then stops the `Switch` pods and the telescope's server. It reads each output from the reservation's `status.session`, so a device that a person deleted has its output switched off after its object is gone. | 5 min |
-| `StopSite` | Disconnects the observatory's devices, switches their outputs off, except an output that a device on another server still draws from, and stops its server, unless a reservation of another telescope in the observatory is active. | 5 min |
+| `StopDevices` | Stops the drivers of every device except the `Switch` devices, and deletes their pods, including the pods of devices that a person deleted. | 2 min |
+| `PowerOff` | Switches the outputs off, except an output that a device on another server still uses, then stops the `Switch` pods and the telescope's server. It reads the outputs from the reservation's `status.session`, so it also switches off the output of a device that a person deleted. | 5 min |
+| `StopSite` | Only when no reservation of another telescope in the observatory is active: disconnects the observatory's devices, switches their outputs off, except an output that a device on another server still uses, and stops the observatory's server. | 5 min |
 
-Deactivation begins at `spec.end`, when a person deletes the
+Deactivation starts when `spec.end` passes, when a person deletes the
 reservation, or when a person deletes its `Telescope` or that
-telescope's `Observatory`, as [Deleting a running resource](#deleting-a-running-resource) describes. The finalizer `observatory.liken.sh/deactivate` holds a
-deleted reservation until deactivation is done. A reservation that
-reaches `spec.end` stays, `Released`, until a person deletes it.
+telescope's `Observatory`, as [Deleting a running
+resource](#deleting-a-running-resource) describes. The finalizer
+`observatory.liken.sh/deactivate` keeps a deleted reservation until
+deactivation is done. A reservation that reaches `spec.end` stays in
+the cluster as `Released` until you delete it.
 
-A step that passes its deadline, or a device that answers a change with
-Alert, fails the step, and the reservation is `Failed`. The `Ready`
-condition names the step and the device. After a failed activation
-step, the telescope stays as the steps left it, so a person can look;
-deleting the reservation runs deactivation from `StopWork`. After a failed
-deactivation step, the finalizer stays, because the devices may not be
-safe to power off. In both cases, this runs the failed step again:
+When a step passes its deadline, or a device sets a property to Alert
+after a change, the step fails and the reservation is `Failed`. The
+`Ready` condition names the step and the device. After a failed
+activation step, the operator leaves the telescope as it is, so you can
+look at it. Deleting the reservation then runs deactivation from
+`StopWork`. After a failed deactivation step, the finalizer stays,
+because the devices may not be safe to power off. In both cases, fix
+the cause and then run the failed step again with this command:
 
 ```sh
 kubectl annotate reservation east-tonight -n observatory observatory.liken.sh/retry=1
 ```
 
-A retry is how you say that you fixed the cause. A failed activation
-step often fails on a spec that the session recorded, such as a
-driver that no image holds, so before the step runs again, the
-operator records the session again in `status.session` from the specs
-as they are then. Then the step runs on the fixed spec, and it
-replaces each pod that the old record built. The observatory's part
-of the record still holds the devices that another reservation's
-running session recorded there, and the telescope's part leaves out a
-device that another session started on the observatory's server.
+An activation step often fails because of a spec, such as a driver that
+no image contains. So before a retry of a failed activation step, the
+operator records the session in `status.session` again from the
+current specs, and the steps run on the corrected spec. Devices that
+another reservation's session started on the observatory's server stay
+in the observatory's part of the record, and stay out of the
+telescope's part.
 
-The retry also undoes what the old record started and the new record
-does not, before any step runs again. A device that the new record
-leaves out, such as one you moved to another telescope, leaves the
-session: its `deactivation` runs if the telescope is `Active`, its
-driver stops, its pod goes, and its `PodDeleted` Event says that the
-retry took it out of the session. An output that the old record
-switched on and the new one does not goes off, unless another device
-draws from it. Then the steps run again from the first step that reads
-a part of the record that changed: `StartSite` for the observatory's
-devices, `PowerOn` for the telescope's devices and the outbox,
-`Configure` for the trains, the tubes, and the FITS keywords, and `StartGuider` for the `Guider`. So a power output
-that you changed is switched on, and the `Retry` Event names the first
-step that runs again. A retry of a failed deactivation step records
-nothing, because the release stops what the session started.
+The retry then stops what the old record started and the new record
+leaves out. If you moved a device to another telescope, its
+`deactivation` runs if the telescope is `Active`, its driver stops, its
+pod is deleted, and its `PodDeleted` Event says that the retry removed
+it from the session. An output that the new record does not need is
+switched off, unless another device uses it. Then the steps run again
+from the first step that reads a part of the record that changed:
 
-A trigger's run that failed, such as a dome park that the driver
-refused, is not run again for the same transition. The same annotation
-on the resource runs it again, once the cause is fixed:
+- `StartSite` for the observatory's devices.
+- `PowerOn` for the telescope's devices and the outbox.
+- `Configure` for the trains, the tubes, and the FITS keywords.
+- `StartGuider` for the `Guider`.
+
+The `Retry` Event names the first step that runs again. A retry of a
+failed deactivation step records nothing new, because deactivation
+stops only what the session started.
+
+A procedure run of a trigger that failed, such as a dome park that the
+driver refused, does not run again for the same transition. After you
+fix the cause, put the same annotation on the resource:
 
 ```sh
 kubectl annotate dome lab -n observatory observatory.liken.sh/retry=1
 ```
 
-The operator runs again each `Failed` run of the resource's
-`spec.triggers` whose condition still holds with the same transition
-time, skips the actions that are `Done`, and removes the annotation.
-A run whose condition changed since stays `Failed`. The annotation on
-a device also runs again its `Failed` `activation` that ran after the
-`Activation` step, such as after the device defined its interface's
-properties late. Any other run of `activation` or `deactivation` runs
-again through the retry annotation of its reservation.
+The operator runs each `Failed` run of the resource's `spec.triggers`
+again if its condition still has the same transition time, skips the
+actions that are `Done`, and then removes the annotation. A run whose
+condition has changed since then stays `Failed`. On a device, the
+annotation also runs again a `Failed` `activation` that ran after the
+`Activation` step, such as when the device defined its interface's
+properties late. To run any other `activation` or `deactivation`
+again, retry its reservation.
 
-One telescope serves one reservation at a time. A second reservation
-of the telescope waits in `Wait`, and its summary names the reservation
-it waits for. Waiting reservations take the telescope in the order of
-their `spec.start`, and of their creation when they have none.
+A telescope serves one reservation at a time. A second reservation of
+the same telescope waits in `Wait`, and its summary names the
+reservation it waits for. Waiting reservations get the telescope in the
+order of their `spec.start`, or in the order of their creation when
+they have no start.
 
-While a reservation is `Ready`, the operator creates again each pod
-that is deleted. When a device's driver comes back on the server
-disconnected, after its pod or the server restarted, the operator
-connects it and writes its settings again. A device that a person
-disconnects in KStars stays disconnected. The operator also creates
-the guider's pod again, and connects the camera and the mount of each
-new PHD2 once.
+While a reservation is `Ready`, the operator creates each deleted pod
+again, including the guider's pod. While a pod is missing, its device
+is `Starting`, and the `Ready` message of the device or its `Guider`
+reads `Creating pod <name>`. When the operator creates the pod, it
+posts a `PodCreated` Event on the device, the `Guider`, or the
+`Telescope` or `Observatory` whose INDI server the pod runs. A new INDI
+server starts each driver disconnected, so the operator connects each
+device and writes its settings again. It does the same for a driver
+that restarts. A device that a person disconnects in KStars stays
+disconnected. A new PHD2 starts idle and not calibrated. The operator
+connects its camera and mount once, and the holder must calibrate and
+start guiding again. During activation, before its step creates the
+pod, the device's message reads `Waiting for activation to create pod
+<name>`.
 
-INDI names a device after its model, so two devices on one server
-with the same driver define one device, and the second driver breaks
-the first. Activation refuses such a pair: `StartSite` or `PowerOn`
-fails, and its message names both devices and the driver, so a
-reservation never becomes `Ready` without its imaging camera.
+INDI names a device after its model, so two devices with the same
+driver on one server would define one INDI device, and the second
+driver would break the first. So `StartSite` or `PowerOn` fails, and
+its message names both devices and the driver.
 
-While such a pod is gone, its device is `Starting`, and the `Ready`
-message of the device or its `Guider` reads `Creating pod <name>`.
-During activation, before the steps create the pod, the device's
-message reads `Waiting for activation to create pod <name>`.
-When the operator creates the pod, it records a `PodCreated` Event on
-the device, the `Guider`, or the `Telescope` or `Observatory` whose
-INDI server the pod runs, and writes one line to its log. A new PHD2
-starts idle and not calibrated, so the holder calibrates and starts
-guiding again. A new INDI server starts each driver disconnected, and
-the operator connects each device again.
-
-Each resource except a `Reservation` posts an Event each time a condition first
-appears or changes its status or its reason, with the condition's
-reason and message. A `ParentFound` that is `False`, a `Ready` whose
-reason is `Error`, a `Safe` that is `False`, and an `AttentionNeeded`
-that is `True` are `Warning`s. `kubectl describe` lists them for an
-hour. A person's own write of `SetUp` posts nothing, and its expiry
-posts a `Normal` Event with the reason `Expired`.
+Each device, `Telescope`, `Observatory`, `Guider`, `OpticalTrain`, and
+`OpticalTube` posts an Event each time a condition first appears or
+changes its status or its reason. The Event has the condition's reason
+and message. The transition is a `Warning` Event when `ParentFound` is
+`False`, `Ready` is `False` with the reason `Error`, `StepFailed`, or
+`StepTimedOut`, `Safe` or `HorizonFound` is `False`, or
+`AttentionNeeded` is `True`. `kubectl describe` lists Events for an
+hour. Your own write of `SetUp` posts no Event, and its expiry posts a
+`Normal` Event with the reason `Expired`.
 
 ## Requirements and dawn
 
-Each resource with procedures can list conditions in `spec.requires`
-that must hold before a session starts it, as a pod's
-`readinessGates` hold a pod. A portable telescope lists the `SetUp`
-that a person writes once it is carried out and polar aligned, and a
-site can list a `WeatherStation`'s `Safe`, so nothing powers on in the
-rain. [Set up a portable telescope](/docs/guides/set-up-a-portable-telescope/)
-gives the steps.
+A resource with procedures can list conditions in `spec.requires` that
+must be true before a session starts it, much as a pod's
+`readinessGates` must be true before the pod is ready. A portable
+telescope requires the `SetUp` condition, which a person writes after
+the telescope is carried out and polar aligned. An observatory can
+require a `WeatherStation`'s `Safe`, so nothing powers on in the rain.
+[Set up a portable
+telescope](/docs/guides/set-up-a-portable-telescope/) gives the steps.
 
-Two steps hold the requirements, because each INDI server starts in
-its own step. The `Observatory`'s requirements, and those of the
-devices on its server, hold the `Wait` step, before the reservation
-takes its telescope, so the telescope and its devices stay `Idle`.
-The `Telescope`'s requirements, and those of its devices, hold the
-`Requires` step, after `StartSite`, so a telescope can require the
-`Safe` of a weather station that the observatory's server runs: the
-station reports `Safe` only once `StartSite` has connected it. The
-same requirement on the `Observatory` waits until dawn, because the
-station never starts. Each step's summary names every condition it
-waits for, such as `Waiting for Telescope east SetUp=True,
-WeatherStation lab Safe=True`, and a reference that names no resource
-appears there too, such as `spec.requires[0] of Telescope east: no
-WeatherStation roof`.
+The operator checks the requirements in two steps, because the two INDI
+servers start in different steps. `Wait` checks the requirements of the
+`Observatory` and of the devices on its server, before the reservation
+gets its telescope, so the telescope and its devices stay `Idle`.
+`Requires` checks the requirements of the `Telescope` and of its
+devices, after `StartSite`. So a telescope can require the `Safe` of a
+weather station on the observatory's server, because the station
+reports `Safe` only after `StartSite` connects it. The same requirement
+on the `Observatory` would wait until dawn, because the station would
+never start. The summary of each step lists every condition it waits
+for, such as `Waiting for Telescope east SetUp=True, WeatherStation lab
+Safe=True`. A requirement on a resource that does not exist is listed
+too, such as `spec.requires[0] of Telescope east: no WeatherStation
+roof`.
 
-A requirement gates only the start of a session. A condition that
-turns `False` once the equipment runs changes nothing here, and a
-[trigger](/docs/concepts/procedures/#triggers) acts on it, such as
+A requirement controls only whether a session starts. When a condition
+turns `False` while the equipment runs, a
+[trigger](/docs/concepts/procedures/#triggers) can act on it, such as
 parking the dome in bad weather.
 
-A reservation that still waits in either step at the first
-astronomical dawn after the wait began ends. Astronomical dawn is
-when the sun rises through 18 degrees below the horizon at the
-`Observatory`'s `spec.location`, the end of a dark night. The `Wait`
-step's wait begins at `spec.start`, or when the step starts if that
-is later, and the `Requires` step's when it starts. The step is
-`Skipped` with a summary such as `Dawn came at
-2026-10-13T08:44:52Z while waiting for Telescope east SetUp=True, so
-the session did not start`, the reservation deactivates, and it is
-`Released` with the telescope's equipment never powered on. The
-`Deactivating` or `Released` Event gives the same reason. Where the
-sun never reaches 18 degrees below the horizon, in the white nights
-of a high-latitude summer, the night ends at the sun's lowest point,
-and in a polar night, where it never rises that far, at its highest.
+A reservation that is still waiting in either step at the first
+astronomical dawn after its wait began ends. Astronomical dawn is when
+the sun rises through 18 degrees below the horizon at the
+`Observatory`'s `spec.location`. The wait in `Wait` begins at
+`spec.start`, or when the step starts if that is later. The wait in
+`Requires` begins when the step starts. At dawn the step is `Skipped`
+with a summary such as `Dawn came at 2026-10-13T08:44:52Z while waiting
+for Telescope east SetUp=True, so the session did not start`. The
+reservation deactivates and becomes `Released`, and the telescope's
+equipment never powers on. The `Deactivating` and `Released` Events
+give the same reason. Where the sun stays above 18 degrees below the
+horizon all night, as in a high-latitude summer, the night ends at the
+sun's lowest point. In a polar night, where the sun never rises that
+far, it ends at the sun's highest point.
 
 ## The outbox
 
-A camera's driver writes a frame to a file only when a client asks it
-to keep frames, and it writes the file to the pod's `/tmp`, which the
-pod loses when it stops. To keep the frames, name a
-`PersistentVolumeClaim` of the reservation's namespace in
-`spec.outbox`:
+A camera's driver saves a frame to a file only when a client asks it
+to, and it writes the file to the pod's `/tmp`, which is lost when the
+pod stops. To keep the frames, set `spec.outbox` to a
+`PersistentVolumeClaim` in the reservation's namespace:
 
 ```yaml
 spec:
@@ -203,251 +204,226 @@ spec:
     claimName: east-frames
 ```
 
-The claim is yours, so the frames stay from night to night in the
-place you chose. A volume on the machine at the pier keeps the frames
-off the network while the night runs. A network share works too, but a
-frame written straight to a share can make the next exposure wait,
-and the wait repeats all night.
+You own the claim, so the frames stay from night to night in the
+storage you chose. A volume on the machine at the pier keeps the frames
+off the network during the night. A network share also works, but a
+slow write to the share can delay the next exposure.
 
-`PowerOn` reads the claim before it creates a pod, and fails with a
-summary that names the claim and the namespace when the claim does
-not exist. Each `Camera` of the telescope mounts the claim at
-`/outbox`, except a camera that a `Guider` guides with, because that
-camera sends its frames to PHD2 and writes no file. The driver runs as
-user and group 1000, and a new volume is often owned by root, so the
-camera's pod sets `fsGroup: 1000` with `fsGroupChangePolicy:
-OnRootMismatch`. The kubelet then gives the driver's group write
-access, and walks a large volume only when the owner of its root does
-not match. A claim that exists and that the camera's node cannot
-mount, such as a `ReadWriteOnce` volume bound on another node, leaves
-the camera's pod `Pending`, and the summary of `StartDevices` gives
-the scheduler's message.
+When the claim does not exist, `PowerOn` fails before it creates a pod,
+with a summary that names the claim and the namespace. Each `Camera` of
+the telescope mounts the claim at `/outbox`, except a camera that a
+`Guider` uses, because that camera sends its frames to PHD2 and writes
+no file. The driver runs as user and group 1000, and a new volume is
+often owned by root, so the camera's pod sets `fsGroup: 1000` with
+`fsGroupChangePolicy: OnRootMismatch`. The kubelet then gives group
+1000 write access to the volume, and changes ownership across the
+volume only when its root directory has the wrong owner. When the
+camera's node cannot mount the claim, such as a `ReadWriteOnce` volume
+that is bound on another node, the camera's pod stays `Pending`, and
+the summary of `StartDevices` gives the scheduler's message.
 
-The claim's access mode decides which pods can mount it at once. A
-`ReadWriteOnce` claim lets every pod on the node that holds the volume
-mount it. A `ReadWriteOncePod` claim lets one pod in the cluster mount
-it, so it works only for a telescope with one imaging camera and a
-holder that mounts nothing. A second imaging camera's pod stays
-`Pending`. When `astrophotography-operator` holds the reservation, its
-worker pod mounts the outbox beside the camera's pod, so a
-`ReadWriteOncePod` claim leaves the worker `Pending`. Use
-`ReadWriteOnce` or `ReadWriteMany`, as [Image a
+The claim's access mode decides which pods can mount it at once. Every
+pod on the volume's node can mount a `ReadWriteOnce` claim. Only one
+pod in the cluster can mount a `ReadWriteOncePod` claim, so it works
+only for a telescope with one imaging camera and a holder that mounts
+nothing: a second imaging camera's pod stays `Pending`. When
+`astrophotography-operator` runs the session, its worker pod also
+mounts the outbox, and a `ReadWriteOncePod` claim leaves the worker
+`Pending`. Use `ReadWriteOnce` or `ReadWriteMany`, as [Image a
 target](https://liken.sh/astrophotography/docs/guides/image-a-target/)
 does.
 
-`Configure` then sets the driver's `UPLOAD_DIR` to the directory of
-the camera's name in the outbox, such as `/outbox/east-main`, and its
-`UPLOAD_MODE` to `UPLOAD_BOTH`, so each frame lands in the outbox and
-KStars still receives it. The driver creates the directory when it
-saves the first frame. A driver numbers its files from the ones it
+`Configure` sets the driver's `UPLOAD_DIR` to a directory named after
+the camera inside the outbox, such as `/outbox/east-main`, and sets
+`UPLOAD_MODE` to `UPLOAD_BOTH`, so each frame is saved in the outbox
+and KStars still receives it. The driver creates the directory when it
+saves the first frame. A driver numbers its files from the files it
 finds in its directory, and a `Camera`'s name is unique in its
-namespace, so two cameras that write to one claim, on one telescope or
-on two, never choose the same file name. `Configure` leaves
-`UPLOAD_PREFIX` as the driver has it. The holder can change the mode and the directory afterward: Ekos
-writes its own upload settings when it captures, and
+namespace, so two cameras that write to one claim never choose the same
+file name. `Configure` leaves `UPLOAD_PREFIX` at the driver's value.
+The holder can change the mode and the directory afterward: Ekos writes
+its own upload settings when it captures, and
 `astrophotography-operator` chooses a directory for each target. With
-no outbox, the operator does not touch the upload settings.
+no outbox, the operator does not change the upload settings.
 
-The session records the outbox, so an edit of `spec.outbox` takes
-effect at the next session. A new pod in the middle of an exposure
-would lose the exposure.
+An edit of `spec.outbox` takes effect at the next session, because a
+new camera pod in the middle of an exposure would lose the exposure.
 
 ## Editing devices during a session
 
-From the step that starts a telescope's INDI server, `PowerOn`, until
-the reservation is `Released`, the server runs the devices that the
-tree placed on it when it started, and no others. The observatory's
-server does the same from `StartSite`, while a reservation of any of
-its telescopes holds it. The operator refuses no edit, and an edit
-that would change which devices a server runs takes effect when the
-session ends:
+From `PowerOn` until the reservation is `Released`, the telescope's
+server runs the devices that it started with, and no others. The
+observatory's server works the same way from `StartSite`, while a
+reservation of any of its telescopes holds it. The operator accepts
+every edit, but an edit that would change which devices a server runs
+takes effect when the session ends:
 
-- A device that a person moves to another telescope, another train,
-  or the shelf stays where it runs. Its driver, its pod, and its power
-  do not change, and it stays connected. Its `ParentFound` condition
-  is `True` with the reason `MovePending` and a message such as
-  `Moves to OpticalTrain west-imaging when Reservation east-tonight
-  ends`, and the condition's Event records the edit. The release
-  stops the device as one of its own: its `deactivation` runs, it
-  disconnects, `PowerOff` switches its output off, and its pod goes.
-  The next session of the telescope that the device names starts it
-  there. A train that a person deletes leaves its devices on the
-  server the same way.
+- A device that a person moves to another telescope, another train, or
+  out of every parent keeps running where it is. Its driver, its pod, and its power do not change, and
+  it stays connected. Its `ParentFound` condition is `True` with the
+  reason `MovePending`, and a message such as `Moves to OpticalTrain
+  west-imaging when Reservation east-tonight ends`. At the end of the
+  session the operator stops it with the session's other devices: its
+  `deactivation` runs, it disconnects, `PowerOff` switches its output
+  off, and its pod is deleted. The next session of its new telescope
+  starts it there. The devices of a train that a person deletes keep
+  running in the same way.
 - Any other edit of a device that the session started, such as of its
-  `spec.power`, its driver, or its claim, waits for the end of the
-  session too. So does an edit of the `Telescope`'s
-  `spec.observatory`, of its `OpticalTrain`s, of the `OpticalTube`s of
-  those trains, of its `Guider`, of the reservation's
-  `spec.outbox`, and of `spec.fitsKeywords` at every level. Before the session starts a
-  server, the operator records in the reservation's `status.session`
-  what it acts on: each device's parents, driver, power, and claim,
-  whether a `Guider` guides with it, the telescope's observatory,
-  trains, tubes, and `Guider`s, the reservation's outbox, and the
-  merged FITS keywords of each imaging camera. `StartSite` records the observatory
-  and the devices of its server, and `PowerOn` records the rest. Each
-  step writes its part once, and only the retry of a failed activation
-  step writes it again, from the specs as they are then. Until
-  the session ends, the operator reads the record and not the spec. So the release switches off the output that the
-  session switched on, a camera whose driver comes back gets the
-  `SCOPE_INFO` of the tube that the session started with, and PHD2
-  keeps its pod and its calibration. A tube's status still shows the
-  lengths in its spec.
-- The reservation's `EditsPending` condition shows when an edit of
-  the outbox or of a FITS keyword waits. It is `False` with the reason
-  `NoEditPending` while the record holds what the specs give now. An
-  edit of `spec.outbox`, or of a `spec.fitsKeywords` that changes the
-  merged list of an imaging camera, turns it `True` with the reason
-  `EditPending`, and its message names each change, such as
-  `spec.outbox.claimName changes from frames to nightly at the next
-  session`. Each change of its status posts one Event. A keyword that a
-  more specific level replaces changes no merged list, so its edit
-  leaves the condition `False`.
-- A device's settings, such as a camera's gain, the `Observatory`'s
-  location, and the procedures of every resource are not in the
-  record, because a person changes them during a session on purpose.
-  The operator writes the settings and the location from the spec
-  when a device's driver comes back.
-- A device that a person adds to the telescope, a train, or the
-  observatory of a session, by creating it or by naming its parent,
-  does not start. That includes an observatory that had no devices
-  when the session started. It is `Idle`, and its `Ready` message reads
-  `Starts at the next reservation, after Reservation east-tonight
-  ends`. The next session starts it. A resource that another
-  resource's driver serves, such as the `FilterWheel` of a camera,
-  waits the same way, and so does a `Guider` that a person creates
-  for the telescope. The record names each object by its UID, so a
-  device, a train, a tube, or a `Guider` that a person deletes and
-  creates again with the same name is a new object, and it waits too.
-- A device that a person deletes while the reservation is `Ready`
-  leaves at once, as
-  [Deleting a running resource](#deleting-a-running-resource)
-  describes. An `OpticalTrain`, an `OpticalTube`, or a `Guider` that a
-  person deletes is gone at once too: a `Guider` whose train is gone
-  turns to `Error`, and a camera whose train or tube is gone gets no
-  `SCOPE_INFO` when its driver comes back.
+  `spec.power`, its driver, or its claim, also waits for the end of the
+  session. So does an edit of the `Telescope`'s `spec.observatory`, of
+  its `OpticalTrain`s, of the tubes of those trains, of its `Guider`,
+  of the reservation's `spec.outbox`, and of `spec.fitsKeywords` on any
+  resource. When a session starts a server, the operator records in the
+  reservation's `status.session`:
+  - each device's parents, driver, power, and claim, and whether a
+    `Guider` uses it
+  - the telescope's observatory, trains, tubes, and `Guider`s
+  - the reservation's outbox
+  - the merged FITS keywords of each imaging camera
 
-An eviction does not change the set either. The record is in the
-reservation and not on the pods, so when an eviction deletes one pod
-of the server or every pod, the operator creates the pods again from
-the record. They run the drivers, the power, and the claims that the
-session started with, and a device added during the session still
+  `StartSite` records the observatory and the devices of its server,
+  and `PowerOn` records the rest. Only the retry of a failed activation
+  step records them again. Until the session ends, the operator acts on
+  the record and not on the spec. So deactivation switches off the
+  outputs that the session switched on, a camera whose driver restarts
+  gets the `SCOPE_INFO` of the tube that the session started with, and
+  PHD2 keeps its pod and its calibration. A tube's status still shows
+  the lengths in its spec.
+- The reservation's `EditsPending` condition shows when an edit of the
+  outbox or of a FITS keyword waits for the next session. It is `False`
+  with the reason `NoEditPending` while the record matches the specs.
+  An edit of `spec.outbox`, or an edit of `spec.fitsKeywords` that
+  changes an imaging camera's merged keywords, sets it `True` with the
+  reason `EditPending`. Its message lists each change, such as
+  `spec.outbox.claimName changes from frames to nightly at the next
+  session`. Each change of its status posts an Event. An edit of a
+  keyword that a more specific resource overrides changes no merged
+  keywords, so the condition stays `False`.
+- A device's settings, such as a camera's gain, the `Observatory`'s
+  location, and the procedures of every resource are not in the record,
+  because you may change them during a session on purpose. The operator
+  writes the settings and the location again from the spec when a
+  device's driver restarts.
+- A device that you add to the telescope, a train, or the observatory
+  during a session, by creating it or by setting its parent, does not
+  start until the next session. This includes the first device of an
+  observatory that had none. The device is `Idle`, and its `Ready`
+  message reads `Starts at the next reservation, after Reservation
+  east-tonight ends`. A resource that another resource's driver serves,
+  such as the `FilterWheel` of a camera, and a new `Guider` of the
+  telescope wait in the same way. The record identifies each object by
+  its UID, so a device, train, tube, or `Guider` that you delete and
+  create again with the same name also waits.
+- A device that you delete while the reservation is `Ready` leaves at
+  once, as [Deleting a running resource](#deleting-a-running-resource)
+  describes. A deleted `OpticalTrain`, `OpticalTube`, or `Guider` is
+  also gone at once. A `Guider` whose train is gone is `Error`, and a
+  camera whose train or tube is gone gets no `SCOPE_INFO` when its
+  driver restarts.
+
+When an eviction deletes some or all of a server's pods, the operator
+creates them again from the record, with the drivers, power, and claims
+that the session started with. A device added during the session still
 waits.
 
-The reservations of several telescopes in one observatory share its
-server, and each reservation writes only its own status. So each one
-records the observatory's devices when its `StartSite` begins. A
-reservation that starts while another holds the server records the
-devices that the other recorded, and the operator reads the union of
-the records of every reservation that holds its telescope. The record
-of the observatory's server stays while any of them holds it, in
-whatever order they end. The operator reads a reservation's record
-only while the reservation holds its telescope, so the record of a
+The reservations of several telescopes in one observatory share the
+observatory's server. Each reservation records the observatory's
+devices when its `StartSite` begins, and a reservation that starts
+while another holds the server copies the other's record. So the
+observatory's server keeps the same devices while any of those
+reservations holds it, in whatever order they end. The record of a
 `Released` reservation changes nothing.
-
-So each device runs on one server at a time. A device that moved
-between two running servers would need one server to release it while
-the other started it, and the steps of both reservations to agree on
-where it was at each moment. A device on a telescope with no active
-reservation changes nothing that runs.
 
 ## Deleting a running resource
 
 The operator adds the finalizer `observatory.liken.sh/deactivate` to
 each resource that it runs something for, so a delete waits until the
-operator stopped it:
+operator has stopped it:
 
-| Resource | Holds the finalizer |
+| Resource | The finalizer stays |
 |---|---|
 | `Reservation` | from its first step until its deactivation steps are done |
-| A device | from just before the operator creates its pod until the pod is gone and no held server runs the device |
-| `Telescope` | from when a reservation takes it in `Wait` until that reservation is `Released` |
+| A device | from just before the operator creates its pod until the pod is gone and no server that a reservation holds runs the device |
+| `Telescope` | from when a reservation gets it in `Wait` until that reservation is `Released` |
 | `Observatory` | while a reservation holds any of its telescopes |
 
-A device that a person deletes while a reservation is `Ready` leaves
-its server, and the server and the other devices on it keep running.
-When its `Telescope` or `Observatory` is `Active`, and the device ran
-its `activation`, the operator first runs its `deactivation` through
-its driver, so a dust cap closes and a dome parks. A `deactivation`
+A device that you delete while a reservation is `Ready` leaves its
+server, and the server and the other devices on it keep running. When
+the device's `Telescope` or `Observatory` is `Active` and the device
+ran its `activation`, the operator first runs the device's
+`deactivation`, so a dust cap closes and a dome parks. A `deactivation`
 that fails or times out posts a `ProcedureFailed` Warning, and the
-delete goes on. A device that is not connected skips its actions.
-Then the operator stops the device's driver on the running server and
-posts a `DriverStopped` Event on the `Telescope` or the `Observatory`.
-It deletes the device's pod, its `Service`, and its `ResourceClaimTemplate`,
-and switches off the output that the device's `spec.power` names,
-unless another device that a running server runs names the same
-output. The `PodDeleted` Event on the device says whether the output
-went off. Then the operator removes the finalizer, and the device is
-gone. A device deleted while the reservation activates or is `Failed`
-goes at a retry, when the reservation is `Ready`, or in its release. A
-device deleted before the `Activation` step ran its `activation` goes
-with no procedure.
+delete goes on. A device that is not connected skips its actions. Then
+the operator stops the device's driver on the running server and posts
+a `DriverStopped` Event on the `Telescope` or the `Observatory`. It
+deletes the device's pod, `Service`, and `ResourceClaimTemplate`, and
+switches off the output in the device's `spec.power`, unless a device
+on a running server uses the same output. The `PodDeleted` Event on the
+device says whether the output was switched off. Then the operator
+removes the finalizer. A device deleted while the reservation is
+activating or `Failed` is removed at a retry, when the reservation
+becomes `Ready`, or when it is released. A device deleted before the
+`Activation` step ran its `activation` is removed with no procedure.
 
-When a person deletes a reservation together with devices or the
+When you delete a reservation together with its devices or the
 resources that place them, as `kubectl delete -f` of a whole inventory
-does, the reservation's deactivation steps find each device on the
-server where its driver's pod still runs, and not through its parents.
-This holds for a deleted device and for a device that stays. A device
-that names a `spec.opticalTrain` runs in the train tier, and any other
-device runs in the tier of its telescope or observatory. An
-`OpticalTrain` carries no finalizer, so it is gone at once. Its dust
+does, the deactivation steps find each device on the server where its
+driver's pod still runs, not through its parents. A device that sets
+`spec.opticalTrain` deactivates with the train's devices, and any other
+device with the devices of its telescope or observatory. An
+`OpticalTrain` has no finalizer, so it is gone at once, but its dust
 cap still closes, its flat panel still goes dark, and its camera still
-aborts its exposure, warms, and disconnects in order, whether a person
-deleted those devices too or not. A deleted `Dome` parks the same way.
-The server's record names each such device, and the finalizer keeps a
-deleted one while its pod runs, so `StopDevices` stops the driver of a
-deleted device and leaves its pod. `PowerOff` then switches off the
-output that the record names, and deletes the pod before the server's
-pod. A deleted `Switch` switches
-its outputs off the same way, and so does a `Switch` that a person
-moves to another telescope during the session, because its pod still
-runs on the server it left. A deleted `Dome` disconnects in
-`StopSite` before the observatory's server stops. A `Guider`
-carries no finalizer either, so it is gone at once, and `StopWork` finds
-its PHD2 by the guider's pod on the telescope's server, and stops it
-there.
+aborts its exposure, warms, and disconnects in order, whether you
+deleted those devices or not. A deleted `Dome` parks in the same way
+and disconnects in `StopSite`, before the observatory's server stops.
+`StopDevices` stops the driver of a deleted device but leaves its pod,
+which the finalizer keeps. `PowerOff` then switches off the output that
+the record names, and deletes the pod before the server's pod. A
+deleted `Switch` switches its outputs off in the same way, and so does
+a `Switch` that you moved to another telescope during the session. A
+`Guider` has no finalizer either, so it is gone at once, and `StopWork`
+finds its PHD2 through the guider's pod on the telescope's server.
 
-A `Telescope` that a person deletes during a session ends the
-reservation that holds it, as `spec.end` does. The deactivation steps
-run, from `StopWork`, on the telescope and its devices, which stay while
-the finalizer holds them. The summary of `StopWork` begins with
-`Telescope east was deleted`, and the `Deactivating` Event on the
-reservation ends with the same words. When the reservation is
-`Released`, the operator removes the finalizer, and the telescope is
-gone. A deleted `Observatory` ends the reservation of each of its
-telescopes the same way, and goes when the last one is `Released`.
-Each device of a deleted telescope or observatory stays: only the
-resource that a person deleted goes.
+Deleting a `Telescope` during a session ends the reservation that holds
+it, as `spec.end` does. The deactivation steps run on the telescope and
+its devices, starting at `StopWork`, while the finalizer keeps the
+telescope. The summary of `StopWork` begins with `Telescope east was
+deleted`, and the `Deactivating` Event on the reservation ends with the
+same words. When the reservation is `Released`, the operator removes
+the finalizer and the telescope is gone. Deleting an `Observatory` ends
+the reservation of each of its telescopes in the same way, and the
+observatory is gone when the last reservation is `Released`. The
+devices of a deleted telescope or observatory are not deleted.
 
 A new reservation of a telescope that is being deleted, or whose
-observatory is being deleted, waits in `Wait`, and its summary reads
+observatory is being deleted, waits in `Wait` with the summary
 `Telescope east is being deleted`. When the telescope is gone, the
 summary reads `Missing Telescope east`, as for a telescope that never
 existed.
 
-A device with no pod, such as one on the shelf, one of a telescope
-with no reservation, or one whose reservation is `Released`, carries
-no finalizer, and a delete removes it at once. So do a `Telescope`
-that no reservation holds and an `Observatory` with no held
-telescope.
+A resource that runs nothing has no finalizer, and a delete removes it
+at once. That is a device that is not installed, a device of a telescope with no
+reservation or with a `Released` one, a `Telescope` that no reservation
+holds, and an `Observatory` none of whose telescopes a reservation
+holds.
 
-While the operator is down, a delete of a running resource waits for
-it, and the operator does the work when it returns. A person can
-remove the finalizer by hand:
+While the operator is down, a delete of a running resource waits, and
+the operator finishes it when it starts again. You can remove the
+finalizer by hand:
 
 ```sh
 kubectl patch dustcap east -n observatory --type=merge -p '{"metadata":{"finalizers":null}}'
 ```
 
-That skips the device's `deactivation`. Kubernetes then deletes its
-pod, its `Service`, its `ResourceClaimTemplate`, and the pod's
-`ResourceClaim` by garbage collection,
-before the operator stops its driver on the running server. The same
-patch on a held `Telescope` lets it go at once, and Kubernetes deletes
-its server's pod and `Service`. The reservation runs on until it
-ends, and then reads a missing telescope: its `Deactivation` step
-skips every procedure, and
-`StopSite` leaves the observatory's server to the operator's sweep,
-which stops it with no procedure. On an `Observatory`, the patch lets
-it go at once, and the reservation runs on until it ends. Its
-`Deactivation` step then reads a missing observatory and skips every
-procedure.
+This skips the device's `deactivation`. Kubernetes garbage collection
+deletes the device's pod, its `Service`, its `ResourceClaimTemplate`,
+and the pod's `ResourceClaim`, and then the operator stops the device's
+driver on the running server. The same patch on a `Telescope` that a
+reservation holds deletes it at once, and Kubernetes deletes its
+server's pod and `Service`. The reservation runs until it ends and
+then finds the telescope missing, so its `Deactivation` step skips
+every procedure. The operator then deletes the pods of the
+observatory's server with no procedure, once no reservation holds that
+server. The same patch on an `Observatory` deletes it at once, and the
+reservation runs until it ends. Its `Deactivation` step then finds the
+observatory missing and skips every procedure.

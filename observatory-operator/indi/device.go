@@ -6,24 +6,24 @@ import (
 	"slices"
 )
 
-// connection is the standard property that connects a driver to its
-// hardware. Every INDI driver defines it, with the members CONNECT and
-// DISCONNECT under the rule OneOfMany.
+// connection is the standard INDI property that connects a driver to
+// its hardware. Every INDI driver defines it as a switch vector with
+// the members CONNECT and DISCONNECT and the rule OneOfMany.
 const connection = "CONNECTION"
 
 // ConnectDevice connects a device to its hardware through CONNECTION
-// and waits until the driver reports the result. It first waits for the
-// device to define CONNECTION, so a caller can call it as soon as the
-// device's pod starts. When CONNECT is On and the state is Ok, it sends
-// nothing. A driver that cannot reach its hardware answers with Alert,
-// which returns an AlertError. ctx bounds the whole wait.
+// and waits for the driver's result. It first waits for the device to
+// define CONNECTION, so a caller can call it as soon as the device's
+// pod starts. When CONNECT is already On and the state is Ok, it sends
+// nothing. When the driver cannot reach its hardware and reports
+// Alert, it returns an AlertError. ctx bounds the whole wait.
 func (c *Client) ConnectDevice(ctx context.Context, device string) error {
 	return c.setConnection(ctx, device, "CONNECT")
 }
 
-// DisconnectDevice disconnects a device from its hardware, the same
-// way ConnectDevice connects it. The driver keeps running, and it
-// deletes the properties that it defined on connect.
+// DisconnectDevice disconnects a device from its hardware in the same
+// way. The driver keeps running and deletes the properties that it
+// defined when it connected.
 func (c *Client) DisconnectDevice(ctx context.Context, device string) error {
 	return c.setConnection(ctx, device, "DISCONNECT")
 }
@@ -47,28 +47,34 @@ func (c *Client) setConnection(ctx context.Context, device, member string) error
 		return err
 	}
 	if on := p.On(); !slices.Equal(on, []string{member}) {
-		return fmt.Errorf("indi: %s answered %s with %v On, not %s", device, connection, on, member)
+		return fmt.Errorf("%s reports %v On in %s, want only %s", device, on, connection, member)
 	}
 	return nil
 }
 
-// Sync waits until the client holds everything that a device's driver
-// wrote before the call, such as the properties that a driver defines
-// just after it reports CONNECTION, with no timer. It asks for the
-// device's properties with getProperties. indiserver hands a
+// Sync waits until the client has received everything that a device's
+// driver wrote before the call, such as the properties that a driver
+// defines just after it reports CONNECTION. It waits on the driver's
+// reply, not on a timer.
+//
+// Sync sends getProperties for the device. indiserver passes a
 // getProperties that names a device to that device's driver
-// (indiserver/ClInfo.cpp), and the driver answers it by defining its
-// properties again, CONNECTION among them (DefaultDevice::ISGetProperties
-// in libs/indibase/defaultdevice.cpp). A driver answers in the order it
-// reads, so its answer comes after everything it wrote before, and the
-// next definition of CONNECTION shows that the client has applied all
-// of it. An update of CONNECTION does not count: a client such as
-// KStars can connect the device again during the wait, and the
-// driver's Busy and Ok come before the properties that the connection
-// defines. Each Sync makes the driver define every property again, and
-// indiserver sends that burst to every client, so a caller syncs only
-// when it has a reason to. It fails when the connection ends or the
-// device deletes CONNECTION, and ctx bounds the wait.
+// (indiserver/ClInfo.cpp), and the driver answers by defining its
+// properties again, CONNECTION among them
+// (DefaultDevice::ISGetProperties in libs/indibase/defaultdevice.cpp).
+// The driver handles requests in the order it reads them, so its reply
+// comes after everything it wrote earlier, and the next definition of
+// CONNECTION that the client receives marks the end of it.
+//
+// An update of CONNECTION does not count as the reply. A client such as
+// KStars can connect the device during the wait, and the driver sends
+// the Busy and Ok updates before the properties that the connection
+// defines.
+//
+// Each Sync makes the driver define every property again, and
+// indiserver sends that burst to every client, so call Sync only when
+// you need it. Sync fails when the connection ends or the device
+// deletes CONNECTION. ctx bounds the wait.
 func (c *Client) Sync(ctx context.Context, device string) error {
 	c.mutex.Lock()
 	opened, sequence := c.store.connection, c.store.sequence

@@ -1,7 +1,7 @@
 package main
 
-// The park locks of the example's Observatory, which has a dome, across
-// the observatory's server and the servers of its telescopes.
+// These tests run the park locks of the example's Observatory: its dome
+// on the observatory's server, and a mount on each telescope's server.
 
 import (
 	"slices"
@@ -13,7 +13,7 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The relayed reports, as the fake records them.
+// The relayed reports, as the fake INDI server records them.
 const (
 	domeUnparkedToEast  = "east-telescope Dome Simulator.DOME_PARK PARK=Off UNPARK=On"
 	domeParkedToEast    = "east-telescope Dome Simulator.DOME_PARK PARK=On UNPARK=Off"
@@ -21,7 +21,8 @@ const (
 	mountsParkedToLab   = "lab-observatory Telescope Simulator.TELESCOPE_PARK PARK=On UNPARK=Off"
 )
 
-// bothReady reserves both telescopes and waits until each is Ready.
+// bothReady reserves both telescopes and waits until both reservations
+// are Ready.
 func bothReady(t *testing.T) *world {
 	w := startWorld(t)
 	w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
@@ -31,8 +32,8 @@ func bothReady(t *testing.T) *world {
 	return w
 }
 
-// relayedLast waits until the last report that a server received
-// about one property is want.
+// relayedLast waits until the most recent relay to a server for one
+// property is want.
 func (w *world) relayedLast(server, property, want string) {
 	w.t.Helper()
 	w.until(time.Minute, "the last relay to "+server+" is not "+want, func() bool {
@@ -58,7 +59,7 @@ func TestTheOperatorWritesTheDomePolicies(t *testing.T) {
 			"west-telescope Telescope Simulator.DOME_POLICY DOME_IGNORED=Off DOME_LOCKS=On",
 		} {
 			if !slices.Contains(changes, want) {
-				t.Errorf("no change %q", want)
+				t.Errorf("the changes written to INDI do not include %q", want)
 			}
 		}
 		w.relayedLast("east-telescope", "DOME_PARK", domeUnparkedToEast)
@@ -129,8 +130,8 @@ func TestAMountDoesNotUnparkWhileTheDomeIsParked(t *testing.T) {
 	})
 }
 
-// A held telescope's mount whose driver stops reporting may be
-// unparked, so it keeps the dome from parking.
+// A mount whose driver stops reporting may be unparked, so the dome's
+// lock stays in force and the dome does not park.
 func TestAMountThatStopsReportingKeepsTheDomeUnparked(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -188,8 +189,9 @@ func TestARestartedMountIsRelayedTheDomeAgain(t *testing.T) {
 	})
 }
 
-// The Observatory's condition says what the operator relays, and that
-// the drivers keep the last relay while the operator is down.
+// The Observatory's LocksRelayed condition says what the operator
+// relayed, and that the drivers keep the last relayed state while the
+// operator is down.
 func TestTheObservatoryReportsTheRelay(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -205,7 +207,7 @@ func TestTheObservatoryReportsTheRelay(t *testing.T) {
 		want := "Relayed to Mount east that every dome is unparked: Dome lab; relayed to Dome lab that a mount is unparked or moving: Mount east. " +
 			"While observatory-operator is down, each driver keeps the last state that the operator relayed"
 		if c := siteLocks(t, w); c.Status != observatory.ConditionTrue || c.Message != want {
-			t.Errorf("LocksRelayed = %s %q\nwant True %q", c.Status, c.Message, want)
+			t.Errorf("the LocksRelayed condition is %s %q\nwant True %q", c.Status, c.Message, want)
 		}
 
 		w.api.deleteNamed(kindCollection(observatory.DomeKind), "lab")
@@ -215,8 +217,9 @@ func TestTheObservatoryReportsTheRelay(t *testing.T) {
 	})
 }
 
-// With no dome, nothing locks a mount. INDI's mount starts locked and
-// waits for a dome's report to unlock it, so the mount ignores the dome.
+// With no dome, nothing locks a mount. An INDI mount whose DOME_POLICY
+// is DOME_LOCKS stays locked until a dome reports, so the operator sets
+// it to DOME_IGNORED and relays nothing.
 func TestAnObservatoryWithNoDomeHasNoLocks(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -228,16 +231,15 @@ func TestAnObservatoryWithNoDomeHasNoLocks(t *testing.T) {
 			t.Errorf("DOME_POLICY is %q, want DOME_IGNORED On", got)
 		}
 		if got := w.indi.relays(); len(got) != 0 {
-			t.Errorf("relays = %v, want none", got)
+			t.Errorf("the relays are %v, want none", got)
 		}
 		if c := siteLocks(t, w); c.Type != "" {
-			t.Errorf("LocksRelayed = %s %q, want none", c.Status, c.Reason)
+			t.Errorf("the LocksRelayed condition is %s with reason %q, want none", c.Status, c.Reason)
 		}
 	})
 }
 
-// A refusal names every device that holds the lock.
-func TestARefusalNamesEveryUnparkedMount(t *testing.T) {
+func TestARefusalListsEveryUnparkedMount(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := bothReady(t)
@@ -273,18 +275,18 @@ func TestTheLastReleaseParksTheDome(t *testing.T) {
 			return !east && !west
 		})
 		if !slices.Contains(w.indi.changes(), "lab-observatory Dome Simulator.DOME_PARK PARK=On UNPARK=Off") {
-			t.Error("the dome was not asked to park")
+			t.Error("no DOME_PARK PARK=On change was written to the dome after both reservations were deleted, want one")
 		}
 		if got := eventsAbout(w.api, observatory.DomeKind, "lab", reasonDomeParkRefused); len(got) != 0 {
-			t.Errorf("events = %v, want none", got)
+			t.Errorf("the Events are %v, want none", got)
 		}
 	})
 }
 
-// A mount deleted together with its reservation holds the dome's lock
-// while its driver runs. So while an exposure holds the StopWork step, a
-// person's KStars cannot park the dome over the mount, which is still
-// unparked.
+// A mount that is deleted with its reservation keeps the dome's lock in
+// force while its driver runs. So while an exposure delays the StopWork
+// step, a person's KStars cannot park the dome over the mount, which is
+// still unparked.
 func TestAMountDeletedWithItsReservationHoldsTheDomeLock(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

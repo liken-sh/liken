@@ -1,8 +1,7 @@
 package main
 
-// The record of a resource's runs belongs to one object, not to one
-// name: an object deleted and created again with the same name starts
-// with no runs.
+// status.procedures belongs to one object, not to one name. A dome that
+// is deleted and created again with the same name starts with no runs.
 
 import (
 	"testing"
@@ -12,15 +11,15 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// recreate deletes one of the example's objects, waits until the
-// operator's store holds no object of that name, and creates it again
-// from the same spec, as `kubectl delete` and `kubectl apply` do.
+// recreate deletes an object, waits until the operator's snapshot no
+// longer has it, and creates it again from the same spec, as
+// `kubectl delete` and `kubectl apply` do.
 func (w *world) recreate(kind observatory.Kind, name string) {
 	w.t.Helper()
 	collection := kindCollection(kind)
 	object, ok := w.api.object(collection, name)
 	if !ok {
-		w.t.Fatalf("no %s %s", kind.Name, name)
+		w.t.Fatalf("the %s %s does not exist", kind.Name, name)
 	}
 	w.api.deleteNamed(collection, name)
 	w.until(time.Minute, kind.Name+" "+name+" is not gone", func() bool {
@@ -54,11 +53,11 @@ func TestARecreatedDomeStartsWithNoRunsOfTheOldOne(t *testing.T) {
 		w.settle()
 		dome, _ := decode[observatory.Dome](t, w.api, kindCollection(observatory.DomeKind), "lab")
 		if dome.Status.Phase != observatory.DeviceConnected || len(dome.Status.Procedures) == 0 {
-			t.Errorf("the new dome = %s with runs %s, want Connected with its own activation", dome.Status.Phase, mustJSON(dome.Status.Procedures))
+			t.Errorf("the recreated dome is %s with runs %s, want Connected with its own activation", dome.Status.Phase, mustJSON(dome.Status.Procedures))
 		}
 		for _, run := range dome.Status.Procedures {
 			if run.StartTime == nil || run.StartTime.Before(recreated) {
-				t.Errorf("the new dome holds a run of the old one: %s", mustJSON(run))
+				t.Errorf("the recreated dome holds a run of the old dome: %s", mustJSON(run))
 			}
 		}
 	})

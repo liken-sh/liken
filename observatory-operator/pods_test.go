@@ -1,11 +1,5 @@
 package main
 
-// The operator's pods and Services hold the properties that plan 03
-// measured on a test cluster with manifests written by hand: socat
-// serves each driver over a pipe, every container runs as user 1000 on
-// a read-only root, the server links one shim to each device, and the
-// server stops in 1 second.
-
 import (
 	"encoding/json"
 	"reflect"
@@ -29,8 +23,6 @@ func repository(image string) string {
 	return name
 }
 
-// eastDevices are three devices of the east telescope, as plan 03 ran
-// them.
 func eastDevices() []*device {
 	return []*device{
 		simulator(observatory.MountKind, "east", "indi_simulator_telescope"),
@@ -41,8 +33,6 @@ func eastDevices() []*device {
 
 var east = serverRef{observatory.TelescopeKind, "east"}
 
-// Every container runs as user 1000, on a read-only root, with no
-// capabilities, as plan 06's contract for a driver's image states.
 var wantSecurity = &securityContext{
 	RunAsNonRoot: true, RunAsUser: 1000, RunAsGroup: 1000,
 	AllowPrivilegeEscalation: false, ReadOnlyRootFilesystem: true,
@@ -56,13 +46,13 @@ func TestADevicePodServesItsDriverThroughSocat(t *testing.T) {
 			t.Parallel()
 			p, svc, claim, err := devicePod("observatory", east, d, false, "")
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("building the pod of %s: %v", d.name(), err)
 			}
 			if claim != nil {
-				t.Errorf("a simulator has a claim: %+v", claim)
+				t.Errorf("the simulator has the claim template %+v, want none", claim)
 			}
 			if len(p.Spec.Containers) != 1 {
-				t.Fatalf("containers = %+v", p.Spec.Containers)
+				t.Fatalf("the pod has the containers %+v, want one", p.Spec.Containers)
 			}
 			c := p.Spec.Containers[0]
 			cases := []struct {
@@ -70,8 +60,6 @@ func TestADevicePodServesItsDriverThroughSocat(t *testing.T) {
 				got, want any
 			}{
 				{"command", c.Command, []string{"/usr/bin/socat"}},
-				// pipes gives the driver a pipe for stdout, so it sends
-				// each BLOB as base64, which socat carries.
 				{"args", c.Args, []string{"TCP-LISTEN:7625,reuseaddr", "EXEC:" + d.object.Spec.Driver.Name + ",pipes"}},
 				{"ports", c.Ports, []containerPort{{Name: "driver", ContainerPort: 7625}}},
 				{"security", c.SecurityContext, wantSecurity},
@@ -97,10 +85,10 @@ func TestTheServerPodListsEachDeviceForTheShim(t *testing.T) {
 	t.Parallel()
 	p, svc, err := serverPod("observatory", east, "uid-east", eastDevices())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the server pod: %v", err)
 	}
 	if len(p.Spec.InitContainers) != 0 || len(p.Spec.Containers) != 1 {
-		t.Fatalf("pod spec = %s", mustJSON(p.Spec))
+		t.Fatalf("the pod spec is %s, want no init container and one container", mustJSON(p.Spec))
 	}
 	server := p.Spec.Containers[0]
 	cases := []struct {
@@ -108,8 +96,6 @@ func TestTheServerPodListsEachDeviceForTheShim(t *testing.T) {
 		got, want any
 	}{
 		{"drivers", p.Metadata.Annotations[annotationDrivers], "east-mount:7625\neast-main-camera:7625\neast-focuser:7625\n"},
-		// -r is the largest restart count that indiserver's atoi holds,
-		// because the count never resets.
 		{"server command", server.Command, []string{
 			"/indi-shim", "serve", "/etc/indi/devices/drivers", "/run/indi/drivers", "/tmp/indiserver.fifo",
 			"/usr/bin/indiserver", "-v", "-r", "2147483647",
@@ -149,11 +135,11 @@ func TestEveryObjectHasItsOwnerAndTheOperatorsLabels(t *testing.T) {
 	camera := simulator(observatory.CameraKind, "east-main", "indi_simulator_ccd")
 	devicePodBuilt, deviceService, _, err := devicePod("observatory", east, camera, false, "")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the device pod: %v", err)
 	}
 	server, serverService, err := serverPod("observatory", east, "uid-east", []*device{camera})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the server pod: %v", err)
 	}
 	cases := []struct {
 		object meta
@@ -173,39 +159,39 @@ func TestEveryObjectHasItsOwnerAndTheOperatorsLabels(t *testing.T) {
 				t.Errorf("owner references = %+v, want %s", refs, c.owner)
 			}
 			if c.object.Labels[labelManagedBy] != managedBy || c.object.Labels[labelRole] != c.role || c.object.Labels[labelServer] != "east-telescope" {
-				t.Errorf("labels = %v", c.object.Labels)
+				t.Errorf("labels are %v, want %s=%s, %s=%s, and %s=east-telescope", c.object.Labels, labelManagedBy, managedBy, labelRole, c.role, labelServer)
 			}
 		})
 	}
 }
 
-// A device on real hardware names a claim, and its pod makes its own
-// ResourceClaim from a template of it, so the claim ends with the pod.
+// A device with spec.claim gets a ResourceClaimTemplate, and its pod
+// creates its own ResourceClaim from it, so the claim is deleted with
+// the pod.
 func TestADeviceWithAClaimGetsAResourceClaimTemplate(t *testing.T) {
 	t.Parallel()
 	camera := simulator(observatory.CameraKind, "east-main", "indi_asi_ccd")
 	camera.object.Spec.Claim = json.RawMessage(`{"devices":{"requests":[{"name":"camera","exactly":{"deviceClassName":"usb.liken.sh"}}]}}`)
 	p, _, template, err := devicePod("observatory", serverRef{observatory.TelescopeKind, "east"}, camera, false, "")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the device pod: %v", err)
 	}
 	if template == nil || template.Metadata.Name != "east-main-camera" || template.Kind != "ResourceClaimTemplate" {
-		t.Fatalf("template = %+v", template)
+		t.Fatalf("the template is %+v, want a ResourceClaimTemplate named east-main-camera", template)
 	}
 	if mustJSON(template.Spec) != `{"spec":{"devices":{"requests":[{"exactly":{"deviceClassName":"usb.liken.sh"},"name":"camera"}]}}}` {
-		t.Errorf("template spec = %s", mustJSON(template.Spec))
+		t.Errorf("the template spec is %s, want the spec.claim of the Camera", mustJSON(template.Spec))
 	}
 	if len(p.Spec.ResourceClaims) != 1 || p.Spec.ResourceClaims[0].ResourceClaimTemplateName != "east-main-camera" ||
 		p.Spec.Containers[0].Resources == nil || p.Spec.Containers[0].Resources.Claims[0].Name != p.Spec.ResourceClaims[0].Name {
-		t.Errorf("the pod does not use the claim: %s", mustJSON(p.Spec))
+		t.Errorf("the pod spec is %s, want one resource claim from the template that the container uses", mustJSON(p.Spec))
 	}
 	if repository(p.Spec.Containers[0].Image) != "ghcr.io/liken-sh/indi-zwo" {
-		t.Errorf("image = %s", p.Spec.Containers[0].Image)
+		t.Errorf("the image is %s, want a ghcr.io/liken-sh/indi-zwo image", p.Spec.Containers[0].Image)
 	}
 }
 
-// Each object takes the name <resource-name>-<kind>, so kubectl get pods
-// lists one telescope's objects together.
+// A pod and its Service are named <resource-name>-<kind in lower case>.
 func TestEachObjectIsNamedForItsResourceThenItsKind(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -222,19 +208,19 @@ func TestEachObjectIsNamedForItsResourceThenItsKind(t *testing.T) {
 			t.Parallel()
 			p, svc, _, err := devicePod("observatory", east, simulator(c.kind, c.name, "indi_simulator_ccd"), false, "")
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("building the pod for the %s %s: %v", c.kind.Name, c.name, err)
 			}
 			if p.Metadata.Name != c.want || svc.Metadata.Name != c.want {
-				t.Errorf("pod %s and Service %s, want %s", p.Metadata.Name, svc.Metadata.Name, c.want)
+				t.Errorf("the pod is named %s and the Service %s, want both %s", p.Metadata.Name, svc.Metadata.Name, c.want)
 			}
 		})
 	}
 }
 
-// A Service name is a DNS label of 63 characters or fewer, and the
-// shims dial a device by its Service name. A resource whose generated
-// name breaks that rule is refused with a message that says how to fix
-// the name.
+// A Service name must be a DNS label of at most 63 characters, and
+// each shim connects to a device by its Service name. The operator
+// refuses a resource whose generated name breaks the rule, and the
+// error says how to fix the name of the resource.
 func TestANameThatIsNoServiceNameIsRefused(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -259,25 +245,24 @@ func TestANameThatIsNoServiceNameIsRefused(t *testing.T) {
 		t.Run(c.what, func(t *testing.T) {
 			t.Parallel()
 			if err := c.build(); err == nil || err.Error() != c.message {
-				t.Errorf("error = %v\nwant %s", err, c.message)
+				t.Errorf("the error is %v, want %s", err, c.message)
 			}
 		})
 	}
 }
 
-// The longest names that fit are accepted.
 func TestTheLongestNamesThatFitAreAccepted(t *testing.T) {
 	t.Parallel()
 	if _, _, _, err := devicePod("observatory", east, simulator(observatory.CameraKind, strings.Repeat("a", 56), "indi_simulator_ccd"), false, ""); err != nil {
-		t.Error(err)
+		t.Errorf("refusing a Camera name of 56 characters: %v", err)
 	}
 	if _, _, err := serverPod("observatory", serverRef{observatory.TelescopeKind, strings.Repeat("a", 53)}, "uid", nil); err != nil {
-		t.Error(err)
+		t.Errorf("refusing a Telescope name of 53 characters: %v", err)
 	}
 }
 
-// A pod's digest follows its spec, and a server's devices are not in
-// its spec, so the operator replaces no server whose devices changed.
+// A server's device list is an annotation outside the spec, so a
+// change of devices does not replace the server pod.
 func TestTheDigestOfAServerLeavesOutItsDevices(t *testing.T) {
 	t.Parallel()
 	east := serverRef{observatory.TelescopeKind, "east"}
@@ -286,12 +271,10 @@ func TestTheDigestOfAServerLeavesOutItsDevices(t *testing.T) {
 	one, _, _ := serverPod("observatory", east, "uid", []*device{mount})
 	two, _, _ := serverPod("observatory", east, "uid", []*device{mount, camera})
 	if !current(one, two) {
-		t.Errorf("digests: %v %v", one.Metadata.Annotations, two.Metadata.Annotations)
+		t.Errorf("the annotations are %v and %v, want the same digest", one.Metadata.Annotations, two.Metadata.Annotations)
 	}
 }
 
-// A device pod's digest follows its spec, so a device whose driver
-// changed gets a new pod.
 func TestTheDigestOfADevicePodFollowsItsDriver(t *testing.T) {
 	t.Parallel()
 	east := serverRef{observatory.TelescopeKind, "east"}
@@ -299,7 +282,7 @@ func TestTheDigestOfADevicePodFollowsItsDriver(t *testing.T) {
 	same, _, _, _ := devicePod("observatory", east, simulator(observatory.MountKind, "east", "indi_simulator_telescope"), false, "")
 	other, _, _, _ := devicePod("observatory", east, simulator(observatory.MountKind, "east", "indi_lx200generic"), false, "")
 	if !current(one, same) || current(one, other) {
-		t.Errorf("digests: %v %v %v", one.Metadata.Annotations, same.Metadata.Annotations, other.Metadata.Annotations)
+		t.Errorf("the annotations are %v, %v, and %v, want the first two to share a digest and the third to differ", one.Metadata.Annotations, same.Metadata.Annotations, other.Metadata.Annotations)
 	}
 }
 

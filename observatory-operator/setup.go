@@ -1,18 +1,18 @@
 package main
 
-// A person's SetUp. A person writes the SetUp condition into a
-// resource's status through the status subresource, as an outside
-// controller writes a pod's readiness gate, and the status writer,
-// which composes and replaces each status, must keep it as the person
-// wrote it. Plan 21 gives the design.
+// A person confirms that a resource is set up by writing the SetUp
+// condition through the status subresource, the way an outside
+// controller writes a pod's readiness gate. The status writer replaces
+// the whole status on each write, so it copies SetUp from the stored
+// status.
 //
-// A confirmation expires by itself, so nobody has to remember to
-// withdraw it in the morning: at status.setUpUntil when the person
-// wrote one, and otherwise at the first astronomical dawn after its
+// SetUp expires on its own, so nobody has to withdraw it in the
+// morning: at status.setUpUntil when the person wrote one, and
+// otherwise at the first astronomical dawn after its
 // lastTransitionTime at the resource's Observatory (dawn.go). The
-// operator then sets it False with the reason Expired, and the
-// transition posts one Event. The expiry is a clock, so the status
-// writer keeps a timer for the next one.
+// operator then sets it to False with the reason Expired. No watch
+// event arrives at that moment, so the status writer sets a timer for
+// the next expiry.
 
 import (
 	"fmt"
@@ -22,11 +22,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// keepSetUp answers a composed list of conditions with the stored
-// SetUp added as the person wrote it. The status writer composes each
-// status from what it observes, and SetUp is the one condition that a
-// person observes.
-func keepSetUp(stored, composed []observatory.Condition) []observatory.Condition {
+// withStoredSetUp appends the stored SetUp to the composed conditions, unless
+// they already have one.
+func withStoredSetUp(stored, composed []observatory.Condition) []observatory.Condition {
 	if c, ok := conditions.Find(stored, observatory.ConditionSetUp); ok {
 		if _, has := conditions.Find(composed, observatory.ConditionSetUp); !has {
 			composed = append(composed, c)
@@ -35,12 +33,13 @@ func keepSetUp(stored, composed []observatory.Condition) []observatory.Condition
 	return composed
 }
 
-// setUpExpiry answers when a SetUp that holds expires: at until when a
-// person wrote one, else at the first astronomical dawn after its
-// transition at a place, else never, which is the zero time. A
-// resource with no Observatory, such as a device on the shelf, has no
-// place, and its confirmation expires once it gets one, at the dawn
-// after the confirmation there.
+// setUpExpiry returns when a SetUp that is True expires: at until when
+// it is set, else at the first astronomical dawn after its
+// lastTransitionTime at place. It returns the zero time when SetUp is
+// not True, or when place is nil because the resource has no
+// Observatory, such as a device that is not installed in a telescope.
+// When such a device is installed later, its expiry is still the first
+// dawn after lastTransitionTime.
 func setUpExpiry(c observatory.Condition, until *time.Time, place *observatory.Location) time.Time {
 	switch {
 	case c.Status != observatory.ConditionTrue:
@@ -53,9 +52,10 @@ func setUpExpiry(c observatory.Condition, until *time.Time, place *observatory.L
 	return time.Time{}
 }
 
-// expireSetUp sets a SetUp that holds past its expiry False, with the
-// reason Expired, and answers the transition, which posts its Event
-// once the write lands.
+// expireSetUp sets a SetUp that is past its expiry to False with the
+// reason Expired. It returns the new condition, or nil when nothing
+// changed, so the caller posts the Event only after its status write
+// succeeds.
 func expireSetUp(list *[]observatory.Condition, until *time.Time, place *observatory.Location) *observatory.Condition {
 	c, ok := conditions.Find(*list, observatory.ConditionSetUp)
 	if !ok {
@@ -71,15 +71,14 @@ func expireSetUp(list *[]observatory.Condition, until *time.Time, place *observa
 	if !conditions.Set(list, next) {
 		return nil
 	}
-	held, _ := conditions.Find(*list, observatory.ConditionSetUp)
-	return &held
+	expired, _ := conditions.Find(*list, observatory.ConditionSetUp)
+	return &expired
 }
 
-// expiryTime answers the expiry of the SetUp in a composed list of
-// conditions, for status.setUpExpiryTime, or nil when no SetUp holds
-// or it never expires. The person's setUpUntil is absent when they let
-// the SetUp last until dawn, so without this field `kubectl get` could
-// not show when that SetUp ends.
+// expiryTime returns the value of status.setUpExpiryTime, or nil when
+// SetUp does not expire. A person who lets SetUp last until dawn leaves
+// setUpUntil unset, and this field is then the only place that `kubectl
+// get` shows when SetUp ends.
 func expiryTime(list []observatory.Condition, until *time.Time, place *observatory.Location) *time.Time {
 	c, ok := conditions.Find(list, observatory.ConditionSetUp)
 	if !ok {
@@ -93,9 +92,9 @@ func expiryTime(list []observatory.Condition, until *time.Time, place *observato
 	return &expiry
 }
 
-// nextExpiry answers the earlier of a time and the expiry of a stored
-// SetUp, when that expiry is still to come. The status writer waits
-// for the earliest one, because no watch event marks the moment.
+// nextExpiry returns the earlier of earliest and the stored SetUp's
+// expiry, when that expiry is in the future, for the status writer's
+// timer. A zero earliest means no expiry yet.
 func nextExpiry(earliest time.Time, stored []observatory.Condition, until *time.Time, place *observatory.Location) time.Time {
 	c, ok := conditions.Find(stored, observatory.ConditionSetUp)
 	if !ok {
@@ -111,8 +110,6 @@ func nextExpiry(earliest time.Time, stored []observatory.Condition, until *time.
 	return earliest
 }
 
-// placeOf answers the location of a resource's Observatory, or nil for
-// a resource that has none.
 func placeOf(t *tree, kind observatory.Kind, name string) *observatory.Location {
 	if site, ok := t.observatories[t.observatoryOf(kind, name)]; ok {
 		return &site.Spec.Location

@@ -1,29 +1,22 @@
 package main
 
-// A device leaves a running server when a person deletes it, and every
-// device leaves when the release stops it. A restart of the server
-// would disconnect every other device on it and end an exposure in
-// progress, so the server's pod does not change, and its drivers do.
-// The operator writes the server's devices in the annotation
-// annotationDrivers, one address on each line. The pod mounts the
-// annotation as a file through a downward API volume, and indi-shim,
-// which runs indiserver, reads the file on each change. It writes
-// `start <link>` for each device that joined and `stop <link>` for each
-// device that left to indiserver's -f fifo (indi/shim/serve.go).
+// A device leaves a running INDI server when a person deletes it, when
+// a retry changes the session's devices, and when a release stops the
+// telescope's devices. Restarting the server would disconnect every
+// other device on it and end an exposure in progress, so the operator
+// keeps the server's pod and changes only the drivers it runs.
 //
-// The annotation is metadata, so it is not in the digest of the pod's
-// spec, and a change of the devices replaces no pod. A change reaches
-// the shim without the operator running a command in the pod: the
-// kubelet remounts a downward API volume on each update of its pod, so
-// the file changes within about a second. A ConfigMap volume changes
-// only at the kubelet's next sync of the pod, up to about a minute
-// later.
+// The operator writes the server's device addresses, one per line, into
+// the pod annotation annotationDrivers. The pod mounts the annotation
+// as a file through a downward API volume, and indi-shim, which runs
+// indiserver, starts and stops drivers to match the file
+// (indi/shim/serve.go). An annotation is metadata, so the change does
+// not replace the pod. The kubelet updates a downward API volume when
+// the pod changes, while a ConfigMap volume changes only at the
+// kubelet's next periodic sync of the pod, which can be a minute later.
 //
-// A server's pod lists each device's driver when the pod is created,
-// so a pod that is gone and created again keeps its driver, and the
-// shim dials the new pod. A leaving device loses its driver first and
-// then its pod, so indiserver does not restart a shim whose pod is gone
-// (steady.go, deactivation.go).
+// A server pod that is created again starts with the drivers in its
+// annotation, which the operator sets when it creates the pod.
 
 import (
 	"context"
@@ -41,34 +34,30 @@ import (
 )
 
 // reasonDriverStopped is the reason of the Event on a Telescope or an
-// Observatory whose running server stopped the driver of a device that
-// a person deleted.
+// Observatory when its running server stops the driver of a device
+// that left it.
 const reasonDriverStopped = "DriverStopped"
 
-// driverStopLimit bounds the wait for a running server to report the
-// driver of a leaving device stopped. It is a clock. The shim stops the
-// driver about a second after the patch.
+// driverStopLimit is how long setDrivers waits for the server to
+// report that a leaving device's driver stopped.
 const driverStopLimit = 30 * time.Second
 
-// driversMemo records the annotation that the operator wrote last on
-// each server's pod. The store's copy of a pod can be older than the
-// operator's own patch. A pass that read the older copy would patch
-// again and post its Events again.
+// driversMemo records the annotation that the operator last wrote on
+// each server's pod. The operator's cached copy of a pod can be older
+// than its own patch, and a pass that read that copy would patch the
+// pod again and post its Events again.
 type driversMemo struct {
 	mu      sync.Mutex
 	written map[string]writtenDrivers
 }
 
-// writtenDrivers is one patch: the UID of the pod it changed, and the
-// annotation it wrote.
 type writtenDrivers struct {
 	uid, list string
 }
 
-// current answers the devices of a server's pod: the annotation that
-// the operator wrote last on this pod, or the store's copy of it. A
-// pod with another UID is a new pod, and the operator wrote nothing on
-// it yet.
+// current returns the value that the operator last wrote on a server's
+// pod, or the cached pod's annotation when it wrote none to a pod with
+// this UID. A pod created again under the same name has a new UID.
 func (m *driversMemo) current(p *pod) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -87,16 +76,16 @@ func (m *driversMemo) wrote(p *pod, list string) {
 	m.written[p.Metadata.Name] = writtenDrivers{uid: p.Metadata.UID, list: list}
 }
 
-// setDrivers writes the devices of a running server in its pod's
-// annotation, and answers the pods of the devices that left it. A
-// server whose pod is gone has nothing to change: the next pod starts
-// with the devices of the pod that ensure creates.
+// setDrivers writes the devices of a running server into its pod's
+// annotation and returns the pod names of the devices that left. When
+// the server's pod does not exist or is being deleted, it changes
+// nothing, because ensureServer creates the next pod with the current
+// devices.
 //
-// A deleted device that left while its parent is Active runs its
-// deactivation before its driver stops (leaves.go). setDrivers returns only after
-// the server reports the driver of each device that left stopped, or
-// after driverStopLimit, so the caller can delete those pods
-// (stopping).
+// A leaving device runs its deactivation before its driver stops
+// (leaves.go). setDrivers returns after the server reports each leaving
+// driver stopped, or after driverStopLimit, so the caller can then
+// delete those pods (see stopping).
 func (o *operator) setDrivers(ctx context.Context, report func(string), ref serverRef, devices []*device) (left []string, err error) {
 	want, err := driverList(devices)
 	if err != nil {
@@ -134,19 +123,17 @@ func (o *operator) setDrivers(ctx context.Context, report func(string), ref serv
 	return left, stopped()
 }
 
-// stopping opens a subscription to a server before the patch that
-// stops the drivers of the pods that left it, and answers a wait for
-// the server to report each of those drivers stopped. indiserver
-// deletes every property of a driver that exits, so the wait ends on
-// the delProperty of each driver's device.
+// stopping subscribes to the server's events before setDrivers patches
+// the annotation, so no event is lost, and returns a function that
+// waits until the server reports each leaving driver stopped. When a
+// driver exits, indiserver sends a delProperty for its device with no
+// property name.
 //
-// A pod that goes before its driver stops ends the driver's
-// connection. indiserver then reads EOF, starts the driver again, and
-// the shim's stop ends the new driver. The wait keeps the order of the
-// effects, not only of the API calls. The wait ends at
-// driverStopLimit, and the caller deletes the pods anyway, because a
-// shim that does not stop a driver must not hold the device's claim
-// until deactivation.
+// The caller deletes the device pods only after this wait, because a
+// driver whose device pod is deleted first reads EOF on its connection,
+// and indiserver starts it again. After driverStopLimit the wait ends
+// and the caller deletes the pods anyway, so a driver that does not
+// stop cannot keep a device's pod running.
 func (o *operator) stopping(ctx context.Context, t *tree, ref serverRef, left []string) (wait func() error, cancel func()) {
 	none := func() error { return nil }
 	server, open := o.servers.get(ref.String())
@@ -170,9 +157,9 @@ func (o *operator) stopping(ctx context.Context, t *tree, ref serverRef, left []
 		for e := range events {
 			switch {
 			case e.Kind == indi.Disconnected:
-				// The server or the connection ended. A new
-				// connection starts with the drivers of the
-				// annotation, which no longer lists these.
+				// No delProperty can arrive on a closed connection,
+				// and a restarted server starts only the drivers in
+				// the annotation.
 				return nil
 			case e.Kind == indi.Deleted && e.Property == "":
 				delete(gone, e.Device)
@@ -181,7 +168,7 @@ func (o *operator) stopping(ctx context.Context, t *tree, ref serverRef, left []
 				return nil
 			}
 		}
-		// The subscription ends with bounded.
+		// The subscription closed because bounded ended.
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -192,9 +179,8 @@ func (o *operator) stopping(ctx context.Context, t *tree, ref serverRef, left []
 	}, cancel
 }
 
-// definedBy answers the INDI device that a driver program defines on a
-// server, or "" while it defines none. DRIVER_EXEC holds the program's
-// name.
+// definedBy returns the INDI device whose DRIVER_INFO.DRIVER_EXEC is
+// the driver program, or "" when the driver has defined none yet.
 func definedBy(c *indi.Client, driver string) string {
 	for _, name := range c.Devices() {
 		info, ok := c.Property(name, "DRIVER_INFO")
@@ -208,9 +194,9 @@ func definedBy(c *indi.Client, driver string) string {
 	return ""
 }
 
-// podDriver answers the driver program that a device pod's socat
-// starts, from its EXEC address. The pod, not the device's spec, says
-// what runs: the spec can name another driver already, or be deleted.
+// podDriver returns the driver program from the EXEC address of a
+// device pod's socat. It reads the pod and not the device's spec,
+// because the spec can already name another driver or be deleted.
 func podDriver(p *pod) string {
 	for _, c := range p.Spec.Containers {
 		for _, arg := range c.Args {
@@ -224,9 +210,8 @@ func podDriver(p *pod) string {
 }
 
 // recordDrivers posts an Event on a Telescope or an Observatory for
-// each driver that its running server stopped while the reservation is
-// Ready, or at its retry. t names the device of each pod that left,
-// from the pod's labels, because the device itself can be gone already.
+// each driver that releaseLeft stopped. It names each device from its
+// pod's labels in t, because the device object can already be deleted.
 func (r *runner) recordDrivers(t *tree, ref serverRef, about events.ObjectReference, left []string) {
 	for _, name := range left {
 		device := "pod " + name
@@ -234,7 +219,7 @@ func (r *runner) recordDrivers(t *tree, ref serverRef, about events.ObjectRefere
 			device = p.Metadata.Labels[labelKind] + " " + p.Metadata.Labels[labelResource]
 		}
 		r.o.recorder.Normal(about, reasonDriverStopped,
-			fmt.Sprintf("Stopped the driver of %s on server %s while Reservation %s is %s. The server did not restart.", device, ref, r.name, r.status.Phase))
+			fmt.Sprintf("Stopped the driver of %s on server %s while Reservation %s is %s. The server did not restart", device, ref, r.name, r.status.Phase))
 		r.o.logf("Reservation %s: stopped the driver of %s on %s", r.name, device, ref)
 	}
 }

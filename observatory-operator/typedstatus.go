@@ -1,16 +1,15 @@
 package main
 
-// The typed status fields of a resource: one field for each standard
-// property that the resource holds of its INDI device (devicesplit.go),
-// which schema/ generates, such as a camera's temperature or a filter
-// wheel's slot. Each field's indi tag names its property, and the
-// field's shape follows the property's (schema/fields.go): the state,
-// then a field for each member that the tag names, the names of the
-// switches that are on, or the list of the elements that the driver
-// chooses. A family, such as DIGITAL_OUTPUT_1 and the rest, is a list
-// with one item for each property. The schema holds each definition, so
-// a field holds the state and the values alone, and status.limits holds
-// the ranges that the driver chooses.
+// The typed status fields give each standard INDI property that a
+// resource reads (devicesplit.go) its own field, such as a camera's
+// temperature or a filter wheel's slot. schema/ generates their types,
+// and each field's indi tag names its property. A field has the
+// property's state and, depending on the property, the values of the
+// members that the tag names, the names of the switches that are on, or
+// the property's elements. A numbered family of properties, such as
+// DIGITAL_OUTPUT_1, DIGITAL_OUTPUT_2, and so on, is a list with one item
+// for each property. The ranges of writable numbers go in status.limits
+// instead (limits below).
 
 import (
 	"math"
@@ -21,9 +20,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// standardStatus answers the typed fields of a resource's kind, such as
-// a *observatory.CameraStandard, from the properties that the resource
-// holds, or nil when it holds none.
+// standardStatus returns the typed fields of a resource's kind, such as
+// a *observatory.CameraStandard, filled from r's properties. It returns
+// nil when the kind has no typed fields or r has no properties.
 func standardStatus(kind observatory.Kind, r reader) any {
 	newStatus := observatory.Standards[kind].Status
 	if newStatus == nil || len(r.held) == 0 {
@@ -46,10 +45,11 @@ func standardStatus(kind observatory.Kind, r reader) any {
 	return status
 }
 
-// family answers the items of a family: one for each numbered
-// property, such as DIGITAL_OUTPUT_2 for the tag DIGITAL_OUTPUT_1, or
-// one for each property that a member of the kind's NamedBy names. An
-// item holds its number or its name beside the property's values.
+// family returns the list for a field whose type is a slice. When the
+// item type has a Name field, there is one item for each property that
+// a member of one of the kind's NamedBy properties names. Otherwise
+// there is one item for each property numbered like the tag, such as
+// DIGITAL_OUTPUT_2 for the tag DIGITAL_OUTPUT_1.
 func family(list reflect.Type, tagged string, kind observatory.Kind, r reader) reflect.Value {
 	items := reflect.MakeSlice(list, 0, 0)
 	add := func(p indi.Property, key func(item reflect.Value)) {
@@ -78,7 +78,6 @@ func family(list reflect.Type, tagged string, kind observatory.Kind, r reader) r
 	return items
 }
 
-// fill sets the fields of one property's struct from the property.
 func fill(object reflect.Value, p indi.Property) {
 	for i := range object.NumField() {
 		f, field := object.Type().Field(i), object.Field(i)
@@ -103,10 +102,8 @@ func fill(object reflect.Value, p indi.Property) {
 	}
 }
 
-// setMember sets a field to the value of one member, by the field's
-// type: a number, a text, or a light. A number that JSON cannot hold,
-// such as NaN, stays absent, because a status that does not encode
-// would never be written.
+// setMember leaves a number that JSON cannot encode, such as NaN, nil,
+// because a status that fails to encode is never written.
 func setMember(field reflect.Value, m indi.Member) {
 	switch field.Interface().(type) {
 	case *float64:
@@ -121,8 +118,6 @@ func setMember(field reflect.Value, m indi.Member) {
 	}
 }
 
-// elements answers the list of the elements that the driver chooses,
-// in the type of the field it goes in.
 func elements(field any, p indi.Property) any {
 	switch field.(type) {
 	case []observatory.SwitchElement:
@@ -155,12 +150,10 @@ func elements(field any, p indi.Property) any {
 	return out
 }
 
-// limits answers the range of each number that a client can write,
-// of the properties that a resource holds, by property and member. A
-// read-only number has a range too, but nothing that a client sends
-// meets it, so the status leaves it out. A range whose min equals its
-// max is no range: libindi's clients read it as a number with no
-// limit, so it carries none, and the status leaves it out too.
+// limits returns the range of each writable number member, keyed by
+// property name and member name. It leaves out read-only numbers,
+// because a client never writes them, and a range whose min equals its
+// max, because the INDI protocol says to ignore such a range.
 func limits(r reader) map[string]map[string]observatory.Limit {
 	var out map[string]map[string]observatory.Limit
 	for _, p := range r.held {

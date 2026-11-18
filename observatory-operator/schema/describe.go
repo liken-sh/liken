@@ -59,8 +59,9 @@ func (p property) specText() string {
 	return text + " It names one of the elements that the driver defines, such as " + example + "."
 }
 
-// memberText describes the field of one member: the entry's text for
-// the member, or for the one value of a property with one member.
+// memberText describes the field of one member: the member's
+// description from the fields file, or a generic text and the unit when
+// the file has none.
 func (p property) memberText(m standard.Member, me memberEntry, unit string) string {
 	if me.Description == "" {
 		text := "The value that the driver reports."

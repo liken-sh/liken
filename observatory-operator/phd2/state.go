@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// State is what the client knows of one PHD2. A nil field is a value
+// State is the client's copy of one PHD2's state. A nil field is a value
 // that PHD2 has not reported on this connection.
 type State struct {
 	// Open is true while the event connection is open.
@@ -18,37 +18,39 @@ type State struct {
 	// AppState is PHD2's state in one word: Stopped, Selected,
 	// Calibrating, Guiding, LostLock, Paused, or Looping.
 	AppState string
-	// Calibrated is true when PHD2 holds a calibration for the mount.
+	// Calibrated is true when PHD2 has a calibration for the mount.
 	Calibrated *bool
 	// Equipment is true when PHD2's camera and mount are connected.
 	Equipment *bool
 	// PixelScale is the guide camera's scale in arc-seconds per pixel.
-	// PHD2 answers null while it does not know the camera's pixel size
-	// or the focal length, and the field is nil then.
+	// PHD2 returns null until it has the camera's pixel size and the
+	// focal length, and the field is nil until then.
 	PixelScale *float64
 	// Step is the last guide step.
 	Step *Step
 	// RMS is the spread of the last guide steps.
 	RMS RMS
-	// Alert is the last alert PHD2 showed, or the last failed
+	// Alert is the last alert PHD2 displayed, or the last failed
 	// calibration.
 	Alert *Alert
 	// Settling is the settle of the last Guide or Dither that this
-	// client sent, or that PHD2 reported since the connection opened.
+	// client sent, or the last settle that PHD2 reported since the
+	// connection opened.
 	Settling *Settling
 }
 
 // Settling is PHD2's progress toward one settle, from the SettleBegin,
 // Settling, and SettleDone events.
 type Settling struct {
-	// Began is true after SettleBegin. A Guide that calibrates first
-	// begins its settle when the calibration ends.
+	// Began is true after the first settle event. A Guide that
+	// calibrates first sends no settle event until the calibration ends.
 	Began bool
 	// Distance is the star's distance from the lock position at the
 	// last Settling event, in pixels.
 	Distance float64
-	// Time is how long the star has stayed within the settle's
-	// distance, and SettleTime is how long the settle asks for.
+	// Time is how long the star has stayed within the settle distance,
+	// and SettleTime is how long it must stay there for the settle to
+	// finish.
 	Time, SettleTime time.Duration
 	// StarLocked is false while PHD2 has no star at the lock position.
 	StarLocked bool
@@ -76,15 +78,13 @@ type Step struct {
 	SNR, HFD float64
 }
 
-// RMSWindow is how many guide steps the RMS covers: at one step a
-// second, the last 100 seconds of guiding.
+// RMSWindow is how many guide steps the RMS covers.
 const RMSWindow = 100
 
-// RMS is the root mean square of the last guide steps' distances, in
-// pixels. Steps counts the steps it covers, and is 0 before the first
-// step since guiding started. PHD2 sends a new connection no earlier
-// guide steps, so the window also begins at the first step that this
-// connection received.
+// RMS is the root mean square of the RA and Dec distances of the last
+// RMSWindow guide steps, in pixels. StartGuiding resets it. PHD2 does
+// not send past guide steps to a new connection, so after a reconnect
+// the window starts at the first step that this connection receives.
 type RMS struct {
 	Steps          int
 	RA, Dec, Total float64
@@ -138,8 +138,8 @@ func (w *window) add(ra, dec float64, at time.Time) RMS {
 	return RMS{Steps: len(w.ra), RA: math.Sqrt(sumRA / n), Dec: math.Sqrt(sumDec / n), Total: math.Sqrt((sumRA + sumDec) / n), Since: w.at[0]}
 }
 
-// message is any line PHD2 sends: an event has Event, and an answer
-// has an id.
+// message is any line PHD2 sends. An event sets Event, and a response
+// to a request sets id.
 type message struct {
 	Event  string          `json:"Event"`
 	ID     *int            `json:"id"`
@@ -174,37 +174,39 @@ type message struct {
 	DroppedFrames int             `json:"DroppedFrames"`
 }
 
-// seconds converts a time in PHD2's seconds.
+// seconds converts a number of seconds from PHD2 to a Duration.
 func seconds(s float64) time.Duration { return time.Duration(math.Round(s * float64(time.Second))) }
 
-// errMethod wraps an error answer.
+// errMethod wraps an error response from PHD2.
 var errMethod = errors.New("phd2")
 
-// receive applies one line. A line that is not JSON ends the
-// connection: the stream is out of step, and a new connection reads a
-// new baseline.
+// receive applies one line from PHD2. It returns an error for a line
+// that is not JSON, and read then closes the connection, because the
+// client can no longer trust the stream. The next connection reads the
+// whole state again.
 func (c *Client) receive(line []byte) error {
 	if len(line) == 0 || line[0] == '[' {
-		// The answer to a batch, which this client never sends.
+		// A response to a batch request. This client sends none.
 		return nil
 	}
 	var m message
 	if err := json.Unmarshal(line, &m); err != nil {
-		return fmt.Errorf("phd2: a message that is not JSON: %w", err)
+		return fmt.Errorf("phd2: the line is not JSON: %w", err)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if m.Event != "" {
 		c.event(m)
 	} else if m.ID != nil {
-		c.answer(*m.ID, m)
+		c.applyResponse(*m.ID, m)
 	}
 	c.changeLocked()
 	return nil
 }
 
-// answer applies the answer to one request. The caller holds mu.
-func (c *Client) answer(id int, m message) {
+// applyResponse applies the response to one request. The caller holds
+// mu.
+func (c *Client) applyResponse(id int, m message) {
 	r, ok := c.pending[id]
 	if !ok {
 		return
@@ -247,11 +249,12 @@ func (c *Client) applyRead(method string, result json.RawMessage) {
 	}
 }
 
-// event applies one event. PHD2 sends AppState only to a new
-// connection, so each event that implies a state sets it. A stop
-// implies no state, because PHD2 can stop guiding and go on looping,
-// and neither does a lost lock position, so each reads the state again.
-// The caller holds mu.
+// event applies one event. PHD2 sends an AppState event only when a
+// connection opens, so event sets AppState from each event that
+// implies one. After GuidingStopped, LoopingExposuresStopped, or
+// LockPositionLost the next state is unknown, because PHD2 can stop
+// guiding and keep looping, so event reads the state again. The caller
+// holds mu.
 func (c *Client) event(m message) {
 	at := time.UnixMilli(int64(math.Round(m.Timestamp * 1000))).UTC()
 	s := &c.state
@@ -286,8 +289,8 @@ func (c *Client) event(m message) {
 		s.Step = &Step{Frame: m.Frame, Time: at, RA: m.RADistanceRaw, Dec: m.DECDistanceRaw, SNR: m.SNR, HFD: m.HFD}
 		s.RMS = c.rms.add(m.RADistanceRaw, m.DECDistanceRaw, at)
 	case "StarLost":
-		// A star lost while guiding is LostLock. One lost while
-		// looping leaves a state that the event does not say.
+		// A star lost while looping does not show which state
+		// follows, so read it.
 		if s.AppState == "Guiding" || s.AppState == "LostLock" {
 			s.AppState = "LostLock"
 		} else {
@@ -298,9 +301,9 @@ func (c *Client) event(m message) {
 	case "GuidingStopped", "LoopingExposuresStopped", "LockPositionLost":
 		c.rereadLocked(methodAppState)
 	case "Alert":
-		// An alert follows most failures of the equipment, such as an
-		// INDI camera that disconnects, and PHD2 sends no event for
-		// the connection itself.
+		// PHD2 raises an alert for most equipment failures, such as an
+		// INDI camera that disconnects, and sends no event for the
+		// connection change itself, so read the equipment state.
 		s.Alert = &Alert{Message: m.Msg, Type: m.Type, Time: at}
 		c.rereadLocked(methodCalibrated, methodConnected, methodPixelScale)
 	case "SettleBegin", "Settling", "SettleDone":
@@ -312,12 +315,12 @@ func (c *Client) event(m message) {
 	}
 }
 
-// settle applies one event of a settle. The settle that Guide or
-// Dither recorded takes the events that follow its request. A settle
-// that another client started, such as a dither from KStars, starts a
-// new record at its first event, and so does a SettleBegin while a
-// settle that began is still open, because PHD2 begins a new settle
-// only after it ends the last one. The caller holds mu.
+// settle applies one settle event. Events after a Guide or Dither that
+// this client sent update the Settling that settling created. A settle
+// that another client started, such as a dither from KStars, gets a
+// new Settling at its first event. So does a SettleBegin after an
+// earlier settle event with no SettleDone, because PHD2 begins a new
+// settle only after the last one ends. The caller holds mu.
 func (c *Client) settle(m message) {
 	s := c.state.Settling
 	if s == nil || s.Done || (m.Event == "SettleBegin" && s.Began) {

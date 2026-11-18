@@ -11,7 +11,7 @@ A portable telescope spends the day in a garage. Before a night,
 someone carries it out, uncovers it, and polar aligns it, and nothing
 may power on or slew it before then. When you finish this guide, a
 reservation of the telescope waits until you confirm that it is set
-up, your confirmation expires at dawn by itself, and the end of the
+up, your confirmation expires at dawn on its own, and the end of the
 night asks you to cover the telescope.
 
 You need the `kubectl liken observatory` plugin. Install it with
@@ -26,7 +26,7 @@ the namespace `observatory`.
 
 List the `SetUp` condition in the telescope's `spec.requires`, and add
 a `notify` action to its `deactivation`. A requirement with no `kind`
-names the resource itself:
+refers to the resource itself:
 
 ```yaml
 apiVersion: observatory.liken.sh/v1alpha1
@@ -43,19 +43,21 @@ spec:
 ```
 
 The second requirement keeps the telescope off while the weather
-station reports bad weather. Each entry is `{kind, name, type,
-status}`, the same form as an action's `requires`, and `status` is
-`"True"` unless you set it. Any device can list requirements too,
-such as a camera whose dew strap someone fits by hand.
+station reports unsafe weather. Each entry has the form `{kind,
+name, type, status}`, the same as an action's `requires`, and
+`status` is `"True"` unless you set it. A device can list
+requirements too, such as a camera whose dew strap someone fits by
+hand.
 
 Put the requirements on the `Telescope` or on its devices. The
-operator checks those in the reservation's `Requires` step, after the
-observatory's INDI server starts and before anything of the telescope
-runs. Requirements on the `Observatory`, or on a device of the
-observatory, hold the reservation earlier, in its `Wait` step, before
-the observatory's server starts. So a weather station's `Safe` belongs
-on the `Telescope`: the station runs on the observatory's server, and
-it reports `Safe` only after that server starts.
+operator checks them in the reservation's `Requires` step, after the
+observatory's INDI server starts and before any of the telescope's
+equipment runs. Requirements on the `Observatory`, or on a device of
+the observatory, make the reservation wait earlier, in its `Wait`
+step, before the observatory's server starts. So put a weather
+station's `Safe` on the `Telescope`, because the station runs on the
+observatory's server and reports `Safe` only after that server
+starts.
 
 ## 2. Reserve the telescope
 
@@ -72,9 +74,9 @@ NAME           TELESCOPE   HOLDER    PHASE        STEP       MESSAGE            
 east-tonight   east        desktop   Activating   Requires   Waiting for Telescope east SetUp=True   2m
 ```
 
-While it waits, the telescope's server, its pods, and the outputs of
-its `Switch` stay off. You can create the reservation in the
-afternoon, and it waits for you.
+While it waits, the telescope's server and pods do not run, and the
+outputs of its `Switch` stay off. So you can create the reservation
+in the afternoon.
 
 ## 3. Confirm that the telescope is set up
 
@@ -89,9 +91,9 @@ Telescope east is set up until the next astronomical dawn at its Observatory
 ```
 
 The plugin writes the `SetUp` condition into the telescope's status.
-The reservation leaves `Requires` at once, activation runs, and the
-reservation turns `Ready`. The condition's message names you, from the
-user that the API server reports for your credentials:
+The reservation leaves `Requires` at once, runs its activation, and
+becomes `Ready`. The condition's message contains your name, which is
+the user that the API server reports for your credentials:
 
 ```sh
 kubectl get telescope east -n observatory \
@@ -114,41 +116,42 @@ NAME   OBSERVATORY   PHASE   RESERVATION    HOLDER    HOST                      
 east   lab           Ready   east-tonight   desktop   east-telescope.observatory.svc   7624   2026-10-13T08:44:52Z   12d
 ```
 
-The operator writes that time into `status.setUpExpiryTime`: your
-`--until` when you gave one, and otherwise the dawn. The column is
-`<none>` while the resource is not set up. `status.setUpUntil` holds
-only what you wrote with `--until`, so it is empty when the
-confirmation lasts until dawn.
+The operator writes that time into `status.setUpExpiryTime`. It is
+your `--until` when you gave one, and the dawn otherwise. The column
+is `<none>` while the resource is not set up. `status.setUpUntil`
+contains only the value you wrote with `--until`, so it is empty when
+the confirmation lasts until dawn.
 
 The command takes these flags:
 
 | Flag | What it does |
 | --- | --- |
 | `--until` | When the confirmation expires, as an RFC 3339 time such as `2026-10-13T04:30:00Z`, or as a duration from now, such as `6h`. With none, it expires at dawn. `take-down` refuses it. |
-| `--by` | The person the message names, in place of the user the API server reports. |
+| `--by` | The name to put in the message, in place of the user that the API server reports. |
 | `-n`, `--namespace` | The namespace of the resource. |
 | `--context`, `--kubeconfig` | The kubeconfig context and file, as for `kubectl`. |
-| `--force` | Silences the warning that the plugin's version differs from the operator's. The command runs either way. |
+| `--force` | Hides the warning that the plugin's version differs from the operator's. The command runs either way. |
 | `--version` | Prints the plugin's version and exits. |
 
 `set-up` and `take-down` accept the `Observatory`, the `Telescope`,
 and each device kind, by name, singular, or plural, such as `mount`,
 `Mount`, or `mounts`.
 
-The condition is in status, not in spec, because it records what a
-person saw. A GitOps tool that applies the telescope's spec from a
-repository never removes it. The plugin writes it with a server-side
-apply to the status subresource, so it changes only `SetUp` and
-`status.setUpUntil`, and the operator keeps both as you wrote them
-until the confirmation expires.
+The condition is in `status`, not in `spec`, because it records what a
+person observed, and a GitOps tool that applies the telescope's
+`spec` from a repository does not remove it. The plugin writes it with
+a server-side apply to the status subresource, which changes only
+`SetUp` and `status.setUpUntil`. The operator leaves both as you wrote
+them until the confirmation expires.
 
 ## 4. Cover the telescope at the end of the night
 
 The reservation ends at its `end` time, or when you delete it. Its
 `Deactivation` step runs the telescope's `notify` action, which asks
-you to cover the telescope. The action never waits for you: the mount
-parks and the cameras warm on their own. The telescope's
-`AttentionNeeded` condition turns `True` with the reason `Notified`
+you to cover the telescope. The action does not wait for you, so the
+rest of the deactivation, such as parking the mount and warming the
+cameras, continues at once. The telescope's
+`AttentionNeeded` condition becomes `True` with the reason `Notified`
 and the request as its message, and the transition posts a `Warning`
 Event:
 
@@ -161,9 +164,9 @@ LAST SEEN   TYPE      REASON     OBJECT           MESSAGE
 1m          Warning   Notified   Telescope/east   Cover the telescope and carry it in
 ```
 
-An alert on `AttentionNeeded`, or a script that runs `kubectl wait
---for=condition=AttentionNeeded telescope/east -n observatory`, can
-send the request to your phone.
+To get the request on your phone, send an alert when `AttentionNeeded`
+is `True`, or run `kubectl wait --for=condition=AttentionNeeded
+telescope/east -n observatory` in a script that sends the message.
 
 Wait until the reservation's `SafeToPowerOff` is `True`, then cover the
 telescope, carry it in, and take it down:
@@ -176,35 +179,36 @@ kubectl liken observatory take-down telescope east -n observatory
 Telescope east is taken down
 ```
 
-`SetUp` turns `False` with the reason `TakenDown` and the message
-`Taken down by ada`. `AttentionNeeded` turns `False` with the reason
+`SetUp` becomes `False` with the reason `TakenDown` and the message
+`Taken down by ada`. `AttentionNeeded` becomes `False` with the reason
 `Acknowledged` and the same message, so the condition records who
-answered the request. If you never take the telescope down, the
-telescope's next activation clears `AttentionNeeded` with the reason
-`Activated`.
+took the telescope down. If you never take the telescope down, the
+telescope's next activation sets `AttentionNeeded` to `False` with the
+reason `Activated`.
 
-A take-down during a session stops nothing. A requirement holds only
-the start of a session, so the equipment runs until the reservation
-ends.
+A take-down during a session stops nothing. A requirement applies
+only when a session starts, so the equipment runs until the
+reservation ends.
 
 ## When the confirmation expires
 
 A confirmation lasts until the first astronomical dawn after you
-wrote it, at the `Observatory`'s `spec.location`: the moment the sun
-rises through 18 degrees below the horizon. A second `set-up` in the
-same night keeps the first one's time, and so its dawn. With
-`--until`, it lasts until that time instead. At the expiry, the
-operator sets the condition `False` with the reason `Expired` and a
-message such as `Expired at 2026-10-13T08:44:52Z: set up by ada`, and
-posts one `Event`. Nobody has to withdraw it in the morning, and the
-next night's reservation waits for a new `set-up`. An expiry does not
-answer a `notify` request, so `AttentionNeeded` stays `True` until
-you take the telescope down or its next activation begins.
+wrote it, at the `Observatory`'s `spec.location`. Astronomical dawn is
+the moment the sun rises through 18 degrees below the horizon. A
+second `set-up` in the same night keeps the first one's expiry time.
+With `--until`, the confirmation lasts until that time instead. At
+the expiry, the operator sets the condition to `False` with the reason
+`Expired` and a message such as
+`Expired at 2026-10-13T08:44:52Z: set up by ada`, and posts an
+`Event`. So nobody has to withdraw the confirmation in the morning,
+and the next night's reservation waits for a new `set-up`. An expiry does
+not acknowledge a `notify` request, so `AttentionNeeded` stays `True`
+until you take the telescope down or its next activation begins.
 
-A session that already runs keeps running when the confirmation
-expires. A reservation that still waits at dawn ends, with the
-telescope's equipment never powered on. Its `Requires` step is
-`Skipped`, and the summary says why, such as
+A session that is already running keeps running when the confirmation
+expires. A reservation that is still waiting at dawn ends, and the
+telescope's equipment is never powered on. Its `Requires` step is
+`Skipped`, and the summary gives the reason, such as
 `Dawn came at 2026-10-13T08:44:52Z while waiting for Telescope east SetUp=True, so the session did not start`.
 The reservation is `Released`, so create a new one for the next
 night.
@@ -212,8 +216,9 @@ night.
 ## Let other people confirm
 
 A person who confirms needs `get` on the resource and `patch` on its
-status. This `Role` grants that for the telescopes and mounts of one
-namespace, and `list` for the shell's completion of their names:
+status. This `Role` grants both for the telescopes and mounts of one
+namespace, and also `list`, which the shell needs to complete their
+names:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -231,5 +236,5 @@ rules:
 ```
 
 The plugin also lists the `Deployment`s of every namespace, to find
-the operator's and compare versions. A person who cannot list them
-gets a line on stderr, and the command still runs.
+the operator's `Deployment` and compare versions. A person who cannot
+list them gets a message on stderr, and the command still runs.

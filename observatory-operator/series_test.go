@@ -1,11 +1,5 @@
 package main
 
-// The domain series, read from a scrape of the running operator after
-// the events that set them: an activation, a driver that drops its
-// connection, a step that fails, a guider that changes state, a
-// connection to a server that ends, and a resource or a session that
-// is gone.
-
 import (
 	"io"
 	"testing"
@@ -16,7 +10,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/phd2/phd2test"
 )
 
-// untilSample waits until a scrape of the operator holds each line.
+// untilSample waits until a scrape of the operator contains every line,
+// and returns the scrape.
 func (w *world) untilSample(limit time.Duration, lines ...string) string {
 	w.t.Helper()
 	var body string
@@ -66,14 +61,14 @@ func TestAReadyReservationSetsTheSeriesOfItsTelescope(t *testing.T) {
 			requireSample(t, body, line)
 		}
 		if at, ok := valueOf(body, `observatory_observation_last_success_timestamp_seconds{namespace="observatory",source="Telescope/east"}`); !ok || at < float64(time.Now().Add(-time.Minute).Unix()) {
-			t.Errorf("the last success of Telescope/east is %v, %v", at, ok)
+			t.Errorf("the last success timestamp of Telescope/east is %v (present: %v), want within the last minute", at, ok)
 		}
 		if took, _ := valueOf(body, `observatory_activation_duration_seconds_sum{namespace="observatory",telescope="east"}`); took <= 0 {
-			t.Errorf("the activation took %v s", took)
+			t.Errorf("the activation duration sum is %v s, want more than 0", took)
 		}
 		for _, kind := range []string{"Reservation", "Camera", "Telescope", "Observatory"} {
 			if passes, _ := valueOf(body, `observatory_reconcile_duration_seconds_count{kind="`+kind+`"}`); passes == 0 {
-				t.Errorf("no pass counted under %s", kind)
+				t.Errorf("reconcile passes of %s are counted as 0, want at least 1", kind)
 			}
 		}
 	})
@@ -88,8 +83,8 @@ func TestTheCameraTemperatureFollowsItsDriver(t *testing.T) {
 	})
 }
 
-// A device that a person disconnects counts as a drop, because a
-// session holds it, and its connected gauge falls.
+// A person disconnects the device while a session claims it, so the
+// disconnect counts as a drop and the connected gauge falls to 0.
 func TestADriverThatDropsItsConnectionCounts(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -149,17 +144,16 @@ func TestTheGuiderSeriesFollowPHD2(t *testing.T) {
 	})
 }
 
-// A connection to a server that ends makes the observation invalid,
-// and the devices on that server keep the connected value they had,
-// as root plan 65 states: the operator does not know that they
-// dropped.
+// When the connection to a server ends, the observation is invalid.
+// The devices on that server keep their last connected value, because
+// the operator cannot tell whether they dropped.
 func TestAConnectionThatEndsIsAnInvalidObservation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
-		// The server refuses the next three dials, so the operator dials
-		// again after 1, 2, and 4 seconds, and the status writer runs
-		// while the connection is down.
+		// The server refuses the next three dials, so the connection
+		// stays down through several redial pauses, long enough for the
+		// status writer to run.
 		w.indi.listenLate("east-telescope", 3)
 		w.indi.cut("east-telescope")
 		w.untilSample(time.Minute, `observatory_observation_valid{namespace="observatory",source="Telescope/east"} 0`)
@@ -172,7 +166,8 @@ func TestAConnectionThatEndsIsAnInvalidObservation(t *testing.T) {
 	})
 }
 
-// The gauges of a resource that a person deleted leave the scrape.
+// The gauges of a resource that a person deleted disappear from the
+// scrape.
 func TestTheSeriesOfADeletedDeviceLeaveTheScrape(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -189,9 +184,9 @@ func TestTheSeriesOfADeletedDeviceLeaveTheScrape(t *testing.T) {
 	})
 }
 
-// A session that ends stops its servers and its guider, so their
-// observation series and the guider's series leave the scrape, and
-// its devices are neither claimed nor connected.
+// When a session ends, the operator stops its servers and its guider,
+// so their observation series and the guider's series leave the
+// scrape, and its devices are neither claimed nor connected.
 func TestAReleaseDeletesTheSeriesOfWhatItStopped(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -212,14 +207,14 @@ func TestAReleaseDeletesTheSeriesOfWhatItStopped(t *testing.T) {
 		})
 		body = scrape(t, w.n.metrics)
 		requireNoSample(t, body, "observatory_guider_state", `guider="east"`)
-		// Deactivation disconnects the devices on purpose, so no drop
-		// counts.
+		// Deactivation disconnects the devices deliberately, so no drop
+		// is counted.
 		requireSample(t, body, `observatory_device_disconnects_total{kind="Camera",name="east-main",namespace="observatory"} 0`)
 	})
 }
 
-// The operator of a namespace that stops deletes every gauge of the
-// namespace, and the counters stay.
+// When the operator of a namespace stops, it deletes every gauge of
+// the namespace and keeps the counters.
 func TestAStoppedNamespaceLeavesNoGauges(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

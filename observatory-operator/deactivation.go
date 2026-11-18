@@ -1,12 +1,12 @@
 package main
 
-// The deactivation steps, in the order of
-// observatory.DeactivationSteps. They run after a delete, which the
-// finalizer holds until they are done, at spec.end, or after a delete
-// of the reservation's Telescope or its Observatory. Each step acts
-// on the devices that are there: a reservation whose activation failed
-// at StartDevices has no device connected, and the Deactivation step
-// then skips the actions of each device (procsteps.go).
+// The deactivation steps of a Reservation, in the order of
+// observatory.DeactivationSteps. They run when the Reservation is
+// deleted, when spec.end passes, and when its Telescope or Observatory
+// is deleted. The Reservation's finalizer keeps the object until they
+// finish. The steps find the telescope's devices by the server that
+// their pods run on, not by their parents, so they also stop a device
+// whose object or parent a person deleted during the session.
 
 import (
 	"context"
@@ -18,8 +18,10 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// deactivate begins deactivation, if it has not begun, and runs the
-// deactivation steps that are not finished.
+// deactivate appends the deactivation steps on its first call, and
+// skips any activation step that has not finished. Then it runs each
+// deactivation step that has not finished. A Reservation that never
+// took its Telescope is released without running any step.
 func (r *runner) deactivate(ctx context.Context) {
 	if !r.tookTelescope() {
 		r.endUnstarted(ctx)
@@ -38,7 +40,7 @@ func (r *runner) deactivate(ctx context.Context) {
 		message := "Deactivating Telescope " + r.res.Spec.Telescope
 		if parent := heldParentDeleted(r.o.snapshot(), r.res); parent != "" {
 			message += ": " + parent + " was deleted"
-		} else if why := gaveUpSummary(r.status.Steps); why != "" {
+		} else if why := dawnSummary(r.status.Steps); why != "" {
 			message += ": " + lowerFirst(why)
 		}
 		r.o.record(r.res, string(observatory.ReservationDeactivating), message)
@@ -69,15 +71,15 @@ func (r *runner) deactivate(ctx context.Context) {
 		fmt.Sprintf("Released in %s: Telescope %s is safe to power off", duration(time.Since(r.began(observatory.DeactivationSteps))), r.res.Spec.Telescope))
 }
 
-// tookTelescope reports whether the reservation ever held its
-// telescope.
+// tookTelescope reports whether the Reservation took its Telescope,
+// which happens when its Wait step finishes.
 func (r *runner) tookTelescope() bool {
 	s := r.step(observatory.StepWait)
 	return s != nil && s.State == observatory.StepDone
 }
 
-// endUnstarted ends a reservation that never took its telescope. It
-// started nothing, so it has nothing to deactivate.
+// endUnstarted releases a Reservation that never took its Telescope.
+// Such a Reservation started no device, so nothing needs deactivating.
 func (r *runner) endUnstarted(ctx context.Context) {
 	for i := range r.status.Steps {
 		s := &r.status.Steps[i]
@@ -89,25 +91,25 @@ func (r *runner) endUnstarted(ctx context.Context) {
 	r.status.Phase, r.status.Step = observatory.ReservationReleased, ""
 	r.save(ctx)
 	message := "Released before it took Telescope " + r.res.Spec.Telescope
-	if why := gaveUpSummary(r.status.Steps); why != "" {
+	if why := dawnSummary(r.status.Steps); why != "" {
 		message += ": " + lowerFirst(why)
 	}
 	r.o.record(r.res, string(observatory.ReservationReleased), message)
 }
 
-// settleWait bounds how long a deactivation step waits for the
-// operator's INDI connection to a server whose pod runs, and for each
-// running device's driver to define its device. After an operator
-// restart, the connection opens and the server sends every definition
-// again within a second. A device whose driver does not appear in this
-// time is noted, and the step acts on the others.
+// settleWait limits how long a deactivation step waits for the INDI
+// connection to the server and for each running driver to define its
+// device. The wait matters after an operator restart, when the server
+// sends every definition again on the new connection. A device whose
+// driver does not define it in time gets a note in the step's summary,
+// and the step acts on the other devices.
 const settleWait = 30 * time.Second
 
-// liveHandles answers the connected devices among the devices whose
-// driver's pod runs on the telescope's server (tree.devicesRunningOn)
-// that are not Switch devices, in connect order. The pod and not the
-// parents places each device, so a camera whose train a person deleted
-// still has its exposure aborted and disconnects in order.
+// liveHandles returns handles, in connect order, for the connected
+// devices other than Switches whose driver pod runs on the telescope's
+// server, and a note for each driver that did not appear. Because it
+// selects devices by their pod, a camera whose train a person deleted
+// still has its exposure aborted and is still disconnected in order.
 func (r *runner) liveHandles(ctx context.Context, w *stepWork) ([]handle, []string) {
 	t := r.o.snapshot()
 	ref, _, _, err := r.telescope(t)
@@ -119,9 +121,10 @@ func (r *runner) liveHandles(ctx context.Context, w *stepWork) ([]handle, []stri
 }
 
 // connectedHandles waits up to settleWait for the server's connection
-// and for the driver of each device whose pod runs, and answers the
-// devices that report themselves connected, with a note for each
-// driver that did not appear.
+// and for the driver of each device whose pod is ready. It returns
+// handles for the devices whose CONNECTION property is CONNECT, and a
+// note for each driver that did not appear. It returns nothing when the
+// server's pod is not ready.
 func (o *operator) connectedHandles(ctx context.Context, report func(string), t *tree, ref serverRef, devices []*device) ([]handle, []string) {
 	p, ok := t.pods[ref.String()]
 	if !ok || !p.ready() {
@@ -151,14 +154,11 @@ func (o *operator) connectedHandles(ctx context.Context, report func(string), t 
 	return out, notes
 }
 
-// stopWork stops PHD2, ends the exposures that run, and stops the mount
-// if it moves. It runs at every end of a reservation, a normal end
-// too, so its name says what it does and not that something failed.
-// A device that is idle receives nothing: the simulators answer an abort
-// of nothing with no update at all. When a person deleted the
-// telescope or its observatory, the step's summary begins with that,
-// because the reservation's own spec and metadata do not show why it
-// ended.
+// stopWork stops PHD2, then aborts each exposure or slew in progress.
+// It sends ABORT only to a device whose property reports Busy, because
+// the simulators send no update when they abort an idle device. When a
+// person deleted the Telescope or its Observatory, the summary starts
+// with that, because nothing in the Reservation shows why it ended.
 func (r *runner) stopWork(ctx context.Context, w *stepWork) (outcome, error) {
 	var why []string
 	if parent := heldParentDeleted(r.o.snapshot(), r.res); parent != "" {
@@ -183,10 +183,10 @@ func (r *runner) stopWork(ctx context.Context, w *stepWork) (outcome, error) {
 		}
 		w.report("aborting " + h.String())
 		if _, err := h.client().SetSwitches(h.name, property, map[string]bool{"ABORT": true}); err != nil {
-			return fmt.Errorf("%s: %w", h, err)
+			return fmt.Errorf("aborting %s: %w", h, err)
 		}
 		if err := r.o.waitFor(ctx, nil, func(*tree) (bool, string, error) { return !busy(h, watched), "", nil }); err != nil {
-			return fmt.Errorf("%s still reports %s Busy: %w", h, watched, err)
+			return fmt.Errorf("waiting for %s to stop reporting %s Busy: %w", h, watched, err)
 		}
 		did = append(did, "aborted "+h.String())
 		return nil
@@ -206,9 +206,9 @@ func (r *runner) stopWork(ctx context.Context, w *stepWork) (outcome, error) {
 	return done("%s", strings.Join(slices.Concat(why, did, notes), "; "))
 }
 
-// disconnect disconnects the telescope's devices in the reverse order
-// of Connect. A served device is its owner's INDI device, so only the
-// owner disconnects.
+// disconnect disconnects the telescope's devices in the reverse of the
+// Connect order. A served device is the same INDI device as its owner,
+// so only the owner is disconnected.
 func (r *runner) disconnect(ctx context.Context, w *stepWork) (outcome, error) {
 	handles, notes := r.liveHandles(ctx, w)
 	handles = owners(handles)
@@ -227,13 +227,13 @@ func (r *runner) disconnect(ctx context.Context, w *stepWork) (outcome, error) {
 	return done("%s", strings.Join(append([]string{"disconnected in order: " + strings.Join(disconnected, ", ")}, notes...), "; "))
 }
 
-// stopTelescopeDevices stops the drivers of the telescope's devices,
-// apart from the ones that power the others, on the server that keeps
-// running, and then deletes their pods (setDrivers). A device that a
-// person deleted goes with the others: a pod that outlived its driver's
-// link would see its socat exit, and the kubelet would start it again.
-// The server's record still names each device after its pod and its
-// object are gone, so PowerOff switches its output off (poweredBy).
+// stopTelescopeDevices stops every driver on the telescope's server
+// except the drivers of the Switches, which PowerOff still uses, and
+// then deletes the device pods of the stopped drivers. It selects the
+// pods by label, so it also deletes the pod of a device whose object a
+// person deleted. The server's session record still lists that device
+// after its pod and object are gone, so PowerOff can switch its output
+// off (poweredBy).
 func (r *runner) stopTelescopeDevices(ctx context.Context, w *stepWork) (outcome, error) {
 	ref := serverRef{observatory.TelescopeKind, r.res.Spec.Telescope}
 	t := r.o.snapshot()
@@ -257,16 +257,12 @@ func (r *runner) stopTelescopeDevices(ctx context.Context, w *stepWork) (outcome
 	return done("stopped %s", strings.Join(stopped, ", "))
 }
 
-// powerOff switches off the outputs that the telescope's devices name,
-// apart from an output that a device on another server still draws
-// from (tree.unpowered), then stops the Switch pods and the
-// telescope's server. The server stops last, because the operator
-// reaches a Switch through it. A device that only its pod places on
-// the server (tree.releasedOn) has its output switched off too, so a
-// camera whose train a person deleted with the reservation loses its
-// power as it would in any release. So does a device that a person
-// deleted with the reservation, whose object can be gone once
-// StopDevices deleted its pod (tree.poweredBy).
+// powerOff switches off the outputs of the telescope's devices, except
+// an output that a device on another server still uses, then
+// disconnects the Switches and stops their pods and the telescope's
+// server. The server stops last, because the operator reaches a Switch
+// through it. releasedOn and poweredBy also find a device whose train
+// or object a person deleted.
 func (r *runner) powerOff(ctx context.Context, w *stepWork) (outcome, error) {
 	t := r.o.snapshot()
 	ref := serverRef{observatory.TelescopeKind, r.res.Spec.Telescope}
@@ -296,12 +292,12 @@ func (r *runner) powerOff(ctx context.Context, w *stepWork) (outcome, error) {
 	return done("%s", strings.Join(notes, "; "))
 }
 
-// stopSite disconnects the observatory's devices, switches off their
-// outputs that no device on another server draws from, and stops the
-// observatory's server, unless a reservation of another telescope in
-// the observatory holds its telescope. The dome's park is a procedure,
-// which the Deactivation step ran while the mounts were still
-// connected.
+// stopSite disconnects the Observatory's devices, switches off the
+// outputs that no device on another server uses, and stops the
+// Observatory's server. It does nothing while another Telescope of the
+// same Observatory is held by a Reservation. It does not park the dome,
+// because the Deactivation step already ran the dome's park procedure
+// while the mounts were connected.
 func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 	t := r.o.snapshot()
 	telescope, ok := t.telescopes[r.res.Spec.Telescope]

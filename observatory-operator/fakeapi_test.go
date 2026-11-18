@@ -1,14 +1,12 @@
 package main
 
-// A fake API server that holds every collection the operator reads and
-// writes: the 20 kinds of the group, the pods, the Services, and the
-// claims. The Events go to the shared fake of kubernetes/events. It
-// serves a list and a watch of each
-// collection, a create, a read, a status write, a merge patch of the
-// metadata, and a delete that a finalizer holds, the way the API
-// server does. It answers over the in-memory connections of
-// apiservertest, so each test runs in a synctest bubble on the fake
-// clock. The fake also plays the kubelet: a pod it creates is Ready at
+// A fake API server for every collection the operator reads and
+// writes. It serves list, watch, create, get, replace, status update,
+// merge patch of metadata, and delete, and a delete waits for
+// finalizers as the real API server does. It listens on the in-memory
+// connections of apiservertest, so each test runs in a synctest bubble
+// on the fake clock, and Events go to the fake in kubernetes/events.
+// The fake also acts as the kubelet: a pod it creates is Ready at
 // once, unless a test holds it Pending.
 
 import (
@@ -39,58 +37,62 @@ type fakeEvent struct {
 
 type fakeAPI struct {
 	server *apiservertest.Server
-	// recorded holds the Events the operator writes.
+	// recorded is the Events the operator writes.
 	recorded *eventstest.Events
 
 	mu      sync.Mutex
 	version int
 	uids    int
-	// objects holds each collection's objects by name. A collection is
-	// the path of its list, such as /api/v1/namespaces/observatory/pods.
+	// objects maps each collection to its objects by name. A collection
+	// is the path of its list, such as
+	// /api/v1/namespaces/observatory/pods.
 	objects map[string]map[string]map[string]any
 	events  []fakeEvent
 	changed chan struct{}
 
-	// pending holds the pods that the kubelet keeps Pending.
+	// pending is the set of pods that stay Pending, by name.
 	pending map[string]bool
-	// writes counts the status writes to each object, by its path, and
-	// the creates in each collection, by "POST " and its path.
+	// writes counts the status writes to each object, keyed by its
+	// path, and the creates in each collection, keyed by "POST " and
+	// the collection's path.
 	writes map[string]int
-	// refusals is how many creates and deletes the server refuses next,
-	// the way an API server that restarts does.
+	// refusals is how many of the next creates and deletes of pods,
+	// Services, and ResourceClaimTemplates the server refuses, as an
+	// API server does while it restarts.
 	refusals int
-	// patchRefusals is how many merge patches the server refuses next.
+	// patchRefusals is how many of the next merge patches the server
+	// refuses.
 	patchRefusals int
-	// lateDeletes is how many patches that remove a deleted object's
-	// last finalizer answer 404 after the object goes, as a patch does
-	// when another request deleted the object first.
+	// lateDeletes is how many of the patches that remove a deleted
+	// object's last finalizer get a 404 after the object is gone. The
+	// real server does the same when another request deletes the
+	// object first.
 	lateDeletes int
-	// statusRefusals is how many status writes the server refuses
-	// next.
+	// statusRefusals is how many of the next status writes the server
+	// refuses.
 	statusRefusals int
-	// jobs plays the Job controller (fakejobs_test.go).
+	// jobs acts as the Job controller (fakejobs_test.go).
 	jobs fakeJobController
-	// heard receives each request before the server answers it, the
-	// Events' requests included, when a test sets it (hear).
-	heard func(*http.Request)
+	// onRequest, when a test sets it with onEachRequest, receives each request
+	// before the server answers it, including requests for Events.
+	onRequest func(*http.Request)
 }
 
-// hear calls heard with each request the server receives from now on.
-func (a *fakeAPI) hear(heard func(*http.Request)) {
+func (a *fakeAPI) onEachRequest(onRequest func(*http.Request)) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.heard = heard
+	a.onRequest = onRequest
 }
 
-// refuse makes the server refuse the next creates and deletes.
 func (a *fakeAPI) refuse(count int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.refusals = count
 }
 
-// refused answers whether the server refuses this write to a pod, a
-// Service, or a ResourceClaimTemplate. The caller holds a.mu.
+// refused writes a 503 and returns true while refusals remain and the
+// collection is pods, Services, or ResourceClaimTemplates. The caller
+// holds a.mu.
 func (a *fakeAPI) refused(w http.ResponseWriter, collection string) bool {
 	if a.refusals == 0 || !slices.Contains([]string{"pods", "services", "resourceclaimtemplates"}, plural(collection)) {
 		return false
@@ -100,8 +102,8 @@ func (a *fakeAPI) refused(w http.ResponseWriter, collection string) bool {
 	return true
 }
 
-// kinds names the kind of each collection's objects, by the last part
-// of its path.
+// fakeKinds maps the last part of a collection's path to the
+// apiVersion and kind of its objects.
 var fakeKinds = func() map[string][2]string {
 	out := map[string][2]string{
 		"pods":                   {"v1", "Pod"},
@@ -127,21 +129,22 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 	answer := api.recorded.Around(api)
 	api.server = apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		api.mu.Lock()
-		heard := api.heard
+		onRequest := api.onRequest
 		api.mu.Unlock()
-		if heard != nil {
-			heard(r)
+		if onRequest != nil {
+			onRequest(r)
 		}
 		answer.ServeHTTP(w, r)
 	}))
-	// The reflector waits out its backoff after a refused list without
-	// reading its context, so the bubble waits past it (apiservertest).
+	// After a refused list, the reflector sleeps through its backoff
+	// without watching its context. The bubble cannot end until that
+	// sleep does, so wait it out (apiservertest).
 	t.Cleanup(func() { time.Sleep(time.Minute) })
 	return api
 }
 
-// collectionOf splits a request's path into its collection, the name of
-// the object, and the subresource.
+// collectionOf splits a request's path into the collection, the object
+// name, and the subresource.
 func collectionOf(path string) (collection, name, sub string) {
 	var prefix, rest string
 	switch {
@@ -173,13 +176,13 @@ func collectionOf(path string) (collection, name, sub string) {
 	return collection, name, sub
 }
 
-// anyNamespace stands for the namespace in the collection of a list or
-// a watch of every namespace.
+// anyNamespace replaces the namespace in the collection path of a list
+// or a watch across all namespaces.
 const anyNamespace = "*"
 
-// covers answers whether a collection is the one a list or a watch
-// names, or one namespace's part of a list or a watch of every
-// namespace.
+// covers reports whether a list or watch of watched includes
+// collection: the same path, or one namespace of a watch across all
+// namespaces.
 func covers(watched, collection string) bool {
 	if watched == collection {
 		return true
@@ -192,7 +195,6 @@ func covers(watched, collection string) bool {
 	return namespace != "" && !strings.Contains(namespace, "/")
 }
 
-// namespaceOf answers the namespace of a collection's objects.
 func namespaceOf(collection string) string {
 	_, rest, _ := strings.Cut(collection, "/namespaces/")
 	namespace, _, _ := strings.Cut(rest, "/")
@@ -230,9 +232,9 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// store records an object at the next version and tells each watch.
-// The caller holds a.mu. The stored object is never changed after this:
-// a change stores a new copy, so the events share it.
+// store saves an object at the next resourceVersion and wakes each
+// watch. The caller holds a.mu. Nothing changes a stored object in
+// place, so watch events can share it.
 func (a *fakeAPI) store(collection, name string, object map[string]any, kind string) map[string]any {
 	a.version++
 
@@ -253,8 +255,9 @@ func (a *fakeAPI) store(collection, name string, object map[string]any, kind str
 	return object
 }
 
-// normalize answers a copy of an object as JSON decodes it, so every
-// number is a float64, the way the API server's answer reads.
+// normalize returns a copy of an object as JSON decoding produces it,
+// so every number is a float64, as in a response from the API
+// server.
 func normalize(object map[string]any) map[string]any {
 	var out map[string]any
 	body, _ := json.Marshal(object)
@@ -262,9 +265,9 @@ func normalize(object map[string]any) map[string]any {
 	return out
 }
 
-// clone answers a deep copy of a normalized object. It copies the
-// maps and slices directly, because a JSON round trip on every read
-// costs more than the rest of the fake.
+// clone returns a deep copy of a normalized object. It copies the maps
+// and slices directly, because a JSON round trip on every read would
+// cost more than the rest of the fake.
 func clone(object map[string]any) map[string]any {
 	return copyValue(object).(map[string]any)
 }
@@ -288,8 +291,8 @@ func copyValue(value any) any {
 	}
 }
 
-// selects answers whether an object carries the label a selector of the
-// form key=value names. An empty selector selects every object.
+// selects reports whether an object has the label that a key=value
+// selector names. An empty selector selects every object.
 func selects(selector string, object map[string]any) bool {
 	key, value, found := strings.Cut(selector, "=")
 	if !found {
@@ -318,9 +321,10 @@ func (a *fakeAPI) list(w http.ResponseWriter, r *http.Request, collection string
 	})
 }
 
-// watch answers a streaming list the way the API server does: an ADDED
-// event for each object, a bookmark that ends the initial events, and
-// then every later change.
+// watch streams the changes after the request's resourceVersion. When
+// the request sets sendInitialEvents, it first sends an ADDED event for
+// each existing object and a bookmark that ends them, as the API
+// server does.
 func (a *fakeAPI) watch(w http.ResponseWriter, r *http.Request, collection string) {
 	selector := r.URL.Query().Get("labelSelector")
 	kind := fakeKinds[plural(collection)]
@@ -340,10 +344,9 @@ func (a *fakeAPI) watch(w http.ResponseWriter, r *http.Request, collection strin
 			"annotations":     map[string]any{"k8s.io/initial-events-end": "true"},
 		}})
 	}
-	// store appends each event with the next version, so the log is in
-	// order of version. The watch starts at the first event after the
-	// version it was opened from, and on each change it reads only the
-	// events after the last one it read.
+	// store appends events in resourceVersion order. The watch starts
+	// at the first event after the version it opened from, and after
+	// each change it reads only the events it has not sent.
 	next, _ := slices.BinarySearchFunc(a.events, from+1, func(event fakeEvent, version int) int {
 		return event.version - version
 	})
@@ -384,8 +387,8 @@ func (a *fakeAPI) get(w http.ResponseWriter, collection, name string) {
 	_ = json.NewEncoder(w).Encode(object)
 }
 
-// create adds an object, and names it from generateName when it has no
-// name, as the API server does.
+// create adds an object. When the object has no name, it builds one
+// from generateName, as the API server does.
 func (a *fakeAPI) create(w http.ResponseWriter, r *http.Request, collection string) {
 	var object map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&object)
@@ -404,8 +407,8 @@ func (a *fakeAPI) create(w http.ResponseWriter, r *http.Request, collection stri
 	_ = json.NewEncoder(w).Encode(added)
 }
 
-// add creates an object, and answers nil when one of its name exists.
-// The caller holds a.mu.
+// add stores a new object, and returns nil when an object of that
+// name exists. The caller holds a.mu.
 func (a *fakeAPI) add(collection string, object map[string]any) map[string]any {
 	metadata := object["metadata"].(map[string]any)
 	name, _ := metadata["name"].(string)
@@ -443,8 +446,9 @@ func readyStatus() map[string]any {
 	}
 }
 
-// writeStatus replaces an object's status, and refuses a write from a
-// copy older than the stored one, as the API server does.
+// writeStatus replaces an object's status. It answers 409 when the
+// request's resourceVersion differs from the stored one, as the API
+// server does.
 func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, collection, name string) {
 	var written map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&written)
@@ -467,11 +471,10 @@ func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, collection
 	a.writes[collection+"/"+name]++
 	next := clone(held)
 	next["status"] = written["status"]
-	// The API server stores nothing for a write that changes nothing:
-	// the resourceVersion stays, and no watch event follows. The held
-	// object and the written status both come from JSON, so their
-	// numbers are float64 already, and they compare without a round
-	// trip.
+	// The API server stores nothing for a write that changes nothing.
+	// The resourceVersion stays the same and no watch event follows.
+	// Both statuses came from JSON, so their numbers are already
+	// float64 and DeepEqual compares them directly.
 	if reflect.DeepEqual(next["status"], held["status"]) {
 		_ = json.NewEncoder(w).Encode(held)
 		return
@@ -480,8 +483,8 @@ func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, collection
 }
 
 // replace stores a whole object in place of the one it names, such as
-// a ConfigMap with new data, and refuses one that states an older
-// resourceVersion.
+// a ConfigMap with new data. It answers 409 when the request's
+// resourceVersion differs from the stored one.
 func (a *fakeAPI) replace(w http.ResponseWriter, r *http.Request, collection, name string) {
 	var written map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&written)
@@ -501,9 +504,10 @@ func (a *fakeAPI) replace(w http.ResponseWriter, r *http.Request, collection, na
 	_ = json.NewEncoder(w).Encode(a.store(collection, name, next, "MODIFIED"))
 }
 
-// patch applies a merge patch to the metadata, and refuses one that
-// states an older resourceVersion. An object that a person deleted
-// goes away when its last finalizer goes.
+// patch applies a merge patch to the metadata. It answers 409 when the
+// patch sets a resourceVersion that differs from the stored one. An
+// object with a deletionTimestamp is removed when the patch removes
+// its last finalizer.
 func (a *fakeAPI) patch(w http.ResponseWriter, r *http.Request, collection, name string) {
 	var patch struct {
 		Metadata map[string]any `json:"metadata"`
@@ -564,8 +568,8 @@ func (a *fakeAPI) patch(w http.ResponseWriter, r *http.Request, collection, name
 	_ = json.NewEncoder(w).Encode(a.store(collection, name, next, "MODIFIED"))
 }
 
-// remove deletes an object, or marks it deleted while a finalizer holds
-// it.
+// remove handles a DELETE request. It deletes the object, or only
+// sets its deletionTimestamp while it still has a finalizer.
 func (a *fakeAPI) remove(w http.ResponseWriter, collection, name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -579,8 +583,8 @@ func (a *fakeAPI) remove(w http.ResponseWriter, collection, name string) {
 	_, _ = fmt.Fprint(w, `{"kind":"Status","status":"Success"}`)
 }
 
-// delete deletes an object, and answers false when it does not exist.
-// The caller holds a.mu.
+// delete deletes an object as remove does, and returns false when the
+// object does not exist. The caller holds a.mu.
 func (a *fakeAPI) delete(collection, name string) bool {
 	held, exists := a.objects[collection][name]
 	if !exists {
@@ -608,8 +612,9 @@ const (
 	configMapsCollection = "/api/v1/namespaces/" + testNamespace + "/configmaps"
 )
 
-// put creates an object, or replaces its spec the way kubectl apply
-// does. A change of the spec moves the generation.
+// put creates an object, or replaces the spec of an existing one, as
+// kubectl apply does. A change to the spec increments the
+// generation.
 func (a *fakeAPI) put(collection string, object map[string]any) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -629,14 +634,13 @@ func (a *fakeAPI) put(collection string, object map[string]any) {
 	a.store(collection, name, next, "MODIFIED")
 }
 
-// deleteNamed deletes an object as a person does with kubectl delete.
 func (a *fakeAPI) deleteNamed(collection, name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.delete(collection, name)
 }
 
-// object answers a copy of a stored object, and false when it is gone.
+// object returns a copy, so a test cannot change the stored object.
 func (a *fakeAPI) object(collection, name string) (map[string]any, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -647,7 +651,6 @@ func (a *fakeAPI) object(collection, name string) (map[string]any, bool) {
 	return clone(object), true
 }
 
-// decode answers a stored object as a typed value.
 func decode[T any](t *testing.T, a *fakeAPI, collection, name string) (T, bool) {
 	t.Helper()
 	var out T
@@ -657,12 +660,11 @@ func decode[T any](t *testing.T, a *fakeAPI, collection, name string) (T, bool) 
 	}
 	body, _ := json.Marshal(object)
 	if err := json.Unmarshal(body, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding %s %s: %v", collection, name, err)
 	}
 	return out, true
 }
 
-// names answers the names of a collection's objects.
 func (a *fakeAPI) names(collection string) []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -673,7 +675,8 @@ func (a *fakeAPI) names(collection string) []string {
 	return out
 }
 
-// setPodReady plays the kubelet for a pod that a test held Pending.
+// setPodReady makes a pod that a test held Pending Ready, as the
+// kubelet would.
 func (a *fakeAPI) setPodReady(name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -688,16 +691,14 @@ func (a *fakeAPI) setPodReady(name string) {
 	a.store(podsCollection, name, next, "MODIFIED")
 }
 
-// holdPending keeps the pod of a name Pending when the operator creates
-// it.
+// holdPending keeps the named pod Pending when the operator creates
+// it, until setPodReady.
 func (a *fakeAPI) holdPending(name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.pending[name] = true
 }
 
-// eventReasons answers the reason of each Event, in the order of their
-// creation.
 func (a *fakeAPI) eventReasons() []string {
 	var out []string
 	for _, e := range a.recorded.List() {
@@ -706,15 +707,14 @@ func (a *fakeAPI) eventReasons() []string {
 	return out
 }
 
-// statusWrites answers how many status writes one object received.
 func (a *fakeAPI) statusWrites(collection, name string) int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.writes[collection+"/"+name]
 }
 
-// creates answers how many creates one collection received, the ones
-// it refused included.
+// creates returns how many creates one collection received, including
+// the refused ones.
 func (a *fakeAPI) creates(collection string) int {
 	a.mu.Lock()
 	defer a.mu.Unlock()

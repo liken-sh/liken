@@ -1,8 +1,8 @@
 package main
 
-// A park or an unpark that a lock refuses fails its action with the
-// lock's explanation, the same words as the refusal's Warning, so the
-// run's record says why the driver answered Alert.
+// When a park lock makes a driver refuse a park or an unpark, the action
+// fails with the text of the refusal's Warning Event, so the run's
+// record says why the driver set the property to Alert.
 
 import (
 	"testing"
@@ -12,11 +12,12 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The first case drops the dome's after, and holds the mount's park,
-// so the dome's park in bad weather meets an unparked mount. A trigger
-// has no tree order, so the summary names the after that gives one.
-// The second case starts the dome and the mount parked, and nothing
-// unparks the dome, so the mount's activation meets a parked dome.
+// In the first case, the fake server never completes the mount's park,
+// so the dome's trigger parks the dome in bad weather while the mount is
+// unparked. The actions of a trigger do not wait for the mounts to park,
+// so the summary tells the user to add an after. In the second case,
+// the dome and the mount start parked and the dome has no activation, so
+// the mount's activation finds the dome parked.
 func TestARefusedMoveExplainsTheLock(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -40,7 +41,7 @@ func TestARefusedMoveExplainsTheLock(t *testing.T) {
 		}, observatory.DomeKind, "lab", "triggers[0]",
 			"When WeatherStation lab Safe=False: state: Parked: Dome lab refused to park, because Mount east is unparked or moving. " +
 				"In Observatory lab, a dome does not park until every mount parks. " +
-				"In a trigger, after: [{kind: Mount}] orders the dome's park after the mounts' parks"},
+				"In a trigger, set after: [{kind: Mount}] on the dome's park so that it runs after the mounts park"},
 		{"an activation's unpark", func(w *world) {
 			w.indi.preset("Dome Simulator", "DOME_PARK", "PARK")
 			w.indi.preset("Telescope Simulator", "TELESCOPE_PARK", "PARK")
@@ -60,7 +61,7 @@ func TestARefusedMoveExplainsTheLock(t *testing.T) {
 				c.setup(w)
 				run := w.runEnds(c.kind, c.device, c.trigger, 15*time.Minute)
 				if run.State != observatory.StepFailed || run.Summary != c.summary {
-					t.Errorf("the run = %s %q\nwant %q", run.State, run.Summary, c.summary)
+					t.Errorf("the run is %s %q, want %s %q", run.State, run.Summary, observatory.StepFailed, c.summary)
 				}
 			})
 		})

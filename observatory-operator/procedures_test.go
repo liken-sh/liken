@@ -1,8 +1,8 @@
 package main
 
-// The procedures of the two lifecycle triggers: the order the tree
-// gives them, the record that a new copy of the operator resumes from,
-// and the waits of requires and after.
+// Activation and deactivation procedures: the order in which they run,
+// how a restarted operator resumes a run from its record, and how
+// requires and after make an action wait.
 
 import (
 	"strings"
@@ -18,7 +18,7 @@ func (w *world) amend(kind observatory.Kind, name string, change func(spec map[s
 	w.t.Helper()
 	object, ok := w.api.object(kindCollection(kind), name)
 	if !ok {
-		w.t.Fatalf("no %s %s", kind.Name, name)
+		w.t.Fatalf("%s %s does not exist", kind.Name, name)
 	}
 	change(object["spec"].(map[string]any))
 	w.api.put(kindCollection(kind), object)
@@ -37,9 +37,9 @@ func procedureEvents(a *fakeAPI, kind observatory.Kind, name, reason string) int
 }
 
 // Every simulator starts unparked and open, so the presets park the
-// dome and the mount and close the cap, and each activation then sends
-// its move. The dome unparks before the mount, and the cap opens and
-// the camera cools after the mount.
+// dome and the mount and close the cap, which gives each activation a
+// move to send. The dome unparks before the mount, and the cap opens
+// and the camera cools after the mount.
 func TestActivationRunsTheTreeFromTheTop(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -56,7 +56,7 @@ func TestActivationRunsTheTreeFromTheTop(t *testing.T) {
 		}
 		for _, pair := range order {
 			if !w.indi.sentBefore(pair[0], pair[1]) {
-				t.Errorf("%q was not sent before %q: %v", pair[0], pair[1], w.indi.changes())
+				t.Errorf("%q was not sent before %q, want that order in %v", pair[0], pair[1], w.indi.changes())
 			}
 		}
 		want := "Ran the activation of Observatory lab, Dome lab, Mount east, Camera east-main, DustCap east\n" +
@@ -79,9 +79,11 @@ func TestActivationRunsTheTreeFromTheTop(t *testing.T) {
 	})
 }
 
-// Active keeps its transition time across an operator restart, so the
-// new copy runs no procedure again. A second telescope in the
-// observatory finds it Active, and runs only its own tiers.
+// The Active condition keeps its transition time across an operator
+// restart, so the restarted operator runs no procedure a second time. A
+// second telescope that starts in the same observatory finds the
+// Observatory already Active, so the dome's activation does not run
+// again.
 func TestActiveSurvivesARestart(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -107,7 +109,7 @@ func TestActiveSurvivesARestart(t *testing.T) {
 		synctest.Wait()
 		eastAfter, labAfter := active()
 		if !eastAfter.LastTransitionTime.Equal(eastBefore.LastTransitionTime) || !labAfter.LastTransitionTime.Equal(labBefore.LastTransitionTime) {
-			t.Errorf("Active moved from %v and %v to %v and %v", eastBefore.LastTransitionTime, labBefore.LastTransitionTime,
+			t.Errorf("Active changed from %v and %v to %v and %v, want no change", eastBefore.LastTransitionTime, labBefore.LastTransitionTime,
 				eastAfter.LastTransitionTime, labAfter.LastTransitionTime)
 		}
 		for _, d := range []struct {
@@ -122,8 +124,8 @@ func TestActiveSurvivesARestart(t *testing.T) {
 }
 
 // An operator that stops in the middle of a run leaves it Running, and
-// the next copy runs only the actions that are not Done.
-func TestANewOperatorResumesARunFromItsRecord(t *testing.T) {
+// the restarted operator runs only the actions that are not Done.
+func TestARestartedOperatorResumesARun(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -200,11 +202,11 @@ func (w *world) retry(name string) {
 }
 
 // annotateRetry sets the retry annotation on any resource, as a person
-// does with kubectl annotate. A person annotates after the fix landed,
-// and each kind comes through its own watch, so the annotation waits
-// until the operator has read every earlier write. Without the wait,
-// the operator can read the annotation before the fixed spec, and the
-// retry records the spec that failed.
+// does with kubectl annotate after fixing a spec. Each kind reaches the
+// operator through its own watch, so annotateRetry first waits until
+// the operator has read every earlier write. Without the wait, the
+// operator can read the annotation before the fixed spec, and the retry
+// uses the spec that failed.
 func (w *world) annotateRetry(kind observatory.Kind, name string) {
 	synctest.Wait()
 	object, _ := w.api.object(kindCollection(kind), name)
@@ -214,8 +216,8 @@ func (w *world) annotateRetry(kind observatory.Kind, name string) {
 	w.api.mu.Unlock()
 }
 
-// requires holds an action until its condition holds, and fails it at
-// its timeout.
+// requires makes an action wait until its condition is met, and fails
+// the action at its timeout.
 func TestRequiresWaitsForItsCondition(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -256,9 +258,10 @@ func TestRequiresWaitsForItsCondition(t *testing.T) {
 	}
 }
 
-// after waits for the runs of the same step. A resource with no run in
-// the step is not waited for, and a resource in a later tier is waited
-// for until the action's timeout.
+// after makes an action wait for the runs of other resources in the
+// same step. A resource with no run in the step is not waited for. A
+// resource in a later tier runs only after this action, so the action
+// waits until its timeout.
 func TestAfterWaitsForTheRunsOfTheSameStep(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -326,17 +329,17 @@ func TestTheLastTelescopeDeactivatesTheObservatory(t *testing.T) {
 		}
 		east := end("east-tonight", "east")
 		if text := stepText(stepOf(east, observatory.StepDeactivation)); !strings.Contains(text, "Observatory lab stays active for Telescope west") {
-			t.Errorf("east's Deactivation =\n%s", text)
+			t.Errorf("east's Deactivation =\n%s\nwant it to contain \"Observatory lab stays active for Telescope west\"", text)
 		}
 		if n := w.indi.count("lab-observatory", "Dome Simulator.DOME_PARK"); n != 0 {
-			t.Errorf("the dome received %d parks while west is Active", n)
+			t.Errorf("the dome received %d parks while west is Active, want 0", n)
 		}
 		west := end("west-tonight", "west")
 		if text := stepText(stepOf(west, observatory.StepDeactivation)); !strings.Contains(text, "Dome lab state: Parked Done: Parked Dome lab") {
-			t.Errorf("west's Deactivation =\n%s", text)
+			t.Errorf("west's Deactivation =\n%s\nwant it to contain \"Dome lab state: Parked Done: Parked Dome lab\"", text)
 		}
 		if !w.indi.sentBefore("west-telescope Telescope Simulator.TELESCOPE_PARK PARK=On", "lab-observatory Dome Simulator.DOME_PARK PARK=On") {
-			t.Errorf("the dome did not park after the west mount: %v", w.indi.changes())
+			t.Errorf("the dome parked before the west mount, want it after: %v", w.indi.changes())
 		}
 	})
 }

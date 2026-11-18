@@ -31,7 +31,7 @@ func TestEachStepEndIsOneLogLine(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := stepLine(&c.step); got != c.want {
-				t.Errorf("got %q, want %q", got, c.want)
+				t.Errorf("stepLine = %q, want %q", got, c.want)
 			}
 		})
 	}
@@ -53,7 +53,7 @@ func TestEachPhaseChangeIsOneLogLine(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := phaseLine(&c.status); got != c.want {
-				t.Errorf("got %q, want %q", got, c.want)
+				t.Errorf("phaseLine = %q, want %q", got, c.want)
 			}
 		})
 	}

@@ -1,12 +1,12 @@
 package main
 
-// Two kinds of work hold a lock across INDI waits: the work on an
-// observatory's server, which the runners of several telescopes share
-// (operator.siteLock), and the work on one INDI server's devices
-// (indiServer.lock). A runner that waits for such a lock must still
-// stop at its step's deadline, and a sync.Mutex cannot be abandoned.
-// So the lock is a channel that holds one token, and a waiter selects
-// on it and on its context.
+// Some work holds a lock while it waits on INDI: work on an
+// observatory's shared server, which the runners of several telescopes
+// contend for (operator.siteLock), and work on the devices of one INDI
+// server (indiServer.lock). A runner that waits for such a lock must
+// still give up at its step's deadline, and sync.Mutex.Lock cannot be
+// cancelled. So the lock is a channel with room for one token, and a
+// waiter selects on the channel and on its context.
 
 import "context"
 
@@ -14,7 +14,8 @@ type lock chan struct{}
 
 func newLock() lock { return make(lock, 1) }
 
-// acquire takes the lock, or answers the cause when ctx ends first.
+// acquire waits for the lock, or returns context.Cause(ctx) if ctx is
+// done first.
 func (l lock) acquire(ctx context.Context) error {
 	select {
 	case l <- struct{}{}:
@@ -24,5 +25,4 @@ func (l lock) acquire(ctx context.Context) error {
 	}
 }
 
-// release gives the lock back to the next waiter.
 func (l lock) release() { <-l }

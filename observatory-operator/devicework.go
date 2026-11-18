@@ -1,9 +1,9 @@
 package main
 
-// What the steps send each kind of device, built against what the
-// simulators of the indi-simulators image define and answer. A device
-// whose driver lacks a property, such as a guide camera with no cooler,
-// is noted in the step's message, and the step goes on.
+// The property names here are the ones that the drivers in the
+// indi-simulators image define. When a real driver lacks a property,
+// such as a guide camera with no cooler, the step adds a note to its
+// message and continues.
 
 import (
 	"context"
@@ -14,13 +14,11 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// connectOrder is the order in which Connect connects a telescope's
-// devices, by the kind of the resource that runs each driver. The
-// cameras come last, because a camera snoops the mount, the focuser,
-// the filter wheel, and the rotator of its train, and reads their
-// values when it connects. Disconnect runs in the reverse order. The
-// Switch devices connect earlier, in PowerOn, because they power the
-// others.
+// connectOrder is the order in which a telescope's devices connect, by
+// kind. Cameras come last because a camera snoops the mount, focuser,
+// filter wheel, and rotator of its train and reads their values when it
+// connects. Switch devices are not listed because they power the other
+// devices, so PowerOn connects them first.
 var connectOrder = []observatory.Kind{
 	observatory.MountKind, observatory.GPSKind, observatory.PolarAlignerKind,
 	observatory.FocuserKind, observatory.FilterWheelKind, observatory.RotatorKind,
@@ -28,15 +26,14 @@ var connectOrder = []observatory.Kind{
 	observatory.ReceiverKind, observatory.CameraKind,
 }
 
-// siteOrder is the order in which StartSite connects an observatory's
-// own devices, after its Switch devices.
+// siteOrder is the order in which an observatory's own devices connect,
+// after its Switch devices.
 var siteOrder = []observatory.Kind{
 	observatory.WeatherStationKind, observatory.DomeKind, observatory.ReceiverKind,
 }
 
-// inOrder answers the devices in the order of kinds, and by name in
-// each kind. A device of a kind that the order does not name is left
-// out.
+// inOrder sorts devices by the position of their kind in kinds, and
+// leaves out a device whose kind is not in kinds.
 func inOrder(devices []*device, kinds []observatory.Kind) []*device {
 	var out []*device
 	for _, kind := range kinds {
@@ -49,8 +46,7 @@ func inOrder(devices []*device, kinds []observatory.Kind) []*device {
 	return out
 }
 
-// location writes the observatory's location to a mount or a GPS.
-// GEOGRAPHIC_COORD takes longitude from 0 to 360 degrees east.
+// GEOGRAPHIC_COORD takes a longitude from 0 to 360 degrees east.
 func location(ctx context.Context, h handle, at observatory.Location) (bool, error) {
 	longitude := at.Longitude
 	if longitude < 0 {
@@ -59,10 +55,9 @@ func location(ctx context.Context, h handle, at observatory.Location) (bool, err
 	return h.setNumbers(ctx, "GEOGRAPHIC_COORD", map[string]float64{"LAT": at.Latitude, "LONG": longitude, "ELEV": at.Elevation})
 }
 
-// activeDevices writes the members of ACTIVE_DEVICES that the property
-// has, and leaves out the others. A member that names no device is
-// empty, so a camera snoops no focuser of another train on the same
-// server.
+// activeDevices writes only the members of want that the driver's
+// ACTIVE_DEVICES has. It writes an empty value too, so that a camera
+// stops snooping a device of another train on the same server.
 func activeDevices(ctx context.Context, h handle, want map[string]string) (bool, error) {
 	p, ok := h.property(ctx, "ACTIVE_DEVICES")
 	if !ok {
@@ -80,8 +75,8 @@ func activeDevices(ctx context.Context, h handle, want map[string]string) (bool,
 	return h.setTexts(ctx, "ACTIVE_DEVICES", values)
 }
 
-// optional writes a setting that a person may leave out, to a property
-// the driver may not define, and notes a property the driver lacks.
+// optional writes a property that the driver may not define. When the
+// driver lacks it, optional appends a note and writes nothing.
 func optional(ctx context.Context, h handle, property string, values map[string]float64, notes *[]string) (bool, error) {
 	if _, ok := h.property(ctx, property); !ok {
 		*notes = append(*notes, fmt.Sprintf("no %s on %s", property, h))
@@ -90,7 +85,8 @@ func optional(ctx context.Context, h handle, property string, values map[string]
 	return h.setNumbers(ctx, property, values)
 }
 
-// on reports whether one member of a switch property is On now.
+// on reports whether a member of a switch property is On in the
+// client's store.
 func on(h handle, property, member string) bool {
 	p, ok := h.client().Property(h.name, property)
 	if !ok {
@@ -100,14 +96,13 @@ func on(h handle, property, member string) bool {
 	return has && m.Switch
 }
 
-// busy reports whether a property's state is Busy now.
 func busy(h handle, property string) bool {
 	p, ok := h.client().Property(h.name, property)
 	return ok && p.State == indi.Busy
 }
 
-// outputs answers the Switch outputs that the devices name in
-// spec.power, by switch, with each switch's outputs sorted.
+// outputs returns the outputs that devices name in spec.power, sorted
+// and without duplicates, for each Switch.
 func outputs(devices []*device) map[string][]int32 {
 	out := map[string][]int32{}
 	for _, d := range devices {
@@ -121,7 +116,6 @@ func outputs(devices []*device) map[string][]int32 {
 	return out
 }
 
-// sortedKeys answers a map's keys in order.
 func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {

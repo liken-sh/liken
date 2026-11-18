@@ -26,7 +26,7 @@ func TestAProfileReadsItsPoints(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got, err := ParseProfile(c.profile)
 			if err != nil || !slices.Equal(got, c.want) {
-				t.Errorf("ParseProfile = %v, %v, want %v", got, err, c.want)
+				t.Errorf("ParseProfile(%q) = %v, %v, want %v and no error", c.profile, got, err, c.want)
 			}
 		})
 	}
@@ -50,13 +50,13 @@ func TestAProfileRefusesWhatNoProgramReads(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := ParseProfile(c.profile)
 			if err == nil || !strings.Contains(err.Error(), c.refusal) {
-				t.Errorf("ParseProfile error = %v, want %q", err, c.refusal)
+				t.Errorf("ParseProfile error is %v, want it to contain %q", err, c.refusal)
 			}
 		})
 	}
 }
 
-func TestAProfileAnswersTheAltitudeInEachDirection(t *testing.T) {
+func TestAProfileReturnsTheAltitudeInEachDirection(t *testing.T) {
 	square := Profile{{0, 10}, {90, 20}, {180, 30}, {270, 20}}
 	cases := []struct {
 		name    string
@@ -86,8 +86,8 @@ func TestAProfileAnswersTheAltitudeInEachDirection(t *testing.T) {
 	}
 }
 
-// longProfile answers a profile of exactly length characters: a point
-// for every half degree, and a comment that fills the rest.
+// longProfile returns a profile of exactly length characters: a point
+// at every half degree, and a comment line that fills the rest.
 func longProfile(length int) string {
 	var b strings.Builder
 	for azimuth := 0.0; azimuth < 360; azimuth += 0.5 {
@@ -97,9 +97,9 @@ func longProfile(length int) string {
 }
 
 // astrophotography-operator reads a profile with ParseProfile, and the
-// API server checks it with the CRD's rules. The two must agree, or
-// the scheduler meets a Horizon that the API server accepted and the
-// parser refuses. Each case runs through both.
+// API server validates it with the CRD's rules. The two must agree.
+// If they do not, the scheduler can meet a Horizon that the API server
+// accepted and the parser rejects. Each case runs through both.
 func TestTheParserAcceptsWhatTheAPIServerAccepts(t *testing.T) {
 	cases := []struct {
 		name, profile string

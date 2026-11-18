@@ -8,34 +8,34 @@ import (
 	"testing/synctest"
 )
 
-// exchange sends one line to a new connection of the Server, and
-// answers the lines it reads back: the two catch-up events, then the
-// answer.
+// exchange sends one line on a new connection to the Server and returns
+// the messages it reads back: the two catch-up events, then the
+// response.
 func exchange(t *testing.T, s *Server, line string) []map[string]any {
 	conn, err := s.DialContext(t.Context(), "tcp", "phd2:4400")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("dialing the Server: %v", err)
 	}
 	defer conn.Close()
 	lines := bufio.NewScanner(conn)
 	var out []map[string]any
 	read := func() {
 		if !lines.Scan() {
-			t.Fatal("the connection ended")
+			t.Fatal("the connection ended before the response, want a response")
 		}
 		var m map[string]any
 		if err := json.Unmarshal(lines.Bytes(), &m); err != nil {
-			t.Fatal(err)
+			t.Fatalf("decoding a message of the Server: %v", err)
 		}
 		out = append(out, m)
 	}
 	read()
 	read()
 	if _, err := conn.Write([]byte(line + "\r\n")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("sending a line to the Server: %v", err)
 	}
-	// An event can come before the answer, as ConfigurationChange does
-	// before the answer to set_connected.
+	// An event can come before the response, as ConfigurationChange
+	// does for set_connected.
 	for {
 		read()
 		if _, answer := out[len(out)-1]["jsonrpc"]; answer {
@@ -49,11 +49,11 @@ func TestAnUnknownMethodIsNotFound(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		got := exchange(t, New(), `{"method":"get_star_image","id":7}`)
 		if got[0]["Event"] != "Version" || got[1]["Event"] != "AppState" || got[1]["State"] != "Stopped" {
-			t.Errorf("catch-up = %v", got[:2])
+			t.Errorf("the catch-up events are %v, want Version and AppState Stopped", got[:2])
 		}
 		failure, _ := got[2]["error"].(map[string]any)
 		if got[2]["id"] != 7.0 || failure["message"] != "method not found" {
-			t.Errorf("answer = %v", got[2])
+			t.Errorf("the response is %v, want id 7 and the error \"method not found\"", got[2])
 		}
 	})
 }
@@ -64,7 +64,7 @@ func TestSetConnectedNeedsOneBoolean(t *testing.T) {
 		got := exchange(t, s, `{"method":"set_connected","params":["yes"],"id":1}`)
 		failure, _ := got[2]["error"].(map[string]any)
 		if failure["message"] != "expected connected boolean param" || s.Equipment {
-			t.Errorf("answer = %v, equipment = %v", got[2], s.Equipment)
+			t.Errorf("the response is %v and equipment is %v, want the error expected connected boolean param and equipment false", got[2], s.Equipment)
 		}
 	})
 }
@@ -81,15 +81,15 @@ func TestALineThatIsNotJSONIsRecorded(t *testing.T) {
 		}
 		conn.Close()
 		if got := s.Unread(); len(got) != 1 || got[0] != "not json" {
-			t.Errorf("unread = %q", got)
+			t.Errorf("the unread lines are %q, want [not json]", got)
 		}
 		if s.Dials() != 1 {
-			t.Errorf("dials = %d", s.Dials())
+			t.Errorf("the Server counts %d dials, want 1", s.Dials())
 		}
 	})
 }
 
-func TestEachReadAnswersTheServersState(t *testing.T) {
+func TestEachGetMethodReturnsTheServersState(t *testing.T) {
 	cases := []struct {
 		method string
 		set    func(*Server)
@@ -109,10 +109,10 @@ func TestEachReadAnswersTheServersState(t *testing.T) {
 				s.Set(c.set)
 				got := exchange(t, s, `{"method":"`+c.method+`","id":1}`)
 				if got[2]["result"] != c.want {
-					t.Errorf("answer = %v, want %v", got[2], c.want)
+					t.Errorf("the response is %v, want result %v", got[2], c.want)
 				}
 				if s.Received() != c.method {
-					t.Errorf("received %q", s.Received())
+					t.Errorf("the Server received %q, want %q", s.Received(), c.method)
 				}
 			})
 		})
@@ -124,18 +124,19 @@ func TestSetConnectedSetsTheEquipmentOrRefuses(t *testing.T) {
 		s := New()
 		got := exchange(t, s, `{"method":"set_connected","params":[true],"id":1}`)
 		if got[2]["result"] != 0.0 || !s.Equipment {
-			t.Errorf("answer = %v, equipment = %v", got[2], s.Equipment)
+			t.Errorf("the response is %v and equipment is %v, want result 0 and equipment true", got[2], s.Equipment)
 		}
 		s.Set(func(s *Server) { s.Refuse = "equipment failed to connect: mount" })
 		got = exchange(t, s, `{"method":"set_connected","params":[false],"id":2}`)
 		failure, _ := got[2]["error"].(map[string]any)
 		if failure["message"] != "equipment failed to connect: mount" || !s.Equipment {
-			t.Errorf("answer = %v, equipment = %v", got[2], s.Equipment)
+			t.Errorf("the response is %v and equipment is %v, want the error equipment failed to connect: mount and equipment true", got[2], s.Equipment)
 		}
 	})
 }
 
-// stop_capture answers, then reports the end of the loop as PHD2 does.
+// stop_capture returns its result, and then PHD2 sends the event that
+// ends the loop.
 func TestStopCaptureEndsTheLoop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := New()
@@ -151,12 +152,12 @@ func TestStopCaptureEndsTheLoop(t *testing.T) {
 		var e map[string]any
 		_ = json.Unmarshal(lines.Bytes(), &e)
 		if e["Event"] != "LoopingExposuresStopped" || s.AppState != "Stopped" {
-			t.Errorf("event = %v, state = %q", e, s.AppState)
+			t.Errorf("the event is %v and the state is %q, want LoopingExposuresStopped and Stopped", e, s.AppState)
 		}
 	})
 }
 
-// A held method gets no answer, and a broadcast reaches each open
+// A held method gets no response, and a broadcast reaches each open
 // connection until a cut ends them.
 func TestAHeldMethodWaitsAndABroadcastReachesTheClient(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -173,15 +174,15 @@ func TestAHeldMethodWaitsAndABroadcastReachesTheClient(t *testing.T) {
 		var e map[string]any
 		_ = json.Unmarshal(lines.Bytes(), &e)
 		if e["Event"] != "GuideStep" || e["Frame"] != 7.0 || e["RADistanceRaw"] != 0.5 {
-			t.Errorf("event = %v", e)
+			t.Errorf("the event is %v, want GuideStep with Frame 7 and RADistanceRaw 0.5", e)
 		}
 		s.Cut()
 		if lines.Scan() {
-			t.Errorf("read %q after the cut", lines.Text())
+			t.Errorf("read %q after the cut, want the connection closed", lines.Text())
 		}
 		s.Clear()
 		if s.Received() != "" {
-			t.Errorf("received %q after clear", s.Received())
+			t.Errorf("the Server received %q after Clear, want nothing", s.Received())
 		}
 	})
 }
@@ -194,7 +195,7 @@ func TestACutServerRefusesADial(t *testing.T) {
 	s.Cut()
 	if conn, err := s.DialContext(t.Context(), "tcp", "phd2:4400"); err == nil {
 		conn.Close()
-		t.Fatal("the dial reached a PHD2 that exited")
+		t.Fatal("the dial reached a PHD2 that exited, want a refused connection")
 	}
 }
 
@@ -236,15 +237,15 @@ func TestTheGuidingMethodsRefuseAsPHD2Does(t *testing.T) {
 				got := exchange(t, s, c.line)
 				failure, _ := got[2]["error"].(map[string]any)
 				if failure["message"] != c.want {
-					t.Errorf("answer = %v, want %q", got[2], c.want)
+					t.Errorf("the response is %v, want the error %q", got[2], c.want)
 				}
 			})
 		})
 	}
 }
 
-// readAll sends one line to a new connection and answers every message
-// that follows the catch-up events until the Server goes quiet.
+// readAll sends one line on a new connection and returns every message
+// that follows the catch-up events, until the Server sends no more.
 func readAll(t *testing.T, s *Server, line string) []map[string]any {
 	conn, _ := s.DialContext(t.Context(), "tcp", "phd2:4400")
 	lines := bufio.NewScanner(conn)
@@ -267,7 +268,8 @@ func readAll(t *testing.T, s *Server, line string) []map[string]any {
 	return out
 }
 
-// names answers the event of each message, or "answer" for an answer.
+// names returns the event name of each message, or "answer" for a
+// response.
 func names(messages []map[string]any) []string {
 	var out []string
 	for _, m := range messages {
@@ -311,20 +313,20 @@ func TestEachMethodSendsPHD2sEvents(t *testing.T) {
 				s := New()
 				s.Set(c.set)
 				if got := names(readAll(t, s, c.line)); !slices.Equal(got, c.want) {
-					t.Errorf("messages = %v, want %v", got, c.want)
+					t.Errorf("the messages are %v, want %v", got, c.want)
 				}
 			})
 		})
 	}
 }
 
-func TestFindStarAnswersTheStar(t *testing.T) {
+func TestFindStarReturnsTheStarPosition(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := New()
 		s.Set(func(s *Server) { s.AppState, s.Star = "Looping", [2]float64{10, 20} })
 		got := exchange(t, s, `{"method":"find_star","id":1}`)
 		if position, _ := got[2]["result"].([]any); !slices.Equal(position, []any{10.0, 20.0}) || s.AppState != "Selected" {
-			t.Errorf("answer = %v, state = %q", got[2], s.AppState)
+			t.Errorf("the response is %v and the state is %q, want [10 20] and Selected", got[2], s.AppState)
 		}
 	})
 }
@@ -334,7 +336,7 @@ func TestSetExposureRecordsTheExposure(t *testing.T) {
 		s := New()
 		exchange(t, s, `{"method":"set_exposure","params":[2000],"id":1}`)
 		if s.Exposure != 2000 || string(s.Params("set_exposure")) != "[2000]" {
-			t.Errorf("exposure = %d, params = %s", s.Exposure, s.Params("set_exposure"))
+			t.Errorf("the exposure is %d and the params are %s, want 2000 and [2000]", s.Exposure, s.Params("set_exposure"))
 		}
 	})
 }
@@ -347,7 +349,7 @@ func TestASettleEndsSettledOrFailed(t *testing.T) {
 		s.Set(func(s *Server) { s.AppState, s.SettleFailure = "Guiding", "timed-out waiting for guider to settle" })
 		got := readAll(t, s, `{"method":"dither","params":{"amount":5,"settle":{"pixels":1.5,"time":5,"timeout":60}},"id":1}`)
 		if done := got[len(got)-1]; done["Status"] != 1.0 || done["Error"] != "timed-out waiting for guider to settle" {
-			t.Errorf("SettleDone = %v", done)
+			t.Errorf("the event is %v, want SettleDone with Status 1 and the settle failure", done)
 		}
 
 		s = New()
@@ -367,7 +369,7 @@ func TestASettleEndsSettledOrFailed(t *testing.T) {
 		var done map[string]any
 		_ = json.Unmarshal(lines.Bytes(), &done)
 		if _, failed := done["Error"]; done["Event"] != "SettleDone" || done["Status"] != 0.0 || failed {
-			t.Errorf("SettleDone = %v", done)
+			t.Errorf("the event is %v, want SettleDone with Status 0 and no Error", done)
 		}
 	})
 }

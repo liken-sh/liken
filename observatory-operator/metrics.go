@@ -1,17 +1,15 @@
 package main
 
-// The operator's half of liken's Prometheus contract (root plan 65,
-// plans/completed/65-prometheus-metrics.md at the top of the
-// repository, and this operator's plan 22): the runtime layer, the
-// reconcile loop layer, and the domain series, on one registry that a
-// scrape reads from memory. This file holds the registry, the
-// listener, and the first two layers. series.go sets the domain
-// series of one namespace.
+// observatory-operator exports Go runtime and process metrics,
+// reconcile metrics for each loop, and series for the telescopes,
+// cameras, and guiders, all from one registry. This file holds the
+// registry, the /metrics listener, and the runtime and reconcile
+// metrics. series.go sets the series of each namespace.
 //
-// A scrape never touches INDI, PHD2, or the API server. Each series is
-// set when the operator reads the fact for its own work: the status
-// writer's composition of a status, a runner's step, an INDI event, or
-// a PHD2 event.
+// A scrape reads only memory and never contacts INDI, PHD2, or the API
+// server. The operator sets each series when its own work reads the
+// fact: while it builds a status, runs a step, or receives an INDI or
+// PHD2 event.
 
 import (
 	"context"
@@ -27,35 +25,35 @@ import (
 )
 
 // version is the release that this binary was built from. The
-// Dockerfile sets it with -ldflags "-X main.version=...", and a build
-// with no such flag, such as go test, reports dev.
+// Dockerfile sets it with -ldflags "-X main.version=...". A build
+// without that flag, such as go test, reports dev.
 var version = "dev"
 
-// metricsPrefix is the prefix that root plan 65 gives this operator.
-// liken_build_info is the one name that every component shares, so it
-// has no prefix.
+// metricsPrefix starts the name of every series of this operator,
+// except liken_build_info, which every liken component exports under
+// the same name.
 const metricsPrefix = "observatory_"
 
 // metricsComponent is the value of liken_build_info's component label.
 const metricsComponent = "observatory-operator"
 
-// The kinds of the watches that follow the operator's own objects. The
-// watches of the group are labeled with the name of their kind.
+// ownedKinds are the kinds of the objects that the operator creates
+// for its servers. Each has a watch, and watch_restarts_total counts
+// its reopens under the kind's name.
 var ownedKinds = []string{"Pod", "Service", "ConfigMap", "Job"}
 
-// reconcileBuckets cover a pass of one loop over one namespace: a pass
-// that reads the stores and changes nothing takes about a millisecond,
-// and a pass that writes several statuses takes tens of milliseconds.
+// reconcileBuckets run from 1 ms to about 16 s in steps of 4, to cover
+// a pass that only reads the stores and a pass that writes several
+// statuses.
 var reconcileBuckets = prometheus.ExponentialBuckets(0.001, 4, 8)
 
-// activationBuckets cover an activation from its first step to Ready:
-// about half a minute for the simulators, and up to the 20 minutes of
-// a step's longest deadline for a camera that cools or a dome that
-// turns.
+// activationBuckets run from 10 s to 40 minutes. An activation runs
+// several steps, and a camera's cool-down action alone has a default
+// timeout of 20 minutes (observatory.CoolTimeout).
 var activationBuckets = []float64{10, 30, 60, 120, 300, 600, 1200, 2400}
 
-// metrics is the registry that the listener serves. One process builds
-// one, and each namespace's operator sets its series through a
+// metrics is the registry that the listener serves. The process builds
+// one, and the operator of each namespace sets its series through a
 // namespaceSeries (series.go).
 type metrics struct {
 	registry *prometheus.Registry
@@ -79,7 +77,7 @@ type metrics struct {
 }
 
 // newMetrics builds the registry. release is the release that the
-// binary was built from.
+// binary was built from, for liken_build_info.
 func newMetrics(release string) *metrics {
 	gauge := func(name, help string, labels ...string) *prometheus.GaugeVec {
 		return prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: metricsPrefix + name, Help: help}, labels)
@@ -93,7 +91,7 @@ func newMetrics(release string) *metrics {
 			Name: metricsPrefix + "reconcile_duration_seconds", Help: "How long one pass of a loop takes, by the resource kind that it serves.",
 			Buckets: reconcileBuckets,
 		}, []string{"kind"}),
-		reconcileErrors: counter("reconcile_errors_total", "Passes of a loop that failed, by the resource kind that it serves.", "kind"),
+		reconcileErrors: counter("reconcile_errors_total", "Reconcile passes that returned an error, by the kind of resource that the loop reconciles.", "kind"),
 		watchRestarts:   counter("watch_restarts_total", "Watches that the API server closed and the operator opened again, by resource kind.", "kind"),
 
 		deviceConnected:   gauge("device_connected", "One while the device's driver reports CONNECTION on, zero otherwise.", "namespace", "kind", "name"),
@@ -114,9 +112,9 @@ func newMetrics(release string) *metrics {
 		guiderState:       gauge("guider_state", "One for the state that PHD2 reports, and zero for every other state.", "namespace", "guider", "state"),
 	}
 
-	// Layer 1. The gauge always holds 1, and its labels hold the
-	// release, so one panel that reads liken_build_info shows the
-	// release of every component in a cluster.
+	// The value of liken_build_info is always 1 and the release is in
+	// its labels, so one query shows the release of every component in
+	// a cluster.
 	buildInfo := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "liken_build_info",
 		Help: "The release each liken component runs, as labels on a gauge that is always 1.",
@@ -135,10 +133,10 @@ func newMetrics(release string) *metrics {
 		m.guidingError, m.guiderState,
 	)
 
-	// Each kind publishes its counters at zero from the first scrape.
-	// Prometheus computes a rate or an increase from two readings, so a
-	// counter that appears only at its first increase hides that
-	// increase.
+	// Create each kind's series now, so that the first scrape reports
+	// them at zero. Prometheus computes rate() and increase() between
+	// two samples, so a counter that first appears with a value of 1
+	// hides that first increment.
 	for _, kind := range observatory.Kinds {
 		m.reconcileDuration.WithLabelValues(kind.Name)
 		m.reconcileErrors.WithLabelValues(kind.Name)
@@ -150,45 +148,44 @@ func newMetrics(release string) *metrics {
 	return m
 }
 
-// Layer 2 labels each loop with the kind of the resource that it
-// serves:
+// The reconcile metrics label each loop's passes with the kind of the
+// resource that the loop serves:
 //
-//   - The supervisor counts under Reservation. Its pass starts the
-//     runner of each Reservation and stops the servers that no
-//     Reservation holds.
-//   - The status writer counts under the kind of each status that it
-//     writes, with the time that it spent on the objects of that kind.
-//     It writes the status of every kind except Reservation, whose
-//     runner writes its own.
-//   - The lock relay counts under Observatory, because it relays the
-//     park locks of each Observatory and sets its LocksRelayed
-//     condition.
-//   - The trigger controller counts under the kind of each resource
-//     whose spec.triggers it reads.
+//   - The supervisor uses Reservation. Each pass starts a runner for
+//     each Reservation that has work left and deletes the servers
+//     that no Reservation holds.
+//   - The status writer uses the kind of each status that it writes,
+//     and times the objects of each kind separately. It writes every
+//     kind's status except Reservation, whose runner writes its own.
+//   - The lock relay uses Observatory, because it relays the park
+//     locks of each Observatory and sets its LocksRelayed condition.
+//   - The trigger controller uses the kind of each resource whose
+//     spec.triggers it reads.
 //
-// A runner runs steps, and has no pass to time. The activation
-// duration and the step failures measure its work.
+// A runner executes steps and has no passes. The activation duration
+// and step failure series measure its work instead.
 
-// passTimes adds up one pass of a loop that serves several kinds, by
-// kind.
+// passTimes accumulates, by kind, the time and failures of one pass of
+// a loop that serves several kinds.
 type passTimes struct {
 	took   map[string]time.Duration
 	failed map[string]bool
-	// timing and began are the kind and the start of the resource that
-	// start began to time, until stop.
+	// timing and began are the kind and start time of the resource that
+	// is being timed, from start until stop.
 	timing *observatory.Kind
 	began  time.Time
 }
 
-// start times one resource of a kind, and stops the time of the one
-// before. A loop whose body can continue calls start at the top of
-// each iteration, and stop after the loop.
+// start begins timing one resource and first ends the timing of the
+// previous one. A loop whose body can use continue calls start at the
+// top of each iteration and stop after the loop, so every exit path
+// is timed.
 func (p *passTimes) start(kind observatory.Kind) {
 	p.stop()
 	p.timing, p.began = &kind, time.Now()
 }
 
-// stop adds the time of the resource that start timed.
+// stop adds the time since start to the kind that start was given.
 func (p *passTimes) stop() {
 	if p.timing != nil {
 		p.add(*p.timing, p.began, false)
@@ -200,15 +197,15 @@ func newPassTimes() *passTimes {
 	return &passTimes{took: map[string]time.Duration{}, failed: map[string]bool{}}
 }
 
-// add counts the time since began against kind.
+// add adds the time since began to kind, and records a failure.
 func (p *passTimes) add(kind observatory.Kind, began time.Time, failed bool) {
 	p.took[kind.Name] += time.Since(began)
 	p.failed[kind.Name] = p.failed[kind.Name] || failed
 }
 
-// observePasses records one pass for each kind that the pass served.
-// Every pass counts, a pass that changed nothing too, because the rate
-// of passes shows that the loop runs.
+// observePasses records one pass for each kind that p timed. A pass
+// that changed nothing counts too, because the rate of passes shows
+// that the loop is running.
 func (m *metrics) observePasses(p *passTimes) {
 	for kind, took := range p.took {
 		m.observePass(kind, took, p.failed[kind])
@@ -222,33 +219,30 @@ func (m *metrics) observePass(kind string, took time.Duration, failed bool) {
 	}
 }
 
-// watchReopened answers the function that counts the reopened watches
-// of one kind (informer.Options.Reopened).
+// watchReopened returns a function that counts one reopened watch of
+// kind. It is the Reopened option of the informers.
 func (m *metrics) watchReopened(kind string) func() {
 	counter := m.watchRestarts.WithLabelValues(kind)
 	return counter.Inc
 }
 
-// handler answers a scrape from the registry.
+// handler serves the registry in the Prometheus text format.
 func (m *metrics) handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{
-		// A collector that fails gives a failed scrape, and not a
-		// document with a gap in it.
+		// A failed collector fails the whole scrape, so a scrape never
+		// returns a document with series missing.
 		ErrorHandling: promhttp.HTTPErrorOnError,
 	})
 }
 
-// listen is net.Listen. A test replaces it with a listener in memory,
-// which keeps a synctest bubble's clock moving where a real socket
-// stops it.
+// listen is net.Listen. A test replaces it with an in-memory listener,
+// because a real socket stops the fake clock of a synctest bubble.
 var listen = net.Listen
 
-// serve opens the /metrics listener and returns at once, with the
-// address that the listener holds. An empty address turns the listener
-// off. The listen runs in the caller's goroutine, so a port in use is
-// an error that the caller reports. The server runs in its own
-// goroutine, because the operator's work never waits on a scraper, and
-// it stops when ctx ends.
+// serve starts the /metrics server and returns the address it listens
+// on. An empty address disables the server and returns a nil address.
+// It listens before it returns, so a port that is in use is an error to
+// the caller. The server stops when ctx ends.
 func (m *metrics) serve(ctx context.Context, address string) (net.Addr, error) {
 	if address == "" {
 		return nil, nil
@@ -261,9 +255,9 @@ func (m *metrics) serve(ctx context.Context, address string) (net.Addr, error) {
 	mux.Handle("/metrics", m.handler())
 	server := &http.Server{
 		Handler: mux,
-		// A client that opens a connection and sends no headers holds a
-		// goroutine until this bound. The handler reads memory alone,
-		// so the server needs no other timeout.
+		// A client that connects and sends no headers keeps a goroutine
+		// until this timeout. The handler only reads memory, so the
+		// server needs no other timeout.
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	context.AfterFunc(ctx, func() { _ = server.Close() })

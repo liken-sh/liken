@@ -1,25 +1,21 @@
 package main
 
-// A person who fixes the spec that failed an activation step asks for
-// a retry with the annotation observatory.liken.sh/retry. The record of
-// the session holds the spec that failed (records.go), so a step that
-// ran again with it would fail the same way. A retry is the person
-// saying that the specs are fixed, so the runner records the session
-// again from the specs as they are, before any step runs again. A pod
-// that the record built with the old spec no longer matches the record,
-// and the step that runs again replaces it (ensure).
+// A person who fixes the spec that failed an activation step requests
+// a retry with the annotation observatory.liken.sh/retry. The session's
+// record in the Reservation's status still has the failed spec
+// (records.go), so before it runs any step, the runner records the
+// session again from the current specs. A pod built from the old record
+// no longer matches the new one, and ensure replaces it.
 //
-// The session acts on what it recorded, so the retry also undoes what
-// the old record started and the new one does not. A device that the
-// new record leaves out leaves the session at once, as a deleted device
-// leaves a Ready session (deletes.go): its deactivation runs, its driver
-// stops, its pod goes, and the output that the old record switched on
-// goes off when no device draws from it. A device whose recorded output
-// changed has its old output switched off the same way. Each step that
-// reads a part of the record that changed runs again, from the first
-// one (rerunFrom), so PowerOn switches on a changed output, and
-// StartSite or PowerOn gives the server's drivers to a device that the
-// new record adds.
+// The retry also undoes what the old record started and the new record
+// leaves out. A device that is missing from the new record leaves the
+// session at once, as a deleted device leaves a Ready session (deletes.go): its
+// deactivation runs, its driver stops, its pod is deleted, and its power
+// output is switched off unless another device draws from it. A device
+// whose recorded output changed has its old output switched off the
+// same way. Then the steps that read a changed part of the record run
+// again (rerunFrom). PowerOn switches on a changed output, and StartSite
+// or PowerOn starts the drivers of a device that the new record adds.
 
 import (
 	"context"
@@ -28,13 +24,13 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// recordAgain records the parts of the session that the reservation
-// recorded, from the specs as they are now, and waits until the store
-// holds the new record. The part of the observatory's server holds the
-// set that the other reservations that hold the server recorded, as
-// the StartSite step would, so a session that runs there keeps its
-// devices. A retry of a deactivation step records nothing: the release
-// stops what the session started.
+// recordAgain records the reservation's session again from the current
+// specs, and waits until the operator's store has the new record. The
+// observatory's part of the record keeps the devices that the other
+// reservations on the same observatory server recorded, as StartSite
+// would, so their sessions keep their devices. A retry of a
+// deactivation step records nothing, because deactivation stops only
+// what the session started.
 func (r *runner) recordAgain(ctx context.Context) (notes []string, err error) {
 	old := r.status.Session
 	if old == nil || isDeactivation(r.status.Step) {
@@ -65,7 +61,7 @@ func (r *runner) recordAgain(ctx context.Context) (notes []string, err error) {
 		next.FITSKeywords = t.fitsKeywordsOf(ref, next.Observatory, t.devicesOn(ref), r.res.Spec.FITSKeywords)
 	}
 	r.status.Session = next
-	r.judgeSession(r.o.snapshot())
+	r.updateEditsPending(r.o.snapshot())
 	r.rerunFrom(old, next)
 	if err := r.o.send(ctx, nil, "recording the session again in the status of the Reservation "+r.name, func() error { return r.save(ctx) }); err != nil {
 		return nil, err
@@ -79,13 +75,12 @@ func (r *runner) recordAgain(ctx context.Context) (notes []string, err error) {
 	return r.undoOld(ctx, before, old, next)
 }
 
-// undoOld releases each device that a server of the old record runs
-// and the new record leaves out (releaseLeft), and then switches off
-// each output that the old record powered a device from and the new
-// record does not, unless another device draws from it (unpowered).
-// before is the tree of the old record, whose spec of each device names
-// the output that the session switched on. It answers what it switched
-// off.
+// undoOld releases each device that the old record ran on a server and
+// the new record leaves out (releaseLeft). Then it switches off each
+// output that the old record powered a device from and the new record
+// does not, unless another device still draws from it. before is the
+// tree under the old record, whose device specs name the outputs that
+// the session switched on.
 func (r *runner) undoOld(ctx context.Context, before *tree, old, next *observatory.Session) ([]string, error) {
 	after := r.o.snapshot()
 	var servers []serverRef
@@ -121,17 +116,21 @@ func (r *runner) undoOld(ctx context.Context, before *tree, old, next *observato
 	return r.o.setOutputs(ctx, now, now.unpowered(unpowered, serverRef{}), false)
 }
 
-// rerunFrom sets Pending each activation step that is done, from the
-// first one that reads a part of the record that the retry changed:
-// StartSite for the observatory's devices, PowerOn for the telescope's
-// devices, because it gives the server their drivers and switches on
-// their outputs, PowerOn for the outbox too, because it checks the
-// claim and the camera pods after it mount it, Configure for the
-// trains, the tubes, and the FITS keywords, and StartGuider for the
-// Guiders. The steps after it read what it starts, so they run
-// again too, and the retry names the first one. A step that runs again finds each device that did not
-// change as it left it, and an activation run that is done stays done
-// (activation).
+// rerunFrom sets each finished activation step back to Pending, from
+// the first step that reads a part of the record that the retry
+// changed:
+//
+//   - StartSite for the observatory's devices.
+//   - PowerOn for the telescope's devices, because it starts their
+//     drivers on the server and switches on their outputs.
+//   - PowerOn for the outbox, because it checks the claim and the
+//     camera pods that mount it.
+//   - Configure for the trains, the tubes, and the FITS keywords.
+//   - StartGuider for the guiders.
+//
+// The later steps read what that step starts, so they run again too. A
+// step that runs again finds each unchanged device as the earlier run
+// left it. An activation that is already done stays done (activation).
 func (r *runner) rerunFrom(old, next *observatory.Session) {
 	var first observatory.StepName
 	switch {
@@ -158,14 +157,15 @@ func (r *runner) rerunFrom(old, next *observatory.Session) {
 	}
 }
 
-// forgotten answers the tree as if the reservation had recorded
-// nothing. With failedSites, it also leaves out the record of each
-// reservation whose StartSite step failed, for the part of the
-// observatory's server: such a reservation may have recorded the spec
-// that a person fixed, and its own retry records the site again. The
-// part of the telescope's server keeps those records, because the
-// devices that they name may run on the observatory's server for that
-// session, and a device runs on one server at a time (tree.server).
+// forgotten returns the tree as if this reservation had recorded no
+// session. With failedSites, it also drops the session of each
+// reservation whose StartSite step failed. recordAgain asks for that
+// for the observatory's part of the record, because such a reservation
+// may have recorded a spec that a person has since fixed, and its own
+// retry records the site again. The telescope's part keeps those
+// sessions, because a device runs on one server at a time
+// (tree.server), and the devices they name may run on the
+// observatory's server for that session.
 func (r *runner) forgotten(failedSites bool) *tree {
 	t := r.o.stores.read(r.o.namespace)
 	for other, res := range t.reservations {

@@ -7,8 +7,13 @@ This skill is the guide at https://liken.sh/observatory/docs/guides/automate-the
 
 # Automate the equipment
 
-Each resource can say what the operator does with its equipment. You
-write that in three fields of its spec:
+In this guide you write the procedures of a typical site: the dome
+opens only in safe weather, the mount unparks, the dust cap opens, and
+the camera cools. At the end of the night, and when the weather turns
+bad, the operator closes everything in the right order. You need the
+resources from [Describe your equipment](https://liken.sh/observatory/docs/guides/describe-your-equipment/).
+
+Each resource's spec tells the operator what to do with the equipment:
 
 * `activation` runs when the reservation starts the telescope.
 * `deactivation` runs when the reservation ends, while every device is
@@ -16,18 +21,13 @@ write that in three fields of its spec:
 * `triggers` run when a condition changes during the reservation,
   such as the weather station reporting unsafe weather.
 
-This guide writes the procedures of a typical site: the dome opens
-only in safe weather, the mount unparks, the dust cap opens, and the
-camera cools. At the end of the night, and when the weather turns, the
-operator closes up in the right order.
-
 ## Actions
 
 Each field is a list of actions, and the actions run in order. An
 action is a target state, not a command. The operator reads what the
-device reports and sends nothing when the device is already there, so
-an action is safe to run twice, and safe to run again after the
-operator restarts.
+device reports and sends nothing when the device is already in that
+state, so an action is safe to run twice, and safe to run again after
+the operator restarts.
 
 | Kind | Action | Default timeout |
 |---|---|---|
@@ -39,9 +39,9 @@ operator restarts.
 | any kind, `Telescope`, `Observatory` | `job`: run a container once, as a Kubernetes `Job` | 10 min |
 | any kind, `Telescope`, `Observatory` | `notify`: ask a person to do what no driver can, such as covering the telescope. It never waits for the person. | none |
 
-Each kind accepts only its own actions, and the API server refuses the
-others. Every action also takes `timeout`, such as `timeout: 30m`, and
-an action that passes its timeout fails.
+The API server refuses an action that the kind does not support. Every
+action also takes `timeout`, such as `timeout: 30m`, and an action
+that passes its timeout fails.
 
 ## Start and end the night
 
@@ -83,7 +83,7 @@ spec:
     - warm: {celsius: 5}
 ```
 
-The operator unparks the mount, and it never starts or stops tracking.
+The operator unparks the mount, but it never starts or stops tracking.
 Whether a mount tracks after it unparks depends on its driver. You
 align and start tracking from KStars.
 
@@ -91,43 +91,45 @@ Warm the camera before the cooler goes off. A sensor that loses its
 cooling at -10 °C warms by tens of degrees in seconds, and that stress
 can damage it. A cooler cannot warm a sensor above the air around it,
 so on a cold night `warm` may not reach its target. In that case it
-switches the cooler off at its timeout and notes the temperature it
-reached, and it does not fail.
+switches the cooler off at its timeout, notes the temperature it
+reached, and does not fail.
 
-The first `cool` action's temperature is also the setpoint that the
-operator sends again if the camera's driver restarts during the night.
+If the camera's driver restarts during the night, the operator sends
+it the temperature of the first `cool` action again.
 
 ## The order of the procedures
 
-The tree orders the procedures, so most setups need no explicit order.
-Activation runs from the top of the tree down, in five tiers:
+The tree sets the order of the procedures, so most setups need no
+explicit order. Activation runs from the top of the tree down, in
+these tiers:
 
 1. the `Observatory`'s own procedures
 2. the procedures of the observatory's devices, such as the dome
 3. the `Telescope`'s own procedures
 4. the procedures of the telescope's own devices, such as the mount
-5. the procedures of the devices of its optical trains, such as the
+5. the procedures of the devices on its optical trains, such as the
    dust cap and the camera
 
 Each tier starts when the tier before it ends, and the procedures of
 one tier run at the same time. Deactivation runs the same tiers from
 the bottom up. So the dome opens before the mount unparks, and the
-mount parks before the dome closes, with nothing more to write.
+mount parks before the dome closes, without anything more in the
+spec.
 
 When two telescopes share an observatory, the observatory's procedures
-run once: when the first reservation starts, and when the last one
-ends.
+run once: activation when the first reservation starts, and
+deactivation when the last one ends.
 
-To order two resources of the same group, add `after` to an action. It
+To order two resources in the same tier, add `after` to an action. It
 lists resources, as `{kind, name}`, whose procedures for the same step
 must finish first. `{kind: Mount}` with no name means every `Mount` in
 the observatory.
 
 ## Wait for a condition
 
-`requires` makes an action wait until conditions hold. This dome opens
-only while the weather station reports `Safe`, and waits up to the
-action's timeout for it:
+`requires` makes an action wait until conditions are met. This dome
+opens only while the weather station reports `Safe`, and waits up to
+the action's timeout for it:
 
 ```yaml
 apiVersion: observatory.liken.sh/v1alpha1
@@ -149,26 +151,26 @@ Each entry names a resource and one of its conditions, and `status`
 is `"True"` unless you set it. The action's summary says what it waits
 for, such as `Waiting for WeatherStation backyard Safe=True`.
 
-`requires` binds only the operator's own actions. A move that someone
-makes in KStars is stopped only by the drivers' park locks.
+`requires` applies only to the operator's own actions. When someone
+moves the equipment from KStars, only the drivers' park locks can stop
+the move.
 
 An action's `requires` waits inside the `Activation` step, after
 every device is powered on and connected. To keep the equipment off
-until a condition holds, list it in the resource's own
-`spec.requires` instead, as [Set up a portable
-telescope](https://liken.sh/observatory/docs/guides/set-up-a-portable-telescope/) does with a
+until a condition is met, list the condition in the resource's own
+`spec.requires` instead. [Set up a portable
+telescope](https://liken.sh/observatory/docs/guides/set-up-a-portable-telescope/) does this with a
 person's `SetUp` and the weather station's `Safe`.
 
-A dome unparked means open, and parked means closed. While the
-observatory has a `Dome`, the operator sets each dome to close its
-shutter when it parks and open it when it unparks, so one action moves
-both.
+For a dome, `Unparked` means open and `Parked` means closed. The
+operator sets each dome's driver to close the shutter when the dome
+parks and open it when the dome unparks, so one action moves both.
 
 ## React to the weather
 
 A trigger runs its actions once each time its condition changes to the
-status it names. This dome closes as soon as the weather turns unsafe,
-and opens again after 20 minutes of safe weather:
+status that the trigger names. This dome closes as soon as the weather
+turns unsafe, and opens again after 20 minutes of safe weather:
 
 ```yaml
 spec:
@@ -192,32 +194,33 @@ spec:
         - state: Parked
 ```
 
-Three details make this work:
+These details make it work:
 
-* A trigger has no tree order, so the dome's park names
-  `after: [{kind: Mount}]`. Without it, the dome tries to park while a
-  mount is still unparked, and the park lock refuses it.
-* `for: 20m` waits until the status has held that long. A change
-  before then cancels the run, so a station that flaps between safe and
-  unsafe does not open and close the roof every few minutes.
-* A run that has started finishes, whatever the condition does
-  meanwhile. A brief `Unknown` from a station that reconnects does not
-  stop a park halfway.
+* Triggers do not follow the order of the tree, so the dome's park
+  sets `after: [{kind: Mount}]`. Without it, the dome tries to park
+  while a mount is still unparked, and the park lock refuses it.
+* `for: 20m` waits until the condition has had that status for 20
+  minutes. A change before then cancels the run, so a station that
+  switches between safe and unsafe does not open and close the roof
+  every few minutes.
+* A run that has started finishes, even if the condition changes in
+  the meantime. A brief `Unknown` from a station that reconnects does
+  not stop a park halfway.
 
 If the weather is already unsafe when activation ends, the trigger
 runs then. The mount stays parked when the weather clears, because
 its trigger only parks. You decide when to unpark it again.
 
-The conditions a trigger can name are the state conditions of the
-devices, such as `Parked` on a `Mount` or `Safe` on a
-`WeatherStation`. [Reading the status](https://liken.sh/observatory/docs/reference/reading-the-status/#state-conditions)
-lists them all.
+A trigger can use the state conditions of the devices, such as
+`Parked` on a `Mount` or `Safe` on a `WeatherStation`. [Reading the
+status](https://liken.sh/observatory/docs/reference/reading-the-status/#state-conditions) lists
+them all.
 
 ## Power devices from a switch
 
-A device's `power` names the output of a `Switch` that powers it, from
-output 1. The operator switches the output on before it starts the
-device's pod, and off after the pod stops:
+A device's `power` names the output of a `Switch` that powers it,
+numbered from 1. The operator switches the output on before it starts
+the device's pod, and off after the pod stops:
 
 ```yaml
 apiVersion: observatory.liken.sh/v1alpha1
@@ -238,24 +241,24 @@ spec:
   power: {switch: east, output: 1}
 ```
 
-Several devices can name one output, as they do when a USB hub draws from
-one 12 V line. A resource that names another in `spec.device` takes no
-`power`, because the resource that runs its driver holds the power of
-the device.
+Several devices can use one output, such as the devices on a USB hub
+that draws from one 12 V line. A resource that sets `spec.device`
+takes no `power`, because the resource that runs the driver controls
+the device's power.
 
-The operator switches an output through INDI's output interface: the
+The operator switches an output through INDI's output interface, the
 property `DIGITAL_OUTPUT_<n>` of the switch's driver. The simulator
-`indi_simulator_io` provides it. Many power boxes have drivers with
-power properties of their own and no `DIGITAL_OUTPUT_<n>`, and the
-operator cannot switch those. Check the driver's properties in KStars
-before you rely on `power`.
+`indi_simulator_io` has it. Many power boxes have drivers with power
+properties of their own and no `DIGITAL_OUTPUT_<n>`, and the operator
+cannot switch those. Check the driver's properties in KStars before
+you rely on `power`.
 
 ## Run a container
 
-A `job` action runs a container once, for anything the other actions
-cannot do, such as switching a dew heater's relay or posting to a
-webhook. The operator creates a Kubernetes `Job` in the resource's
-namespace, and the action ends when the `Job` ends:
+A `job` action runs a container once, for anything that the other
+actions cannot do, such as switching a dew heater's relay or posting
+to a webhook. The operator creates a Kubernetes `Job` in the
+resource's namespace, and the action ends when the `Job` ends:
 
 ```yaml
 spec:
@@ -277,10 +280,11 @@ variables to its environment:
 | `LIKEN_TRIGGER` | the procedure, such as `activation` or `triggers[0]` |
 | `INDI_HOST`, `INDI_PORT` | the resource's INDI server |
 
-So a script can drive any INDI property through `INDI_HOST` and
-`INDI_PORT`. When the container fails, the action fails, and its
+So a script can read and write any INDI property through `INDI_HOST`
+and `INDI_PORT`. When the container fails, the action fails, and its
 summary gives the exit code and the last lines of the container's
-output. Kubernetes deletes the `Job` an hour after it ends.
+output. Kubernetes deletes the `Job` an hour after it finishes, so
+you can read its logs until then.
 
 ## Ask a person
 
@@ -294,23 +298,23 @@ spec:
 ```
 
 The action is `Done` at once, and the next action runs, so parking
-the mount and warming the camera never wait on a person. The
+the mount and warming the camera never wait for a person. The
 resource's `AttentionNeeded` condition turns `True` with the request
-as its message, and its transition posts a `Warning` Event with the
-reason `Notified`. `AttentionNeeded` turns `False` when the resource's next activation
-begins, and when someone writes the resource's `SetUp` after the
-request, as `kubectl liken observatory take-down` does. [Set up a
-portable telescope](https://liken.sh/observatory/docs/guides/set-up-a-portable-telescope/) uses
-both.
+as its message, and the change posts a `Warning` Event with the reason
+`Notified`. `AttentionNeeded` turns `False` when the resource's next
+activation starts, and when someone writes the resource's `SetUp`
+after the request, as `kubectl liken observatory take-down` does.
+[Set up a portable telescope](https://liken.sh/observatory/docs/guides/set-up-a-portable-telescope/)
+uses both.
 
 ## Test the procedures with the simulators
 
 Run your procedures against the example observatory from
 [Install](https://liken.sh/observatory/docs/guides/install/) before you trust them with real
-equipment. The INDI server images hold `indi_getprop` and
+equipment. The INDI server images contain `indi_getprop` and
 `indi_setprop`, so you can drive a simulator through `kubectl exec`.
 
-Turn the simulated weather unsafe with a strong wind. The simulator
+Make the simulated weather unsafe with a strong wind. The simulator
 publishes its weather parameters every 60 seconds, so the second
 command asks for them now:
 
@@ -327,9 +331,9 @@ kubectl -n observatory exec lab-observatory -- indi_setprop "Weather Simulator.W
 kubectl -n observatory exec lab-observatory -- indi_setprop "Weather Simulator.WEATHER_REFRESH.REFRESH=On"
 ```
 
-Each resource's `status.procedures` holds the last run of each
-procedure, with every action and its result. Its Events give each
-run's start and end:
+Each resource's `status.procedures` has the last run of each
+procedure, with every action and its result. Its Events show when
+each run started and ended:
 
 ```sh
 kubectl get dome lab -n observatory -o jsonpath='{.status.procedures}' | jq

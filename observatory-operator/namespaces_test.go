@@ -1,7 +1,7 @@
 package main
 
-// Each namespace's observatory runs apart from the others, with the
-// same names.
+// Observatories in different namespaces run independently, even when
+// their resources have the same names.
 
 import (
 	"testing"
@@ -13,15 +13,14 @@ import (
 
 const secondNamespace = "west-wing"
 
-// putExample creates the example's resources in a namespace.
 func putExample(w *world, namespace string) {
 	for _, object := range example(w.t) {
 		w.api.put(kindNamed(object["kind"].(string)).Path(namespace), object)
 	}
 }
 
-// A reservation in one namespace runs that namespace's telescope, and
-// the telescope of the same name in another namespace stays idle.
+// A reservation in one namespace runs that namespace's telescope. The
+// telescope of the same name in another namespace stays idle.
 func TestTwoNamespacesRunTheirObservatoriesApart(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -44,8 +43,8 @@ func TestTwoNamespacesRunTheirObservatoriesApart(t *testing.T) {
 	})
 }
 
-// A namespace gets its operator with its first resource, and loses it
-// when its last resource is gone.
+// A namespace gets an operator when its first resource is created, and
+// the operator stops when its last resource is deleted.
 func TestANamespaceRunsWhileItHoldsResources(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -65,7 +64,7 @@ func TestANamespaceRunsWhileItHoldsResources(t *testing.T) {
 			return w.n.operatorOf(secondNamespace) == nil
 		})
 		if w.n.operatorOf(testNamespace) == nil {
-			t.Errorf("%s has no operator", testNamespace)
+			t.Errorf("%s has no operator, want one while it holds resources", testNamespace)
 		}
 	})
 }

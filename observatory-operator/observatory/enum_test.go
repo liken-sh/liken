@@ -1,9 +1,9 @@
 package observatory
 
-// Each closed vocabulary is a named string type in Go, with one
-// constant for each value, and an enum in the CRD. The API server
-// refuses a status write with a value that the enum lacks, so the two
-// lists must hold the same values.
+// Each closed vocabulary is a named string type in Go with a constant
+// for each value, and an enum in the CRD. The API server rejects a
+// status write whose value is not in the enum, so the constants and the
+// enum must list the same values.
 
 import (
 	"encoding/json"
@@ -34,8 +34,8 @@ var (
 	guiderStates = strs(GuiderStopped, GuiderSelected, GuiderCalibrating, GuiderGuiding,
 		GuiderLostLock, GuiderPaused, GuiderLooping)
 	stepStates = strs(StepPending, StepRunning, StepDone, StepFailed, StepSkipped)
-	// A procedure waits on a resource's conditions, so it names no kind
-	// with no status.
+	// A procedure waits on a resource's conditions, so refKinds
+	// excludes the kinds that have no status.
 	refKinds = func() []string {
 		var names []string
 		for _, kind := range Kinds {
@@ -46,7 +46,7 @@ var (
 		return names
 	}()
 	conditionStatuses = strs(ConditionTrue, ConditionFalse, ConditionUnknown)
-	deviceKind        = func() []string {
+	deviceKinds       = func() []string {
 		var names []string
 		for _, kind := range DeviceKinds {
 			names = append(names, kind.Name)
@@ -66,10 +66,10 @@ func TestEachEnumHoldsTheGoConstants(t *testing.T) {
 		{TelescopeKind, "status.phase", phases},
 		{GuiderKind, "status.phase", phases},
 		{ObservatoryKind, "status.weather", safeties},
-		{ObservatoryKind, "status.devices[].kind", deviceKind},
+		{ObservatoryKind, "status.devices[].kind", deviceKinds},
 		{ObservatoryKind, "status.devices[].phase", devicePhases},
 		{TelescopeKind, "status.devices[].phase", devicePhases},
-		{OpticalTrainKind, "status.devices[].kind", deviceKind},
+		{OpticalTrainKind, "status.devices[].kind", deviceKinds},
 		{OpticalTrainKind, "status.devices[].phase", devicePhases},
 		{TelescopeKind, "status.trains[].devices[].phase", devicePhases},
 		{MountKind, "status.readings.state", strs(MountParked, MountParking, MountUnparking,
@@ -113,7 +113,7 @@ func enumOf(t *testing.T, field *apiextensionsv1.JSONSchemaProps) []string {
 	for _, raw := range field.Enum {
 		var value string
 		if err := json.Unmarshal(raw.Raw, &value); err != nil {
-			t.Fatal(err)
+			t.Fatalf("decoding an enum value: %v", err)
 		}
 		values = append(values, value)
 	}

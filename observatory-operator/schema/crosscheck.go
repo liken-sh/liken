@@ -11,16 +11,16 @@ import (
 )
 
 // The standard properties page of indilib/docs is maintained by hand
-// (indilib/docs#7), and its text is not ours to publish. So the
-// generator never reads it. The cross-check reads it at development
-// time and lists each place where it disagrees with the captures, the
+// (indilib/docs#7), and its text may not be published, so the generator
+// never reads it. make crosscheck reads it and writes ReportFile, which
+// lists each place where the page disagrees with the captures, the
 // conventions, or the units of the fields files, for a person to
-// judge. ReportFile holds that list.
+// review.
 const ReportFile = "disagreements.txt"
 
-// crossCheck answers each disagreement between the page and the
-// standard sets of the kinds: a type, a member, a property that the
-// page lists and no source defines, and a unit.
+// crossCheck returns a line for each type, member, or unit on the page
+// that differs from the standard sets and the kinds' fields files, and
+// for each property that the page lists and no source defines.
 func crossCheck(page []byte, sets map[string]standard.Interface, kinds []kind) ([]string, error) {
 	docs, err := readDocs(page)
 	if err != nil {
@@ -51,8 +51,8 @@ func source(iface string, p standard.Property) string {
 	return "the capture of " + iface
 }
 
-// compareTypes answers each property of an interface whose type or
-// members differ from the page's row.
+// compareTypes returns a line for each property of an interface whose
+// type or members differ from the page's row.
 func compareTypes(i standard.Interface, docs []documented) []string {
 	var report []string
 	for _, p := range i.Properties {
@@ -71,18 +71,20 @@ func compareTypes(i standard.Interface, docs []documented) []string {
 	return report
 }
 
-// lookup answers the page's row for a property of an interface. The
-// interface's own section comes first, then the general section, then
-// any section, because one name can appear in several: the receiver's
-// streaming properties are in the CCD's section. A row of another
-// interface whose members share no name with the property's describes
-// another property of the same name, such as the receiver's
-// FITS_HEADER, and is not used. The page says that most CCD_
-// properties apply to the guide head with GUIDER_ in place of CCD_, so
-// a GUIDER_ property with no row of its own reads the row of its CCD_
-// twin, with each member renamed the same way when the property
-// defines the new name. GUIDER_INFO keeps the CCD_ names of its
-// members.
+// lookup returns the page's row for a property of an interface. One
+// name can appear in several sections, so lookup tries the interface's
+// own section, then the general section, then any section, because the
+// page lists some properties under another interface, such as the
+// receiver's streaming properties under the CCD. Outside the
+// interface's own section, a row must pass describes, because a row
+// whose members share no name with the property's members is another
+// property of the same name, such as the receiver's FITS_HEADER.
+//
+// The page says that most CCD_ properties apply to the guide head with
+// GUIDER_ in place of CCD_. So a GUIDER_ property with no row of its
+// own uses the row of the CCD_ property with the same suffix. A member
+// of that row is renamed to GUIDER_ only when the property defines the
+// GUIDER_ name, because GUIDER_INFO keeps the CCD_ names of its members.
 func lookup(docs []documented, iface string, p standard.Property) (documented, bool) {
 	for _, section := range []func(documented) bool{
 		func(d documented) bool { return d.Interface == iface },
@@ -110,8 +112,9 @@ func lookup(docs []documented, iface string, p standard.Property) (documented, b
 	return d, found
 }
 
-// describes reports whether a row can describe a property: it names
-// no member, or it names at least one of the property's members.
+// describes reports whether a row can describe a property: true when
+// either lists no members, or when the row lists one of the property's
+// members.
 func (d documented) describes(p standard.Property) bool {
 	if len(d.Members) == 0 || len(p.Members) == 0 {
 		return true
@@ -122,31 +125,30 @@ func (d documented) describes(p standard.Property) bool {
 	})
 }
 
-// members answers each member that the page names and the structure
-// lacks, and each member that the structure defines and the page's
-// list of members lacks. A row with a * stands for members that the
-// driver numbers, so it is not compared.
+// members returns a line for each member that only one of the page and
+// the property has. A member name with a * on the page stands for
+// members that the driver numbers, and members compares no row that
+// has one.
 func members(p standard.Property, d documented, source string) []string {
 	if len(d.Members) == 0 || slices.ContainsFunc(d.Members, func(m docMember) bool { return strings.Contains(m.Name, "*") }) {
 		return nil
 	}
 	var report []string
 	for _, m := range d.Members {
-		if _, held := p.Member(m.Name); !held {
+		if _, defined := p.Member(m.Name); !defined {
 			report = append(report, fmt.Sprintf("%s: the standard properties page names the member %s, and %s does not define it", p.Name, m.Name, source))
 		}
 	}
 	for _, m := range p.Members {
-		if _, held := d.member(m.Name); !held {
+		if _, listed := d.member(m.Name); !listed {
 			report = append(report, fmt.Sprintf("%s: %s defines the member %s, and the standard properties page does not name it", p.Name, source, numbered.ReplaceAllString(m.Name, "${1}*")))
 		}
 	}
 	return report
 }
 
-// A driver numbers some members, such as FILTER_SLOT_NAME_1 to
-// FILTER_SLOT_NAME_12, and the report names them once, as
-// FILTER_SLOT_NAME_*.
+// numbered matches the names of members that a driver numbers, such as
+// FILTER_SLOT_NAME_1, so the report writes them as FILTER_SLOT_NAME_*.
 var numbered = regexp.MustCompile(`^(.*_)[0-9]+$`)
 
 func (d documented) member(name string) (docMember, bool) {
@@ -158,9 +160,9 @@ func (d documented) member(name string) (docMember, bool) {
 	return docMember{}, false
 }
 
-// undefined answers each property that the page lists in the section
-// of an interface, and that neither the interface's captures nor the
-// conventions define.
+// undefined returns a line for each property that the page lists in an
+// interface's section and that neither the capture of that interface
+// nor the conventions define.
 func undefined(sets map[string]standard.Interface, docs []documented) []string {
 	var report []string
 	for _, d := range docs {
@@ -175,9 +177,9 @@ func undefined(sets map[string]standard.Interface, docs []documented) []string {
 	return report
 }
 
-// unitWords are the words of the page that name a unit, by the unit
-// of a fields file, in the order that they are tried: a longer phrase
-// before a phrase that it holds.
+// unitWords maps the words that the page uses for a unit to the unit
+// as a fields file writes it. pageUnit returns the first match, so a
+// phrase comes before any shorter phrase inside it.
 var unitWords = []struct {
 	unit string
 	word *regexp.Regexp
@@ -198,7 +200,6 @@ var unitWords = []struct {
 	{"steps", regexp.MustCompile(`(?i)\bsteps\b`)},
 }
 
-// pageUnit answers the unit that a text of the page names, or "".
 func pageUnit(text string) string {
 	for _, u := range unitWords {
 		if u.word.MatchString(text) {
@@ -208,8 +209,8 @@ func pageUnit(text string) string {
 	return ""
 }
 
-// compareUnits answers each number whose unit in the fields file
-// differs from the unit that the page names for it.
+// compareUnits returns a line for each number whose unit in the fields
+// file differs from the unit that the page gives for it.
 func compareUnits(k kind, iface string, p property, docs []documented) []string {
 	if p.Type != "Number" {
 		return nil
@@ -240,12 +241,11 @@ func compareUnits(k kind, iface string, p property, docs []documented) []string 
 	return report
 }
 
-// CrossCheck answers the report of the disagreements between the
-// sources of the standard properties, as ReportFile holds it: the
-// variants of each interface and the conventions against the
-// simulators, which Load finds, and the page of indilib/docs at the
-// commit named against the standard sets and the fields files. root is
-// the component's directory.
+// CrossCheck returns the contents of ReportFile. It joins the
+// disagreements that Load finds between the variants of each interface
+// and between the conventions and the simulators, with those that
+// crossCheck finds on page, the standard properties page of
+// indilib/docs at commit. root is the component's directory.
 func CrossCheck(root string, page []byte, commit string) ([]byte, error) {
 	sets, report, kinds, err := loadKinds(root)
 	if err != nil {

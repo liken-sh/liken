@@ -1,8 +1,9 @@
 package main
 
-// Telescopes of other shapes than the example's: one with a mount
-// alone in an observatory with no devices of its own, one with only a
-// Switch, and drivers that lack the properties a step writes.
+// Reservations that leave the example's usual path: telescopes with
+// fewer devices than the example's, drivers that lack their
+// interface's properties, a reservation that ends during activation,
+// and finalizer patches that fail.
 
 import (
 	"slices"
@@ -56,7 +57,7 @@ func TestASmallTelescopeSkipsWhatItLacks(t *testing.T) {
 				time.Sleep(time.Hour)
 				r := w.phase("solo-tonight", observatory.ReservationReleased, 10*time.Minute)
 				if got := stepStates(r); !slices.Equal(got, c.steps) {
-					t.Errorf("steps = %v\nwant %v", got, c.steps)
+					t.Errorf("the steps are %v, want %v", got, c.steps)
 				}
 			})
 		})
@@ -64,9 +65,9 @@ func TestASmallTelescopeSkipsWhatItLacks(t *testing.T) {
 }
 
 // A resource whose driver does not define its interface's properties
-// reports Error, and the rest of the telescope starts. The polar
-// aligner's driver defines no CCD_EXPOSURE, so it serves no Camera, and
-// the steps send it nothing for the camera.
+// reports Error, and the rest of the telescope starts. The camera here
+// runs the polar aligner simulator, which defines no CCD_EXPOSURE, so
+// the steps send that device nothing for the camera.
 func TestADeviceWhoseDriverLacksItsInterfaceReportsError(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -81,25 +82,26 @@ func TestADeviceWhoseDriverLacksItsInterfaceReportsError(t *testing.T) {
 
 		lacks := "INDI device Alignment Correction Simulator defines no CCD_EXPOSURE after it connects, so it serves no Camera"
 		if message := stepText(stepOf(r, observatory.StepConnect)); !strings.Contains(message, "Camera east-odd is not served: "+lacks) {
-			t.Errorf("Connect: %q does not note %q", message, lacks)
+			t.Errorf("the Connect step message is %q, want it to contain %q", message, lacks)
 		}
 		if message := stepText(stepOf(r, observatory.StepActivation)); strings.Contains(message, "east-odd") {
-			t.Errorf("Activation: %q runs the camera's activation", message)
+			t.Errorf("the Activation step message is %q, want no mention of Camera east-odd", message)
 		}
 		camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-odd")
 		if ready := conditionOf(camera.Status.Conditions, observatory.ConditionReady); camera.Status.Phase != observatory.DeviceError || ready.Message != "Failed: "+lacks {
-			t.Errorf("camera = %s, Ready = %+v", camera.Status.Phase, ready)
+			t.Errorf("the camera is in phase %s with Ready %+v, want Error with the message %q", camera.Status.Phase, ready, "Failed: "+lacks)
 		}
 		for _, change := range w.indi.changes() {
 			if strings.Contains(change, "Alignment Correction Simulator.") && !strings.Contains(change, ".CONNECTION ") {
-				t.Errorf("the steps sent %q to a device that serves no Camera", change)
+				t.Errorf("the steps sent %q to a device that serves no Camera, want only its connection", change)
 			}
 		}
 	})
 }
 
-// A reservation that ends during activation stops the step that runs,
-// and deactivation stops what the steps before it started.
+// When a reservation ends during activation, the Activation step ends
+// Skipped, and the release stops what the earlier steps started. The
+// held CCD_TEMPERATURE keeps activation from finishing.
 func TestAReservationThatEndsDuringActivationDeactivates(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -109,10 +111,10 @@ func TestAReservationThatEndsDuringActivationDeactivates(t *testing.T) {
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "end": end})
 		r := w.phase("east-tonight", observatory.ReservationReleased, 20*time.Minute)
 		if step := stepOf(r, observatory.StepActivation); step.State != observatory.StepSkipped || step.Summary != "Reservation ended" {
-			t.Errorf("Activation = %+v", step)
+			t.Errorf("the Activation step is %+v, want Skipped with the summary \"Reservation ended\"", step)
 		}
 		if pods := w.api.names(podsCollection); len(pods) != 0 {
-			t.Errorf("pods after the release: %v", pods)
+			t.Errorf("the pods after the release are %v, want none", pods)
 		}
 	})
 }
@@ -128,7 +130,7 @@ func TestARefusedFinalizerIsSentAgain(t *testing.T) {
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		if !slices.Contains(r.Metadata.Finalizers, observatory.Finalizer) {
-			t.Errorf("finalizers = %v", r.Metadata.Finalizers)
+			t.Errorf("the finalizers are %v, want %s", r.Metadata.Finalizers, observatory.Finalizer)
 		}
 		w.api.mu.Lock()
 		w.api.patchRefusals = 2
@@ -141,8 +143,9 @@ func TestARefusedFinalizerIsSentAgain(t *testing.T) {
 	})
 }
 
-// A finalizer that is gone with its reservation is removed: the
-// operator does not send the patch again, and logs no retry.
+// When the patch that removes the last finalizer gets a 404 because the
+// reservation is already gone, the operator treats the finalizer as
+// removed and logs no retry.
 func TestAFinalizerOfAGoneReservationIsRemoved(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -160,7 +163,7 @@ func TestAFinalizerOfAGoneReservationIsRemoved(t *testing.T) {
 		time.Sleep(time.Minute)
 		synctest.Wait()
 		if logs := w.logs.String(); strings.Contains(logs, "retrying") {
-			t.Errorf("the operator retried a finished removal:\n%s", logs)
+			t.Errorf("the log shows a retry of a finished removal, want none:\n%s", logs)
 		}
 	})
 }
@@ -170,7 +173,7 @@ func TestAFinalizerOfAGoneReservationIsRemoved(t *testing.T) {
 const templatesCollection = "/apis/resource.k8s.io/v1/namespaces/" + testNamespace + "/resourceclaimtemplates"
 
 // claimFocuser gives the east focuser a claim, as a focuser on real
-// hardware states one.
+// hardware has.
 func (w *world) claimFocuser() {
 	w.put(observatory.FocuserKind, "east", map[string]any{
 		"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_focus"},
@@ -178,8 +181,8 @@ func (w *world) claimFocuser() {
 	})
 }
 
-// A device on real hardware states a claim, and its
-// ResourceClaimTemplate lives as long as the reservation.
+// The operator creates the ResourceClaimTemplate of a device's claim
+// for the reservation, and deletes it when the reservation ends.
 func TestAClaimTemplateLivesAsLongAsTheReservation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -188,7 +191,7 @@ func TestAClaimTemplateLivesAsLongAsTheReservation(t *testing.T) {
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		if names := w.api.names(templatesCollection); !slices.Equal(names, []string{"east-focuser"}) {
-			t.Errorf("claims = %v", names)
+			t.Errorf("the ResourceClaimTemplates are %v, want [east-focuser]", names)
 		}
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
 		w.until(10*time.Minute, "the reservation stays", func() bool {
@@ -196,15 +199,15 @@ func TestAClaimTemplateLivesAsLongAsTheReservation(t *testing.T) {
 			return !ok
 		})
 		if names := w.api.names(templatesCollection); len(names) != 0 {
-			t.Errorf("claims after the release: %v", names)
+			t.Errorf("the ResourceClaimTemplates after the release are %v, want none", names)
 		}
 	})
 }
 
-// The observatory's devices start in StartSite, so its summary names a
-// resource there whose device does not serve its interface. The GPS
-// simulator defines no RECEIVER_SETTINGS.
-func TestStartSiteNamesADeviceThatLacksItsInterface(t *testing.T) {
+// StartSite starts the observatory's devices, so its summary names an
+// observatory device whose driver does not serve its interface. Here a
+// Receiver runs the GPS simulator, which defines no RECEIVER_SETTINGS.
+func TestStartSiteReportsADeviceThatLacksItsInterface(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -212,7 +215,7 @@ func TestStartSiteNamesADeviceThatLacksItsInterface(t *testing.T) {
 		r := readyOf(w)
 		want := "Receiver lab is not served: INDI device GPS Simulator defines no RECEIVER_SETTINGS after it connects, so it serves no Receiver"
 		if summary := stepOf(r, observatory.StepStartSite).Summary; !strings.Contains(summary, want) {
-			t.Errorf("StartSite = %q, want %q", summary, want)
+			t.Errorf("the StartSite summary is %q, want it to contain %q", summary, want)
 		}
 	})
 }

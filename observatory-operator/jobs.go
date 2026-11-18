@@ -1,18 +1,16 @@
 package main
 
-// The job action: a container that the operator runs once as a
-// batch/v1 Job, for what the vocabulary of target states lacks, such
-// as a dew heater's relay or a webhook. The operator watches its Jobs
-// as it watches its pods, by its label, and the Job's conditions end
-// the action. Nothing polls the Job.
+// The job action runs a container once as a batch/v1 Job, for work
+// that a state action cannot do, such as switching a dew heater's relay
+// or calling a webhook. The operator watches its Jobs by label, as it
+// watches its pods, and the action ends when the Job's Complete or
+// Failed condition is True.
 //
-// The Job's name comes from the resource, the trigger, the transition
-// time of the run, and the place of the action in the run. So an
-// operator that restarts during a run finds the Job it created, and
-// creates no second one. A run that runs again, such as a failed
-// activation after the retry annotation, finds the Job of the earlier
-// run under the same name. That Job is older than the run, so the
-// operator deletes it and creates a new one.
+// A Job's name is derived from the resource, the trigger, the time the
+// run's transition began, and the action's index, so an operator that
+// restarts during a run finds the Job it already created. A retry of a
+// failed run computes the same name, finds a Job created before the
+// retry started, and deletes it before it creates a new one.
 
 import (
 	"context"
@@ -32,11 +30,11 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// roleJob is the role of a Job's labels.
+// roleJob is the value of the role label on a Job and its pod.
 const roleJob = "job"
 
-// jobTTL is how long Kubernetes keeps a Job after it ends, so a person
-// can read its logs.
+// jobTTL is how long Kubernetes keeps a finished Job, so a person can
+// still read its logs.
 const jobTTL = int32(time.Hour / time.Second)
 
 func jobsCollection(namespace string) string {
@@ -44,13 +42,14 @@ func jobsCollection(namespace string) string {
 }
 
 // notLabel matches each run of characters that a DNS label cannot
-// hold.
+// contain.
 var notLabel = regexp.MustCompile(`[^a-z0-9]+`)
 
-// jobName answers the name of the Job of one action of one run, such
-// as dome-lab-triggers-0-3f9a1c2b7e. The readable part names the
-// resource and the trigger, and the hash names the transition and the
-// action, so the name stays a DNS label of at most 63 characters.
+// jobName returns the name of the Job for one action of one run, such
+// as dome-lab-triggers-0-3f9a1c2b7e. The readable prefix comes from the
+// resource and the trigger, and the hash also covers the transition
+// time and the action index. The prefix is cut so the name stays a DNS
+// label of at most 63 characters.
 func jobName(r resource, trigger string, since time.Time, index int) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\n%s\n%d\n%d", r.key(), trigger, since.Unix(), index)))
 	hash := hex.EncodeToString(sum[:])[:10]
@@ -61,9 +60,9 @@ func jobName(r resource, trigger string, since time.Time, index int) string {
 	return readable + "-" + hash
 }
 
-// jobEnvironment answers the variables that the operator adds to a
-// Job's environment: what ran the Job, and where the resource's INDI
-// server listens.
+// jobEnvironment returns the variables that the operator adds to a
+// Job's environment: the resource and trigger that started the Job,
+// and the address of the resource's INDI server.
 func jobEnvironment(t *tree, r resource, trigger string) []envVar {
 	env := []envVar{{observatory.EnvObservatory, r.observatory}}
 	if r.telescope != "" {
@@ -76,9 +75,8 @@ func jobEnvironment(t *tree, r resource, trigger string) []envVar {
 	return env
 }
 
-// serverOf answers the INDI server of a resource: the server that a
-// device's driver runs on, or the server that a Telescope or an
-// Observatory runs. The pod places a device before its parents do
+// serverOf returns the INDI server of a resource. For a device, the
+// server of its driver pod comes before the server of its parents
 // (tree.runningOn), because a device that left its server, or whose
 // train a person deleted, runs its deactivation where its driver runs.
 func serverOf(t *tree, r resource) (serverRef, bool) {
@@ -91,9 +89,9 @@ func serverOf(t *tree, r resource) (serverRef, bool) {
 	return serverRef{r.kind, r.name()}, true
 }
 
-// jobFor answers the Job of one action. The person's variables come
-// first, and a variable with the name of one of the operator's own is
-// left out, so the operator's value holds.
+// jobFor builds the Job for one action. It drops a variable of the
+// person's that has the name of one of the operator's, so the container
+// sees the operator's value.
 func jobFor(t *tree, name string, r resource, trigger string, spec observatory.Job, limit time.Duration) *job {
 	own := jobEnvironment(t, r, trigger)
 	var env []envVar
@@ -104,16 +102,16 @@ func jobFor(t *tree, name string, r resource, trigger string, spec observatory.J
 	}
 	env = append(env, own...)
 	security := restricted()
-	// The namespace states no Pod Security level, so a cluster's
-	// default applies. The container meets the restricted level, the
-	// strictest, so the Job's pod starts under any of them.
+	// The Job runs in the resource's namespace, whatever Pod Security
+	// level it enforces. The pod meets restricted, the strictest
+	// level, so it starts under any level.
 	security.SeccompProfile = &seccompProfile{Type: "RuntimeDefault"}
 	jobLabels := map[string]string{
 		labelManagedBy: managedBy, labelPartOf: partOf, labelName: name, labelRole: roleJob,
 		labelKind: r.kind.Name, labelResource: r.name(),
 	}
-	// The pod carries no managed-by label: the operator's pod watch
-	// selects by it, and a Job's pod is the Job controller's.
+	// The pod has no managed-by label, so the operator's pod watch,
+	// which selects on that label, leaves it to the Job controller.
 	podLabels := map[string]string{labelPartOf: partOf, labelName: name, labelRole: roleJob}
 	return &job{
 		APIVersion: "batch/v1", Kind: "Job",
@@ -123,8 +121,8 @@ func jobFor(t *tree, name string, r resource, trigger string, spec observatory.J
 			OwnerReferences: []ownerReference{owner(observatory.APIVersion, r.kind, r.name(), r.meta.UID)},
 		}},
 		Spec: jobSpec{
-			// The action runs once. A step's retry annotation runs a
-			// failed action again with a new Job.
+			// A failed action runs again only when a person sets the
+			// retry annotation, which creates a new Job.
 			BackoffLimit:            int32Pointer(0),
 			ActiveDeadlineSeconds:   int64Pointer(int64(limit / time.Second)),
 			TTLSecondsAfterFinished: int32Pointer(jobTTL),
@@ -137,8 +135,8 @@ func jobFor(t *tree, name string, r resource, trigger string, spec observatory.J
 					Containers: []container{{
 						Name: "job", Image: spec.Image, Command: spec.Command, Args: spec.Args, Env: env,
 						SecurityContext: security,
-						// A script that fails usually prints why and exits,
-						// so the end of its log is the reason a person needs.
+						// A failed script usually prints the reason and exits,
+						// so the end of its log is the most useful message.
 						TerminationMessagePolicy: "FallbackToLogsOnError",
 						VolumeMounts:             []volumeMount{{Name: "tmp", MountPath: tmpDir}},
 					}},
@@ -160,7 +158,8 @@ func hasVariable(env []envVar, name string) bool {
 
 func int32Pointer(i int32) *int32 { return &i }
 
-// ended answers whether a Job ended, and the error of one that failed.
+// ended reports whether a Job finished, and returns an error when it
+// failed.
 func (j *job) ended() (bool, error) {
 	for _, c := range j.Status.Conditions {
 		switch {
@@ -174,19 +173,19 @@ func (j *job) ended() (bool, error) {
 	return false, nil
 }
 
-// runJob runs one job action, and waits until its Job ends. ctx holds
-// the action's deadline, and the action's timeout bounds the Job too.
+// runJob creates the Job for one job action and waits until it ends.
+// The action's timeout is both the deadline of ctx and the Job's
+// activeDeadlineSeconds.
 func (o *operator) runJob(ctx context.Context, c procCall, spec observatory.Job, at place, report func(string)) (string, error) {
 	name := jobName(c.res, c.trigger, c.since, at.index)
 	created := false
 	err := o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
-		j, held := t.jobs[name]
+		j, found := t.jobs[name]
 		switch {
-		case held && j.Metadata.CreationTimestamp != nil && j.Metadata.CreationTimestamp.Before(at.start):
-			// The Job of an earlier run of the same transition.
+		case found && j.Metadata.CreationTimestamp != nil && j.Metadata.CreationTimestamp.Before(at.start):
 			created = false
 			return false, "deleting Job " + name + " of an earlier run", o.deleteJob(name)
-		case held:
+		case found:
 			done, err := j.ended()
 			if err != nil {
 				if why, ok := o.jobPodEnd(name); ok {
@@ -206,8 +205,8 @@ func (o *operator) runJob(ctx context.Context, c procCall, spec observatory.Job,
 	return "Job " + name + " succeeded", nil
 }
 
-// deleteJob deletes a Job and its pods. The API deletes a Job's pods
-// only with a propagation policy: with none, it leaves them running.
+// deleteJob deletes a Job and its pods. Without a propagation policy,
+// the API server leaves a deleted Job's pods running.
 func (o *operator) deleteJob(name string) error {
 	body, err := json.Marshal(map[string]any{"propagationPolicy": "Background"})
 	if err != nil {
@@ -220,17 +219,14 @@ func (o *operator) deleteJob(name string) error {
 	return err
 }
 
-// messageTail is how many bytes of a failed container's termination
-// message an action's summary keeps: the last lines, which name what
-// the script did when it failed.
+// messageTail is how many bytes from the end of a failed container's
+// termination message go into the action's summary.
 const messageTail = 300
 
-// jobPodEnd answers how the container of a failed Job's pod ended,
-// such as "exit code 3: checking the dew heater", and false when no
-// pod reports a terminated container. The pod carries no managed-by
-// label, so no watch of the operator holds it. The Job's Failed
-// condition is the event, and this reads the pod once, when it
-// arrives.
+// jobPodEnd describes how the container of a failed Job's pod ended,
+// such as "exit code 3: checking the dew heater". It returns false
+// when no pod reports a terminated container. No watch caches the pod,
+// so runJob reads it once, after the Job fails.
 func (o *operator) jobPodEnd(name string) (string, bool) {
 	var pods struct {
 		Items []pod `json:"items"`
@@ -250,9 +246,9 @@ func (o *operator) jobPodEnd(name string) (string, bool) {
 	return "", false
 }
 
-// terminationText says how a container ended: its exit code, a reason
-// other than the plain Error, such as OOMKilled, and the last lines of
-// its message, one line after another.
+// terminationText describes how a container ended: its exit code, its
+// reason when that is not the plain Error (such as OOMKilled), and the
+// last lines of its termination message joined by semicolons.
 func terminationText(end terminated) string {
 	text := fmt.Sprintf("exit code %d", end.ExitCode)
 	if end.Reason != "" && end.Reason != "Error" {
@@ -261,8 +257,8 @@ func terminationText(end terminated) string {
 	message := strings.TrimSpace(end.Message)
 	if len(message) > messageTail {
 		message = message[len(message)-messageTail:]
-		// The cut can fall inside a line or a character, so the text
-		// starts at the next whole line.
+		// The cut can fall inside a line or a multi-byte character, so
+		// drop the partial line and any invalid bytes.
 		if _, rest, found := strings.Cut(message, "\n"); found {
 			message = rest
 		}

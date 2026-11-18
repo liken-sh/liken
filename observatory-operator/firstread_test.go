@@ -9,11 +9,11 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// A new copy of the operator that is connected to the site's server
-// but has not read the weather station yet leaves the station's stored
-// Safe condition alone. Safe keeps its transition time across the
+// A restarted operator that has connected to the site's server but has
+// not yet read the weather station does not rewrite the station's
+// stored Safe condition. Safe keeps its transition time across the
 // restart, so the mount's trigger, which runs once for each transition,
-// runs once.
+// does not run again.
 func TestANewOperatorKeepsAConditionItHasNotRead(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -26,15 +26,15 @@ func TestANewOperatorKeepsAConditionItHasNotRead(t *testing.T) {
 		before := w.condition(observatory.WeatherStationKind, "lab", observatory.ConditionSafe)
 		w.halt()
 		w.indi.release("Telescope Simulator", "TELESCOPE_PARK")
-		w.indi.answerLater("lab-observatory")
+		w.indi.delayDefinitions("lab-observatory")
 		dialed := w.indi.clients("lab-observatory")
 		w.start()
-		w.until(time.Minute, "the new copy does not connect to the site's server", func() bool {
+		w.until(time.Minute, "the restarted operator does not connect to the site's server", func() bool {
 			return w.indi.clients("lab-observatory") > dialed
 		})
 		time.Sleep(2 * statusWindow)
 		synctest.Wait()
-		w.indi.answerLate("lab-observatory")
+		w.indi.sendDelayedDefinitions("lab-observatory")
 		w.runEnds(observatory.MountKind, "east", "triggers[0]", 15*time.Minute)
 		time.Sleep(time.Minute)
 		synctest.Wait()
@@ -47,8 +47,9 @@ func TestANewOperatorKeepsAConditionItHasNotRead(t *testing.T) {
 	})
 }
 
-// A driver that never answers the new copy's read holds the statuses
-// until readLimit, and the writer then writes what the operator reads.
+// When a driver never answers the read, the writer holds the statuses
+// until readLimit, and then writes them from what the operator has
+// read.
 func TestANewOperatorWritesStatusesAfterReadLimit(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -58,16 +59,16 @@ func TestANewOperatorWritesStatusesAfterReadLimit(t *testing.T) {
 		w.start()
 		started := time.Now()
 		w.weather("Alert")
-		w.until(2*readLimit, "the new copy does not write the weather station's Safe", func() bool {
+		w.until(2*readLimit, "the restarted operator does not write the weather station's Safe", func() bool {
 			return strings.HasPrefix(w.condition(observatory.WeatherStationKind, "lab", observatory.ConditionSafe), "False")
 		})
 		if waited := time.Since(started); waited < readLimit {
-			t.Errorf("the new copy wrote the status after %s, want after readLimit", waited)
+			t.Errorf("the restarted operator wrote the status after %s, want after readLimit", waited)
 		}
 	})
 }
 
-// condition answers one condition of a device as "<status> since
+// condition returns one condition of a device as "<status> since
 // <lastTransitionTime>".
 func (w *world) condition(kind observatory.Kind, name, conditionType string) string {
 	w.t.Helper()

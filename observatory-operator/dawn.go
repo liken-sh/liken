@@ -1,17 +1,11 @@
 package main
 
-// Dawn at an observatory. A person's SetUp lasts until dawn, and a
-// reservation that still waits for its requirements at dawn ends, so
-// the operator computes when the sun rises at the Observatory's
-// spec.location.
+// Astronomical dawn at an Observatory's spec.location. A SetUp with no
+// --until expires at dawn, and a reservation that is still waiting for
+// its requirements at dawn gives up.
 //
-// Dawn here is astronomical dawn: the sun rises through 18 degrees
-// below the horizon. That is the moment the sky stops being dark
-// enough to image the faintest targets, so it ends an imaging night,
-// and it comes about an hour and a half before sunrise at mid
-// latitudes. Civil or nautical dawn would keep a confirmation, and a
-// waiting reservation, until the sky is already too bright to use. A
-// person who works past it writes an --until of their own.
+// Astronomical dawn is when the sun rises through 18 degrees below the
+// horizon. After that the sky is too bright to image faint targets.
 
 import (
 	"math"
@@ -23,29 +17,30 @@ import (
 // dawnAltitude is the sun's altitude at astronomical dawn, in degrees.
 const dawnAltitude = -18.0
 
-// The sun moves at most about a quarter of a degree a minute in
-// altitude, so a scan in steps of five minutes finds every crossing of
-// an altitude that the sun stays beyond for longer than that, and
-// bisection then finds the second.
+// The sun's altitude changes by at most about 0.25 degrees a minute, so
+// a scan in five-minute steps finds every crossing of an altitude
+// unless the sun crosses it and comes back within one step. crossing
+// then narrows the step that contains the crossing to one second.
 const (
 	sunScanStep = 5 * time.Minute
 	sunScanSpan = 48 * time.Hour
 )
 
-// dawnAfter answers the first astronomical dawn after a time at a
-// place. Where the sun never rises through 18 degrees below the horizon
-// in the next two days, the night has no astronomical dawn: in the
-// white nights of a high-latitude summer the sun stays above that
-// altitude, and dawn is the time of its lowest point, after which the
-// sky only brightens; in a polar night it stays below, and dawn is the
-// time of its highest point.
+// dawnAfter returns the first astronomical dawn after the given time.
+// A place with no astronomical dawn still gets an end to its night. In
+// a high-latitude summer the sun stays above -18 degrees all night, and
+// the night ends at the sun's lowest point, when the sky stops getting
+// darker. In a polar winter the sun stays below -18 degrees, and the
+// night ends at the sun's highest point, when it comes closest to dawn.
 func dawnAfter(after time.Time, at observatory.Location) time.Time {
 	return riseThrough(after, at, dawnAltitude)
 }
 
-// riseThrough answers the first time after a time that the sun rises
-// through an altitude, to the second, or the end of the night when it
-// does not (dawnAfter).
+// riseThrough returns the first time after the given time that the sun
+// rises through altitude, to the second. When that does not happen
+// within sunScanSpan, it returns the time of the sun's lowest point in
+// the next 24 hours if the sun stays above altitude, or of its highest
+// point if not.
 func riseThrough(after time.Time, at observatory.Location, altitude float64) time.Time {
 	before, low := after, sunAltitude(after, at)
 	for t := after.Add(sunScanStep); !t.After(after.Add(sunScanSpan)); t = t.Add(sunScanStep) {
@@ -72,8 +67,9 @@ func riseThrough(after time.Time, at observatory.Location, altitude float64) tim
 	return highest.UTC().Truncate(time.Second)
 }
 
-// crossing bisects the time between below, when the sun is below an
-// altitude, and above, when it is at or above it, to one second.
+// crossing bisects the interval from below, when the sun is under
+// altitude, to above, when it is at or over altitude, until the
+// interval is one second long. It returns the end at or over altitude.
 func crossing(below, above time.Time, at observatory.Location, altitude float64) time.Time {
 	for above.Sub(below) > time.Second {
 		middle := below.Add(above.Sub(below) / 2)
@@ -86,16 +82,15 @@ func crossing(below, above time.Time, at observatory.Location, altitude float64)
 	return above.UTC().Truncate(time.Second)
 }
 
-// sunAltitude answers the altitude of the sun's center above the
-// horizon in degrees, with no refraction, from the low-precision
-// formulas of the Astronomical Almanac that the US Naval Observatory
-// publishes as "Approximate Solar Coordinates" and "Approximate
-// Sidereal Time". They hold the sun's position to about 0.01 degrees
-// from 1950 to 2050, which puts dawn within a few seconds.
+// sunAltitude returns the altitude of the sun's center above the
+// horizon in degrees, without atmospheric refraction. It uses the
+// low-precision formulas that the US Naval Observatory publishes as
+// "Approximate Solar Coordinates" and "Approximate Sidereal Time". They
+// are accurate to about 0.01 degrees from 1950 to 2050.
 func sunAltitude(t time.Time, at observatory.Location) float64 {
-	// n is the days since the J2000.0 epoch, 2000-01-01 12:00 TT. The
-	// difference between TT and UTC moves the sun by a thousandth of a
-	// degree, so UTC stands in for it.
+	// n is the number of days since the J2000.0 epoch, 2000-01-01
+	// 12:00 TT. The difference between TT and UTC moves the sun by about
+	// a thousandth of a degree, so the code uses UTC.
 	n := float64(t.UnixNano())/float64(24*time.Hour) + 2440587.5 - 2451545.0
 	meanAnomaly := radians(357.529 + 0.98560028*n)
 	meanLongitude := 280.459 + 0.98564736*n
@@ -103,8 +98,8 @@ func sunAltitude(t time.Time, at observatory.Location) float64 {
 	obliquity := radians(23.439 - 0.00000036*n)
 	rightAscension := math.Atan2(math.Cos(obliquity)*math.Sin(longitude), math.Cos(longitude))
 	declination := math.Asin(math.Sin(obliquity) * math.Sin(longitude))
-	// The Greenwich mean sidereal time in hours, then the local hour
-	// angle of the sun.
+	// Greenwich mean sidereal time in hours, then the sun's hour angle
+	// at the site.
 	sidereal := 18.697374558 + 24.06570982441908*n
 	hourAngle := radians(sidereal*15+at.Longitude) - rightAscension
 	latitude := radians(at.Latitude)

@@ -1,13 +1,12 @@
 package main
 
-// The fake drivers' lock policies, as INDI's mount and dome base
-// classes enforce them (libs/indibase/inditelescope.cpp and
-// indidome.cpp in indilib/indi). A mount snoops the DOME_PARK of the
-// dome its ACTIVE_DOME names, and only while it is connected. A dome
-// snoops the TELESCOPE_PARK of the mount its ACTIVE_TELESCOPE names.
-// Each reads a snooped report only when its state is Ok. indiserver
-// hands a driver a report that a client relays as a set*Vector, and
-// so does the fake.
+// The lock policies of the fake drivers, which follow INDI's mount and
+// dome base classes (libs/indibase/inditelescope.cpp and indidome.cpp
+// in indilib/indi). A connected mount snoops DOME_PARK on the dome in
+// its ACTIVE_DOME, and a dome snoops TELESCOPE_PARK on the mount in its
+// ACTIVE_TELESCOPE. Each driver ignores a snooped update whose state is
+// not Ok. indiserver passes a set*Vector that a client sends on to the
+// drivers that snoop it, and the fake does the same.
 
 import (
 	"encoding/xml"
@@ -17,8 +16,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi/inditest"
 )
 
-// relay records a report that a client relayed, and hands it to each
-// driver of the server that snoops it.
+// relay records a set*Vector that a client sent, and passes it to each
+// driver on the server that snoops it.
 func (w *indiWorld) relay(server string, s *fakeServer, v inditest.Vector) {
 	values := map[string]string{}
 	var members []string
@@ -41,7 +40,6 @@ func (w *indiWorld) relay(server string, s *fakeServer, v inditest.Vector) {
 	}
 }
 
-// snoops answers whether a driver snoops one property of one device.
 func (d *fakeDriver) snoops(device, property string) bool {
 	switch {
 	case d.find("DOME_POLICY") != nil:
@@ -52,9 +50,9 @@ func (d *fakeDriver) snoops(device, property string) bool {
 	return false
 }
 
-// lockRefuses answers whether a lock refuses a change, and sets the
-// property as the driver reports a refusal: Alert, with the position it
-// keeps.
+// lockRefuses reports whether a lock refuses a park change. When it
+// does, it sets the property as the driver reports a refusal: Alert,
+// with the switch still on the current position.
 func (d *fakeDriver) lockRefuses(p *inditest.Property, v inditest.Vector) bool {
 	asks := func(member string) bool {
 		for _, m := range v.Members {
@@ -78,7 +76,6 @@ func (d *fakeDriver) lockRefuses(p *inditest.Property, v inditest.Vector) bool {
 	return true
 }
 
-// value answers one member's value of one property, or "".
 func (d *fakeDriver) value(property, member string) string {
 	if p := d.find(property); p != nil {
 		for _, m := range p.Members {
@@ -90,8 +87,8 @@ func (d *fakeDriver) value(property, member string) string {
 	return ""
 }
 
-// ask sends one change to a server as another client does, such as a
-// person's KStars, and the server's driver answers it.
+// ask sends a switch change to a server as a second client, such as a
+// person's KStars, would.
 func (w *indiWorld) ask(server, device, property string, members ...string) {
 	w.t.Helper()
 	var b strings.Builder
@@ -103,23 +100,24 @@ func (w *indiWorld) ask(server, device, property string, members ...string) {
 	b.WriteString("</newSwitchVector>")
 	var v inditest.Vector
 	if err := xml.Unmarshal([]byte(b.String()), &v); err != nil {
-		w.t.Fatal(err)
+		w.t.Fatalf("parsing the switch vector: %v", err)
 	}
 	w.mu.Lock()
 	s := w.servers[server]
 	w.mu.Unlock()
-	w.answer(server, s, nil, v)
+	w.respond(server, s, nil, v)
 }
 
-// relays answers the reports that clients relayed, in order.
 func (w *indiWorld) relays() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return append([]string(nil), w.relayed...)
 }
 
-// parked answers a park property on one server as "<state> <member>",
-// with the member that is On, such as "Alert PARK".
+// parked returns a park property on one server as "<state> <member>",
+// where member is the one that is On, such as "Alert PARK". It returns
+// only the state when no member is On, and "" when the server has no
+// such property.
 func (w *indiWorld) parked(server, device, property string) string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -136,14 +134,14 @@ func (w *indiWorld) parked(server, device, property string) string {
 	return ""
 }
 
-// shutterFollowsPark moves a dome's shutter when a client changes its
-// park state, as DOME_SHUTTER_PARK_POLICY tells INDI's dome to
+// shutterFollowsPark moves a dome's shutter when its park state
+// changes, as DOME_SHUTTER_PARK_POLICY tells INDI's dome to
 // (Dome::Park and Dome::UnPark in libs/indibase/indidome.cpp). The
-// driver acts on the policy only in those handlers, so a park that
-// finds the dome there already moves no shutter. The fake sends the
-// shutter's update before the park's, so a client that reads the
-// shutter after the park settles reads where the policy put it. The
-// caller holds w.mu.
+// real driver applies the policy only in those handlers, so a park
+// request for a dome that is already parked moves no shutter. The fake
+// sends the shutter's update before the park's update, so a client
+// that reads the shutter after the park settles sees the new position.
+// The caller holds w.mu.
 func (d *fakeDriver) shutterFollowsPark(s *fakeServer) {
 	shutter := d.find("DOME_SHUTTER")
 	if shutter == nil {

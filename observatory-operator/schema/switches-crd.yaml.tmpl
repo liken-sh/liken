@@ -71,10 +71,12 @@ spec:
           x-kubernetes-validations:
             - rule: size(self.metadata.name) <= 32
               message: >-
-                a Switch name is at most 32 characters, because
-                observatory-operator names its pod and Service
-                <name>-switch, and a Service name holds at most 63
-                characters
+                a Switch name is at most 32 characters.
+                observatory-operator names the Switch's pod and Service
+                <name>-switch, and Kubernetes limits those names to 63
+                characters. Every observatory.liken.sh kind has the same
+                limit of 32, which leaves room for a suffix longer than
+                any that the operator adds.
           description: >-
             A `Switch` is a relay board or a power box's outputs: an
             INDI device that serves `OUTPUT_INTERFACE` or `INPUT_INTERFACE`. A
@@ -102,7 +104,7 @@ spec:
                     The name of the `Telescope` that the device belongs
                     to. Set this or `observatory`, not both.
                     Optional. With neither `telescope` nor
-                    `observatory`, the device is on the shelf, and the
+                    `observatory`, the device is not installed, and the
                     operator creates nothing for it.
                 observatory:
                   type: string
@@ -115,7 +117,7 @@ spec:
                     device then runs on the observatory's own INDI
                     server. Set this or `telescope`, not both.
                     Optional. With neither `telescope` nor
-                    `observatory`, the device is on the shelf, and the
+                    `observatory`, the device is not installed, and the
                     operator creates nothing for it.
 {{ include "device spec" . | indent 16 }}
 {{ settings | indent 16 }}

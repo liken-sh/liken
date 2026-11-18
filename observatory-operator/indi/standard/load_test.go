@@ -1,10 +1,5 @@
 package standard
 
-// These cases build the sources of a small standard set in a
-// directory of their own: captures, a page, a conventions table, and
-// simulator transcripts. Each one shows a disagreement that Load
-// reports, or a mistake in a source that fails the read.
-
 import (
 	"os"
 	"path/filepath"
@@ -14,9 +9,8 @@ import (
 	"testing"
 )
 
-// sources writes files into a new directory, by their paths in it,
-// and answers the directory. Every set has an empty conventions table
-// unless the case gives its own.
+// sources writes files, keyed by path, to a new temporary directory and
+// returns it. It writes an empty conventions table unless files has one.
 func sources(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -26,17 +20,17 @@ func sources(t *testing.T, files map[string]string) string {
 	for name, body := range files {
 		path := filepath.Join(dir, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the directory of %s: %v", name, err)
 		}
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing %s: %v", name, err)
 		}
 	}
 	return dir
 }
 
-// focuserSpeed is a capture of one focuser variant that defines
-// FOCUS_SPEED with a permission.
+// focuserSpeed returns a capture of a focuser variant that defines
+// FOCUS_SPEED with the given permission.
 func focuserSpeed(perm string) string {
 	return `<capture><phase name="connect"><defNumberVector name="FOCUS_SPEED" perm="` + perm +
 		`"><defNumber name="FOCUS_SPEED_VALUE" label="Speed"/></defNumberVector></phase></capture>`
@@ -62,10 +56,10 @@ func TestLoadReportsEachDisagreement(t *testing.T) {
 			dir := sources(t, c.files)
 			_, report, err := Load(dir, filepath.Join(dir, "sims"))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("Load: %v", err)
 			}
 			if !slices.Contains(report, c.want) {
-				t.Errorf("report = %q, want it to hold %q", report, c.want)
+				t.Errorf("the report is %q, want it to hold %q", report, c.want)
 			}
 		})
 	}
@@ -85,7 +79,7 @@ func TestLoadRefusesAMistakeInASource(t *testing.T) {
 		{"a convention that the capture defines", map[string]string{"focuser.xml": speed,
 			ConventionsFile: "- {name: FOCUS_SPEED, interface: focuser, type: Number, perm: rw, label: S, members: [], simulators: []}\n"}, "the capture of focuser defines it"},
 		{"a convention that names the wrong simulators", map[string]string{"focuser.xml": speed,
-			ConventionsFile: "- {name: X, interface: focuser, type: Number, perm: ro, label: X, members: [], simulators: [focus]}\n"}, "names the simulators [focus] for X"},
+			ConventionsFile: "- {name: X, interface: focuser, type: Number, perm: ro, label: X, members: [], simulators: [focus]}\n"}, "lists the simulators [focus] for X"},
 		{"a transcript that is no XML", map[string]string{"focuser.xml": speed, "sims/focus/a.xml": "<def"}, "a.xml"},
 	}
 	for _, c := range cases {
@@ -93,19 +87,19 @@ func TestLoadRefusesAMistakeInASource(t *testing.T) {
 			dir := sources(t, c.files)
 			_, _, err := Load(dir, filepath.Join(dir, "sims"))
 			if err == nil || !strings.Contains(err.Error(), c.error) {
-				t.Errorf("Load = %v, want an error with %q", err, c.error)
+				t.Errorf("Load returned %v, want an error that contains %q", err, c.error)
 			}
 		})
 	}
 }
 
-// The committed captures merge into one set for each interface: the
-// park position of the telescope holds the members of every park
-// type, and the camera's set holds the conventions of the CCD.
+// Load merges the committed captures into one set for each interface,
+// so TELESCOPE_PARK_POSITION has the members of every telescope variant,
+// and adds the conventions to the set of their interface.
 func TestLoadMergesTheVariantsAndTheConventions(t *testing.T) {
 	sets, report, err := Load(".", "../inditest/testdata")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Load: %v", err)
 	}
 	park, _ := sets["telescope"].Property("TELESCOPE_PARK_POSITION")
 	var members []string
@@ -125,7 +119,7 @@ func TestLoadMergesTheVariantsAndTheConventions(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if !reflect.DeepEqual(c.got, c.want) {
-				t.Errorf("got %v, want %v", c.got, c.want)
+				t.Errorf("%s is %v, want %v", c.name, c.got, c.want)
 			}
 		})
 	}

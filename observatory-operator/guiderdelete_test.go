@@ -1,9 +1,9 @@
 package main
 
-// A Guider has no finalizer, so a person who deletes it with its
-// reservation, as `kubectl delete -f` of the whole inventory does,
-// removes it at once while its PHD2 still runs on the telescope's
-// server.
+// A Guider has no finalizer. When a person deletes it together with its
+// reservation, as `kubectl delete -f` of a whole inventory file does,
+// the Guider is removed at once while its PHD2 still runs on the
+// telescope's server.
 
 import (
 	"strings"
@@ -15,9 +15,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/phd2/phd2test"
 )
 
-// The StopWork step stops a PHD2 whose Guider is gone, because its pod
-// still runs on the server and a guide pulse after the mount's stop
-// would move the mount.
+// The StopWork step stops the PHD2 of a deleted Guider. Its pod still
+// runs on the server, and a guide pulse after the mount stops would move
+// the mount.
 func TestAbortStopsThePHD2OfADeletedGuider(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

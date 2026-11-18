@@ -13,9 +13,9 @@ import (
 // the equation of time, as NOAA's solar calculator uses them. It
 // shares no formula with sunAltitude, so a wrong sign or a wrong
 // longitude in either one shows as a difference of degrees. Its
-// declination is a fit over many years, and in 2026 it is up to half a
-// degree off the almanac's equinoxes, which the next test holds
-// sunAltitude to.
+// declination is a fit over many years and can be half a degree off, so
+// the next test checks sunAltitude against the almanac's equinoxes
+// instead.
 func spencerAltitude(t time.Time, at observatory.Location) float64 {
 	t = t.UTC()
 	hours := float64(t.Hour()) + float64(t.Minute())/60 + float64(t.Second())/3600
@@ -46,7 +46,7 @@ func TestTheSunAgreesWithASecondFormulation(t *testing.T) {
 			worst = math.Max(worst, math.Abs(sunAltitude(when, at)-spencerAltitude(when, at)))
 		}
 		if worst > 0.5 {
-			t.Errorf("at %+v the formulations differ by up to %.3f degrees", at, worst)
+			t.Errorf("at %+v the two formulations of the sun's altitude differ by up to %.3f degrees, want at most 0.5", at, worst)
 		}
 	}
 }
@@ -75,14 +75,13 @@ func TestTheSunCrossesTheEquatorAtTheEquinoxes(t *testing.T) {
 	}
 }
 
-// Each case is a fact that follows from the geometry or that the
-// almanacs publish. On the equator at an equinox the sun moves 15
-// degrees an hour straight up, so it reaches 18 degrees below the
-// horizon 7 hours 12 minutes before noon, and noon at Greenwich's
-// meridian on 20 March is 12:07 UTC by the equation of time. Sunrise
-// in London is 04:43 BST on the summer solstice and 08:04 GMT on the
-// winter solstice, with the sun's upper limb on a horizon that
-// refraction lifts, 0.833 degrees above its center.
+// Each case follows from geometry or from a published almanac. On the
+// equator at an equinox the sun climbs straight up at 15 degrees an
+// hour, so it passes -18 degrees 7 hours 12 minutes before local noon.
+// Local noon at Greenwich on 20 March is 12:07 UTC. Sunrise in London is
+// 04:43 BST on the June solstice and 08:04 GMT on the December solstice.
+// An almanac's sunrise is when the sun's upper edge meets the horizon
+// after refraction, which puts the sun's center at -0.833 degrees.
 func TestTheSunRisesWhenTheAlmanacsSay(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -105,34 +104,33 @@ func TestTheSunRisesWhenTheAlmanacsSay(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got := riseThrough(c.after, c.at, c.altitude)
 			if off := got.Sub(c.want); off < -2*time.Minute || off > 2*time.Minute {
-				t.Errorf("riseThrough = %s, want %s within two minutes", got.Format(time.RFC3339), c.want.Format(time.RFC3339))
+				t.Errorf("riseThrough returned %s, want %s within two minutes", got.Format(time.RFC3339), c.want.Format(time.RFC3339))
 			}
 		})
 	}
 }
 
-// Dawn comes after the time it is asked from, and the next one comes a
-// day later.
+// dawnAfter returns a time after the one it is given, and the next dawn
+// comes about a day later.
 func TestDawnIsTheNextOne(t *testing.T) {
 	first := dawnAfter(time.Date(2026, 10, 12, 20, 0, 0, 0, time.UTC), cerroTololo)
 	second := dawnAfter(first.Add(time.Second), cerroTololo)
 	if !first.After(time.Date(2026, 10, 12, 20, 0, 0, 0, time.UTC)) {
-		t.Errorf("dawn %s is not after the time asked", first)
+		t.Errorf("dawnAfter returned %s, want a time after the time given", first)
 	}
 	if gap := second.Sub(first); gap < 23*time.Hour || gap > 25*time.Hour {
 		t.Errorf("dawns %s and %s are %s apart, want about a day", first, second, gap)
 	}
 	if got := sunAltitude(first, cerroTololo); math.Abs(got-dawnAltitude) > 0.01 {
-		t.Errorf("the sun is at %.3f degrees at dawn", got)
+		t.Errorf("the sun is at %.3f degrees at dawn, want %.3f", got, dawnAltitude)
 	}
 }
 
 // A night with no astronomical dawn ends at the sun's lowest point in
 // a white night, and at its highest in a polar night. At 60 degrees
-// north on the June solstice the sun sinks only to about 6.6 degrees
-// below the horizon, at local midnight; at 89 degrees north on the
-// December solstice it rises only to about 22.4 degrees below, at
-// local noon.
+// north on the June solstice the sun sinks only to about -6.6 degrees,
+// at local midnight. At 89 degrees north on the December solstice it
+// rises only to about -22.4 degrees, at local noon.
 func TestANightWithNoDawnEnds(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -149,7 +147,7 @@ func TestANightWithNoDawnEnds(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got := dawnAfter(c.after, c.at)
 			if off := got.Sub(c.want); off < -10*time.Minute || off > 10*time.Minute {
-				t.Errorf("dawnAfter = %s, want %s within ten minutes", got.Format(time.RFC3339), c.want.Format(time.RFC3339))
+				t.Errorf("dawnAfter returned %s, want %s within ten minutes", got.Format(time.RFC3339), c.want.Format(time.RFC3339))
 			}
 		})
 	}

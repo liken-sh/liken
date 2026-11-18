@@ -1,39 +1,44 @@
 package main
 
-// The Events of observatory-operator's resources. `kubectl describe`
-// lists them under the status, so a person reads what happened to a
-// resource in the last hour with no log to open. kubernetes/events
-// writes them, and root plan 78 gives the rule for a condition, an
-// Event, and a log line.
+// Where observatory-operator posts Events. `kubectl describe` lists
+// them, so a person can see what happened to a resource in the last
+// hour without reading the log. kubernetes/events writes them. The
+// operator posts an Event for each condition transition and for each
+// action that changes no condition, and none for a reading or a retry
+// of a write.
 //
-//   - Each condition transition of a device, a Telescope, an
-//     Observatory, a Guider, an OpticalTrain, and an OpticalTube posts
-//     one Event, after the status writer's write lands (status.go).
-//     That includes a SetUp that expires (setup.go) and an
-//     AttentionNeeded that a notify action sets (attention.go). A
-//     person's own write of SetUp is no transition of the operator's,
-//     and posts nothing.
-//   - A Reservation's runner posts one Event for each step's end and
-//     each phase change, with the step's own summary, so the
-//     transitions of the Reservation's Ready and SafeToPowerOff post
-//     nothing more. Each of them changes when a step starts or ends,
-//     or when the phase changes, and the runner's Event says more.
-//     EditsPending changes on a spec edit, when no step changes, so
-//     each of its transitions posts one Event (editspending.go).
-//   - A pod that a Ready reservation's runner creates again is one
-//     Event on the device, the Guider, or the Telescope or
-//     Observatory whose INDI server the pod runs, because the status
-//     shows only the gap while the pod is gone (steady.go).
-//   - A driver that a Ready reservation's runner stops on a running
-//     server, because a person deleted its device, is one Event on its
-//     Telescope or Observatory (serverdrivers.go), and the device's pod
-//     that the runner deletes is one Event on the device (deletes.go).
-//   - A move that a mount or a dome refuses under a lock policy is one
-//     Warning on the device (locks.go).
-//   - Each run of a procedure posts one Event on its resource when it
-//     starts, and one when it ends: ProcedureStarted, ProcedureDone,
-//     or the Warning ProcedureFailed (procedure.go). Its actions post
-//     none: the run's record in status.procedures holds them.
+//   - Each condition transition of a device, Telescope, Observatory,
+//     Guider, OpticalTrain, or OpticalTube posts one Event after the
+//     status writer writes the status (status.go). This includes a SetUp
+//     that expires (setup.go) and an AttentionNeeded that a notify
+//     action sets (attention.go). A person's own write of SetUp posts
+//     nothing.
+//   - A Reservation's runner posts one Event with the step's summary
+//     when a step ends and when the phase changes, and a Warning when a
+//     step fails. Ready and SafeToPowerOff change only at those times,
+//     so their transitions post no Event of their own. EditsPending
+//     changes when a person edits the spec, so save posts an Event for
+//     each of its transitions (reservation.go).
+//   - When the runner of a Ready Reservation creates a pod again, it
+//     posts one Event on the device, Guider, Telescope, or Observatory
+//     that the pod serves (steady.go). The status shows a missing pod
+//     only until the pod is back, so the Event is what tells a person
+//     that the pod is new and started without the holder's settings.
+//   - When a person deletes a device, the runner of a Ready Reservation
+//     stops the device's driver on the running INDI server and posts
+//     one Event on its Telescope or Observatory (serverdrivers.go). It
+//     also deletes the device's pod and posts one Event on the device
+//     (deletes.go).
+//   - A move that a lock policy refuses posts one Warning on the mount
+//     or dome (locks.go).
+//   - Each procedure run posts ProcedureStarted when it starts, and
+//     ProcedureDone or the Warning ProcedureFailed when it ends
+//     (procedure.go). A trigger that cannot run posts ProcedureFailed
+//     once for each new reason (triggers.go). The actions of a run post
+//     no Events, because status.procedures records them.
+//   - The retry annotation posts a Retry Event on its resource
+//     (retry.go), and a Reservation that retries its failed step posts
+//     another (finish.go).
 
 import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
@@ -41,7 +46,6 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// reference answers the object reference of a resource of the group.
 func reference(kind observatory.Kind, meta observatory.ObjectMeta) events.ObjectReference {
 	return events.ObjectReference{
 		APIVersion: observatory.APIVersion, Kind: kind.Name,
@@ -54,16 +58,14 @@ func (o *operator) record(r *observatory.Reservation, reason, message string) {
 	o.recorder.Normal(reference(observatory.ReservationKind, r.Metadata), reason, message)
 }
 
-// badStatus answers the status of a condition that needs a person,
-// for events.Recorder.Transition. A missing parent needs one. Ready is
-// False while a resource starts or is not reserved, which is expected,
-// so only its failing reasons need one. Weather that is not Safe needs
-// one too, and so does a missing Horizon, because a scheduler would
-// plan the telescope's night with no horizon. AttentionNeeded True is
-// a notify action's request to a person, so it is a Warning, and a
-// SetUp that expires is expected, so it is not. The other state
-// conditions of a device, such as Parked or Lit, are False in normal
-// use, so none of them is a Warning.
+// badStatus returns the status that makes a transition of c a Warning,
+// for events.Recorder.Transition, or "" when no status of c is a
+// Warning. The Warnings are ParentFound False, Ready False with a
+// failing reason, Safe False, HorizonFound False, and AttentionNeeded
+// True, which a notify action sets to call a person. Ready is also
+// False while a resource starts or has no reservation, which is normal.
+// The other state conditions, such as Parked or Lit, are False in
+// normal use, so they post no Warning.
 func badStatus(c observatory.Condition) observatory.ConditionStatus {
 	switch {
 	case c.Type == observatory.ConditionParentFound:
@@ -78,11 +80,12 @@ func badStatus(c observatory.Condition) observatory.ConditionStatus {
 	return ""
 }
 
-// failing reports whether a Ready reason says that something failed:
-// a phase of Error, or a failed step.
+// failing reports whether a Ready reason means that something failed:
+// the Error phase, or a step that failed or timed out.
 func failing(reason string) bool {
 	switch reason {
-	// A device's phase and a Telescope's phase both name it Error.
+	// The Error phase of a device and of a Telescope have the same
+	// string, so PhaseError matches both.
 	case string(observatory.PhaseError), reasonFailed, reasonTimedOut:
 		return true
 	}

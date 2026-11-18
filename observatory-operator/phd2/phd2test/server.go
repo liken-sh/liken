@@ -1,16 +1,16 @@
-// Package phd2test is a fake PHD2 event server for tests. It answers
-// the way PHD2's event server does (src/event_server.cpp in
-// OpenPHDGuiding/phd2): each message is one line of JSON that ends in
-// CR LF, a new connection receives the catch-up events Version and
-// AppState first, and each request with an id receives one JSON-RPC 2.0
-// answer with the same id. A client dials it through the Server's
-// DialContext, and each dial is one end of a net.Pipe, so a test runs
-// in a synctest bubble on the fake clock, which a real socket stops.
+// Package phd2test is a fake PHD2 event server for tests. It follows
+// PHD2's event server (src/event_server.cpp in OpenPHDGuiding/phd2):
+// each message is one line of JSON that ends in CR LF, a new connection
+// first receives the catch-up events Version and AppState, and each
+// request with an id receives one JSON-RPC 2.0 response with the same
+// id. A client dials it through the Server's DialContext, which returns
+// one end of a net.Pipe. A real socket would stop the fake clock of a
+// synctest bubble, and a pipe does not.
 //
 // The package phd2 tests its client against it, and the operator tests
-// its guider steps against one Server for each guider pod. The answers
-// and the events around them follow the transcript in phd2/testdata/,
-// which a real PHD2 sent.
+// its guider steps against one Server for each guider pod. The
+// responses and the events around them follow the transcript in
+// phd2/testdata/, which a real PHD2 sent.
 package phd2test
 
 import (
@@ -23,41 +23,46 @@ import (
 	"syscall"
 )
 
-// Server is one fake PHD2. Its fields are its state, and Set changes
-// them under the Server's lock.
+// Server is one fake PHD2. Its exported fields are its state. To change
+// them while connections are open, call Set, which holds the Server's
+// lock.
 type Server struct {
 	mu sync.Mutex
-	// AppState is what get_app_state answers and the catch-up AppState
-	// event says.
+	// AppState is the state that get_app_state returns and that the
+	// catch-up AppState event reports.
 	AppState   string
 	Calibrated bool
-	// Equipment is what get_connected answers. set_connected sets it.
+	// Equipment is the value that get_connected returns. set_connected
+	// sets it.
 	Equipment bool
 	// Scale is the pixel scale in arc-seconds per pixel, or nil for a
 	// camera whose pixel size PHD2 does not know.
 	Scale *float64
-	// Refuse is the message of an error answer to set_connected.
+	// Refuse, when it is not empty, is the message of the error that
+	// set_connected returns.
 	Refuse string
-	// Refusals holds the message of an error answer to each method it
-	// names, such as find_star with "could not find star".
+	// Refusals maps a method name to the message of the error that the
+	// Server returns for that method, such as "could not find star" for
+	// find_star.
 	Refusals map[string]string
-	// Hold names a method that the Server reads and never answers.
+	// Hold is a method that the Server records but never responds to.
 	Hold string
-	// Exposure is the guide exposure in milliseconds that set_exposure
-	// set last.
+	// Exposure is the guide exposure in milliseconds from the last
+	// set_exposure.
 	Exposure int
-	// Star is the position in pixels that find_star selects.
+	// Star is the position in pixels that find_star selects and
+	// returns.
 	Star [2]float64
 	// HoldSettle keeps each settle of a guide or a dither open after
 	// its SettleBegin and one Settling event, until Settle ends it.
 	HoldSettle bool
 	// SettleFailure is the reason that each SettleDone reports, or
-	// empty for a settle that settles.
+	// empty for a settle that succeeds.
 	SettleFailure string
 
-	// settling names the operation whose settle HoldSettle holds open,
-	// guide or dither. PHD2 refuses another guide or dither until it
-	// ends.
+	// settling is "guide" or "dither" while HoldSettle keeps that
+	// operation's settle open. PHD2 refuses a guide or a dither during a
+	// settle.
 	settling string
 	params   map[string]json.RawMessage
 	methods  []string
@@ -66,18 +71,19 @@ type Server struct {
 	// exited records a Cut. A PHD2 that exited has no listener, so
 	// each later dial is refused.
 	exited bool
-	// Failed receives what the Server could not read. A test checks it.
+	// failed records each line that was not a JSON request. Unread
+	// returns it.
 	failed []string
 }
 
-// New answers a PHD2 that runs, is idle, and has no equipment
-// connected, as PHD2 is after it starts. Its star is where the
-// recorded session's star was.
+// New returns a Server in the state of a PHD2 that has just started: it
+// is Stopped and has no equipment connected. Its star is at the
+// position of the star in the recorded session.
 func New() *Server {
 	return &Server{AppState: "Stopped", Star: [2]float64{1045.09, 44.96}, params: map[string]json.RawMessage{}}
 }
 
-// DialContext answers one end of a new pipe, and serves the other. A
+// DialContext returns one end of a new pipe and serves the other end. A
 // Server that was cut refuses the dial with ECONNREFUSED, as a host with
 // no listener on the port does.
 func (s *Server) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
@@ -115,7 +121,7 @@ func GuideStep(frame int, ra, dec float64) map[string]any {
 }
 
 // send writes one message to one connection. net.Pipe serializes
-// concurrent writes, so an event and an answer never interleave.
+// concurrent writes, so an event and a response never interleave.
 func send(conn net.Conn, message map[string]any) {
 	body, _ := json.Marshal(message)
 	_, _ = conn.Write(append(body, '\r', '\n'))
@@ -171,18 +177,18 @@ func (s *Server) serve(conn net.Conn) {
 		if held {
 			continue
 		}
-		answer := map[string]any{"jsonrpc": "2.0", "id": request.ID}
-		a := s.answer(request.Method, request.Params)
+		response := map[string]any{"jsonrpc": "2.0", "id": request.ID}
+		a := s.call(request.Method, request.Params)
 		for _, e := range a.before {
 			send(conn, e)
 		}
 		if a.failure != "" {
-			answer["error"] = map[string]any{"code": 1, "message": a.failure}
+			response["error"] = map[string]any{"code": 1, "message": a.failure}
 		} else {
-			answer["result"] = a.result
+			response["result"] = a.result
 		}
 		if request.ID != nil {
-			send(conn, answer)
+			send(conn, response)
 		}
 		for _, e := range a.after {
 			send(conn, e)
@@ -190,8 +196,8 @@ func (s *Server) serve(conn net.Conn) {
 	}
 }
 
-// reply is the Server's answer to one method: the events it sends
-// before the answer, the result or the failure, and the events after.
+// reply is the Server's response to one method: the events it sends
+// before the response, the result or the failure, and the events after.
 type reply struct {
 	before  []map[string]any
 	result  any
@@ -203,9 +209,9 @@ func result(v any, after ...map[string]any) reply    { return reply{result: v, a
 func failure(message string) reply                   { return reply{failure: message} }
 func (r reply) first(before ...map[string]any) reply { r.before = before; return r }
 
-// answer runs one method the way event_server.cpp does, with the
-// error messages of event_server.cpp and phdcontrol.cpp.
-func (s *Server) answer(method string, params json.RawMessage) reply {
+// call runs one method as event_server.cpp does, with the error
+// messages of event_server.cpp and phdcontrol.cpp.
+func (s *Server) call(method string, params json.RawMessage) reply {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.params[method] = params
@@ -227,8 +233,8 @@ func (s *Server) answer(method string, params json.RawMessage) reply {
 		}
 		return result(*s.Scale)
 	case "set_connected":
-		// Connecting the gear writes the profile, and PHD2 reports
-		// that before it answers.
+		// PHD2 saves the profile when it connects the equipment, and
+		// sends ConfigurationChange before the response.
 		changed := Event("ConfigurationChange", nil)
 		var on []bool
 		if err := json.Unmarshal(params, &on); err != nil || len(on) != 1 {
@@ -240,8 +246,8 @@ func (s *Server) answer(method string, params json.RawMessage) reply {
 		s.Equipment = on[0]
 		return result(0).first(changed)
 	case "stop_capture":
-		// PHD2 reports the end of guiding and of the loop as events
-		// after it answers, and sends no AppState.
+		// PHD2 sends the end of guiding and of the loop as events after
+		// the response, and sends no AppState.
 		var after []map[string]any
 		if s.AppState != "Stopped" && s.AppState != "Selected" && s.AppState != "Looping" {
 			after = append(after, Event("GuidingStopped", nil))
@@ -315,7 +321,7 @@ func (s *Server) answer(method string, params json.RawMessage) reply {
 		if s.settling != "" {
 			return failure("Cannot initiate dither while " + s.settling + " is in progress")
 		}
-		// PHD2's frame refuses a dither while it does not guide.
+		// PHD2 refuses a dither unless it is guiding.
 		if s.AppState != "Guiding" {
 			return failure("Dither error")
 		}
@@ -340,9 +346,9 @@ type settle struct {
 // present.
 func (p settle) valid() bool { return p.Pixels != nil && p.Time != nil && p.Timeout != nil }
 
-// settleLocked begins a settle, and answers its events: SettleBegin,
-// one Settling, and SettleDone, which reports SettleFailure when it is
-// set. With HoldSettle, the settle stays open without its SettleDone
+// settleLocked returns the events of a settle: SettleBegin, one
+// Settling, and SettleDone, which reports SettleFailure when it is set.
+// With HoldSettle, it leaves out SettleDone and keeps the settle open
 // until Settle ends it. The caller holds mu.
 func (s *Server) settleLocked(operation string, p settle) []map[string]any {
 	events := []map[string]any{
@@ -376,7 +382,7 @@ func (s *Server) Settle(failure string) {
 	s.Broadcast(settleDone(failure))
 }
 
-// Params answers the params of the last request of a method, as the
+// Params returns the params of the last request of a method, as the
 // client sent them, or nil when no request of the method arrived.
 func (s *Server) Params(method string) json.RawMessage {
 	s.mu.Lock()
@@ -391,8 +397,8 @@ func (s *Server) Set(change func(*Server)) {
 	change(s)
 }
 
-// Received answers the methods the Server has read, in order, joined
-// by spaces.
+// Received returns the methods that the Server has read, in order,
+// joined by spaces.
 func (s *Server) Received() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -406,19 +412,20 @@ func (s *Server) Clear() {
 	s.methods = nil
 }
 
-// Dials counts the connections the Server has accepted.
+// Dials returns how many connections the Server has accepted.
 func (s *Server) Dials() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.dials
 }
 
-// Unread answers each line the Server could not read as a request.
+// Unread returns each line that the Server could not parse as a
+// request.
 func (s *Server) Unread() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.failed...)
 }
 
-// Pointer answers a pointer to a number, for Scale.
+// Pointer returns a pointer to v, for Scale.
 func Pointer(v float64) *float64 { return &v }

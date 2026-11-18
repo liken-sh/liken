@@ -19,34 +19,33 @@ func TestSwitchTurnsOneMemberOn(t *testing.T) {
 	parked, _ := p.Value("PARK")
 	unparked, _ := p.Value("UNPARK")
 	if parked != "Off" || unparked != "On" {
-		t.Errorf("PARK = %s, UNPARK = %s", parked, unparked)
+		t.Errorf("after Switch(UNPARK), PARK is %s and UNPARK is %s, want Off and On", parked, unparked)
 	}
 	if _, ok := p.Value("NONESUCH"); ok {
-		t.Error("a member that the property lacks has a value")
+		t.Error("Value(NONESUCH) reports a value for a member the property lacks")
 	}
 }
 
-// A definition and an update name the device, the property, and each
-// member, with the text escaped.
+// Def and Set escape XML special characters in the names they write.
 func TestDefAndSetWriteTheElements(t *testing.T) {
 	p := park()
 	p.Device = `A & B`
 	if got := p.Def(); !strings.HasPrefix(got, `<defSwitchVector device="A &amp; B" name="TELESCOPE_PARK"`) || !strings.Contains(got, `rule="OneOfMany"`) {
-		t.Errorf("def = %s", got)
+		t.Errorf("Def() = %s, want a defSwitchVector with the escaped device name and rule OneOfMany", got)
 	}
 	if got := p.Set(); got != `<setSwitchVector device="A &amp; B" name="TELESCOPE_PARK" state="Ok"><oneSwitch name="PARK">On</oneSwitch><oneSwitch name="UNPARK">Off</oneSwitch></setSwitchVector>`+"\n" {
-		t.Errorf("set = %s", got)
+		t.Errorf("Set() = %s, want a setSwitchVector with the escaped device name", got)
 	}
 }
 
-// A getProperties that names a device answers that device alone, and a
-// ping gets its reply, as indiserver answers both.
+// A getProperties for one device returns only that device's
+// properties, and a ping gets a reply, as with indiserver.
 func TestGetPropertiesOfOneDeviceAndAPing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewServer(t, "ccd", "telescope")
 		conn, err := s.DialContext(t.Context(), "tcp", "indiserver.test:7624")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("dialing the fake INDI server: %v", err)
 		}
 		defer conn.Close()
 		lines := read(conn)
@@ -54,16 +53,17 @@ func TestGetPropertiesOfOneDeviceAndAPing(t *testing.T) {
 		synctest.Wait()
 		got := lines()
 		if strings.Contains(got, "CCD Simulator") || !strings.Contains(got, `device="Telescope Simulator"`) {
-			t.Errorf("answer names another device: %.200s", got)
+			t.Errorf("the reply to getProperties names another device or none: %.200s, want only Telescope Simulator", got)
 		}
 		if !strings.HasSuffix(got, `<pingReply uid="7"/>`+"\n") {
-			t.Errorf("no ping reply at the end: %.200s", got[max(0, len(got)-200):])
+			t.Errorf("the reply ends with %.200s, want a pingReply for uid 7", got[max(0, len(got)-200):])
 		}
 	})
 }
 
-// read reads what the server sends in the background, and answers a
-// function that returns what arrived so far.
+// read collects what the server sends, in a goroutine. It returns a
+// function that closes the connection and returns everything that
+// arrived.
 func read(conn net.Conn) func() string {
 	var b strings.Builder
 	done := make(chan struct{})

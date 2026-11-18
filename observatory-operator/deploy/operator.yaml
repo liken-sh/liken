@@ -1,37 +1,38 @@
-# The operator: one unprivileged Deployment in liken-system. It reads
-# the resources in every namespace, runs each reserved telescope's pods
-# in the telescope's namespace, and drives the devices through each
-# INDI server's Service. It keeps no state outside the API server: a
-# reservation's status records every step, and a copy that takes the
-# Lease continues from it.
+# The operator runs as one unprivileged Deployment in liken-system. It
+# watches the observatory resources in every namespace, creates the pods
+# of each reserved telescope in the telescope's namespace, and controls
+# the devices through each INDI server's Service. It keeps no state
+# outside the API server. A reservation's status records every step it
+# has finished, so a copy that takes over the Lease continues from
+# there.
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: observatory-operator
   labels:
-    # The base binary selects on this label to find the operator's
-    # Deployment, read its image version, and pull the matching -cli
-    # image.
+    # The liken toolkit's base binary finds this Deployment by this
+    # label, reads its image version, and pulls the -cli image with the
+    # same version.
     cli.liken.sh/plugin: observatory
 spec:
   # One replica is enough, because the kubelet restarts a crashed
   # operator. Two copies that acted at once would each run the same
-  # reservation's steps on the same devices, so only the copy that
-  # holds the Lease observatory-operator acts (leader.go). Every other
-  # copy waits for it.
+  # reservation's steps on the same devices. So only the copy that holds
+  # the Lease named observatory-operator acts (leader.go), and any other
+  # copy waits until that Lease is free.
   replicas: 1
   selector:
     matchLabels:
       app: observatory-operator
-  # A rollout starts the new pod beside the old one, and stops the old
-  # one only when the new one runs. The new pod waits for the Lease while
-  # the old one leads. On SIGTERM the old pod stops its runners, its
-  # status writer, and its INDI connections, waits for their last
-  # writes, and releases the Lease. The new pod takes it on its next
-  # read, within about 11 seconds, and reads the holder of each
-  # telescope from the reservations' status. So the image pull happens
-  # while the old pod still leads.
+  # A rollout starts the new pod before it stops the old one, and stops
+  # the old one only when the new one is running. So the new pod pulls
+  # its image while the old pod still holds the Lease. On SIGTERM the
+  # old pod stops its runners, its status writer, and its INDI
+  # connections, waits for their last writes, and releases the Lease.
+  # The new pod takes the Lease on its next read, within about 11
+  # seconds, and then reads from the reservations' status which
+  # reservation holds each telescope.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -43,20 +44,22 @@ spec:
         app: observatory-operator
     spec:
       serviceAccountName: observatory-operator
-      # A shutdown waits until every writer has returned, and the client
-      # ends each request in 15 s at most. Then the release waits up to
+      # Shutdown waits for every writer to return, and the client ends
+      # each request after 15 s at most. Then the release waits up to
       # 11 s for client-go's election to end, and up to 5 s more for the
-      # release that follows a late renewal. One write in flight and the
-      # release take up to 31 s, past the default grace of 30 s, so the
-      # grace is 60 s. A kill before the release leaves the Lease to
-      # expire, and a waiting copy then takes it 30 to 41 s after the
-      # last renewal instead of within about 11 s.
+      # release that follows a late renewal. A write in flight plus the
+      # release can take 31 s, which is longer than the default grace
+      # period of 30 s, so the grace period is 60 s. If the pod is
+      # killed before it releases the Lease, the Lease expires, and a
+      # waiting copy takes it 30 to 41 s after the last renewal, not
+      # within about 11 s.
       terminationGracePeriodSeconds: 60
       containers:
         - name: operator
           image: ghcr.io/liken-sh/observatory-operator:latest
-          # The pod's name and namespace name the Lease and the identity
-          # that holds it, so the operator exits when either is unset.
+          # The operator creates its Lease in the pod's namespace and
+          # uses the pod's name as the Lease holder's identity. It exits
+          # at startup when either variable is unset.
           env:
             - name: POD_NAME
               valueFrom:
@@ -66,11 +69,9 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            # The pod runs on the cluster network, so it takes port 9200,
-            # the port of root plan 65. The copy that holds the Lease
-            # serves /metrics there. The deploy/monitoring component is
-            # what a cluster owner adds to scrape it, and the base runs
-            # the same either way. An empty value turns the listener off.
+            # Only the copy that holds the Lease serves /metrics. The
+            # Kustomize component in deploy/monitoring adds a PodMonitor
+            # that scrapes it. An empty value turns the listener off.
             - name: OBSERVATORY_METRICS_ADDRESS
               value: :9200
           ports:
@@ -88,8 +89,8 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
-            # The watches hold every resource of the group, and each
-            # INDI connection holds every property of its server's
-            # devices: about 70 for a camera.
+            # The operator caches every resource of the group from its
+            # watches, and each INDI connection caches every property of
+            # its server's devices.
             limits:
               memory: 256Mi

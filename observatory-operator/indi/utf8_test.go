@@ -17,10 +17,10 @@ func TestValidUTF8(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			// One byte for each read splits every multi-byte character.
+			// Reading one byte at a time splits every multi-byte character.
 			got, err := io.ReadAll(&validUTF8{from: iotest.OneByteReader(strings.NewReader(c.in))})
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading through validUTF8: %v", err)
 			}
 			if string(got) != c.want {
 				t.Errorf("read %q, want %q", got, c.want)

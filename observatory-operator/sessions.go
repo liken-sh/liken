@@ -1,34 +1,22 @@
 package main
 
-// Which server runs a device while sessions hold the servers. A
-// reservation records the devices of its session in its status before
-// it creates any pod (records.go), so from then on the record alone
-// gives each server's set. A pod, a server's drivers annotation, or a
-// device that its parents place there adds nothing to the set, and
-// only a delete takes a device out of it.
-
 import "github.com/liken-sh/liken/observatory-operator/observatory"
 
-// server answers the INDI server that runs a device. While a session
-// holds a server and has recorded it, the server runs a fixed set of
-// devices: the devices that the record in the status of the
-// reservations that hold the server names (heldOn). An eviction can
-// delete the server's pod, or every pod of the server, and the runner
-// creates the pods again from the record. A server whose holders
-// recorded nothing yet takes the devices that the specs place there,
-// as a new session does. During the session, the record places a
-// device, and its spec does not, so a spec edit that would move it to
-// another telescope, train, or the shelf, or a train deleted under it,
-// takes effect when the session ends, and the release stops the device
-// as its own. A device that its parents place on a recorded server and
-// that the record does not name waits for the next session: one
-// created during the session, one that a person created again with
-// the same name, and a served device whose owner the session started.
-// So a device runs on one server at a time: a move between two running
-// servers would need one server to release the device while the other
-// starts it, and the steps of both sessions to agree on where it is. A
-// deleted device leaves its server at once, because its finalizer
-// holds it only until its deactivation ran.
+// server returns the INDI server that should run a device, and false
+// when no server should.
+//
+// While a session holds a server and has recorded its devices, the
+// server runs exactly the devices in the records of the reservations
+// that hold it (records.go). A device that the specs place there but the record
+// does not have, such as one created during the session, waits for the
+// next session. A spec edit that would move a recorded device takes
+// effect when the session ends. So a device never moves between two
+// running servers, which would need one server to stop it while the
+// other starts it. Before the holders have recorded anything, the
+// server runs the devices that the specs place on it.
+//
+// A deleted device is on no server, so the server that runs it handles
+// it as a device that left and runs its deactivation (finalizers.go).
 func (t *tree) server(d *device) (serverRef, bool) {
 	if deleting(d.object.Metadata) {
 		return serverRef{}, false
@@ -43,20 +31,18 @@ func (t *tree) server(d *device) (serverRef, bool) {
 	return ref, ok
 }
 
-// sessions is what the reservations hold in one tree. The status
-// writer places every device on each pass, so a tree computes it once.
+// sessions describes which servers the reservations hold in one tree.
+// The tree computes it once, because the status writer calls server for
+// every device on each pass.
 type sessions struct {
-	// holders names, for each held server, the reservations that hold
-	// it, sorted: one for a telescope's server, and one for each held
-	// telescope of an observatory for the observatory's server.
+	// holders lists the names of the reservations that hold each
+	// server, sorted. An observatory's server is held by the
+	// reservation of each of its held telescopes.
 	holders map[serverRef][]string
-	// started holds each held server whose set of devices is fixed,
-	// because a holder's status records it.
+	// started is true for each held server that has a record.
 	started map[serverRef]bool
 }
 
-// sessions answers what the reservations hold, from their steps
-// (holds) and their records.
 func (t *tree) sessions() sessions {
 	t.heldOnce.Do(func() {
 		t.held = sessions{holders: map[serverRef][]string{}, started: map[serverRef]bool{}}
@@ -81,15 +67,15 @@ func (t *tree) sessions() sessions {
 	return t.held
 }
 
-// started reports whether a session holds a server and the server's
-// set of devices is fixed (heldOn).
+// started reports whether a session holds the server and has recorded
+// its devices.
 func (t *tree) started(ref serverRef) bool {
 	return t.sessions().started[ref]
 }
 
-// heldOn answers the held server whose record names a device. The
-// record of a device that a person created again with the same name
-// names another UID, so it does not apply (applyRecords).
+// heldOn returns the server whose record has the device. applyRecords
+// matches records by UID, so a device that a person deleted and created
+// again with the same name has none.
 func (t *tree) heldOn(d *device) (serverRef, bool) {
 	if d.record == nil {
 		return serverRef{}, false

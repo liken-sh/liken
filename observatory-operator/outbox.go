@@ -1,16 +1,15 @@
 package main
 
-// The outbox of plan 19: a PersistentVolumeClaim that a reservation
-// names in spec.outbox, which the telescope's imaging cameras mount at
-// /outbox. Configure points each of their drivers at it, so the driver
-// writes every frame once, already in place, and
-// astrophotography-operator moves the frames from there afterward.
+// The outbox is a PersistentVolumeClaim that a reservation names in
+// spec.outbox. The telescope's imaging cameras mount it at /outbox, and
+// Configure points each camera driver at it, so each frame is written
+// once, into the outbox. astrophotography-operator moves the frames out
+// of the outbox afterward.
 //
-// The PowerOn step records the outbox in status.session with the
-// devices, and the pods read the record, never the spec. A claim
-// cannot change under a running driver without a new pod, and a new
-// pod in the middle of an exposure loses the exposure, so an edit
-// takes effect at the next session (records.go).
+// The PowerOn step copies spec.outbox into status.session, and the pods
+// are built from that copy. A pod's volumes cannot change, and
+// replacing a camera's pod during an exposure loses the exposure, so an
+// edit of spec.outbox takes effect at the next session.
 
 import (
 	"context"
@@ -22,13 +21,13 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// driverGroup is the group that every driver runs as (restricted).
+// driverGroup is the group ID that every driver pod runs as.
 const driverGroup = 1000
 
-// outbox answers the claim that a device's pod mounts at /outbox, or
-// "" for none. Only a Camera of a telescope whose session recorded an
-// outbox mounts it, and not a camera that a Guider guides with: that
-// camera sends its frames to PHD2 and never writes a file.
+// outbox returns the name of the claim that a device's pod mounts at
+// /outbox, or "" for none. Only a Camera mounts it, and only when the
+// session recorded an outbox. A Guider's camera does not, because it
+// sends its frames to PHD2 and never writes a file.
 func (t *tree) outbox(server serverRef, d *device) string {
 	r, ok := t.records[server]
 	if !ok || r.Outbox == nil || d.kind != observatory.CameraKind || t.guides(server, d) {
@@ -37,11 +36,12 @@ func (t *tree) outbox(server serverRef, d *device) string {
 	return r.Outbox.ClaimName
 }
 
-// mountOutbox mounts a claim in a device's pod at /outbox. A new
-// volume is often owned by root, and the driver runs as user and group
-// 1000 on a read-only root, so the pod sets fsGroup to the driver's
-// group. OnRootMismatch makes the kubelet walk a large volume only
-// when the owner of its root does not match.
+// mountOutbox mounts a claim in a device's pod at /outbox. A new volume
+// is often owned by root, and the driver runs as user and group 1000,
+// so the pod sets fsGroup to driverGroup. With OnRootMismatch, the
+// kubelet changes the ownership of every file only when the volume's
+// root directory does not already match, which saves a walk of a large
+// volume at each pod start.
 func mountOutbox(p *pod, claim string) {
 	p.Spec.Volumes = append(p.Spec.Volumes, volume{Name: outboxVolume, PersistentVolumeClaim: &claimVolume{ClaimName: claim}})
 	p.Spec.Containers[0].VolumeMounts = append(p.Spec.Containers[0].VolumeMounts, volumeMount{Name: outboxVolume, MountPath: outboxDir})
@@ -52,16 +52,16 @@ func volumeClaimPath(namespace, name string) string {
 	return "/api/v1/namespaces/" + namespace + "/persistentvolumeclaims/" + name
 }
 
-// checkOutbox fails when the session's outbox names a claim that does
-// not exist, before the PowerOn step creates a pod. A pod whose claim
-// does not exist stays Pending with no message that names the
-// reservation. A claim that exists and cannot be mounted on the
-// camera's node also leaves the pod Pending, and StartDevices gives
-// the scheduler's message (waitReady).
+// checkOutbox fails PowerOn when the session's outbox names a claim
+// that does not exist, before any pod is created. Otherwise the
+// camera's pod would stay Pending, and nothing in its status would
+// point the person at the reservation. A claim that exists but cannot
+// be mounted on the camera's node also leaves the pod Pending, and
+// waitReady reports the scheduler's message for that case.
 //
-// It reads the claim once, with a GET, and does not watch the claims:
-// a watch of every claim in the cluster would hold a copy of each one
-// and wake the operator for volumes it never mounts.
+// It reads the claim once with a GET. A watch of every claim in the
+// cluster would cache each one and wake the operator for volumes it
+// never mounts.
 func (r *runner) checkOutbox(ctx context.Context, w *stepWork, outbox *observatory.Outbox) error {
 	if outbox == nil {
 		return nil
@@ -80,26 +80,29 @@ func (r *runner) checkOutbox(ctx context.Context, w *stepWork, outbox *observato
 		return err
 	}
 	if missing {
-		return fmt.Errorf("missing PersistentVolumeClaim %s in namespace %s, which spec.outbox.claimName names", outbox.ClaimName, r.o.namespace)
+		return fmt.Errorf("the PersistentVolumeClaim %s that spec.outbox.claimName names is not in the namespace %s", outbox.ClaimName, r.o.namespace)
 	}
 	return nil
 }
 
-// uploadToOutbox points a camera's driver at the outbox: UPLOAD_DIR is
-// /outbox/<the Camera's name>, and UPLOAD_MODE is UPLOAD_BOTH, so every
-// frame lands in the outbox and a desktop client still receives it.
-// Each driver numbers its files from the ones it finds in its
-// directory, so two drivers that shared one directory could choose the
-// same name at the same moment. That happens when two cameras of one
-// telescope image, or when the reservations of two telescopes name one
-// claim. A Camera's name is unique in its namespace, and a claim is in
-// one namespace, so no two drivers share a directory. The driver
-// creates a missing directory itself when it saves a frame. It leaves
-// UPLOAD_PREFIX to the holder. The holder can change the mode and the
-// directory afterward: astrophotography-operator chooses UPLOAD_LOCAL
-// and a directory for each target, and Ekos writes its own upload
-// settings when it captures. A driver defines both properties only
-// after it connects, and Configure runs after Connect.
+// uploadToOutbox sets the camera driver's UPLOAD_DIR to
+// /outbox/<Camera name> and UPLOAD_MODE to UPLOAD_BOTH, so the driver
+// writes each frame to the outbox and also sends it to the INDI client.
+//
+// A driver picks the next file name from the files already in its
+// directory, so two drivers that share a directory can pick the same
+// name. That would happen when two cameras of one telescope image, or
+// when two reservations name one claim. Camera names are unique in a
+// namespace and a claim belongs to one namespace, so each driver gets
+// its own directory. The driver creates the directory when it saves
+// its first frame.
+//
+// UPLOAD_PREFIX keeps the driver's value. The holder of the telescope
+// can change the mode and the directory later: astrophotography-operator
+// sets UPLOAD_LOCAL and a directory for each target, and Ekos writes
+// its own upload settings when it captures. A driver defines these
+// properties only after it connects, so this runs in Configure, after
+// Connect.
 func uploadToOutbox(ctx context.Context, t *tree, h handle, notes *[]string, note func(bool, error) error) error {
 	if t.outbox(h.d.recordedOn, h.d) == "" {
 		return nil

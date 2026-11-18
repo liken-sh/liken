@@ -1,7 +1,7 @@
 package main
 
-// What a person reads in `kubectl get`, `kubectl describe`, and the
-// Events: each message leads with the state, in a few words.
+// The messages that a person reads in `kubectl get`, `kubectl describe`,
+// and Events start with the state in a few words.
 
 import (
 	"encoding/json"
@@ -21,41 +21,41 @@ func TestADevicesMessageLeadsWithItsState(t *testing.T) {
 		return deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: p}}
 	}
 	cases := []struct {
-		name     string
-		kind     observatory.Kind
-		status   deviceStatus
-		fault    string
-		standing standing
-		want     string
+		name   string
+		kind   observatory.Kind
+		status deviceStatus
+		fault  string
+		use    serverUse
+		want   string
 	}{
-		{"a mount on the shelf", observatory.MountKind, phase(observatory.DeviceInventory), "", onShelf, "Not installed in a telescope"},
-		{"a camera on the shelf", observatory.CameraKind, phase(observatory.DeviceInventory), "", onShelf, "Not installed in an optical train"},
-		{"a dome on the shelf", observatory.DomeKind, phase(observatory.DeviceInventory), "", onShelf, "Not installed in an observatory"},
-		{"a switch on the shelf", observatory.SwitchKind, phase(observatory.DeviceInventory), "", onShelf, "Not installed in a telescope or an observatory"},
+		{"a mount that is not installed", observatory.MountKind, phase(observatory.DeviceInventory), "", notInstalled, "Not installed in a telescope"},
+		{"a camera that is not installed", observatory.CameraKind, phase(observatory.DeviceInventory), "", notInstalled, "Not installed in an optical train"},
+		{"a dome that is not installed", observatory.DomeKind, phase(observatory.DeviceInventory), "", notInstalled, "Not installed in an observatory"},
+		{"a switch that is not installed", observatory.SwitchKind, phase(observatory.DeviceInventory), "", notInstalled, "Not installed in a telescope or an observatory"},
 		{"an installed device with no reservation", observatory.CameraKind, phase(observatory.DeviceIdle), "", idle, "Not reserved"},
 		{"a device whose reservation activates", observatory.CameraKind, phase(observatory.DeviceStarting), "", activating,
 			"Waiting for activation to create pod east-main-camera"},
-		{"a device whose pod a Ready reservation creates again", observatory.CameraKind, phase(observatory.DeviceStarting), "", kept,
+		{"a device whose pod a Ready reservation creates again", observatory.CameraKind, phase(observatory.DeviceStarting), "", maintained,
 			"Creating pod east-main-camera"},
 		{"a pod whose driver has not defined its device", observatory.CameraKind, deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceStarting, Pod: "camera-east-main"}}, "",
 			activating, "Waiting for its driver on east-telescope"},
 		{"a pod that a device's server no longer runs", observatory.CameraKind, deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceDisconnecting, Pod: "east-main-camera"}}, "",
-			onShelf, "Stopping pod east-main-camera"},
-		{"a connected device", observatory.CameraKind, deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceConnected, IndiDevice: "CCD Simulator"}}, "", kept, "Connected on east-telescope"},
+			notInstalled, "Stopping pod east-main-camera"},
+		{"a connected device", observatory.CameraKind, deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceConnected, IndiDevice: "CCD Simulator"}}, "", maintained, "Connected on east-telescope"},
 		{"a device that failed", observatory.CameraKind, deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceError, IndiDevice: "CCD Simulator"}}, "indi: CCD Simulator.CCD_GAIN is Alert",
-			kept, "Failed: indi: CCD Simulator.CCD_GAIN is Alert"},
+			maintained, "Failed: indi: CCD Simulator.CCD_GAIN is Alert"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := deviceMessage(c.status, c.kind, ref.String(), "east-main-camera", c.fault, c.standing); got != c.want {
-				t.Errorf("got %q, want %q", got, c.want)
+			if got := deviceMessage(c.status, c.kind, ref.String(), "east-main-camera", c.fault, c.use); got != c.want {
+				t.Errorf("deviceMessage = %q, want %q", got, c.want)
 			}
 		})
 	}
 }
 
-// eventMessages answers the reason and the message of each Event, in
-// the order the operator wrote them.
+// eventMessages returns "<reason>: <message>" of each Event, in the
+// order the operator wrote them.
 func eventMessages(a *fakeAPI) []string {
 	var out []string
 	for _, e := range a.recorded.List() {
@@ -64,9 +64,8 @@ func eventMessages(a *fakeAPI) []string {
 	return out
 }
 
-// A finished reservation shows no step, so `kubectl get rsv` never
-// shows a step that ended as if it ran. The Ready condition, which the
-// Message column shows, gives the endpoint.
+// A finished reservation shows no step, so `kubectl get rsv` does not
+// show a step that has ended as if it were running.
 func TestAFinishedReservationShowsNoStep(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -76,18 +75,18 @@ func TestAFinishedReservationShowsNoStep(t *testing.T) {
 		r := w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		ready := conditionOf(r.Status.Conditions, observatory.ConditionReady)
 		if r.Status.Step != "" || ready.Reason != "Ready" || ready.Message != "Ready at east-telescope.observatory.svc:7624" {
-			t.Errorf("a Ready reservation shows step %q and Ready %+v", r.Status.Step, ready)
+			t.Errorf("a Ready reservation has step %q and Ready %+v, want no step and Ready \"Ready at east-telescope.observatory.svc:7624\"", r.Status.Step, ready)
 		}
 		time.Sleep(time.Hour)
 		r = w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
 		safe := conditionOf(r.Status.Conditions, observatory.ConditionSafeToPowerOff)
 		if r.Status.Step != "" || safe.Message != "Safe to power off" {
-			t.Errorf("a Released reservation shows step %q and SafeToPowerOff %+v", r.Status.Step, safe)
+			t.Errorf("a Released reservation has step %q and SafeToPowerOff %+v, want no step and \"Safe to power off\"", r.Status.Step, safe)
 		}
-		// The simulators answer at once, so each step takes no time on
-		// the bubble's clock. The dome's activation waits for the
-		// weather station's Safe condition, which the status writer
-		// writes within its window of a second.
+		// The simulators respond at once, so a step takes 0 s on the
+		// bubble's clock. Activation takes 1 s because the dome waits
+		// for the weather station's Safe condition, which the status
+		// writer writes within a second.
 		events := eventMessages(w.api)
 		for _, want := range []string{
 			"Wait: Done in 0 s: took Telescope east",
@@ -96,15 +95,15 @@ func TestAFinishedReservationShowsNoStep(t *testing.T) {
 			"Released: Released in 0 s: Telescope east is safe to power off",
 		} {
 			if !slices.Contains(events, want) {
-				t.Errorf("no Event %q in %q", want, events)
+				t.Errorf("the Events are %q, want one to be %q", events, want)
 			}
 		}
 	})
 }
 
-// SafeToPowerOff says why the devices are not safe to power off yet,
-// and leads with the state.
-func TestSafeToPowerOffSaysWhyNot(t *testing.T) {
+// SafeToPowerOff gives the reason that the devices are not yet safe to
+// power off, and starts with the state.
+func TestSafeToPowerOffGivesTheReason(t *testing.T) {
 	cases := []struct {
 		phase   observatory.ReservationPhase
 		reason  string
@@ -125,16 +124,17 @@ func TestSafeToPowerOffSaysWhyNot(t *testing.T) {
 			r.compose()
 			safe := conditionOf(r.status.Conditions, observatory.ConditionSafeToPowerOff)
 			if safe.Reason != c.reason || safe.Message != c.message {
-				t.Errorf("SafeToPowerOff = %s: %s, want %s: %s", safe.Reason, safe.Message, c.reason, c.message)
+				t.Errorf("the SafeToPowerOff condition is %s: %s, want %s: %s", safe.Reason, safe.Message, c.reason, c.message)
 			}
 		})
 	}
 }
 
-// printedLines answers the columns of `kubectl get rsv -o wide` for each
-// change of a reservation's status, in order. A change of the metadata
-// alone, such as a delete that a finalizer holds, is left out: the API
-// server writes it, and the operator cannot give it a column of its own.
+// printedLines returns the columns of `kubectl get rsv -o wide` for
+// each change of a reservation's status, in order. It skips an update
+// that changes only metadata, such as the deletionTimestamp that the API
+// server sets when a finalizer blocks a delete, because the operator
+// did not write it.
 func printedLines(t *testing.T, a *fakeAPI, name string) []string {
 	t.Helper()
 	a.mu.Lock()
@@ -150,7 +150,7 @@ func printedLines(t *testing.T, a *fakeAPI, name string) []string {
 		var r observatory.Reservation
 		body, _ := json.Marshal(e.object)
 		if err := json.Unmarshal(body, &r); err != nil {
-			t.Fatal(err)
+			t.Fatalf("decoding the Reservation: %v", err)
 		}
 		line := []string{string(r.Status.Phase), string(r.Status.Step), conditionOf(r.Status.Conditions, observatory.ConditionReady).Message}
 		if r.Status.Endpoint != nil {
@@ -161,7 +161,7 @@ func printedLines(t *testing.T, a *fakeAPI, name string) []string {
 	return out
 }
 
-// repeatedLines answers each line that equals the line before it.
+// repeatedLines returns each line that equals the line before it.
 func repeatedLines(lines []string) []string {
 	var out []string
 	for i := 1; i < len(lines); i++ {
@@ -172,10 +172,10 @@ func repeatedLines(lines []string) []string {
 	return out
 }
 
-// Each status write of a reservation changes a line of
-// `kubectl get rsv -w`, so the watch prints no line twice for the
-// operator's writes. A write that changes only a time or a step's
-// record below the columns waits for a change that a person can see.
+// Each status write of a reservation changes what `kubectl get rsv -w`
+// prints, so the watch does not print the same line twice. The operator
+// holds back a write that changes only a time, or a step record that no
+// column shows, until a visible column changes.
 func TestEachStatusWriteChangesWhatKubectlGetShows(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -194,9 +194,9 @@ func TestEachStatusWriteChangesWhatKubectlGetShows(t *testing.T) {
 	})
 }
 
-// While a step runs, the Ready condition gives the step as its reason
+// While a step runs, the Ready condition has the step as its reason
 // and the step's summary as its message, so the Message column of
-// `kubectl get rsv -w` shows what changes.
+// `kubectl get rsv -w` shows each change.
 func TestARunningStepIsTheReadyConditionsReason(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

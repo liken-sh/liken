@@ -1,9 +1,5 @@
 package main
 
-// The order of the deletes when a release stops an INDI server: the
-// pods of its devices before the server's pod, so that no device's
-// container runs again while its server stops.
-
 import (
 	"net/http"
 	"slices"
@@ -17,13 +13,13 @@ import (
 )
 
 // podDeletes records the name of each pod that the operator deletes,
-// in the order the API server receives the deletes.
+// in the order the fake API server receives the requests.
 type podDeletes struct {
 	mu    sync.Mutex
 	names []string
 }
 
-func (d *podDeletes) hear(r *http.Request) {
+func (d *podDeletes) record(r *http.Request) {
 	prefix := podsCollection + "/"
 	if r.Method != http.MethodDelete || !strings.HasPrefix(r.URL.Path, prefix) {
 		return
@@ -33,21 +29,23 @@ func (d *podDeletes) hear(r *http.Request) {
 	d.names = append(d.names, strings.TrimPrefix(r.URL.Path, prefix))
 }
 
-func (d *podDeletes) sent() []string {
+func (d *podDeletes) deleted() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return slices.Clone(d.names)
 }
 
-// The dome's pod stays terminating for 10 seconds, and the reservation
-// is released only after it is gone. The deletes of the device pods
-// reach the API server before the delete of their server's pod.
+// When a release stops an INDI server, the operator deletes the pods
+// of the server's devices before the server's pod, so a device's
+// container does not restart while its server stops. The test keeps
+// the dome's pod terminating, and the reservation must not be Released
+// until the pod is gone.
 func TestAServerStopsAfterItsDevicePods(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		deletes := &podDeletes{}
-		w.api.hear(deletes.hear)
+		w.api.onEachRequest(deletes.record)
 		w.holdPod("lab-dome")
 		at := time.Now().Add(time.Minute).UTC().Format(time.RFC3339)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "end": at})
@@ -58,12 +56,12 @@ func TestAServerStopsAfterItsDevicePods(t *testing.T) {
 		time.Sleep(10 * time.Second)
 		synctest.Wait()
 		if r, _ := w.reservation("east-tonight"); r.Status.Phase == observatory.ReservationReleased {
-			t.Error("the reservation is Released while the dome's pod is terminating")
+			t.Error("the reservation is Released, want it to stay unreleased while the dome's pod is terminating")
 		}
 		w.releasePod("lab-dome")
 		w.phase("east-tonight", observatory.ReservationReleased, 15*time.Minute)
 
-		devicesFirst(t, deletes.sent(), []podOrder{
+		devicesFirst(t, deletes.deleted(), []podOrder{
 			{"east-switch", "east-telescope"},
 			{"lab-dome", "lab-observatory"},
 			{"lab-weatherstation", "lab-observatory"},
@@ -71,27 +69,27 @@ func TestAServerStopsAfterItsDevicePods(t *testing.T) {
 	})
 }
 
-// podOrder is a device's pod and the pod of the server it runs on.
+// podOrder is the pod of a device and the pod of the INDI server that
+// the device connects to.
 type podOrder struct{ device, server string }
 
-// devicesFirst checks that each device's pod was deleted before its
-// server's pod.
-func devicesFirst(t *testing.T, sent []string, orders []podOrder) {
+// devicesFirst checks that each device's pod is in deleted before the
+// pod of its server.
+func devicesFirst(t *testing.T, deleted []string, orders []podOrder) {
 	t.Helper()
 	for _, order := range orders {
-		device, server := slices.Index(sent, order.device), slices.Index(sent, order.server)
+		device, server := slices.Index(deleted, order.device), slices.Index(deleted, order.server)
 		if device < 0 || server < 0 || device > server {
-			t.Errorf("deleted pod %s at %d and its server's pod %s at %d, want the device's pod first, in %v",
-				order.device, device, order.server, server, sent)
+			t.Errorf("the pod %s was deleted at position %d and its server's pod %s at position %d, want the device's pod first, in %v",
+				order.device, device, order.server, server, deleted)
 		}
 	}
 }
 
-// A person removes the finalizer of a Ready reservation by hand while
-// the operator is down, so the reservation goes with no deactivation.
-// The operator that returns sweeps the pods that no reservation holds,
-// and sends the deletes of each server's device pods before the delete
-// of the server's pod.
+// A Ready reservation is deleted while the operator is down, so no
+// deactivation runs. When the operator starts again, it deletes the
+// pods that no reservation uses, each server's device pods before the
+// server's pod.
 func TestTheSweepStopsAServerAfterItsDevicePods(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -102,11 +100,11 @@ func TestTheSweepStopsAServerAfterItsDevicePods(t *testing.T) {
 		w.api.store(kindCollection(observatory.ReservationKind), "east-tonight", object, "DELETED")
 		w.api.mu.Unlock()
 		deletes := &podDeletes{}
-		w.api.hear(deletes.hear)
+		w.api.onEachRequest(deletes.record)
 		w.start()
 		w.until(time.Minute, "the sweep leaves pods", func() bool { return len(w.api.names(podsCollection)) == 0 })
 
-		devicesFirst(t, deletes.sent(), []podOrder{
+		devicesFirst(t, deletes.deleted(), []podOrder{
 			{"east-switch", "east-telescope"},
 			{"east-mount", "east-telescope"},
 			{"east-main-camera", "east-telescope"},

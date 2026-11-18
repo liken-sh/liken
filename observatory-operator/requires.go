@@ -1,32 +1,30 @@
 package main
 
-// The spec.requires of the resources that a session starts. Each
-// resource can list conditions that must hold before the session
-// starts it, as a pod's readinessGates hold a pod: a person's SetUp on
-// a portable telescope, or a WeatherStation's Safe, so nothing powers on
-// in the rain. Plan 21 gives the design.
+// A resource's spec.requires lists conditions on other resources that
+// must be True before a reservation starts the resource's equipment,
+// such as a person's SetUp on a portable telescope, or a
+// WeatherStation's Safe so that nothing powers on in the rain.
 //
-// Two steps hold the gates, because each server needs its own. The
-// Observatory's requirements, and those of the devices on its server,
-// hold the Wait step, so the observatory's server does not start
-// before they hold. The Telescope's requirements, and those of its
-// devices, hold the Requires step, after StartSite and before PowerOn.
-// That order lets a telescope require the Safe of a WeatherStation
-// that the observatory's server runs: the station reports Safe only
-// once StartSite has connected it. The same requirement on the
-// Observatory would wait for good, and its step's message says what it
-// waits for.
+// The reservation checks requirements before it starts each INDI
+// server. The Wait step checks the requirements of the Observatory and
+// of the devices on its server, before the reservation takes the
+// telescope. The Requires step checks those of the Telescope and of the
+// devices on its server, after StartSite and before PowerOn. So a
+// Telescope can require the Safe of a WeatherStation on the
+// Observatory's server, because the station reports Safe only after
+// StartSite connects it. The same requirement on the Observatory would
+// never be met.
 //
-// A requirement gates only the start of a session. A condition that
-// turns False once the equipment runs changes nothing here: a trigger
-// in spec.triggers acts on it, as plan 13 gives triggers that job.
+// Requirements are checked only before the session starts. When a
+// condition turns False while the equipment runs, a trigger in
+// spec.triggers must handle it.
 //
-// A reservation that still waits in either step at dawn ends with the
-// telescope's equipment off, because the night is over: a session that
-// started after dawn could not image, and a reservation that waited
-// all day would wake the equipment at an hour nobody chose. The step is
-// Skipped with the conditions it waited for, and deactivation stops
-// whatever StartSite started.
+// When a step still waits at dawn, the reservation ends without
+// powering on the telescope's equipment, because a session that starts
+// after dawn cannot take images. The step becomes Skipped with the
+// conditions it waited for in its summary. After the Requires step,
+// deactivation stops what StartSite started. After the Wait step, the
+// reservation is Released without taking the telescope.
 
 import (
 	"context"
@@ -38,8 +36,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// gateOf answers the resources whose requirements hold one server's
-// start: the server's owner, and each device on the server.
+// gateOf returns the resources whose requirements are checked before a
+// server starts: the server's owner and each device on that server.
 func (t *tree) gateOf(owner resource, ref serverRef) []resource {
 	resources := []resource{owner}
 	for _, d := range t.devicesOn(ref) {
@@ -48,11 +46,10 @@ func (t *tree) gateOf(owner resource, ref serverRef) []resource {
 	return resources
 }
 
-// unmet answers each requirement of the resources that does not hold
-// now, such as "Telescope east SetUp=True", in the order of the
-// resources and their lists. A requirement that names no resource does
-// not hold, and its text names the field, so a person can find it.
-// held answers the ones that hold, in the same form.
+// unmet returns the requirements that are not met as waiting and those
+// that are met as held, each as text such as "Telescope east
+// SetUp=True". A requirement whose target does not exist is not met,
+// and its text names the spec.requires entry so a person can find it.
 func (t *tree) unmet(resources []resource) (waiting, held []string) {
 	for _, r := range resources {
 		for i, req := range r.procedures.Requires {
@@ -74,52 +71,48 @@ func (t *tree) unmet(resources []resource) (waiting, held []string) {
 	return waiting, held
 }
 
-// gaveUpError ends a gate's step at dawn. runStep records the step as
-// Skipped with the error's text, and the reservation then deactivates
-// (gaveUp).
-type gaveUpError struct{ summary string }
+// dawnError ends the Wait or Requires step at dawn. runStep records
+// the step as Skipped with the error's text.
+type dawnError struct{ summary string }
 
-func (g gaveUpError) Error() string { return g.summary }
+func (g dawnError) Error() string { return g.summary }
 
-// dawnCame starts the summary of a gate's step that dawn ended. A
-// reservation that ends for another reason, such as spec.end, also
-// leaves Wait or Requires Skipped, with "Reservation ended", so the
-// summary tells the two apart.
-const dawnCame = "Dawn came at "
+// dawnPrefix starts the summary of a step that dawn ended. A reservation
+// that ends for another reason, such as spec.end, also leaves Wait or
+// Requires Skipped, so the prefix tells the two apart.
+const dawnPrefix = "Dawn came at "
 
-// gaveUp reports whether a gate's step ended the reservation at dawn.
-func gaveUp(steps []observatory.Step) bool {
-	return gaveUpSummary(steps) != ""
+func endedAtDawn(steps []observatory.Step) bool {
+	return dawnSummary(steps) != ""
 }
 
-// gaveUpSummary answers the summary of the gate's step that ended the
-// reservation at dawn, for the reservation's Events, or "".
-func gaveUpSummary(steps []observatory.Step) string {
+// dawnSummary returns the summary of the step that dawn ended, or ""
+// when dawn ended none.
+func dawnSummary(steps []observatory.Step) string {
 	for _, s := range steps {
 		if (s.Name == observatory.StepWait || s.Name == observatory.StepRequires) &&
-			s.State == observatory.StepSkipped && strings.HasPrefix(s.Summary, dawnCame) {
+			s.State == observatory.StepSkipped && strings.HasPrefix(s.Summary, dawnPrefix) {
 			return s.Summary
 		}
 	}
 	return ""
 }
 
-// gate is one gate's wait as one reading of the tree finds it.
+// gate is the state of the requirements checked before one server
+// starts.
 type gate struct {
-	// waiting is the step's message, "waiting for" each condition, or
-	// "" when every requirement holds.
+	// waiting is the step's message, or "" when every requirement is met.
 	waiting string
-	// held names each requirement that holds.
-	held []string
-	// dawn ends the wait. It is zero when nothing waits, or when the
-	// telescope's Observatory is missing and gives no place.
+	held    []string
+	// dawn is when the wait ends. It is zero when nothing waits, and
+	// when the telescope's Observatory is missing, because dawn needs
+	// the Observatory's location.
 	dawn time.Time
 }
 
-// gateOn reads one gate: the requirements of the resources, and the
-// first astronomical dawn after the wait began at the telescope's
-// Observatory. It fails with gaveUpError once that dawn has come and a
-// requirement still does not hold.
+// gateOn checks the requirements of the resources. It returns
+// dawnError when a requirement is not met and the first astronomical
+// dawn after began, at the telescope's Observatory, has passed.
 func gateOn(t *tree, resources []resource, telescope *observatory.Telescope, began time.Time) (gate, error) {
 	waiting, held := t.unmet(resources)
 	g := gate{held: held}
@@ -132,16 +125,14 @@ func gateOn(t *tree, resources []resource, telescope *observatory.Telescope, beg
 		g.dawn = dawnAfter(began, site.Spec.Location)
 	}
 	if !g.dawn.IsZero() && !time.Now().Before(g.dawn) {
-		return gate{}, gaveUpError{fmt.Sprintf(dawnCame+"%s while waiting for %s, so the session did not start",
+		return gate{}, dawnError{fmt.Sprintf(dawnPrefix+"%s while waiting for %s, so the session did not start",
 			g.dawn.UTC().Format(time.RFC3339), list)}
 	}
 	return g, nil
 }
 
-// requires holds the Requires step until every requirement of the
-// Telescope and of the devices on its server holds, or ends the
-// reservation at the first dawn after the step began. The timer is a
-// clock: dawn.
+// requires runs the Requires step. A change to the tree wakes it, and
+// its only timer is the dawn that ends the wait.
 func (r *runner) requires(ctx context.Context, w *stepWork) (outcome, error) {
 	began := *r.step(observatory.StepRequires).StartTime
 	for {
@@ -152,7 +143,7 @@ func (r *runner) requires(ctx context.Context, w *stepWork) (outcome, error) {
 		t := r.o.snapshot()
 		telescope, ok := t.telescopes[r.res.Spec.Telescope]
 		if !ok {
-			return outcome{}, fmt.Errorf("missing Telescope %s", r.res.Spec.Telescope)
+			return outcome{}, fmt.Errorf("spec.telescope names Telescope %s, which does not exist", r.res.Spec.Telescope)
 		}
 		g, err := gateOn(t, t.gateOf(ofTelescope(telescope), serverRef{observatory.TelescopeKind, telescope.Metadata.Name}), telescope, began)
 		switch {
@@ -168,8 +159,7 @@ func (r *runner) requires(ctx context.Context, w *stepWork) (outcome, error) {
 	}
 }
 
-// isGaveUp reports whether a step's error is a gate's end at dawn.
-func isGaveUp(err error) (gaveUpError, bool) {
-	var g gaveUpError
+func asDawnError(err error) (dawnError, bool) {
+	var g dawnError
 	return g, errors.As(err, &g)
 }

@@ -1,10 +1,10 @@
 package main
 
-// An action of a procedure, and what the operator sends a device to
-// carry it out. Each action is a target state, so the operator first
-// reads what the device reports, and sends nothing when the device is
-// there already (indidevice.go). That makes a run that an operator
-// restart interrupted safe to run again.
+// An action of a procedure, and how the operator carries it out on a
+// device. Each action describes a target state. The operator reads the
+// device's properties first and sends nothing when the device already
+// matches (indidevice.go), so a run that an operator restart
+// interrupted can run again safely.
 
 import (
 	"context"
@@ -15,9 +15,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// action holds every field that an action of any kind has, so one type
-// reads the procedures of every kind. The CRD of each kind refuses the
-// fields that its kind does not have, as deviceSpec does for the spec.
+// action has the fields of every kind's actions, so one type decodes
+// the procedures of every kind. The type accepts a field that a kind
+// does not have, because the CRD of each kind rejects it first.
 type action struct {
 	observatory.ActionBase
 	State string                   `json:"state,omitempty"`
@@ -25,8 +25,8 @@ type action struct {
 	Warm  *observatory.Temperature `json:"warm,omitempty"`
 }
 
-// procedures answers the procedures of a kind that has no action of
-// its own, with the union type.
+// procedures converts the procedures of a kind with only the common
+// action fields into procedures of the action type.
 func procedures(in observatory.Procedures[observatory.Action]) observatory.Procedures[action] {
 	actions := func(in []observatory.Action) []action {
 		var out []action
@@ -42,7 +42,7 @@ func procedures(in observatory.Procedures[observatory.Action]) observatory.Proce
 	return out
 }
 
-// String reads like the action's YAML, such as "state: Parked" or
+// String formats the action like its YAML, such as "state: Parked" or
 // "cool: -10 °C within 0.5 °C".
 func (a action) String() string {
 	switch {
@@ -64,7 +64,7 @@ func temperatureText(t observatory.Temperature) string {
 	return quantity(t.Celsius, 1, "°C") + " within " + quantity(within(t), 1, "°C")
 }
 
-// timeout answers how long the action may take, its waits included.
+// timeout returns how long the action may run, including its waits.
 func (a action) timeout() (time.Duration, error) {
 	if a.Timeout != "" {
 		d, err := time.ParseDuration(a.Timeout)
@@ -84,8 +84,9 @@ func (a action) timeout() (time.Duration, error) {
 	return observatory.StateTimeout, nil
 }
 
-// skipError is the outcome of an action that had nothing it could do,
-// such as a cool action on a camera with no cooler. Its run goes on.
+// skipError is returned by an action that does not apply to the device,
+// such as a cool action on a camera with no cooler. The procedure
+// continues with the next action.
 type skipError string
 
 func (s skipError) Error() string { return string(s) }
@@ -97,18 +98,20 @@ func isSkip(err error) bool {
 	return errors.As(err, &s)
 }
 
-// switchTarget is the switch that one state of one kind turns On, with
-// the words that a summary uses.
+// switchTarget is the INDI switch member that an action state turns On,
+// with the wording for the step summary.
 type switchTarget struct {
 	property, member string
-	// doing names the change while it runs, did once it is done, and
-	// found the state that the device reported already.
+	// doing describes the change while it runs, did describes it after
+	// the device changed, and found describes the state that the device
+	// already reported.
 	doing, did, found string
 }
 
-// act carries out one action on a connected device. wait holds the
-// action's deadline, and ctx outlives it, for the one action that must
-// finish after its deadline: the cooler's switch-off after a warm-up.
+// act carries out one action on a connected device. wait has the
+// action's deadline. ctx has no deadline, because the cooler's switch-off
+// after a warm-up must finish even when the action's deadline has
+// passed.
 func (o *operator) act(ctx, wait context.Context, h handle, a action, report func(string)) (string, error) {
 	of := interfaces[h.d.kind]
 	switch {
@@ -122,9 +125,8 @@ func (o *operator) act(ctx, wait context.Context, h handle, a action, report fun
 			return "", fmt.Errorf("a %s has no state %s", h.d.kind.Name, a.State)
 		}
 		if of.locks {
-			// The park locks decide this move, so each driver holds
-			// the current park states before the move arrives
-			// (locks.go).
+			// Park locks can refuse this move, so send each driver
+			// the current park states first (locks.go).
 			o.relayLocks(o.snapshot())
 		}
 		report(target.doing + " " + h.String())
@@ -148,20 +150,19 @@ func (o *operator) act(ctx, wait context.Context, h handle, a action, report fun
 	return "", fmt.Errorf("a %s cannot run %s", h.d.kind.Name, a)
 }
 
-// shutterTargets maps a dome's park state to the shutter's: closed
-// when parked, and open when unparked.
+// shutterTargets maps a dome's park state to the shutter switch:
+// Parked closes the shutter, and Unparked opens it.
 var shutterTargets = map[string]switchTarget{
 	"Parked":   {"DOME_SHUTTER", "SHUTTER_CLOSE", "closing the shutter of", "closed its shutter", ""},
 	"Unparked": {"DOME_SHUTTER", "SHUTTER_OPEN", "opening the shutter of", "opened its shutter", ""},
 }
 
-// shutterFollows moves a dome's shutter to where its park state puts
-// it, and answers what it did, or "" when the shutter was there
-// already. The driver moves the shutter through
-// DOME_SHUTTER_PARK_POLICY only when the park state changes, so a dome
-// that starts unparked with its shutter closed stays closed after an
-// unpark that finds it unparked. A dome with no DOME_SHUTTER, such as a
-// roll-off roof, has nothing to move.
+// shutterFollows moves a dome's shutter to match its park state and
+// returns what it did, or "" when the shutter was already there. The
+// driver applies DOME_SHUTTER_PARK_POLICY only when the park state
+// changes, so a dome that starts unparked with its shutter closed stays
+// closed after an unpark. A dome with no DOME_SHUTTER property, such as
+// a roll-off roof, has no shutter to move.
 func shutterFollows(ctx context.Context, h handle, state string, report func(string)) (string, error) {
 	target := shutterTargets[state]
 	if _, ok := h.client().Property(h.name, target.property); !ok {

@@ -1,8 +1,7 @@
 package main
 
-// A pod that a Ready reservation's runner creates again: the status
-// says what the runner does while the pod is gone, and an Event and a
-// log line say that it created the pod.
+// When a pod is deleted during a Ready reservation, the runner creates
+// it again, and the status, an Event, and a log line say so.
 
 import (
 	"slices"
@@ -14,8 +13,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// readyMessages answers each message of an object's Ready condition,
-// in the order the operator wrote them.
+// readyMessages returns each message that the operator wrote to an
+// object's Ready condition, oldest first.
 func readyMessages(a *fakeAPI, collection, name string) []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -36,8 +35,8 @@ func readyMessages(a *fakeAPI, collection, name string) []string {
 	return out
 }
 
-// eventsAbout answers the reason and the message of each Event about
-// one object with one reason, in the order the operator wrote them.
+// eventsAbout returns "reason: message" for each Event with the given
+// reason about one object, oldest first.
 func eventsAbout(a *fakeAPI, kind observatory.Kind, name, reason string) []string {
 	var out []string
 	for _, e := range a.recorded.About(kind.Name, name) {
@@ -48,8 +47,9 @@ func eventsAbout(a *fakeAPI, kind observatory.Kind, name, reason string) []strin
 	return out
 }
 
-// devicePhases answers each phase a device's status held, in the order
-// the operator wrote them, from the first write after since.
+// devicePhases returns each phase that the operator wrote to a
+// device's status after the fake API server's version since, oldest
+// first.
 func devicePhases(a *fakeAPI, kind observatory.Kind, name string, since int) []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -72,12 +72,12 @@ func TestARecreatedPodIsNamedInTheStatusAndAnEvent(t *testing.T) {
 	}{
 		{
 			"the guider", "east-guider", observatory.GuiderKind, "east",
-			"PodCreated: Created pod east-guider while Reservation east-tonight is Ready. The new PHD2 starts idle and not calibrated.",
+			"PodCreated: Created pod east-guider while Reservation east-tonight is Ready. The new PHD2 starts idle and not calibrated",
 			"Reservation east-tonight: created pod east-guider for Guider east",
 		},
 		{
 			"a device", "east-main-camera", observatory.CameraKind, "east-main",
-			"PodCreated: Created pod east-main-camera while Reservation east-tonight is Ready.",
+			"PodCreated: Created pod east-main-camera while Reservation east-tonight is Ready",
 			"Reservation east-tonight: created pod east-main-camera for Camera east-main",
 		},
 	}
@@ -86,39 +86,36 @@ func TestARecreatedPodIsNamedInTheStatusAndAnEvent(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				w := readyWorld(t)
-				// The API server refuses the first creates, so the pod
-				// stays gone for a few status windows.
+				// The fake API server refuses the next two creates, so the
+				// pod stays missing across more than one status write.
 				w.api.refuse(2)
 				w.api.deleteNamed(podsCollection, c.pod)
-				w.until(time.Minute, "the Event is not written", func() bool {
+				w.until(time.Minute, "no PodCreated Event was posted", func() bool {
 					return slices.Contains(eventsAbout(w.api, c.kind, c.object, reasonPodCreated), c.event)
 				})
 				messages := readyMessages(w.api, kindCollection(c.kind), c.object)
 				if !slices.Contains(messages, "Creating pod "+c.pod) {
-					t.Errorf("no message names the pod's creation: %q", messages)
+					t.Errorf("the Ready messages are %q, want one that says Creating pod %s", messages, c.pod)
 				}
 				if got := eventsAbout(w.api, c.kind, c.object, reasonPodCreated); len(got) != 1 {
 					t.Errorf("Events = %q, want one", got)
 				}
 				if !strings.Contains(w.logs.String(), c.log) {
-					t.Errorf("no log line %q", c.log)
+					t.Errorf("the log lacks the line %q", c.log)
 				}
 			})
 		})
 	}
 }
 
-// A Ready reservation's runner creates an INDI server's pod again too,
-// and records it the same way. Every driver on the new server starts
-// disconnected, and the runner connects each device again.
 func TestARecreatedServerPodIsNamedInAnEvent(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
-		want := "PodCreated: Created pod east-telescope while Reservation east-tonight is Ready. Its drivers start disconnected, and the runner connects each device again."
+		want := "PodCreated: Created pod east-telescope while Reservation east-tonight is Ready. Its drivers start disconnected, and the runner connects each device again"
 
 		w.api.deleteNamed(podsCollection, "east-telescope")
-		w.until(time.Minute, "the Event is not written", func() bool {
+		w.until(time.Minute, "no PodCreated Event was posted", func() bool {
 			return slices.Contains(eventsAbout(w.api, observatory.TelescopeKind, "east", reasonPodCreated), want)
 		})
 
@@ -126,14 +123,13 @@ func TestARecreatedServerPodIsNamedInAnEvent(t *testing.T) {
 			t.Errorf("Events = %q, want one", got)
 		}
 		if log := "Reservation east-tonight: created pod east-telescope for Telescope east"; !strings.Contains(w.logs.String(), log) {
-			t.Errorf("no log line %q", log)
+			t.Errorf("the log lacks the line %q", log)
 		}
 	})
 }
 
-// While a Ready reservation's runner creates a device's pod again, the
-// device is Starting, not Idle: Idle means that no reservation needs
-// the device.
+// A device whose pod the runner creates again is Starting, not Idle,
+// because Idle means that no reservation needs the device.
 func TestADeviceWhosePodIsGoneIsStarting(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -144,7 +140,7 @@ func TestADeviceWhosePodIsGoneIsStarting(t *testing.T) {
 		w.api.refuse(2)
 
 		w.api.deleteNamed(podsCollection, "east-main-camera")
-		w.until(time.Minute, "the camera is not Connected again", func() bool {
+		w.until(time.Minute, "the camera did not become Connected again", func() bool {
 			phases := devicePhases(w.api, observatory.CameraKind, "east-main", since)
 			return len(phases) > 1 && phases[len(phases)-1] == string(observatory.DeviceConnected)
 		})

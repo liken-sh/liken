@@ -1,8 +1,8 @@
 package main
 
-// The registry, the listener, and the reconcile layer, scraped through
-// the real promhttp handler. series_test.go runs the operator and
-// reads the domain series that its work sets.
+// Tests of the registry, the listener, and the reconcile metrics,
+// scraped through the real promhttp handler. series_test.go runs the
+// operator and reads the domain series that its work sets.
 
 import (
 	"context"
@@ -22,21 +22,21 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// scrape reads a registry as Prometheus does: one GET that the real
-// handler answers. The handler writes to a recorder, so a test in a
-// synctest bubble scrapes with no socket.
+// scrape returns the body of a GET /metrics served by the real
+// handler. The handler writes to a recorder, so a test inside a
+// synctest bubble scrapes without a socket.
 func scrape(t *testing.T, m *metrics) string {
 	t.Helper()
 	recorder := httptest.NewRecorder()
 	m.handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("the scrape answered %d", recorder.Code)
+		t.Fatalf("GET /metrics returned status %d, want %d", recorder.Code, http.StatusOK)
 	}
 	return recorder.Body.String()
 }
 
-// samples answers each sample line of a scrape whose metric is name,
-// without the comment lines.
+// samples returns the sample lines of a scrape for the metric name,
+// leaving out the HELP and TYPE lines.
 func samples(body, name string) []string {
 	var out []string
 	for line := range strings.SplitSeq(body, "\n") {
@@ -47,14 +47,14 @@ func samples(body, name string) []string {
 	return out
 }
 
-// metricName answers the name of a sample line, before its labels.
+// metricName returns the metric name of a sample line, without labels.
 func metricName(line string) string {
 	name, _, _ := strings.Cut(line, " ")
 	name, _, _ = strings.Cut(name, "{")
 	return name
 }
 
-// hasSample reports whether a scrape holds one sample line exactly.
+// hasSample reports whether the scrape has exactly this sample line.
 func hasSample(body, line string) bool {
 	return slices.Contains(samples(body, metricName(line)), line)
 }
@@ -62,23 +62,24 @@ func hasSample(body, line string) bool {
 func requireSample(t *testing.T, body, line string) {
 	t.Helper()
 	if !hasSample(body, line) {
-		t.Errorf("the scrape has no %q; it has %q", line, samples(body, metricName(line)))
+		t.Errorf("the scrape has no sample %q, want one; the metric has %q", line, samples(body, metricName(line)))
 	}
 }
 
-// requireNoSample fails unless no sample of the metric has every one
-// of the labels, such as `name="spare"`.
+// requireNoSample fails when any sample of the metric contains all of
+// the labels, such as `name="spare"`.
 func requireNoSample(t *testing.T, body, name string, labels ...string) {
 	t.Helper()
 	for _, line := range samples(body, name) {
 		if !slices.ContainsFunc(labels, func(label string) bool { return !strings.Contains(line, label) }) {
-			t.Errorf("the scrape still has %q", line)
+			t.Errorf("the scrape has the sample %q, want none", line)
 		}
 	}
 }
 
-// valueOf answers the number of the one sample whose line starts with
-// prefix, the name and the labels, or false when there is none.
+// valueOf returns the value of the sample whose line starts with
+// prefix, which is the name and the labels. It returns false when no
+// sample matches.
 func valueOf(body, prefix string) (float64, bool) {
 	for _, line := range samples(body, metricName(prefix)) {
 		if number, ok := strings.CutPrefix(line, prefix+" "); ok {
@@ -100,14 +101,14 @@ func TestTheRuntimeLayerReportsTheProcess(t *testing.T) {
 	body := scrape(t, newMetrics("dev"))
 	for _, name := range []string{"go_goroutines", "go_memstats_alloc_bytes", "process_start_time_seconds"} {
 		if len(samples(body, name)) == 0 {
-			t.Errorf("the scrape has no %s", name)
+			t.Errorf("the scrape has no %s sample, want at least one", name)
 		}
 	}
 }
 
-// Every kind publishes its reconcile and watch counters at zero from
-// the first scrape, so Prometheus has a reading to compute a rate from
-// when one first moves.
+// Each kind's reconcile and watch counters are in the first scrape at
+// zero, so Prometheus has a sample to compute a rate from when the
+// counter first increases.
 func TestEveryKindPublishesItsCountersAtZero(t *testing.T) {
 	t.Parallel()
 	body := scrape(t, newMetrics("dev"))
@@ -165,7 +166,7 @@ func TestRepeatedScrapesLeaveTheSeriesUnchanged(t *testing.T) {
 	first, second := scrape(t, m), scrape(t, m)
 	for _, name := range []string{"observatory_reconcile_errors_total", "observatory_watch_restarts_total", "observatory_reconcile_duration_seconds_count", "liken_build_info"} {
 		if !slices.Equal(samples(first, name), samples(second, name)) {
-			t.Errorf("%s moved between scrapes: %q, then %q", name, samples(first, name), samples(second, name))
+			t.Errorf("%s changed between two scrapes, from %q to %q, want no change", name, samples(first, name), samples(second, name))
 		}
 	}
 }
@@ -174,20 +175,20 @@ func TestAnEmptyAddressServesNoMetrics(t *testing.T) {
 	t.Parallel()
 	addr, err := newMetrics("dev").serve(t.Context(), "")
 	if err != nil || addr != nil {
-		t.Errorf("serve = %v, %v; want no listener", addr, err)
+		t.Errorf("serve returned %v and %v, want no listener and no error", addr, err)
 	}
 }
 
 func TestAnAddressTheKernelRefusesIsAnError(t *testing.T) {
 	t.Parallel()
 	if _, err := newMetrics("dev").serve(t.Context(), "127.0.0.1:-1"); err == nil {
-		t.Error("serve answered no error")
+		t.Error("serve returned no error for address 127.0.0.1:-1, want one")
 	}
 }
 
-// pipeListener hands each dial one end of a net.Pipe, whose reads and
-// writes wait on channels, so a scrape in a synctest bubble waits on
-// nothing outside the bubble.
+// pipeListener gives each dial one end of a net.Pipe and accepts the
+// other end. A pipe blocks on channels, so a scrape inside a synctest
+// bubble never waits on anything outside the bubble.
 type pipeListener struct {
 	accepted chan net.Conn
 	closed   chan struct{}
@@ -220,9 +221,9 @@ func (l *pipeListener) dial(context.Context, string, string) (net.Conn, error) {
 	}
 }
 
-// listenInMemory makes serve open a pipeListener until the test ends,
-// and answers a client that dials it. listen is a variable that every
-// test shares, so a test that calls this does not run in parallel.
+// listenInMemory makes serve use a pipeListener until the test ends,
+// and returns a client that dials it. It replaces the package variable
+// listen, so a test that calls it must not run in parallel.
 func listenInMemory(t *testing.T) *http.Client {
 	t.Helper()
 	listener := &pipeListener{accepted: make(chan net.Conn), closed: make(chan struct{})}
@@ -238,28 +239,29 @@ func TestTheListenerServesTheRegistryUntilItsContextEnds(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		addr, err := newMetrics("dev").serve(ctx, ":9200")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("starting the listener on :9200: %v", err)
 		}
 		response, err := scraper.Get("http://" + addr.String() + "/metrics")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("scraping the listener: %v", err)
 		}
 		body, _ := io.ReadAll(response.Body)
 		response.Body.Close()
 		if !strings.Contains(string(body), "liken_build_info") {
-			t.Errorf("the listener served no build info:\n%s", body)
+			t.Errorf("the listener served no liken_build_info sample, want one; the body is:\n%s", body)
 		}
 
 		cancel()
 		synctest.Wait()
 		if _, err := scraper.Get("http://" + addr.String() + "/metrics"); !errors.Is(err, net.ErrClosed) {
-			t.Errorf("a scrape after the end answered %v", err)
+			t.Errorf("a scrape after the context ended returned %v, want net.ErrClosed", err)
 		}
 	})
 }
 
-// A camera's cooler reports a percentage, and the series holds the
-// ratio. A reading that the driver stops reporting leaves the scrape.
+// The camera's cooler power is a percentage in the status, and the
+// series is a ratio from 0 to 1. When the driver stops reporting a
+// reading, its series disappears from the scrape.
 func TestTheCameraSeriesFollowTheTypedFields(t *testing.T) {
 	t.Parallel()
 	m := newMetrics("dev")

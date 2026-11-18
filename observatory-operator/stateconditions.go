@@ -1,18 +1,18 @@
 package main
 
-// The conditions of a device's state, which the triggers of procedures
-// read (plan 13), and which several printer columns show by reason.
-// Each one comes from a standard property that the resource holds as a
-// typed field (devicesplit.go). The status writer adds
-// them only while the device is connected: a disconnected driver
-// deletes the properties, and a condition kept from before would
-// describe a state that nobody can confirm.
+// The conditions that report a device's state: Parked, Open, Lit,
+// Cooling, and Safe. Procedure triggers read them, and several printer
+// columns show their reasons. Each one is computed from a standard INDI
+// property that the status also shows as a typed field
+// (devicesplit.go). The status writer sets them only while the device
+// is connected, because a disconnected driver deletes its properties,
+// and a condition kept from before could report a stale state.
 //
-// A park, a shutter, or a cover that moves reports Busy, and its
-// condition is Unknown with the reason Moving until the move ends.
-// A cooler and a light read the switch alone. INDI's drivers report
-// Busy for the whole time that cooling runs, so Busy does not mean a
-// move.
+// INDI sets a park, shutter, or cover property to Busy while the device
+// moves, so those conditions are Unknown with the reason Moving until
+// the move ends. A cooler and a light read only their switch, because
+// drivers report Busy for the whole time that cooling runs, and Busy
+// there does not mean a move.
 
 import (
 	"fmt"
@@ -29,17 +29,17 @@ const (
 // stateRule reads one condition from one switch property.
 type stateRule struct {
 	condition, property string
-	// on and off are the members that make the condition True and
-	// False.
+	// on and off are the switch members that make the condition True
+	// and False.
 	on, off             string
 	onReason, offReason string
-	// subject is a format of what the message describes, with the
-	// device's kind and name, such as "Dome lab", as its argument. The
-	// message adds onText, offText, or "is moving".
+	// subject is a format string for the start of the message. Its
+	// argument is the device's kind and name, such as "Dome lab". The
+	// message continues with onText, offText, or "is moving".
 	subject         string
 	onText, offText string
-	// moves is true when Busy means that the device moves, and the
-	// state is not known until the move ends.
+	// moves is true when a Busy property means that the device is
+	// moving, so the state is Unknown until the move ends.
 	moves bool
 }
 
@@ -62,8 +62,8 @@ var stateRules = map[observatory.Kind][]stateRule{
 	},
 }
 
-// stateConditions answers the state conditions of a connected device.
-// A property that the driver does not define gives no condition.
+// stateConditions returns the state conditions of a connected device.
+// A property that the driver does not define produces no condition.
 func stateConditions(d *device, r reader) []observatory.Condition {
 	label := d.kind.Name + " " + d.name()
 	var out []observatory.Condition
@@ -92,17 +92,18 @@ func (s stateRule) read(p indi.Property, label string) observatory.Condition {
 		fmt.Sprintf("%s reports neither %s nor %s On in %s", label, s.on, s.off, s.property))
 }
 
-// safeCondition reads a weather station's verdict (stationSafety). A
-// Warning is False as well as a Danger, so a trigger on Safe False
-// acts on both, and the reason names which one the station reports.
+// safeCondition turns the Safety that stationSafety reads from a
+// weather station into the Safe condition. Warning and Danger both make
+// Safe False, so a trigger on Safe False acts on either, and the reason
+// says which one the station reports.
 func safeCondition(p indi.Property, label string) observatory.Condition {
-	verdict := stationSafety(p)
-	message := fmt.Sprintf("%s reports %s", label, verdict)
-	switch verdict {
+	level := stationSafety(p)
+	message := fmt.Sprintf("%s reports %s", label, level)
+	switch level {
 	case observatory.SafetySafe:
-		return condition(observatory.ConditionSafe, observatory.ConditionTrue, string(verdict), message)
+		return condition(observatory.ConditionSafe, observatory.ConditionTrue, string(level), message)
 	case observatory.SafetyWarning, observatory.SafetyDanger:
-		return condition(observatory.ConditionSafe, observatory.ConditionFalse, string(verdict), message)
+		return condition(observatory.ConditionSafe, observatory.ConditionFalse, string(level), message)
 	}
-	return condition(observatory.ConditionSafe, observatory.ConditionUnknown, reasonNotReported, label+" reports no safety verdict")
+	return condition(observatory.ConditionSafe, observatory.ConditionUnknown, reasonNotReported, label+" reports no safety level")
 }

@@ -1,6 +1,7 @@
 package main
 
-// The Configure step: the settings that the resources state.
+// The Configure step of an activation, which writes settings to the
+// INDI devices of a reservation's telescope.
 
 import (
 	"context"
@@ -10,18 +11,17 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// configure writes each setting that the resources state, once for the
-// reservation: the settings in each device's spec (settings.go), and
-// the settings that the tree decides, which no spec states. Those are
-// the observatory's location to the mount and the GPS, the mount's
-// ACTIVE_GPS and DOME_POLICY, and each camera's ACTIVE_DEVICES from its
-// train, SCOPE_INFO from the train's tube, its upload settings from
-// the session's outbox (outbox.go), and its FITS keywords from the
-// session's record (fitskeywords.go). It then relays the domes'
-// park state to the mount (locks.go), so the mount holds it before a
-// procedure unparks it. The operator does not drive a setting back
-// while the reservation runs, so a client such as a sequencer can
-// change a camera's gain for one frame.
+// configure writes each device's settings once per session. Some come
+// from the device's spec (settings.go). The operator derives the others
+// from related resources: the observatory's location for the mount and
+// the GPS, the mount's ACTIVE_GPS and DOME_POLICY, and the camera
+// settings of configureCamera. Then it relays the domes' park state to
+// the mount (locks.go), so the mount has that state before a procedure
+// unparks it.
+//
+// The operator writes the settings again only after a device's driver
+// restarts (steady.go). So a client such as a sequencer can change a
+// camera's gain for one frame, and the operator does not undo it.
 func (r *runner) configure(ctx context.Context, w *stepWork) (outcome, error) {
 	t, handles, err := r.telescopeHandles(ctx, w)
 	if err != nil {
@@ -42,7 +42,8 @@ func (r *runner) configure(ctx context.Context, w *stepWork) (outcome, error) {
 		w.report("configuring " + h.String())
 		changed, err := r.o.configureDevice(ctx, t, site, h, handles, &notes)
 		// A device that does not serve its interface keeps the fault
-		// that detect recorded.
+		// that detect recorded, so only clear or replace the fault for
+		// a device that serves it.
 		if err != nil || h.serving() {
 			r.o.fault(h.d, err)
 		}
@@ -62,14 +63,13 @@ func (r *runner) configure(ctx context.Context, w *stepWork) (outcome, error) {
 	return done("%s", strings.Join(append([]string{message}, notes...), "; "))
 }
 
-// configureDevice writes one resource's settings to the INDI device
-// that serves it, and answers whether it sent any. A resource whose
-// device does not serve its interface reports Error already (detect),
-// and gets nothing until it heals (judgeInterfaces). The verdict
-// records which of the two happened, so a heal writes the settings
-// only when they did not go out. A write that fails counts as sent,
-// because its fault is in the resource's status, and a heal that sent
-// it again on each change would repeat the failure.
+// configureDevice writes one resource's settings to its INDI device, and
+// returns whether any setting changed. When the device does not
+// implement the resource's interface, it writes nothing, and
+// checkInterfaces writes the settings when the interface appears. The
+// settings are marked as written before the write, so a write that
+// fails is not repeated on each change. Its error goes to the
+// resource's status.
 func (o *operator) configureDevice(ctx context.Context, t *tree, site *observatory.Observatory, h handle, all []handle, notes *[]string) (bool, error) {
 	serving := h.serving()
 	o.written(h.d, serving)
@@ -93,8 +93,8 @@ func (o *operator) configureDevice(ctx context.Context, t *tree, site *observato
 	return false, err
 }
 
-// configureTree writes the settings that the tree decides for the
-// interfaces that have them.
+// configureTree writes the settings that the operator derives from
+// related resources, for the kinds of device that have them.
 func configureTree(ctx context.Context, t *tree, site *observatory.Observatory, h handle, all []handle, notes *[]string, note func(bool, error) error) error {
 	switch h.d.kind {
 	case observatory.MountKind:
@@ -104,9 +104,9 @@ func configureTree(ctx context.Context, t *tree, site *observatory.Observatory, 
 		}
 		// INDI's mount starts locked, and only a dome's UNPARK report
 		// unlocks it (Telescope::IsLocked in inditelescope.h, and
-		// ISSnoopDevice in inditelescope.cpp). With no dome, no report
-		// ever arrives, so a mount under DOME_LOCKS never unparks. So
-		// a mount in an observatory with no dome ignores the dome.
+		// ISSnoopDevice in inditelescope.cpp). In an observatory with
+		// no dome, no report arrives and a mount under DOME_LOCKS could
+		// never unpark, so it gets DOME_IGNORED.
 		if err == nil {
 			err = note(lockPolicy(ctx, h, "DOME_POLICY", "DOME_LOCKS", "DOME_IGNORED", len(domesOf(t, site)) > 0, notes))
 		}
@@ -120,12 +120,13 @@ func configureTree(ctx context.Context, t *tree, site *observatory.Observatory, 
 }
 
 // configureCamera writes ACTIVE_DEVICES from the camera's train,
-// SCOPE_INFO from the train's tube, and the upload settings and FITS
-// keywords of an imaging camera from the session's record. Each member of ACTIVE_DEVICES names
-// the INDI device that serves the train's resource of that kind, so a
-// camera that serves its train's FilterWheel names itself in
-// ACTIVE_FILTER, which is how INDI's camera reads the filter of its own
-// wheel.
+// SCOPE_INFO from the train's tube, the upload settings for the
+// session's outbox (outbox.go), and the FITS keywords of an imaging
+// camera (fitskeywords.go). Each member of ACTIVE_DEVICES names the INDI
+// device that serves the train's resource of that kind. So a camera
+// that also serves its train's FilterWheel puts its own name in
+// ACTIVE_FILTER, which is how an INDI camera reads the position of its
+// built-in wheel.
 func configureCamera(ctx context.Context, t *tree, h handle, all []handle, notes *[]string, note func(bool, error) error) error {
 	train := h.d.object.Spec.OpticalTrain
 	snooped := map[string]string{
@@ -151,9 +152,9 @@ func configureCamera(ctx context.Context, t *tree, h handle, all []handle, notes
 	return writeFITSKeywords(ctx, t, h, notes, note)
 }
 
-// nameOf answers the INDI name of the first device of a kind among the
-// handles, on one train when train is not empty, or "" when there is
-// none. A served resource's handle names its owner's device.
+// nameOf returns the INDI name of the first device of a kind among the
+// handles, on the given train when train is not empty, or "" when there
+// is none.
 func nameOf(handles []handle, kind observatory.Kind, train string) string {
 	for _, h := range handles {
 		if h.d.kind == kind && (train == "" || h.d.object.Spec.OpticalTrain == train) {
@@ -163,10 +164,10 @@ func nameOf(handles []handle, kind observatory.Kind, train string) string {
 	return ""
 }
 
-// domePolicies writes the rules that hold for every dome. The shutter
-// follows the park state: it closes when the dome parks and opens when
-// the dome unparks, and the dome enforces that alone. MOUNT_LOCKS keeps
-// the dome from parking while a mount is unparked, and needs the
+// domePolicies writes the policies of each dome of the observatory. The
+// shutter policy makes the dome driver close the shutter when the dome
+// parks and open it when the dome unparks. MOUNT_LOCKS keeps the dome
+// from parking while a mount is unparked, which works only with the
 // mounts' park state that the operator relays (locks.go).
 func domePolicies(ctx context.Context, t *tree, site *observatory.Observatory, handles map[string]handle) ([]string, error) {
 	var notes []string
@@ -196,18 +197,17 @@ func domePolicies(ctx context.Context, t *tree, site *observatory.Observatory, h
 	return notes, nil
 }
 
-// lockPolicy writes one lock policy, DOME_POLICY or MOUNT_POLICY, which
-// every INDI mount and dome defines before it connects. A driver that
-// lacks it gets a note.
+// lockPolicy sets a lock policy, DOME_POLICY on a mount or MOUNT_POLICY
+// on a dome, to locks when on is true and to ignored otherwise. It adds
+// a note when the driver does not define the property.
 //
-// After a change, the driver saves its configuration. INDI's mount
-// reads DOME_POLICY from its configuration file again on each
-// getProperties (Telescope::ISGetProperties). The operator's first
-// write of the mount's location or ACTIVE_DEVICES saved the whole file,
-// with the policy that the mount had then. Without the save, the next
-// client that connects, such as PHD2 or KStars, turns the lock off. A
-// saved policy also holds in a driver that restarts while the operator
-// is down.
+// After a change, it saves the driver's configuration. INDI's mount
+// loads DOME_POLICY from its configuration file on each getProperties
+// (Telescope::ISGetProperties), and the file already holds a policy,
+// because the operator's write of the location or ACTIVE_DEVICES saved
+// it. Without a save, the next client that connects, such as PHD2 or
+// KStars, sets the policy back to the one in the file. The saved policy
+// also survives a driver restart while the operator is down.
 func lockPolicy(ctx context.Context, h handle, property, locks, ignored string, on bool, notes *[]string) (bool, error) {
 	if _, ok := h.property(ctx, property); !ok {
 		*notes = append(*notes, fmt.Sprintf("no %s on %s", property, h))
@@ -226,7 +226,7 @@ func lockPolicy(ctx context.Context, h handle, property, locks, ignored string, 
 		_, err = h.client().Answered(ctx, sent)
 	}
 	if err != nil {
-		return true, fmt.Errorf("%s: saving the configuration after %s: %w", h, property, err)
+		return true, fmt.Errorf("saving the configuration of %s after writing %s: %w", h, property, err)
 	}
 	return true, nil
 }

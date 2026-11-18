@@ -1,6 +1,5 @@
-# The typed fields of a `Switch`, from the standard properties of
-# INDI's OUTPUT and INPUT interfaces. curated.go gives the format and
-# the roles.
+# Typed fields of a `Switch`, from INDI's OUTPUT and INPUT interfaces.
+# curated.go describes the format.
 kind: Switch
 interfaces: [output, input]
 detect: [DIGITAL_OUTPUT_1, DIGITAL_INPUT_1]

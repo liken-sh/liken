@@ -8,11 +8,12 @@ import (
 	"strings"
 )
 
-// The standard properties page of indilib/docs groups its tables by
-// interface, under one heading each. sections names the interface of
-// each heading, by the name of its captures. A heading of an interface
-// that has no capture maps to "". A heading that this map lacks fails
-// the read, so a person places each new section of the page.
+// The standard properties page of indilib/docs has one heading for
+// each interface, with a table of properties under it. sections maps
+// each heading to the name of that interface's captures, or to "" when
+// the interface has no capture. readDocs fails on any heading other
+// than Introduction that is not in this map, so a new section of the
+// page must be added here.
 var sections = map[string]string{
 	"General Properties":                                    "",
 	"Telescope Properties":                                  "telescope",
@@ -33,8 +34,8 @@ var sections = map[string]string{
 	"Polar Alignment Correction (PAC) Interface Properties": "pac",
 }
 
-// A documented property is one property as a table of the page gives
-// it. Name can hold a *, as in DIGITAL_OUTPUT_*, for a property that a
+// A documented property is one property as the page's table lists it.
+// Name can contain a *, as in DIGITAL_OUTPUT_*, for a property that a
 // driver defines once for each output.
 type documented struct {
 	Name        string
@@ -44,24 +45,24 @@ type documented struct {
 	Members     []docMember
 }
 
-// A docMember is one member that a row of the page names.
 type docMember struct {
 	Name        string
 	Description string
 }
 
-// matches reports whether the page's name covers a property's name.
+// matches reports whether a property's name matches the documented
+// name, where a * matches any text.
 func (d documented) matches(name string) bool {
 	ok, _ := path.Match(d.Name, name)
 	return ok
 }
 
 // readDocs reads every table of the page. A row with a name starts a
-// property, and a row with no name adds a member to it, or continues
-// the description of the last member or of the property when its
-// value cell is empty. A value in a property's own row is its first
-// member, and the row's description is then the member's and the
-// property's. A value cell can name two members joined by " or ".
+// property, and a value in that row is its first member, with the
+// row's description. A row with no name belongs to the property above
+// it: with a value it adds a member, and with no value its text extends
+// the description of the last member, or of the property when it has
+// no members. A value cell can hold two members joined by " or ".
 func readDocs(page []byte) ([]documented, error) {
 	var out []documented
 	section, inTable := "", false
@@ -70,7 +71,7 @@ func readDocs(page []byte) ([]documented, error) {
 		line := strings.TrimSpace(scanner.Text())
 		if heading, ok := strings.CutPrefix(line, "## "); ok {
 			if _, known := sections[heading]; !known && heading != "Introduction" {
-				return nil, fmt.Errorf("the standard properties page has a section %q that no interface is named for", heading)
+				return nil, fmt.Errorf("the standard properties page has the section %q, which matches no interface", heading)
 			}
 			section, inTable = heading, false
 			continue
@@ -121,10 +122,10 @@ func addMembers(d *documented, values, text string) {
 	}
 }
 
-// unescape undoes the page's Markdown in a name. The page's formatter
-// wrote DIGITAL_INPUT_* as DIGITAL*INPUT*\*, reading the underscores
-// as emphasis, so an unescaped * stands for an underscore and an
-// escaped one for a *.
+// unescape removes the Markdown formatting from a cell. The page's
+// formatter treated underscores as emphasis and wrote DIGITAL_INPUT_*
+// as DIGITAL*INPUT*\*. So a * with no backslash is an underscore, and
+// \* is a literal *.
 func unescape(cell string) string {
 	cell = strings.ReplaceAll(cell, `\*`, "\x00")
 	cell = strings.ReplaceAll(cell, `\_`, "_")

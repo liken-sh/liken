@@ -1,10 +1,5 @@
 package main
 
-// A mount's DOME_POLICY follows the observatory's domes: a dome that a
-// person deletes unlocks each running mount at once, with no wait for
-// the next Configure. A dome declared during a session waits for the
-// next one, and its Configure locks the mount again.
-
 import (
 	"strings"
 	"testing"
@@ -14,10 +9,11 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The dome parks while the mount is parked, so the mount's lock
-// holds. With the dome deleted, the mount unparks. A dome declared
-// again leaves the mount unlocked until the next session locks it.
-func TestAMountsDomePolicyFollowsTheDomes(t *testing.T) {
+// When a person deletes the observatory's last dome while it is parked,
+// the mount gets DOME_IGNORED and can unpark. A dome declared again
+// during the session leaves the mount unlocked until the next session
+// writes DOME_LOCKS.
+func TestMountDomePolicyFollowsTheDomes(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
@@ -54,9 +50,9 @@ func TestAMountsDomePolicyFollowsTheDomes(t *testing.T) {
 }
 
 // Activation writes a mount's DOME_POLICY once, in Configure, and saves
-// the driver's configuration once for it. A driver rewrites its
-// configuration file on each save.
-func TestActivationWritesAMountsDomePolicyOnce(t *testing.T) {
+// the driver's configuration once, because each save rewrites the
+// driver's configuration file.
+func TestActivationWritesMountDomePolicyOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)

@@ -1,9 +1,9 @@
 package observatory
 
-// The Observatory is the building and the site: the roof, the weather,
-// and the location. It runs one INDI server of its own for the devices
-// that no telescope owns, while at least one Reservation in it is
-// active.
+// An Observatory is the building and the site: the roof, the weather,
+// and the location. While at least one Reservation in it is active, it
+// runs an INDI server of its own for the devices that no telescope
+// owns.
 
 import "time"
 
@@ -17,9 +17,10 @@ type ObservatorySpec struct {
 	Procedures[Action]
 }
 
-// Location is the site on the Earth. The operator writes it to each
-// mount and GPS as GEOGRAPHIC_COORD, which takes longitude from 0 to
-// 360 degrees east, and converts a negative longitude to that range.
+// Location is the site's position on the Earth. The operator writes it
+// to each mount and GPS as GEOGRAPHIC_COORD, whose longitude runs from 0
+// to 360 degrees east, so the operator converts a negative longitude
+// into that range.
 type Location struct {
 	// Latitude is in degrees north, from -90 to 90.
 	Latitude float64 `json:"latitude"`
@@ -30,8 +31,8 @@ type Location struct {
 }
 
 // ConditionLocksRelayed is True while the operator relays the park
-// states that the park locks need between the servers. An Observatory
-// with no dome has no such condition.
+// states between the servers for the park locks. An Observatory with no
+// dome has no such condition.
 const ConditionLocksRelayed = "LocksRelayed"
 
 type ObservatoryStatus struct {
@@ -40,51 +41,57 @@ type ObservatoryStatus struct {
 	Conditions         []Condition `json:"conditions,omitempty"`
 	// Server is the observatory's own INDI server, while it runs.
 	Server *Server `json:"server,omitempty"`
-	// Telescopes names each Telescope whose spec.observatory names this
-	// Observatory, as the session that holds a Telescope recorded it.
+	// Telescopes lists each Telescope in this Observatory. For a
+	// Telescope that a Reservation holds, the Observatory is the one the
+	// Reservation recorded in status.session, so an edit of the
+	// Telescope's spec.observatory takes effect when the session ends.
 	Telescopes []string `json:"telescopes,omitempty"`
 	// Devices lists the devices whose parent is this Observatory.
 	Devices []DeviceRef `json:"devices,omitempty"`
-	// Reservations names each active Reservation of a telescope here.
+	// Reservations lists the Reservation that holds each telescope in
+	// this Observatory.
 	Reservations []string `json:"reservations,omitempty"`
-	// Weather is the verdict of the observatory's weather stations:
-	// the worst one, or Unknown when no station reports.
+	// Weather is the worst safety level among the observatory's
+	// weather stations, or Unknown when no station reports.
 	Weather Safety             `json:"weather,omitempty"`
 	Display ObservatoryDisplay `json:"display,omitzero"`
-	// Procedures holds the last run of each trigger of the
-	// observatory's own procedures.
+	// Procedures is the last run of each trigger of the observatory's
+	// own procedures.
 	Procedures []ProcedureRun `json:"procedures,omitempty"`
-	// SetUpUntil is when a person's SetUp expires, in place of the
-	// next astronomical dawn. A person writes it with SetUp, and the
-	// operator keeps it.
+	// SetUpUntil is when a person's SetUp expires, instead of at the next
+	// astronomical dawn. A person writes it with SetUp, and the operator
+	// leaves it in place.
 	SetUpUntil *time.Time `json:"setUpUntil,omitempty"`
-	// SetUpExpiryTime is when the SetUp condition expires: SetUpUntil,
-	// or the next astronomical dawn. The operator writes it while SetUp
-	// is True, so a printer column shows it.
+	// SetUpExpiryTime is when the SetUp condition expires, which is
+	// SetUpUntil or the next astronomical dawn. The operator writes it
+	// while SetUp is True so that a printer column can show it.
 	SetUpExpiryTime *time.Time `json:"setUpExpiryTime,omitempty"`
 }
 
-// ObservatoryDisplay holds the spec's location as a person reads it,
-// such as 51.4769° N and 0.0005° W, for the printer columns.
+// ObservatoryDisplay holds the spec's location formatted for people, as
+// in 51.4769° N and 0.0005° W, for the printer columns.
 type ObservatoryDisplay struct {
 	Latitude  string `json:"latitude,omitempty"`
 	Longitude string `json:"longitude,omitempty"`
 }
 
-// Phase is the state in one word of a resource that runs while a
+// Phase is the one-word state of a resource that runs while a
 // reservation needs it: an Observatory, a Telescope, or a Guider.
 type Phase string
 
 const (
-	// PhaseIdle: no reservation needs it, and nothing runs.
+	// PhaseIdle means no reservation needs the resource, and nothing runs.
 	PhaseIdle Phase = "Idle"
-	// PhaseActivating: a reservation's activation steps run.
+	// PhaseActivating means a reservation's activation steps are running.
 	PhaseActivating Phase = "Activating"
-	// PhaseReady: everything it needs runs and is connected.
+	// PhaseReady means everything the resource needs is running and
+	// connected.
 	PhaseReady Phase = "Ready"
-	// PhaseDeactivating: a reservation's deactivation steps run.
+	// PhaseDeactivating means a reservation's deactivation steps are
+	// running.
 	PhaseDeactivating Phase = "Deactivating"
-	// PhaseError: a step failed. The Ready condition gives the reason.
+	// PhaseError means a step failed. The Ready condition gives the
+	// reason.
 	PhaseError Phase = "Error"
 )
 
@@ -96,14 +103,15 @@ type Endpoint struct {
 	Port    int32  `json:"port"`
 }
 
-// Server is one INDI server: its Service, and the pod that runs it.
+// Server is one INDI server: its Service and the pod that runs it.
 type Server struct {
 	Endpoint
 	Pod  string `json:"pod,omitempty"`
 	Node string `json:"node,omitempty"`
 }
 
-// DeviceRef names one device in a parent's status, with its phase.
+// DeviceRef identifies one device in its parent's status, with its
+// phase.
 type DeviceRef struct {
 	Kind  string      `json:"kind"`
 	Name  string      `json:"name"`

@@ -38,8 +38,6 @@ func expectedProperties(transcripts ...[]byte) []string {
 	return names
 }
 
-// propertiesAre is a condition that holds when the device has exactly
-// the named properties.
 func propertiesAre(device string, want []string) func(*Store) bool {
 	return func(s *Store) bool {
 		var got []string
@@ -61,7 +59,7 @@ func TestConnectAndDisconnectEverySimulator(t *testing.T) {
 				disconnect := transcript(t, simulator, "disconnect")
 
 				if err := connectDevice(t, c, server.device); err != nil {
-					t.Fatal(err)
+					t.Fatalf("connecting the device: %v", err)
 				}
 				p, _ := c.Property(server.device, "CONNECTION")
 				if p.State != Ok || !slices.Equal(p.On(), []string{"CONNECT"}) {
@@ -71,7 +69,7 @@ func TestConnectAndDisconnectEverySimulator(t *testing.T) {
 					propertiesAre(server.device, expectedProperties(baseline, connect)))
 
 				if err := disconnectDevice(t, c, server.device); err != nil {
-					t.Fatal(err)
+					t.Fatalf("disconnecting the device: %v", err)
 				}
 				p, _ = c.Property(server.device, "CONNECTION")
 				if !slices.Equal(p.On(), []string{"DISCONNECT"}) {
@@ -82,7 +80,7 @@ func TestConnectAndDisconnectEverySimulator(t *testing.T) {
 
 				for _, r := range server.received() {
 					if r.XMLName.Local == "enableBLOB" {
-						t.Errorf("the client sent enableBLOB with no caller asking: %+v", r)
+						t.Errorf("the client sent enableBLOB, and no caller asked for it: %+v", r)
 					}
 				}
 			})
@@ -94,7 +92,7 @@ func TestConnectDeviceSendsNothingWhenConnected(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server := connectedDevice(t, "focus")
 		if err := connectDevice(t, c, server.device); err != nil {
-			t.Fatal(err)
+			t.Fatalf("connecting a device that is connected: %v", err)
 		}
 		var sent int
 		for _, r := range server.received() {
@@ -116,12 +114,12 @@ func TestConnectDeviceWaitsForTheDevice(t *testing.T) {
 		go func() { result <- connectDevice(t, c, server.device) }()
 		run(t, c)
 		if err := <-result; err != nil {
-			t.Fatal(err)
+			t.Fatalf("connecting a device that defines CONNECTION late: %v", err)
 		}
 	})
 }
 
-func TestConnectDeviceGivesUpWithItsContext(t *testing.T) {
+func TestConnectDeviceReturnsWhenItsContextExpires(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, _ := connectedBaseline(t, "focus")
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -132,14 +130,15 @@ func TestConnectDeviceGivesUpWithItsContext(t *testing.T) {
 	})
 }
 
-func TestConnectDeviceReportsARefusal(t *testing.T) {
+func TestConnectDeviceReturnsAnAlertErrorWhenTheDriverAlerts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server := connectedBaseline(t, "focus")
 		server.mute()
 		result := make(chan error, 1)
 		go func() { result <- connectDevice(t, c, server.device) }()
 		server.await("CONNECTION")
-		// A driver that cannot open its port refuses the connection so.
+		// A driver that cannot open its port sets Alert and leaves
+		// DISCONNECT On.
 		server.send(`<setSwitchVector device="Focuser Simulator" name="CONNECTION" state="Alert">
 	<oneSwitch name="CONNECT">Off</oneSwitch><oneSwitch name="DISCONNECT">On</oneSwitch>
 	</setSwitchVector>`)
@@ -150,28 +149,28 @@ func TestConnectDeviceReportsARefusal(t *testing.T) {
 	})
 }
 
-func TestConnectDeviceReportsADriverThatStaysDisconnected(t *testing.T) {
+func TestConnectDeviceFailsWhenTheDriverStaysDisconnected(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server := connectedBaseline(t, "focus")
 		server.mute()
 		result := make(chan error, 1)
 		go func() { result <- connectDevice(t, c, server.device) }()
 		server.await("CONNECTION")
-		// The driver works on the connection, then gives up with no Alert.
+		// The driver goes Busy, then Idle with CONNECT still Off and no
+		// Alert.
 		server.send(`<setSwitchVector device="Focuser Simulator" name="CONNECTION" state="Busy"/>
 	<setSwitchVector device="Focuser Simulator" name="CONNECTION" state="Idle">
 	<oneSwitch name="CONNECT">Off</oneSwitch><oneSwitch name="DISCONNECT">On</oneSwitch>
 	</setSwitchVector>`)
 		err := <-result
 		if err == nil || errors.Is(err, context.DeadlineExceeded) {
-			t.Errorf("ConnectDevice = %v, want the report that CONNECT stayed Off", err)
+			t.Errorf("ConnectDevice = %v, want an error that CONNECT stayed Off", err)
 		}
 	})
 }
 
-// Sync returns once the device's driver has answered a getProperties
-// that names the device, so a property that the driver defined after
-// CONNECTION and before that answer is in the store.
+// A property that the driver defines after CONNECTION and before its
+// reply to getProperties is in the store when Sync returns.
 func TestSyncWaitsForEverythingTheDriverWroteBefore(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server := connectedBaseline(t, "dustcover")
@@ -195,7 +194,7 @@ func TestSyncWaitsForEverythingTheDriverWroteBefore(t *testing.T) {
 		server.send(`<defSwitchVector device="` + server.device + `" name="CAP_PARK" state="Idle" perm="rw" rule="OneOfMany"><defSwitch name="PARK">Off</defSwitch><defSwitch name="UNPARK">On</defSwitch></defSwitchVector>`)
 		server.send(`<defSwitchVector device="` + server.device + `" name="CONNECTION" state="Ok" perm="rw" rule="OneOfMany"><defSwitch name="CONNECT">On</defSwitch><defSwitch name="DISCONNECT">Off</defSwitch></defSwitchVector>`)
 		if err := <-synced; err != nil {
-			t.Fatal(err)
+			t.Fatalf("syncing the device: %v", err)
 		}
 		if _, ok := c.Property(server.device, "CAP_PARK"); !ok {
 			t.Error("CAP_PARK is not in the store after Sync")
@@ -203,11 +202,9 @@ func TestSyncWaitsForEverythingTheDriverWroteBefore(t *testing.T) {
 	})
 }
 
-// An update of CONNECTION is not the driver's answer to getProperties:
-// KStars can connect the device again while Sync waits, and the
-// driver's Busy and Ok come before the interface's properties. Sync
-// waits for the driver to define CONNECTION again, which it does in
-// its answer.
+// Sync returns on the definition of CONNECTION in the driver's reply,
+// not on the Busy and Ok updates of a connect by KStars during the
+// wait.
 func TestSyncWaitsForTheDefinitionOfConnection(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server := connectedBaseline(t, "dustcover")
@@ -225,13 +222,12 @@ func TestSyncWaitsForTheDefinitionOfConnection(t *testing.T) {
 		}
 		server.send(`<defSwitchVector device="` + server.device + `" name="CONNECTION" state="Ok" perm="rw" rule="OneOfMany"><defSwitch name="CONNECT">On</defSwitch><defSwitch name="DISCONNECT">Off</defSwitch></defSwitchVector>`)
 		if err := <-synced; err != nil {
-			t.Fatal(err)
+			t.Fatalf("syncing the device: %v", err)
 		}
 	})
 }
 
-// A property's revision rises with each definition and each update, so
-// a caller can tell whether the property changed since it looked.
+// A property's revision rises with each definition and each update.
 func TestARevisionRisesWithEachChange(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server := connectedBaseline(t, "dustcover")

@@ -44,7 +44,7 @@ func TestTheUnitsOfEachValue(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if c.got != c.want {
-				t.Errorf("got %q, want %q", c.got, c.want)
+				t.Errorf("the text is %q, want %q", c.got, c.want)
 			}
 		})
 	}
@@ -65,10 +65,10 @@ func TestRightAscensionAndDeclination(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := rightAscension(c.ra); got != c.wantRA {
-				t.Errorf("right ascension %v = %q, want %q", c.ra, got, c.wantRA)
+				t.Errorf("the right ascension %v is %q, want %q", c.ra, got, c.wantRA)
 			}
 			if got := declination(c.dec); got != c.wantDec {
-				t.Errorf("declination %v = %q, want %q", c.dec, got, c.wantDec)
+				t.Errorf("the declination %v is %q, want %q", c.dec, got, c.wantDec)
 			}
 		})
 	}
@@ -116,7 +116,7 @@ func TestTheDisplayOfACamera(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := deviceDisplay(camera, c.standard, nil); got != c.want {
-				t.Errorf("got %+v, want %+v", got, c.want)
+				t.Errorf("the display is %+v, want %+v", got, c.want)
 			}
 		})
 	}
@@ -147,47 +147,47 @@ func TestTheDisplayOfEachKind(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := deviceDisplay(&device{kind: c.kind}, c.standard, c.limits); got != c.want {
-				t.Errorf("got %+v, want %+v", got, c.want)
+				t.Errorf("the display is %+v, want %+v", got, c.want)
 			}
 		})
 	}
 }
 
-// The printer columns read the display blocks, so each block holds the
-// value with its unit while a reservation holds the east telescope.
+// The printer columns read the display blocks, so while a reservation
+// has the east telescope, each block must hold its value with the unit.
 func TestTheStatusShowsEachValueWithItsUnit(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
 		if d := camera.Status.Display; d.Temperature != "-10 °C" || d.Setpoint != "-10 °C" || (d.Cooler != "On" && d.Cooler != "Off") {
-			t.Errorf("camera display = %+v", d)
+			t.Errorf("the camera display is %+v, want temperature and setpoint -10 °C and cooler On or Off", d)
 		}
 		mount, _ := decode[observatory.Mount](t, w.api, kindCollection(observatory.MountKind), "east")
 		if d := mount.Status.Display; !strings.Contains(d.RightAscension, "h") || !strings.Contains(d.Declination, "°") {
-			t.Errorf("mount display = %+v", d)
+			t.Errorf("the mount display is %+v, want a right ascension with h and a declination with °", d)
 		}
 		tube, _ := decode[observatory.OpticalTube](t, w.api, kindCollection(observatory.OpticalTubeKind), "east-refractor")
 		if d := tube.Status.Display; d.Aperture != "80 mm" || d.FocalLength != "480 mm" {
-			t.Errorf("tube display = %+v", d)
+			t.Errorf("the optical tube display is %+v, want aperture 80 mm and focal length 480 mm", d)
 		}
 		lab, _ := decode[observatory.Observatory](t, w.api, kindCollection(observatory.ObservatoryKind), "lab")
 		if d := lab.Status.Display; d.Latitude != "30.169° S" || d.Longitude != "70.806° W" {
-			t.Errorf("observatory display = %+v", d)
+			t.Errorf("the observatory display is %+v, want latitude 30.169° S and longitude 70.806° W", d)
 		}
 		east, _ := decode[observatory.Telescope](t, w.api, kindCollection(observatory.TelescopeKind), "east")
 		if east.Status.Display.Guider != "Ready, Stopped" {
-			t.Errorf("east guider column = %q", east.Status.Display.Guider)
+			t.Errorf("the guider column of Telescope east is %q, want \"Ready, Stopped\"", east.Status.Display.Guider)
 		}
 		power, _ := decode[observatory.Switch](t, w.api, kindCollection(observatory.SwitchKind), "east")
 		if power.Status.Display.On != "1, 2, 3" {
-			t.Errorf("switch display = %+v, want outputs 1, 2, 3 on", power.Status.Display)
+			t.Errorf("the switch display is %+v, want outputs 1, 2, 3 on", power.Status.Display)
 		}
-		// The west camera has no pod. It shows no temperature, and
-		// its spec states no setpoint.
+		// The west camera has no pod, so it shows no temperature, and its
+		// spec sets no setpoint.
 		west, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "west-main")
 		if west.Status.Display.Temperature != "" {
-			t.Errorf("west camera display = %+v", west.Status.Display)
+			t.Errorf("the west camera display is %+v, want no temperature", west.Status.Display)
 		}
 	})
 }

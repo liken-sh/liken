@@ -15,8 +15,6 @@ func keyword(name, value, comment string) FITSKeyword {
 	return FITSKeyword{Name: name, Value: value, Comment: comment}
 }
 
-// A later level replaces the value and the comment of a name, the name
-// keeps its first place, and a level with no keywords changes nothing.
 func TestMergeFITSKeywords(t *testing.T) {
 	cases := []struct {
 		name                                        string
@@ -56,8 +54,8 @@ func TestMergeFITSKeywords(t *testing.T) {
 	}
 }
 
-// headerKeywords answers the keyword of each card of the frame header
-// that inditest.FrameHeader answers, in order.
+// headerKeywords returns the keyword of each card of
+// inditest.FrameHeader, in order.
 func headerKeywords(t *testing.T) []string {
 	t.Helper()
 	var out []string
@@ -68,17 +66,16 @@ func headerKeywords(t *testing.T) []string {
 		out = append(out, strings.TrimSpace(card[:min(8, len(card))]))
 	}
 	if err := lines.Err(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the captured header: %v", err)
 	}
 	return out
 }
 
-// Every keyword of the captured header is on the driver's list, except
-// OBJECT, which the capture declared, and COMMENT and END, which hold
-// no value. The API server refuses each one in spec.fitsKeywords,
-// except INSTRUME, TELESCOP, and OBJECT. A capture after a bump of the
-// INDI images that holds a keyword the driver did not write before
-// fails here, until DriverFITSKeywords names it.
+// DriverFITSKeywords must list every keyword of the captured header
+// except OBJECT, which the capture declared, and COMMENT and END. So a
+// capture taken after a bump of the INDI images fails this test until
+// DriverFITSKeywords lists each new keyword. The API server must refuse
+// each keyword except INSTRUME, TELESCOP, and OBJECT.
 func TestTheDriversKeywordsAreRefused(t *testing.T) {
 	declarable := []string{"INSTRUME", "TELESCOP", "OBJECT"}
 	for _, name := range headerKeywords(t) {
@@ -102,9 +99,9 @@ func TestTheDriversKeywordsAreRefused(t *testing.T) {
 	}
 }
 
-// The four kinds that declare keywords hold one schema for the field.
-// schema/ writes it into three of the CRDs, and the Reservation's CRD
-// is written by hand, so this holds its copy equal to theirs.
+// schema/ generates spec.fitsKeywords into the CRDs of the Observatory,
+// the Telescope, and the Camera. The Reservation's CRD is written by
+// hand, and its copy must stay equal to the generated one.
 func TestEachLevelHasTheSameFITSKeywordsSchema(t *testing.T) {
 	want := schemaOf(t, ObservatoryKind).Properties["spec"].Properties["fitsKeywords"]
 	for _, kind := range []Kind{TelescopeKind, CameraKind, ReservationKind} {
@@ -117,10 +114,6 @@ func TestEachLevelHasTheSameFITSKeywordsSchema(t *testing.T) {
 	}
 }
 
-// astrophotography-operator writes FRAMEID, a new identity for each
-// frame that it takes. A declared FRAMEID would put one identity on
-// every frame of a session, the frames of a desktop client included,
-// so every level refuses it, with a message that names the writer.
 func TestEveryLevelRefusesFRAMEID(t *testing.T) {
 	frameID := []any{fits("FRAMEID", "0199d3a0-0000-7000-8000-000000000001", "")}
 	cases := []struct {
@@ -136,7 +129,7 @@ func TestEveryLevelRefusesFRAMEID(t *testing.T) {
 		t.Run(c.kind.Name, func(t *testing.T) {
 			errs := validate(t, c.kind, resource(c.kind, c.spec), nil)
 			if got := errs.ToAggregate(); !refuses(got, "FRAMEID is a keyword that astrophotography-operator writes") {
-				t.Errorf("errors = %v", got)
+				t.Errorf("errors = %v, want one that holds \"FRAMEID is a keyword that astrophotography-operator writes\"", got)
 			}
 		})
 	}

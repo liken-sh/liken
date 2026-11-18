@@ -1,9 +1,8 @@
 package schema
 
-// A fields file is written by hand, so the generator refuses an entry
-// that does not fit its property, rather than writing a field that a
-// driver cannot fill. Each case gives one property and one entry, and
-// the start of the error.
+// A fields file is written by hand, so the generator rejects an entry
+// that does not fit its property instead of writing a field that a
+// driver cannot fill.
 
 import (
 	"os"
@@ -51,13 +50,13 @@ func TestTheGeneratorRefusesAnEntryThatDoesNotFit(t *testing.T) {
 		{"no description", numberProperty("V"), entry{Field: "some", Role: roleReading, Unit: "s"}, "the entry has no description"},
 		{"a description with no unit", numberProperty("V"), entry{Text: "A thing.", Field: "some", Role: roleReading, Unit: "s"}, "the description does not name the unit"},
 		{"an unknown unit", numberProperty("V"), entry{Text: "A thing, in seconds.", Field: "some", Role: roleReading, Unit: "parsecs"}, "the unit"},
-		{"members of a switch", switchProperty(), entry{Text: "A thing, in seconds.", Field: "some", Role: roleReading, MemberUnits: map[string]memberEntry{"A": {Field: "a"}}}, "a Switch whose"},
+		{"members of a switch", switchProperty(), entry{Text: "A thing, in seconds.", Field: "some", Role: roleReading, MemberUnits: map[string]memberEntry{"A": {Field: "a"}}}, "a Switch cannot"},
 		{"a number with no unit", numberProperty("V"), entry{Text: "A thing, in seconds.", Field: "some", Role: roleReading}, "a number needs"},
 		{"a unit for several members", numberProperty("V", "W"), entry{Text: "A thing, in seconds.", Field: "some", Role: roleReading, Unit: "s"}, "unit is only"},
 		{"a member with no entry", numberProperty("V", "W"), entry{Text: "A thing, in seconds.", Field: "some", Role: roleReading, MemberUnits: map[string]memberEntry{"V": {Field: "v", Unit: "s", Description: "V, in seconds."}}}, "the member W"},
 		{"a member with a bad name", numberProperty("V", "W"), entry{Text: "A thing, in seconds.", Field: "some", Role: roleReading, MemberUnits: map[string]memberEntry{"V": {Field: "V", Unit: "s"}, "W": {Field: "w", Unit: "s", Description: "W, in seconds."}}}, "the member V names"},
 		{"a member with no unit", numberProperty("V", "W"), entry{Text: "A thing, in seconds.", Field: "some", Role: roleReading, MemberUnits: map[string]memberEntry{"V": {Field: "v"}, "W": {Field: "w", Unit: "s", Description: "W, in seconds."}}}, "the member V needs"},
-		{"a unit on a text", text, entry{Text: "A thing, in seconds.", Field: "some", Role: roleReading, MemberUnits: map[string]memberEntry{"A": {Field: "a", Unit: "s"}, "B": {Field: "b", Description: "B."}}}, "the member A is no number"},
+		{"a unit on a text", text, entry{Text: "A thing, in seconds.", Field: "some", Role: roleReading, MemberUnits: map[string]memberEntry{"A": {Field: "a", Unit: "s"}, "B": {Field: "b", Description: "B."}}}, "the member A is not a number"},
 		{"a member with no description", numberProperty("V", "W"), entry{Text: "A thing, in seconds.", Field: "some", Role: roleReading, MemberUnits: map[string]memberEntry{"V": {Field: "v", Unit: "s"}, "W": {Field: "w", Unit: "s"}}}, "the member V has no description"},
 		{"a member whose description names no unit", numberProperty("V", "W"), entry{Text: "A thing, in seconds.", Field: "some", Role: roleReading, MemberUnits: map[string]memberEntry{"V": {Field: "v", Unit: "s", Description: "V."}, "W": {Field: "w", Unit: "s"}}}, "the description of the member V"},
 		{"a member that the property lacks", numberProperty("V", "W"), entry{Text: "A thing, in seconds.", Field: "some", Role: roleReading, MemberUnits: map[string]memberEntry{"V": {Field: "v", Unit: "s", Description: "V, in seconds."}, "W": {Field: "w", Unit: "s", Description: "W, in seconds."}, "X": {Field: "x", Unit: "s", Description: "X, in seconds."}}}, "the entry names the member X"},
@@ -72,12 +71,11 @@ func TestTheGeneratorRefusesAnEntryThatDoesNotFit(t *testing.T) {
 	}
 }
 
-// fieldsFile writes a fields file into a directory of its own.
 func fieldsFile(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "things"+fieldsSuffix)
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the fields file: %v", err)
 	}
 	return path
 }

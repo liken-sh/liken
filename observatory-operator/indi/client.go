@@ -1,15 +1,16 @@
-// Package indi is a client of the INDI protocol, version 1.7, the XML
-// over TCP that indiserver speaks to KStars and to every other client.
-// It is written in Go with no cgo, because no maintained Go client
-// exists.
+// Package indi is a client of the INDI protocol, version 1.7, which is
+// XML over TCP, the protocol that indiserver speaks to KStars and to
+// every other client. No maintained Go client of INDI exists, so this
+// package implements one in pure Go, with no cgo.
 //
-// A Client follows the repository's rule for events. Run opens the
-// connection and sends getProperties. Every def*Vector that answers it
-// sets the baseline in the Client's Store, and each set*Vector after
-// that updates it. When the connection ends, the store empties, and
-// the next Run fills it from a new baseline. Callers read the store,
-// subscribe to its changes, or wait for a condition on it, and no part
-// of the package reads state again on a timer.
+// A Client keeps its state current from events, as the rest of the
+// repository does. Run opens the connection and sends getProperties.
+// The def*Vector messages that the server sends in reply set the
+// baseline in the Client's Store, and each later set*Vector message
+// updates it. When the connection ends, the store is emptied, and the
+// next Run fills it from a new baseline. Callers read the store,
+// subscribe to its changes, or wait for a condition on it. Nothing in
+// the package polls the server on a timer.
 package indi
 
 import (
@@ -24,33 +25,35 @@ import (
 	"time"
 )
 
-// DialTimeout bounds the TCP dial of each Run. The caller's context can
-// end the dial sooner.
+// DialTimeout is the longest a Run waits for its TCP dial. Canceling
+// the caller's context ends the dial sooner.
 const DialTimeout = 10 * time.Second
 
-// writeTimeout bounds each write. A server that reads nothing for this
-// long is stuck, and the write fails rather than block the caller.
+// writeTimeout is the deadline of each write. A server that reads
+// nothing for this long is stuck, and the write fails so that it does
+// not block the caller.
 const writeTimeout = 10 * time.Second
 
 var (
-	// ErrRunning is the error of a Run while another Run of the same
-	// Client has not returned.
+	// ErrRunning is returned by a Run that starts while another Run of
+	// the same Client has not returned.
 	ErrRunning = errors.New("indi: the client is already running")
-	// ErrNotConnected is the error of a send while the client has no
+	// ErrNotConnected is returned by a send when the client has no
 	// connection.
 	ErrNotConnected = errors.New("indi: no connection to the server")
-	// ErrDisconnected is the error of a wait whose connection ended.
+	// ErrDisconnected is returned by a wait when the connection ends.
 	ErrDisconnected = errors.New("indi: the connection ended")
-	// ErrNotDefined is the error of a send to a property that the
+	// ErrNotDefined is returned by a send to a property that the
 	// device has not defined.
 	ErrNotDefined = errors.New("indi: the property is not defined")
-	// ErrDeleted is the error of a wait on a property that the device
-	// deleted, as indiserver does for every device of a driver that
-	// exits.
+	// ErrDeleted is returned by a wait on a property that the device
+	// deleted. indiserver deletes every property of every device of a
+	// driver that exits.
 	ErrDeleted = errors.New("indi: the property was deleted")
-	// ErrInvalid is the error of a send that the property's definition
-	// forbids: the wrong type, a read-only property, a member the
-	// property does not have, or switches that break the switch rule.
+	// ErrInvalid is returned by a send that the property's definition
+	// forbids: the wrong type, a read-only property, a member that the
+	// property does not have, or switch values that break the
+	// property's switch rule.
 	ErrInvalid = errors.New("indi: the property's definition forbids this change")
 )
 
@@ -60,20 +63,21 @@ type Client struct {
 	address string
 	dialer  Dialer
 
-	// mutex guards every field below it. The reader applies each
-	// element and publishes its event under the mutex, so a reader of
-	// the store never reads half of one element.
+	// mutex guards every field below it. The read loop applies each
+	// element and publishes its event while holding the mutex, so a
+	// caller that reads the store never sees half of an element
+	// applied.
 	mutex       sync.Mutex
 	store       Store
 	conn        net.Conn
 	running     bool
 	subscribers map[*subscriber]struct{}
 	// changed is closed and replaced on every change, which wakes each
-	// WaitFor to check its condition again.
+	// WaitFor to evaluate its condition again.
 	changed chan struct{}
 	blobs   []blobRequest
 
-	// writing serializes the writes to the connection, so two
+	// writing serializes the writes to the connection, so that two
 	// messages never interleave on the wire.
 	writing sync.Mutex
 }
@@ -81,9 +85,10 @@ type Client struct {
 // NewClient returns a client of the server at address, such as
 // "indiserver.observatory:7624". It opens no connection until Run.
 func NewClient(address string, options ...Option) *Client {
-	// The dialer's TCP keep-alive, on by default, ends a connection to
-	// a server that vanished with no close, so a silent socket cannot
-	// hold Run forever. INDI has no heartbeat of its own.
+	// net.Dialer enables TCP keep-alive by default. That ends the
+	// connection to a server that disappeared without closing it, so
+	// Run cannot block forever on a silent socket. INDI has no
+	// heartbeat of its own.
 	c := &Client{
 		address:     address,
 		dialer:      &net.Dialer{Timeout: DialTimeout},
@@ -96,40 +101,39 @@ func NewClient(address string, options ...Option) *Client {
 	return c
 }
 
-// Dialer opens the connection of each Run. *net.Dialer is one.
+// Dialer opens the connection for each Run. *net.Dialer implements it.
 type Dialer interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
 
-// DialerFunc is a function that is a Dialer.
+// DialerFunc is a function that implements Dialer.
 type DialerFunc func(ctx context.Context, network, address string) (net.Conn, error)
 
 func (f DialerFunc) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	return f(ctx, network, address)
 }
 
-// Option changes a Client that NewClient returns.
+// Option configures a Client in NewClient.
 type Option func(*Client)
 
 // WithDialer makes each Run open its connection through dialer. A test
-// passes a dialer that answers with one end of an in-memory pipe, so it
-// can run on the fake clock of testing/synctest, which a real socket
-// stops.
+// passes a dialer that returns one end of an in-memory pipe, so the
+// test can run on the fake clock of testing/synctest, which a real
+// socket would stop.
 func WithDialer(dialer Dialer) Option {
 	return func(c *Client) { c.dialer = dialer }
 }
 
-// Run dials the server, sends getProperties, and reads the server's
-// messages into the store until the connection fails or ctx ends. It
+// Run dials the server, sends getProperties, and applies the server's
+// messages to the store until the connection fails or ctx ends. It
 // always returns an error: the reason the connection ended, or the
 // error of ctx.
 //
-// Run opens one connection, and the caller decides when to open the
-// next. An operator can open it again when the server's Service has a
-// ready endpoint again, instead of on a timer. Each new connection
-// empties the store, and the server's new baseline fills it. Every
-// subscriber receives Connected when a connection opens and
-// Disconnected when it ends.
+// Run opens one connection. The caller decides when to call it again,
+// for example when the server's Service has a ready endpoint again,
+// instead of on a timer. Each new connection empties the store and
+// fills it from the server's new baseline. Every subscriber receives
+// Connected when a connection opens and Disconnected when it ends.
 func (c *Client) Run(ctx context.Context) error {
 	c.mutex.Lock()
 	if c.running {
@@ -172,13 +176,14 @@ func (c *Client) Run(ctx context.Context) error {
 	return err
 }
 
-// read sends the client's first messages, then applies each element
+// read sends the client's opening messages, then applies each element
 // that the server sends until the stream ends.
 func (c *Client) read(conn net.Conn, blobs []blobRequest) error {
-	// getProperties goes first. indiserver reads an enableBLOB that
-	// names a device before any getProperties as a request for that
-	// device alone, and sends the client nothing from the others
-	// (ClInfo::crackBLOBHandling and ClInfo::findDevice).
+	// getProperties must go first. When indiserver receives an
+	// enableBLOB that names a device before any getProperties, it
+	// treats the client as interested in that device alone and sends
+	// nothing from the other devices (ClInfo::crackBLOBHandling and
+	// ClInfo::findDevice).
 	if err := c.writeTo(conn, getProperties()); err != nil {
 		return err
 	}
@@ -213,8 +218,8 @@ func (c *Client) receive(conn net.Conn, decoder *xml.Decoder, start xml.StartEle
 	switch {
 	case isVector, tag == "delProperty", tag == "message", tag == "pingRequest":
 	default:
-		// Every other element, such as another client's new*Vector, is
-		// not for this client.
+		// Any other element, such as another client's new*Vector, is
+		// not addressed to this client.
 		return decoder.Skip()
 	}
 	var e element
@@ -235,10 +240,10 @@ func (c *Client) receive(conn net.Conn, decoder *xml.Decoder, start xml.StartEle
 	return nil
 }
 
-// apply changes the store for one element and returns the event to
+// apply updates the store for one element and returns the event to
 // publish. It returns false for an update of a property that the store
-// does not hold, which the protocol tells a client to ignore. The
-// simulators send such updates: the telescope simulator updates
+// does not hold, because the protocol tells a client to ignore those.
+// The simulators send them: the telescope simulator updates
 // TELESCOPE_MOUNT_TYPE before it defines it.
 func (c *Client) apply(t Type, e element) (Event, bool) {
 	event := Event{Device: e.Device, Property: e.Name, Message: e.Message}
@@ -270,7 +275,7 @@ func (c *Client) apply(t Type, e element) (Event, bool) {
 			return Event{}, false
 		}
 		if entry.property.Type != t {
-			return invalid(fmt.Errorf("%s for %s.%s, a %s property", tag, e.Device, e.Name, entry.property.Type))
+			return invalid(fmt.Errorf("the server sent %s for %s.%s, which is a %s property", tag, e.Device, e.Name, entry.property.Type))
 		}
 		p, blobs, err := e.updated(entry.property, c.wantsBLOBs(e.Device, e.Name))
 		if err != nil {
@@ -282,10 +287,10 @@ func (c *Client) apply(t Type, e element) (Event, bool) {
 	return event, true
 }
 
-// hasAttribute reports whether an element carries an attribute, even
-// an empty one. A delProperty with no name deletes the whole device,
-// and one with an empty name deletes a property named "", which no
-// device defines. The receiver simulator sends the second on
+// hasAttribute reports whether an element has an attribute, even one
+// with an empty value. A delProperty with no name attribute deletes the
+// whole device, and one with name="" deletes a property named "", which
+// no device defines. The receiver simulator sends the second form on
 // disconnect, and libindi's client deletes nothing for it.
 func hasAttribute(start xml.StartElement, name string) bool {
 	for _, a := range start.Attr {
@@ -296,15 +301,17 @@ func hasAttribute(start xml.StartElement, name string) bool {
 	return false
 }
 
-// WaitFor waits until condition holds on the store, or until ctx ends.
-// It checks the condition at once, and again after each change, with
-// no timer. The condition runs while the client holds its lock, so it
-// must only read the store it receives, and must not call the Client.
+// WaitFor waits until condition is true for the store, or until ctx
+// ends. It evaluates the condition at once and again after each
+// change, with no timer. The condition runs while the client holds its
+// lock, so it must only read the Store it receives and must not call
+// the Client.
 func (c *Client) WaitFor(ctx context.Context, condition func(*Store) bool) error {
 	return c.waitFor(ctx, func(s *Store) (bool, error) { return condition(s), nil })
 }
 
-// waitFor waits until check reports done, or fails.
+// waitFor calls check on the store, at once and after each change,
+// until check reports done or returns an error.
 func (c *Client) waitFor(ctx context.Context, check func(*Store) (bool, error)) error {
 	for {
 		c.mutex.Lock()
@@ -329,16 +336,16 @@ func (c *Client) Connected() bool {
 	return c.store.Connected()
 }
 
-// Devices lists the devices that have at least one property, sorted by
-// name.
+// Devices returns the names of the devices that have at least one
+// property, sorted.
 func (c *Client) Devices() []string {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	return c.store.Devices()
 }
 
-// Properties lists a device's properties in the order the driver first
-// defined them.
+// Properties returns a device's properties in the order its driver
+// first defined them.
 func (c *Client) Properties(device string) []Property {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -352,11 +359,12 @@ func (c *Client) Property(device, name string) (Property, bool) {
 	return c.store.Property(device, name)
 }
 
-// Revision answers the number of a property's last change, its
-// definition or its update, or 0 when the device does not define it.
-// A change takes a higher number than every change before it, on this
-// connection and on each one before, so a caller that recorded a
-// revision can tell whether the property changed since.
+// Revision returns the revision number of a property's last change,
+// whether a definition or an update, or 0 when the device does not
+// define the property. Each change gets a higher number than every
+// earlier change, on this connection and on previous ones, so a caller
+// that recorded a revision can tell whether the property has changed
+// since.
 func (c *Client) Revision(device, name string) uint64 {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -366,7 +374,8 @@ func (c *Client) Revision(device, name string) uint64 {
 	return 0
 }
 
-// write sends one message on the current connection.
+// write sends one message on the current connection, or returns
+// ErrNotConnected.
 func (c *Client) write(message []byte) error {
 	c.mutex.Lock()
 	conn := c.conn

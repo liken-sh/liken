@@ -10,8 +10,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// A convention is one entry of conventions.yaml: a property that
-// drivers share and libindi does not define.
+// convention is one entry of conventions.yaml: a property that several
+// drivers define in the same way and that libindi does not define.
 type convention struct {
 	Name       string          `json:"name"`
 	Interface  string          `json:"interface"`
@@ -35,16 +35,16 @@ func readConventions(path string) ([]convention, error) {
 	}
 	var out []convention
 	if err := yaml.UnmarshalStrict(raw, &out); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 	return out, nil
 }
 
-// checkSimulators compares each convention with the transcripts in
-// dir, one directory for each simulator. A convention must name
-// exactly the simulators that define it, or the read fails. Each
-// difference between a simulator's definition and the convention is
-// a disagreement.
+// checkSimulators compares each convention with the simulator
+// transcripts in dir, which has one subdirectory for each simulator, and
+// returns each difference in how a simulator defines the property. It
+// fails when a convention's simulators list differs from the simulators
+// whose transcripts define the property.
 func checkSimulators(conventions []convention, dir string) ([]string, error) {
 	files, err := filepath.Glob(filepath.Join(dir, "*", "*.xml"))
 	if err != nil {
@@ -58,7 +58,7 @@ func checkSimulators(conventions []convention, dir string) ([]string, error) {
 		}
 		props, err := definitionsOf(data)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", file, err)
+			return nil, fmt.Errorf("reading the definitions in %s: %w", file, err)
 		}
 		simulator := filepath.Base(filepath.Dir(file))
 		for _, p := range props {
@@ -75,7 +75,7 @@ func checkSimulators(conventions []convention, dir string) ([]string, error) {
 		simulators := sortedKeys(defined[c.Name])
 		want := slices.Sorted(slices.Values(c.Simulators))
 		if !slices.Equal(simulators, want) {
-			return nil, fmt.Errorf("conventions.yaml names the simulators %v for %s, and the transcripts that define it are %v", want, c.Name, simulators)
+			return nil, fmt.Errorf("conventions.yaml lists the simulators %v for %s, and the simulators whose transcripts define it are %v", want, c.Name, simulators)
 		}
 		for _, simulator := range simulators {
 			where := "the " + simulator + " simulator"
@@ -85,17 +85,15 @@ func checkSimulators(conventions []convention, dir string) ([]string, error) {
 	return report, nil
 }
 
-// compare answers each difference between two definitions of one
-// property: in structure, and each member that one has and the other
-// lacks.
+// compare reports each difference between two definitions of one
+// property: a difference of type, permission, or rule, and each member
+// that only one of them defines.
 func compare(name, first, second string, a, b Property) []string {
 	out := structure(name, first, second, a, b)
 	out = append(out, missingMembers(name, first, second, a, b)...)
 	return append(out, missingMembers(name, second, first, b, a)...)
 }
 
-// structure answers each difference in the type, the permission, and
-// the rule of two definitions of one property.
 func structure(name, first, second string, a, b Property) []string {
 	var out []string
 	differ := func(what, x, y string) {
@@ -109,11 +107,11 @@ func structure(name, first, second string, a, b Property) []string {
 	return out
 }
 
-// missingMembers answers each member that a defines and b lacks.
+// missingMembers reports each member that a defines and b does not.
 func missingMembers(name, first, second string, a, b Property) []string {
 	var out []string
 	for _, m := range a.Members {
-		if _, held := b.Member(m.Name); !held {
+		if _, found := b.Member(m.Name); !found {
 			out = append(out, fmt.Sprintf("%s: %s defines the member %s, and %s does not", name, first, m.Name, second))
 		}
 	}

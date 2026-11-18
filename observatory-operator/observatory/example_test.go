@@ -1,8 +1,9 @@
 package observatory
 
-// examples/simulators.yaml is the stack that a reader copies and that
-// plan 07's tests apply as it is. These tests hold it to the CRDs, to
-// the Go types, and to itself: every resource it names exists in it.
+// examples/simulators.yaml is a complete set of simulated equipment
+// that a reader applies unchanged. These tests check it against the
+// CRDs and the Go types, and check that every resource it refers to is
+// in the file.
 
 import (
 	"bytes"
@@ -22,18 +23,18 @@ import (
 
 const example = "simulators.yaml"
 
-// documents answers the objects in one file of examples/, in order.
+// documents returns the objects in one file of examples/, in order.
 func documents(t *testing.T, name string) []map[string]any {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "examples", name))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the example file: %v", err)
 	}
 	var objects []map[string]any
 	for _, document := range strings.Split(string(raw), "\n---\n") {
 		object := map[string]any{}
 		if err := yaml.UnmarshalStrict([]byte(document), &object); err != nil {
-			t.Fatal(err)
+			t.Fatalf("parsing a document of the example: %v", err)
 		}
 		objects = append(objects, object)
 	}
@@ -56,7 +57,7 @@ func TestTheExampleHasEveryKind(t *testing.T) {
 	}
 	for _, kind := range Kinds {
 		if !slices.Contains(kinds, kind.Name) {
-			t.Errorf("the example has no %s", kind.Name)
+			t.Errorf("the example has no %s, want one of every kind", kind.Name)
 		}
 	}
 }
@@ -66,35 +67,34 @@ func TestTheAPIServerAcceptsTheExample(t *testing.T) {
 		kind := kindNamed(object["kind"].(string))
 		t.Run(kind.Name+"/"+objectName(object), func(t *testing.T) {
 			if errs := validate(t, kind, object, nil); len(errs) > 0 {
-				t.Error(errs.ToAggregate())
+				t.Errorf("the CRD schema rejects the example: %v", errs.ToAggregate())
 			}
 		})
 	}
 }
 
-// The operator decodes each object into its Go type. A field that the
-// type lacks would be dropped with no error, so the decode here
-// refuses unknown fields.
+// The operator's decoder drops a field that the Go type lacks without
+// an error, so this test decodes with DisallowUnknownFields.
 func TestTheGoTypesReadTheExample(t *testing.T) {
 	for _, object := range documents(t, example) {
 		kind := object["kind"].(string)
 		t.Run(kind+"/"+objectName(object), func(t *testing.T) {
 			raw, err := json.Marshal(object)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("encoding %s as JSON: %v", kind, err)
 			}
 			decoder := json.NewDecoder(bytes.NewReader(raw))
 			decoder.DisallowUnknownFields()
 			typed := reflect.New(reflect.TypeOf(kindTypes[kind])).Interface()
 			if err := decoder.Decode(typed); err != nil {
-				t.Error(err)
+				t.Errorf("decoding into the Go type: %v", err)
 			}
 		})
 	}
 }
 
-// references are the spec fields that name another resource, and the
-// kind each one names.
+// references maps each spec field that holds another resource's name
+// to the kind of that resource.
 var references = map[string]string{
 	"observatory":  "Observatory",
 	"telescope":    "Telescope",
@@ -132,11 +132,10 @@ func TestEveryNameInTheExampleExists(t *testing.T) {
 	}
 }
 
-// `kubectl apply` of an unchanged file must change nothing. For a
-// custom resource, kubectl computes a three-way JSON merge patch from
-// the last file it applied, the file, and the live object, and the
-// live object carries the defaults that the API server applied from
-// the CRD. A patch other than {} makes kubectl send it and report the
+// A second `kubectl apply` of the unchanged file must change nothing.
+// For a custom resource, kubectl computes a three-way JSON merge patch
+// from the last applied file, the file, and the live object, which has
+// the CRD's defaults. If the patch is not {}, kubectl reports the
 // resource as configured on every apply.
 func TestApplyingTheExampleAgainChangesNothing(t *testing.T) {
 	for _, object := range documents(t, example) {
@@ -144,11 +143,11 @@ func TestApplyingTheExampleAgainChangesNothing(t *testing.T) {
 		t.Run(kind.Name+"/"+objectName(object), func(t *testing.T) {
 			file, err := json.Marshal(object)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("encoding the example file: %v", err)
 			}
 			patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(file, file, live(t, kind, file))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("computing the merge patch: %v", err)
 			}
 			if string(patch) != "{}" {
 				t.Errorf("a second apply patches %s", patch)
@@ -157,22 +156,22 @@ func TestApplyingTheExampleAgainChangesNothing(t *testing.T) {
 	}
 }
 
-// live answers the object that the API server stores for a file: the
-// file with the CRD's defaults applied.
+// live returns the object that the API server would store for a file:
+// the file with the CRD's defaults applied.
 func live(t *testing.T, kind Kind, file []byte) []byte {
 	t.Helper()
 	structural, err := structuralschema.NewStructural(internalSchema(t, kind))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the structural schema of the CRD: %v", err)
 	}
 	var object map[string]any
 	if err := json.Unmarshal(file, &object); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the example file: %v", err)
 	}
 	defaulting.Default(object, structural)
 	stored, err := json.Marshal(object)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the stored object: %v", err)
 	}
 	return stored
 }

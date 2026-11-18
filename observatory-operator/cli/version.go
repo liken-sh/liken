@@ -1,8 +1,8 @@
 package main
 
-// How the CLI checks whether it is safe to run against the
-// operator it faces, and the calendar-version comparison the sibling
-// CLIs copy without change.
+// The check that the CLI's version is compatible with the operator's.
+// compareVersions has identical copies in the CLIs of the other
+// operators.
 
 import (
 	"fmt"
@@ -10,7 +10,6 @@ import (
 	"strings"
 )
 
-// The three outcomes of the version check.
 type versionAction int
 
 const (
@@ -19,13 +18,15 @@ const (
 	actionRefuse
 )
 
-// The command a drifted or too-old CLI names on stderr.
+// syncCommand is the command that the CLI tells the user to run when
+// its version differs from the operator's or is too old.
 const syncCommand = "kubectl liken plugins sync"
 
-// decideVersionAction compares this binary's version
-// against the operator's version and an optional minimum-CLI floor;
-// an empty floor never refuses, so the floor's transport stays each
-// operator's own choice.
+// decideVersionAction refuses when the CLI is older than minimumCLI,
+// and warns when the CLI's version differs from the operator's. It runs
+// without a warning when the operator's version is unknown. An empty
+// minimumCLI, or a version that does not parse, such as "dev", is never
+// refused.
 func decideVersionAction(cli, operator, minimumCLI string) (versionAction, string) {
 	if minimumCLI != "" {
 		if order, ok := compareVersions(cli, minimumCLI); ok && order < 0 {
@@ -42,17 +43,18 @@ func decideVersionAction(cli, operator, minimumCLI string) (versionAction, strin
 		cli, operator, syncCommand)
 }
 
-// One liken version as an orderable tuple, with a
-// development build sorting after its release and before the next one.
+// versionKey is a liken version split into numbers that compare in
+// order. A development build sorts after its release and before the
+// next release.
 type versionKey struct {
 	year, month, day, serial int
 	dev                      bool
 	devCount                 int
 }
 
-// compareVersions orders two liken versions and reports
-// -1/0/1 and whether both parsed; a version that does not parse, such
-// as a local "dev" build, is not ordered.
+// compareVersions returns -1, 0, or 1 as a is older than, equal to, or
+// newer than b. The second result is false when either version does
+// not parse, such as a local "dev" build.
 func compareVersions(a, b string) (int, bool) {
 	ak, aok := parseVersion(a)
 	bk, bok := parseVersion(b)
@@ -77,8 +79,8 @@ func compareVersions(a, b string) (int, bool) {
 	return 0, true
 }
 
-// parseVersion reads YYYY.MM.DD-NNN and the optional
-// -dev-NNN-sha suffix a development build carries.
+// parseVersion reads a version in the form YYYY.MM.DD-NNN, with the
+// -dev-NNN-sha suffix that a development build adds.
 func parseVersion(text string) (versionKey, bool) {
 	parts := strings.Split(text, "-")
 	if len(parts) != 2 && len(parts) != 5 {

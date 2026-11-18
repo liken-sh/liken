@@ -7,17 +7,18 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
-// namer names the Go identifiers of one kind's generated types.
+// namer builds the Go identifiers for the generated types of one kind.
 type namer struct{ kind string }
 
-// initialisms are the words that Go spells in capitals.
+// initialisms maps a capitalized word, such as Wcs, to the all-capitals
+// spelling that Go uses for it.
 var initialisms = map[string]string{
 	"Fps": "FPS", "Wcs": "WCS", "Ota": "OTA", "Tle": "TLE", "Utc": "UTC", "Dsp": "DSP",
 	"Dft": "DFT", "Idft": "IDFT", "Pec": "PEC", "Cfa": "CFA", "Gps": "GPS",
 }
 
-// goName answers the Go name of a JSON name: each word capitalized, and
-// an initialism in capitals.
+// goName converts a JSON field name to a Go name: it capitalizes each
+// word and writes an initialism in capitals.
 func (namer) goName(json string) string {
 	var words []string
 	start := 0
@@ -38,17 +39,17 @@ func (namer) goName(json string) string {
 	return strings.Join(words, "")
 }
 
-// typeName answers the name of a generated type of one field, such as
-// CameraFrameStatus.
+// typeName returns the name of the generated type for one field, such
+// as CameraFrameStatus.
 func (n namer) typeName(json, suffix string) string {
 	return n.kind + n.goName(json) + suffix
 }
 
-// statusField answers the field of a standard property in status. A
-// property with fixed members holds its state and its values. A
-// property whose elements the driver chooses holds its state and the
-// list of its elements. A family holds one item for each property of
-// the family, with its number or its name, its state, and its values.
+// statusField returns the status field for a standard INDI property:
+// an object of the property's state and its values. When the driver
+// chooses the elements, the values are a list of elements. A family is
+// a list with one item for each property of the family, with its
+// number or name, its state, and its values.
 func (k kind) statusField(p property) field {
 	n := namer{k.Kind}
 	f := field{JSON: p.Field, Go: n.goName(p.Field), INDI: p.Name, Description: p.statusText()}
@@ -69,8 +70,8 @@ func (k kind) statusField(p property) field {
 }
 
 // familyKey is the field that tells the properties of a family apart:
-// the number in a numbered property's name, or the whole name of a
-// property that a parameter names.
+// the number at the end of a numbered property's name, or the whole
+// name of a property whose name comes from a member of p.NamedBy.
 func (p property) familyKey(n namer) field {
 	if p.Family == familyNumbered {
 		prefix := strings.TrimRight(p.Name, "0123456789")
@@ -82,8 +83,8 @@ func (p property) familyKey(n namer) field {
 		Description: "The property's name, which a member of `" + p.NamedBy + "` gives, such as `" + p.Name + "`."}
 }
 
-// element is the item of a list of the elements that a driver chooses:
-// the element's name and label, and its value.
+// element is the item type of a list of the elements that a driver
+// defines.
 func element(p property) *shape {
 	s := elementOf(p)
 	s.Shared = true
@@ -109,13 +110,14 @@ func elementOf(p property) *shape {
 		field{JSON: "value", Go: "Value", Type: text(), Description: "The element's text."})
 }
 
-// specField answers the field of a setting in spec. The value of a
-// property with one member, or of a switch, is the field itself. A
-// property with several members is an object of its values. A switch
-// whose elements the driver chooses names an element, a text whose
-// elements the driver chooses lists its texts in the driver's order,
-// and a number whose elements the driver chooses lists each element by
-// name. A family lists its items by number or by name.
+// specField returns the spec field for a writable INDI property. A
+// property with one value, such as a switch or a property with one
+// member, is that value, and a property with several members is an
+// object of its values. When the driver chooses the elements, a switch
+// is the name of the element to turn on, or a list of names when the
+// rule is AnyOfMany. A text is then a list of texts in the driver's
+// order, and a number is a list of name and value pairs. A family is a
+// list with one item for each property, keyed by number or by name.
 func (k kind) specField(p property) field {
 	n := namer{k.Kind}
 	f := field{JSON: p.Field, Go: n.goName(p.Field), INDI: p.Name, Description: p.specText()}

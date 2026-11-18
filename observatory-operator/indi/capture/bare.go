@@ -1,29 +1,29 @@
 package capture
 
-// A Bare is one of the bare drivers in indi/standard/bare/: a driver
-// for one INDI interface that turns on every capability, defines
-// nothing of its own, and reports connected with no hardware. What it
-// defines is libindi's standard set for that interface. Name is the
-// name of its capture, and steps are the changes its capture sends
-// after connect.
+// A Bare is one of the bare drivers in indi/standard/bare/. A bare
+// driver implements one INDI interface with every capability turned on,
+// adds no properties of its own, and connects with no hardware, so its
+// capture holds libindi's standard properties for that interface. steps
+// returns the changes that the capture sends after the driver connects.
 type Bare struct {
 	Name   string
 	Driver string
 	steps  func(device string) []Phase
 }
 
-// DefaultDevice is the capture of the bare driver that hosts no
+// DefaultDevice is the capture of the bare driver that implements no
 // interface: the properties of INDI::DefaultDevice and of the serial
-// and TCP connection plugins. They belong to every device and to no
-// interface, so every other capture leaves them out.
+// and TCP connection plugins. Every device defines them, so every
+// other capture leaves them out.
 const DefaultDevice = "device"
 
-// Bares are the bare drivers, one capture each. An interface whose
-// capabilities cannot all be on at once has one capture for each
-// variant: a telescope's park type sets the members of
+// Bares lists the bare drivers, with one capture for each. An interface
+// whose capabilities cannot all be on at once has one driver and capture
+// for each variant: a telescope's park type sets the members of
 // TELESCOPE_PARK_POSITION, a focuser defines FOCUS_TIMER only when it
-// cannot move to an absolute position, and a dome is a rotating dome
-// or a roll-off roof. Switch is OUTPUT and INPUT, one capture each.
+// cannot move to an absolute position, and a dome is either a rotating
+// dome or a roll-off roof. A switch has one driver for OUTPUT and one
+// for INPUT.
 var Bares = []Bare{
 	{Name: DefaultDevice, Driver: "indi_bare_device", steps: tcp},
 	{Name: "telescope-ra-dec", Driver: "indi_bare_telescope_ra_dec", steps: pierSide},
@@ -49,8 +49,8 @@ var Bares = []Bare{
 	{Name: "receiver", Driver: "indi_bare_receiver"},
 }
 
-// Script is what a capture sends to the bare driver: the baseline, the
-// connect, and the driver's steps.
+// Script returns what a capture sends to the bare driver: the baseline,
+// the connect, and then the driver's own steps.
 func (b Bare) Script(device string) Script {
 	phases := []Phase{
 		{"baseline", Baseline},
@@ -62,17 +62,16 @@ func (b Bare) Script(device string) Script {
 	return Script{Phases: phases}
 }
 
-// tcp selects the TCP connection plugin. Each plugin defines its
-// properties only while it is the selected one, and the serial plugin
-// is selected first.
+// tcp selects the TCP connection plugin, so that the capture records
+// its properties. Each plugin defines its properties only while it is
+// selected, and the serial plugin is selected by default.
 func tcp(device string) []Phase {
 	return []Phase{{"tcp", switchMessage(device, "CONNECTION_MODE", "CONNECTION_TCP")}}
 }
 
-// pierSide turns on the telescope's simulated pier side. A telescope
-// that simulates its pier side defines TELESCOPE_PIER_SIDE at connect
-// and deletes it at once while the simulation is off, and defines it
-// again when the simulation turns on.
+// pierSide turns on the telescope's pier side simulation. While the
+// simulation is off, the telescope defines TELESCOPE_PIER_SIDE at
+// connect and deletes it at once, so the capture would not record it.
 func pierSide(device string) []Phase {
 	return []Phase{{"pier-side", switchMessage(device, "SIMULATE_PIER_SIDE", "SIMULATE_YES")}}
 }

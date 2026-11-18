@@ -1,19 +1,17 @@
 package main
 
-// The retry annotation on a resource with procedures. A trigger's run
-// that failed is not run again for the same transition, so a person
-// who fixed the cause, such as a dome whose park a driver refused,
-// asks for the run again with observatory.liken.sh/retry, as on a
-// Reservation. The trigger controller runs again each failed run of
-// the resource's triggers whose condition still holds with the same
-// transition time, and skips its Done actions. It then removes the
-// annotation. A run whose transition is over stays Failed, because
-// its condition no longer asks for it. The annotation also runs again
-// the Failed activation that a device ran after its Active parent's
-// Activation step, such as after it healed (lateactivation.go). Any
-// other lifecycle run, activation or deactivation,
-// runs again through the retry annotation of the Reservation whose
-// step it failed.
+// The trigger controller does not run a failed trigger again for the
+// same transition. After a person fixes the cause, such as a driver
+// that refused a dome's park, they add the observatory.liken.sh/retry
+// annotation to the resource. The controller then reruns each failed
+// run whose condition still holds with the same transition time,
+// skips the actions that are already Done, and removes the annotation.
+// A run whose transition has ended stays Failed.
+//
+// On a device, the annotation also reruns a failed activation that the
+// trigger controller ran for it (lateactivation.go). Any other failed
+// activation or deactivation is rerun by annotating the Reservation
+// whose step failed.
 
 import (
 	"context"
@@ -21,17 +19,17 @@ import (
 	"net/http"
 )
 
-// retryAsked reports whether a resource carries the retry annotation
-// and the controller has not acted on this version of it.
-func (k *control) retryAsked(r resource) bool {
+// hasRetryAnnotation reports whether a resource has the retry annotation and
+// the controller has not yet acted on this resourceVersion of it.
+func (k *control) hasRetryAnnotation(r resource) bool {
 	_, asked := r.meta.Annotations[annotationRetry]
 	return asked && k.retried[r.key()] != r.meta.ResourceVersion
 }
 
-// clearRetryOf removes a resource's retry annotation. The write goes
-// out on its own goroutine, so a refused write, which send tries again
-// after a pause, does not hold the controller's pass.
-func (o *operator) clearRetryOf(ctx context.Context, r resource, k *control) {
+// removeRetryAnnotation removes a resource's retry annotation in its own
+// goroutine, because send retries a refused write after a pause and
+// the controller's pass must not wait for it.
+func (o *operator) removeRetryAnnotation(ctx context.Context, r resource, k *control) {
 	k.retried[r.key()] = r.meta.ResourceVersion
 	k.group.Go(func() {
 		path := objectPath(r.kind, o.namespace, r.name())

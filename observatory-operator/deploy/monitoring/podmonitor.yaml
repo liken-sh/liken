@@ -1,8 +1,7 @@
-# One PodMonitor for the operator's pod. Only the copy that holds the
-# Lease serves /metrics, so during a rollout the scrape of the copy
-# that waits fails until it takes the Lease. The relabeling puts the
-# pod's node in the target's node label, as root plan 65 gives every
-# PodMonitor, so a dashboard across the fleet selects by it.
+# Only the replica that holds the Lease serves /metrics, so during a
+# rollout the scrape of the waiting replica fails until it takes the
+# Lease. Root plan 65 requires every PodMonitor to copy the pod's node
+# name into a `node` label, so a dashboard can select by node.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:

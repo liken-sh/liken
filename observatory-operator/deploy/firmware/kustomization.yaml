@@ -1,20 +1,21 @@
-# The Firmware objects that load the bare chip of a QHY camera, one for
-# each chip that a rule of libqhy's 85-qhyccd.rules loads. When the bare
-# chip appears on any machine, firmware-operator runs fxload from the
-# indi-qhy image, and the chip enumerates again as the camera that
-# indi_qhy_ccd opens.
+# Firmware objects that load the firmware into a QHY camera's bare
+# USB chip. When the bare chip appears on a machine, firmware-operator
+# runs fxload from the indi-qhy image, and the chip enumerates again as
+# the camera that indi_qhy_ccd opens. The header of qhy.yaml says which
+# chips of libqhy's 85-qhyccd.rules have no object.
 #
 # The Firmware CRD comes from firmware-operator, so the base in deploy/
-# does not name this directory. A cluster that runs firmware-operator
-# adds it beside the base:
+# does not include this directory. A cluster that runs
+# firmware-operator adds it beside the base:
 #
 #   resources:
 #     - https://github.com/liken-sh/liken//observatory-operator/deploy?ref=<version>
 #     - https://github.com/liken-sh/liken//observatory-operator/deploy/firmware?ref=<version>
 #
-# A Firmware is cluster-scoped, so this sets no namespace. The image of
-# each object is the indi-qhy tag that drivers/generated.go names, and
-# TestTheQHYFirmwareIsCurrent writes qhy.yaml again when that tag moves.
+# A Firmware is cluster-scoped, so this sets no namespace. Each
+# object's image is the indi-qhy tag in drivers/generated.go.
+# TestTheQHYFirmwareIsCurrent fails when qhy.yaml is out of date with
+# that tag or the rules, and `make firmware` writes it again.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

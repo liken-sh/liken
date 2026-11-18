@@ -1,8 +1,9 @@
 package main
 
-// What a session records about the devices it started, so an edit or
-// an eviction during the session does not change them: the output each
-// device draws from, and the set of devices a server runs.
+// A reservation's session records which output each device draws power
+// from and which devices each server runs. These tests check that a
+// spec edit or a pod eviction during the session does not change those
+// records.
 
 import (
 	"slices"
@@ -15,11 +16,10 @@ import (
 )
 
 // The focuser draws from output 1 of Switch lab when east-tonight
-// starts. An edit of its spec.power during the session takes effect
-// when the session ends: the release switches off output 1, which the
-// session switched on, and not the output that the spec names now. A
-// focuser pod that an eviction deleted after the edit comes back with
-// the same record.
+// starts. After an edit of spec.power during the session, the release
+// still switches off output 1, and not the output that the edit names.
+// The same holds when an eviction deletes the focuser's pod after the
+// edit.
 func TestAReleaseSwitchesOffTheOutputThatItsSessionSwitchedOn(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -61,13 +61,12 @@ func TestAReleaseSwitchesOffTheOutputThatItsSessionSwitchedOn(t *testing.T) {
 	}
 }
 
-// A server pod that an eviction deleted during a session comes back
-// with the devices that its session started, also when every pod of
-// the server is gone: the reservation's status records them. A device
-// placed on the server during the session still waits for the next
-// one. The
-// operator is down while the pods go, so it reads every eviction at
-// once, as it would after a node fails.
+// When an eviction deletes a server's pod during a session, the new pod
+// runs the devices that the session started, because the reservation's
+// status records them, even when every pod of the server is gone. A
+// device placed on the server during the session waits for the next
+// session. The operator is stopped while the pods are deleted, so it
+// sees every deletion at once, as it would after a node fails.
 func TestAServerCreatedAgainKeepsItsSessionsDevices(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -109,9 +108,9 @@ func TestAServerCreatedAgainKeepsItsSessionsDevices(t *testing.T) {
 	}
 }
 
-// A Telescope whose spec.observatory a person edits during its session
-// still belongs to the observatory that the session started with: the
-// release parks the dome there and stops the observatory's server.
+// When someone edits a Telescope's spec.observatory during its
+// session, the session still uses the observatory it started with. The
+// release parks the dome there and stops that observatory's server.
 func TestAReleaseKeepsTheObservatoryItsSessionStartedWith(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -132,12 +131,13 @@ func TestAReleaseKeepsTheObservatoryItsSessionStartedWith(t *testing.T) {
 	})
 }
 
-// A spec edit during a session changes nothing that the session
-// started: a guide camera moved to another train keeps its pod beside
-// the server and its Guider stays Ready, a driver edit that names
-// another device's driver leaves both devices running, and a camera
-// moved to another telescope's train keeps its train's settings when
-// its driver comes back, and stays in its train's status.
+// A spec edit during a session does not change what the session
+// started. A guide camera moved to another train keeps its pod beside
+// the server and its Guider stays Ready. A driver edit that names
+// another device's driver leaves both devices running. A camera moved
+// to another telescope's train keeps its original train's settings
+// when its driver comes back, and stays in its original train's
+// status.
 func TestASpecEditDuringASessionChangesNothingItStarted(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -202,7 +202,8 @@ func TestASpecEditDuringASessionChangesNothingItStarted(t *testing.T) {
 	}
 }
 
-// unchanged fails the test when one of the pods is gone or new.
+// unchanged fails the test when any of the pods is missing, or when
+// any pod has a different UID from the one in before.
 func unchanged(t *testing.T, w *world, before map[string]string, pods ...string) {
 	t.Helper()
 	for _, name := range pods {
@@ -212,9 +213,10 @@ func unchanged(t *testing.T, w *world, before map[string]string, pods ...string)
 	}
 }
 
-// A Switch placed on a telescope during its session never runs there,
-// also not during the release, which stops only what the session
-// started. The hold on an output keeps the release in PowerOff.
+// A Switch placed on a telescope during its session does not run
+// there during the release either, because the release works only on
+// what the session started. Holding DIGITAL_OUTPUT_1 keeps the release
+// in PowerOff while the test checks.
 func TestAReleaseStartsNoDriverThatItsSessionDidNot(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -234,12 +236,11 @@ func TestAReleaseStartsNoDriverThatItsSessionDidNot(t *testing.T) {
 	})
 }
 
-// A server whose pods an eviction deletes one at a time while the
-// operator runs keeps its session's devices, in either order, also
-// when the API server refuses to create the pods again until every
-// pod of the server is gone. The reservation's status records the
-// devices that the session started, so the new pod takes them and not
-// the focuser placed during the session.
+// When evictions delete a server's pods one at a time while the
+// operator runs, in either order, the new server pod runs the devices
+// that the session started and not the focuser placed during the
+// session. The API server refuses to create pods until every pod of
+// the server is gone.
 func TestAServerWhosePodsGoOneAtATimeKeepsItsSessionsDevices(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -280,11 +281,12 @@ func TestAServerWhosePodsGoOneAtATimeKeepsItsSessionsDevices(t *testing.T) {
 	}
 }
 
-// A focuser moved from east to west's train during both sessions does
-// not start on west while east's release runs: west's server pod,
-// which an eviction deletes after StopDevices deleted the focuser's
-// pod and while PowerOff waits, comes back without it, although the
-// focuser still holds the finalizer from east's session.
+// A focuser moved from east's train to west's train during both
+// sessions does not start on west while east's release runs. An
+// eviction deletes west's server pod after StopDevices deleted the
+// focuser's pod, while PowerOff waits. The new server pod starts
+// without the focuser, although the focuser still has the finalizer
+// from east's session.
 func TestADeviceMovedToAHeldServerWaitsAfterAnEvictionOfThatServer(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

@@ -1,14 +1,14 @@
 package main
 
-// The fake drivers' configuration files, as INDI's base classes keep
-// them (libs/indibase/defaultdevice.cpp and inditelescope.cpp in
-// indilib/indi). A driver saves its whole configuration when a client
-// sends CONFIG_PROCESS CONFIG_SAVE. A mount also saves the whole
-// configuration the first time a client writes ACTIVE_DEVICES or
-// GEOGRAPHIC_COORD, because saveConfig of one property writes every
-// property when no file exists yet. A mount reads DOME_POLICY from the
-// file again on each getProperties, so a client that connects later
-// turns the policy back to the saved value.
+// The fake drivers save their configuration the way INDI's base
+// classes do (libs/indibase/defaultdevice.cpp and inditelescope.cpp in
+// indilib/indi). A driver saves every property when a client sends
+// CONFIG_PROCESS with CONFIG_SAVE. A mount also saves every property
+// the first time a client writes ACTIVE_DEVICES or GEOGRAPHIC_COORD,
+// because saving one property when no file exists writes all of them.
+// A mount reads DOME_POLICY from the saved file on each getProperties,
+// so a client that connects later gets the saved policy, not the value
+// that an earlier client set.
 
 import (
 	"slices"
@@ -16,14 +16,14 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi/inditest"
 )
 
-// saveConfig saves the configuration after a client changed p, as the
-// driver does.
+// saveConfig saves the configuration after a client changed p, when a
+// real INDI driver would.
 func (d *fakeDriver) saveConfig(p *inditest.Property) {
 	mount := d.find("DOME_POLICY") != nil
 	switch {
 	case p.Name == "CONFIG_PROCESS":
 		save := d.value("CONFIG_PROCESS", "CONFIG_SAVE") == "On"
-		// The driver turns every member Off after it acts.
+		// A driver sets every member of CONFIG_PROCESS Off after it acts.
 		p.Switch("")
 		if save {
 			d.save()
@@ -40,7 +40,7 @@ func (d *fakeDriver) save() {
 	}
 }
 
-// reloadDomePolicy sets a mount's DOME_POLICY to the saved value, as
+// reloadDomePolicy sets DOME_POLICY of a mount to the saved value, as
 // Telescope::ISGetProperties does before it defines the property.
 func (d *fakeDriver) reloadDomePolicy() {
 	p := d.find("DOME_POLICY")

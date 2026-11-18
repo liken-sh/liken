@@ -1,25 +1,28 @@
 package main
 
-// Fake INDI servers for the operator's tests, built from the bytes that
-// the real simulators sent, which indi/inditest/testdata/ records. Each
-// server runs a driver for each device pod that its server pod's
-// annotation names and that the fake API server holds Ready, as
-// indiserver does through the shims: a device pod that comes or goes
-// defines or deletes its device on the server, and a new pod is a new
-// driver, disconnected, with its settings lost. A driver defines what
-// its baseline transcript defines, adds what its connect transcript
-// defines when it connects, and answers every other change with the
-// values sent and the state Ok. A test can hold a property, so that
-// its driver never answers.
+// Fake INDI servers for the operator's tests. Their drivers replay the
+// transcripts in indi/inditest/testdata/, which real simulators sent.
 //
-// indi/inditest holds the properties, the drivers, and the connections
-// that these servers share with that package's own Server, which serves
-// one fixed set of simulators to another component's tests. These
-// servers follow the fake API server's pods, and add the locks, the
-// presets, and the configuration files that the operator's tests need.
+// A fake server runs while its server pod is Ready in the fake API
+// server. Like indiserver behind the shims, it runs one driver for each
+// device pod that is Ready and listed in the server pod's annotation.
+// When a device pod is deleted or replaced, the server deletes its
+// device on every client. A replaced pod gets a new driver, which is
+// disconnected and has none of the old driver's settings.
 //
-// The servers answer over in-memory pipes, so the tests run in a
-// synctest bubble.
+// A driver defines the properties of its baseline transcript, and adds
+// those of its connect transcript when a client connects it. It
+// responds to any other change by storing the values sent and setting
+// the state to Ok, unless a test holds, refuses, or moves the property.
+//
+// The properties, drivers, and connections come from indi/inditest. That
+// package's own Server serves a fixed set of simulators to the tests of
+// other components. These servers follow the pods of the fake API server
+// instead, and add the locks, presets, and configuration files that the
+// operator's tests need.
+//
+// Clients connect over net.Pipe, because a real socket would stop the
+// fake clock of the synctest bubble.
 
 import (
 	"bufio"
@@ -39,17 +42,17 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi/inditest"
 )
 
-// definitions reads what one phase of a simulator's transcripts
-// defines, such as definitions(t, "ccd", "connect").
+// definitions returns the properties that one phase of a simulator's
+// transcripts defines, such as definitions(t, "ccd", "connect").
 func definitions(t *testing.T, simulator, phase string) []*inditest.Property {
 	t.Helper()
 	data, err := inditest.Transcript(simulator, phase)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the %s/%s transcript: %v", simulator, phase, err)
 	}
 	props, err := inditest.Definitions(data)
 	if err != nil {
-		t.Fatalf("%s/%s: %v", simulator, phase, err)
+		t.Fatalf("parsing the definitions of %s/%s: %v", simulator, phase, err)
 	}
 	return props
 }
@@ -60,22 +63,22 @@ type fakeDriver struct {
 	onConnect []*inditest.Property
 	props     []*inditest.Property
 	connected bool
-	// snooped holds the reports that clients relayed to the driver
-	// (fakelocks_test.go), by "<device>.<property>", each member's
-	// value by its name.
+	// snooped maps "<device>.<property>" to member values, from each
+	// report that a client relayed to this driver (fakelocks_test.go).
 	snooped map[string]map[string]string
-	// saved holds the driver's configuration file
-	// (fakeconfig_test.go), each property's members by its name, or
-	// nil while the driver has saved none.
+	// saved is the driver's configuration file (fakeconfig_test.go),
+	// keyed by property name. It is nil until the driver first saves.
 	saved map[string][]inditest.Member
 }
 
+// transcriptCache holds the parsed transcripts of each driver
+// executable, so the test binary parses them once.
 var transcriptCache sync.Map
 
-// transcriptPair is what a driver defines before it connects and what
-// it defines when it connects.
 type transcriptPair struct{ baseline, connect []*inditest.Property }
 
+// newFakeDriver returns a new driver for the executable exec, from the
+// transcripts of its simulator or of a variant (fakevariants_test.go).
 func newFakeDriver(t *testing.T, exec string) *fakeDriver {
 	cached, ok := transcriptCache.Load(exec)
 	if !ok {
@@ -101,16 +104,19 @@ func (d *fakeDriver) find(name string) *inditest.Property {
 	return nil
 }
 
-// fakeServer is one INDI server and the drivers it runs, by the name of
-// each device pod and its UID.
+// fakeServer is one INDI server and the drivers it runs.
 type fakeServer struct {
-	uid     string
+	// uid is the server pod's UID. When the pod is replaced, sync
+	// starts a new fakeServer.
+	uid string
+	// drivers is keyed by device pod name, and uids holds the UID of the
+	// device pod that each driver started for.
 	drivers map[string]*fakeDriver
 	uids    map[string]string
 	conns   []*inditest.Conn
-	// applied is the list of device pods that the shim applied last,
-	// and target is the list that the server pod's annotation names
-	// now (fakeshim_test.go).
+	// target is the list of device pods in the server pod's annotation
+	// now, and applied is the list that the shim has applied. They
+	// differ while the shim's delay runs (fakeshim_test.go).
 	applied, target []string
 }
 
@@ -126,49 +132,53 @@ type indiWorld struct {
 	// relayed records each report that a client relayed, in the same
 	// form (fakelocks_test.go).
 	relayed []string
-	// held holds the properties, as "<device>.<property>", whose
-	// driver never answers a change.
+	// held is the set of properties, as "<device>.<property>", whose
+	// driver never responds to a change.
 	held map[string]bool
-	// refused holds the properties whose driver answers each change
-	// with Alert and keeps its values, as a driver whose hardware
-	// fails does.
+	// refused is the set of properties whose driver responds to each
+	// change with Alert and keeps its old values, as a driver does when
+	// its hardware fails.
 	refused map[string]bool
-	// moving holds the properties whose driver answers a change with
-	// Busy, as a mount that slews does, until a test sets the state.
+	// moving is the set of properties whose driver responds to a change
+	// with Busy, as a mount does while it slews, until a test calls
+	// setState. A change that arrives while the property is Busy
+	// interrupts it: the members go Off and the state goes to Alert.
 	moving map[string]bool
-	// lateDials holds how many dials each server refuses after its pod
-	// is Ready, as an indiserver that has not opened its port yet does.
+	// lateDials is how many more dials to each server fail
+	// (listenLate).
 	lateDials map[string]int
-	// presets holds the switch that a driver turns On when it defines a
-	// property, by "<device>.<property>" (fakepresets_test.go).
+	// presets maps "<device>.<property>" to the switch member that a
+	// driver sets to On when it defines the property
+	// (fakepresets_test.go).
 	presets map[string]string
-	// texts holds the text that a driver gives a member when it
-	// defines its property, by "<device>.<property>.<member>"
+	// texts maps "<device>.<property>.<member>" to the text that a
+	// driver gives the member when it defines the property
 	// (fakepresets_test.go).
 	texts map[string]string
-	// withheld holds the properties, as "<device>.<property>", that a
-	// driver leaves out when it connects, until reveal defines them
-	// (fakepresets_test.go).
+	// withheld is the set of properties, as "<device>.<property>", that
+	// a driver leaves out of its definitions on connect until reveal
+	// defines them (fakepresets_test.go).
 	withheld map[string]bool
-	// silent holds the devices whose driver does not answer a
-	// getProperties that names the device, and asked counts each such
-	// getProperties by device (fakesync_test.go).
+	// silent is the set of devices whose driver ignores a
+	// getProperties that names the device, and asked counts the getProperties messages that
+	// name each device (fakesync_test.go).
 	silent map[string]bool
 	asked  map[string]int
-	// late holds the servers that leave a client's first getProperties
-	// unanswered until answerLate, and waiting holds those clients
-	// (fakesync_test.go).
+	// late is the set of servers that hold back their response to a
+	// getProperties that names no device, until sendDelayedDefinitions. waiting
+	// holds the connections that wait for it (fakesync_test.go).
 	late    map[string]bool
 	waiting map[string][]*inditest.Conn
-	// shimDelay is the time from a change of a server pod's annotation
-	// to the shim's start or stop of a driver (fakeshim_test.go).
+	// shimDelay is the time between a change to a server pod's
+	// annotation and the shim starting or stopping the driver
+	// (fakeshim_test.go).
 	shimDelay time.Duration
 	// restarts records each driver whose device pod was gone while the
 	// shim still listed it, as "<server> <pod>".
 	restarts []string
 
 	// followMu serializes catchUp, and guards last, the pods that the
-	// servers follow now.
+	// servers matched at the last catchUp.
 	followMu sync.Mutex
 	last     map[string]map[string]any
 }
@@ -179,8 +189,10 @@ func startIndiWorld(t *testing.T, api *fakeAPI) *indiWorld {
 	return w
 }
 
-// follow brings each server's drivers in line with the pods after each
-// change of the fake API server's pods.
+// follow calls catchUp after each change to the fake API server's pods,
+// until ctx ends, and then closes every client connection. It reads the
+// change channel before it calls catchUp, so a change during catchUp
+// wakes it again.
 func (w *indiWorld) follow(ctx context.Context) {
 	for {
 		w.api.mu.Lock()
@@ -202,11 +214,12 @@ func (w *indiWorld) follow(ctx context.Context) {
 	}
 }
 
-// catchUp brings each server's drivers in line with the pods that the
-// fake API server holds now. A stored object never changes
-// (fakeAPI.store), so it reads the pods without a copy. A dial calls it
-// too: the operator's watch can deliver a Ready server pod before
-// follow wakes, and the real server listens once its pod is Ready.
+// catchUp makes the servers and drivers match the pods in the fake API
+// server. It copies the map of pods but not the pods, because the fake
+// API server never changes a stored object (fakeAPI.store). DialContext
+// calls it too, because the operator's watch can deliver a Ready server
+// pod before follow wakes, and a real server listens as soon as its pod
+// is Ready.
 func (w *indiWorld) catchUp() {
 	w.followMu.Lock()
 	defer w.followMu.Unlock()
@@ -219,8 +232,8 @@ func (w *indiWorld) catchUp() {
 	}
 }
 
-// samePods answers whether two reads of the pods hold the same stored
-// objects.
+// samePods reports whether two reads of the pods hold the same stored
+// objects, by resourceVersion.
 func samePods(a, b map[string]map[string]any) bool {
 	return maps.EqualFunc(a, b, func(x, y map[string]any) bool {
 		return x["metadata"].(map[string]any)["resourceVersion"] == y["metadata"].(map[string]any)["resourceVersion"]
@@ -240,9 +253,8 @@ func podReady(p map[string]any) bool {
 
 func podUID(p map[string]any) string { return p["metadata"].(map[string]any)["uid"].(string) }
 
-// links answers the device pods that a server pod's annotation names.
-// The real server's shim reads the annotation within about a second;
-// the fake reads it at once.
+// links returns the names of the device pods in a server pod's
+// annotation, which lists each one as an address like east-focuser:7625.
 func links(p map[string]any) []string {
 	var out []string
 	annotations, _ := p["metadata"].(map[string]any)["annotations"].(map[string]any)
@@ -253,20 +265,24 @@ func links(p map[string]any) []string {
 	return out
 }
 
-// execOf answers the driver that a device pod's socat starts.
+// execOf returns the driver executable that a device pod's socat runs,
+// from the EXEC: address in its arguments.
 func execOf(p map[string]any) string {
 	container := p["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)
 	args := container["args"].([]any)
 	return strings.TrimSuffix(strings.TrimPrefix(args[1].(string), "EXEC:"), ",pipes")
 }
 
+// sync makes the servers and drivers match pods. When a server pod is
+// gone, replaced, or not Ready, sync closes the server's connections and
+// drops the server, so its drivers start again with the next Ready
+// server pod. A server runs a driver for each Ready device pod that the
+// shim has applied.
 func (w *indiWorld) sync(pods map[string]map[string]any) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for name, s := range w.servers {
 		if p, ok := pods[name]; !ok || podUID(p) != s.uid || !podReady(p) {
-			// The server stopped: every connection ends, and every
-			// driver behind it restarts with the next server.
 			for _, c := range s.conns {
 				c.Close()
 			}
@@ -323,8 +339,10 @@ func (s *fakeServer) broadcast(text string) {
 	}
 }
 
-// DialContext answers a pipe to the server that an address names, such
-// as east-telescope.observatory.svc:7624, while its pod is Ready.
+// DialContext returns an in-memory connection to the server named by
+// the first label of address, such as east-telescope.observatory.svc:7624.
+// It fails with ECONNREFUSED when no Ready server pod has that name, or
+// while lateDials is positive for it.
 func (w *indiWorld) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	name, _, _ := strings.Cut(address, ".")
 	w.catchUp()
@@ -342,7 +360,8 @@ func (w *indiWorld) DialContext(ctx context.Context, network, address string) (n
 	return client, nil
 }
 
-// serve reads one client's messages until the connection closes.
+// serve reads the messages of one client until its connection closes,
+// and passes each to respond.
 func (w *indiWorld) serve(name string, s *fakeServer, c *inditest.Conn) {
 	decoder := xml.NewDecoder(bufio.NewReader(c))
 	for {
@@ -360,11 +379,14 @@ func (w *indiWorld) serve(name string, s *fakeServer, c *inditest.Conn) {
 			c.Close()
 			return
 		}
-		w.answer(name, s, c, v)
+		w.respond(name, s, c, v)
 	}
 }
 
-func (w *indiWorld) answer(name string, s *fakeServer, c *inditest.Conn, v inditest.Vector) {
+// respond handles one message from a client: a getProperties, a set
+// vector that it relays to the drivers that snoop it, or a new vector
+// that changes a driver's property.
+func (w *indiWorld) respond(name string, s *fakeServer, c *inditest.Conn, v inditest.Vector) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	tag := v.XMLName.Local
@@ -438,7 +460,8 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *inditest.Conn, v indit
 		d.shutterFollowsPark(s)
 	}
 	s.broadcast(p.Set())
-	// An abort ends what moves, as the simulators' abort does.
+	// An abort property sets the Busy property that it aborts to Ok, as
+	// the simulators' abort does.
 	if moving, ok := aborts[p.Name]; ok {
 		if target := d.find(moving); target != nil && target.State == "Busy" {
 			target.State = "Ok"
@@ -476,21 +499,22 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *inditest.Conn, v indit
 	}
 }
 
-// hold makes a driver never answer a change to one property.
+// hold makes a driver ignore every change to one property.
 func (w *indiWorld) hold(device, property string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.held[device+"."+property] = true
 }
 
-// changes answers the changes that clients sent, in order.
+// changes returns the changes that clients sent, in order.
 func (w *indiWorld) changes() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return slices.Clone(w.sent)
 }
 
-// connected answers the devices of one server that are connected now.
+// connected returns the sorted names of the devices of one server that
+// are connected.
 func (w *indiWorld) connected(server string) []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -506,15 +530,16 @@ func (w *indiWorld) connected(server string) []string {
 	return out
 }
 
-// release makes a held property's driver answer again. A change it did
-// not answer stays unanswered, as a real driver's would.
+// release undoes hold. A change sent while the property was held gets
+// no response.
 func (w *indiWorld) release(device, property string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	delete(w.held, device+"."+property)
 }
 
-// count answers how many changes the clients sent to one property.
+// count returns how many changes clients sent to one property of one
+// server, where property is named "<device>.<property>".
 func (w *indiWorld) count(server, property string) int {
 	n := 0
 	for _, change := range w.changes() {
@@ -545,9 +570,9 @@ func (w *indiWorld) setState(server, device, property, state string) {
 	}
 }
 
-// state answers a property's state on one server, or "" when no
-// driver of the server defines it. A driver that restarts defines its
-// properties again as its transcript does.
+// state returns a property's state on one server, or "" when no driver
+// of the server defines it. After a driver restarts, the state is the
+// one in its transcript.
 func (w *indiWorld) state(server, device, property string) string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -562,7 +587,7 @@ func (w *indiWorld) state(server, device, property string) string {
 }
 
 // report sets one member of a property and sends the update to every
-// client, as a driver reports a reading.
+// client, as a driver does with a new reading.
 func (w *indiWorld) report(device, property, member, value string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -582,7 +607,7 @@ func (w *indiWorld) report(device, property, member, value string) {
 	}
 }
 
-// refuse makes a driver answer every change to one property with
+// refuse makes a driver respond to every change to one property with
 // Alert.
 func (w *indiWorld) refuse(device, property string) {
 	w.mu.Lock()
@@ -590,15 +615,16 @@ func (w *indiWorld) refuse(device, property string) {
 	w.refused[device+"."+property] = true
 }
 
-// accept makes a driver that refused a property answer it again.
+// accept undoes refuse.
 func (w *indiWorld) accept(device, property string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	delete(w.refused, device+"."+property)
 }
 
-// listenLate makes a server refuse its next dials after its pod is
-// Ready.
+// listenLate makes the next dials connection attempts to a server fail
+// with ECONNREFUSED, as they do before indiserver opens its port. A dial
+// before the server pod is Ready also fails, and counts.
 func (w *indiWorld) listenLate(server string, dials int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -617,7 +643,7 @@ func (w *indiWorld) cut(server string) {
 	s.conns = nil
 }
 
-// clients answers how many client connections a server holds.
+// clients returns how many client connections a server has open.
 func (w *indiWorld) clients(server string) int {
 	w.mu.Lock()
 	defer w.mu.Unlock()

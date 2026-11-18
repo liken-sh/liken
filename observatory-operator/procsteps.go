@@ -1,20 +1,20 @@
 package main
 
-// The Activation and Deactivation steps run the procedures of the two
-// lifecycle triggers. The tree orders them: activation runs the
-// Observatory and then its devices, then the Telescope and then its
-// devices, then the devices of each OpticalTrain, and deactivation
-// runs the same tiers in reverse. The resources of one tier run in
-// parallel, so a dome unparks before the mount does, and the mount
-// parks before the dome does, with no order declared. Each step waits
-// until every run it started has ended, so the next lifecycle step
-// never begins under a procedure that still runs.
+// The Activation and Deactivation steps run the procedures of a
+// reservation's lifecycle triggers. Activation runs these tiers in turn: the Observatory, its devices,
+// the Telescope, its devices without an optical train, then its devices
+// that name one. Deactivation runs the same tiers in reverse. The
+// resources of one tier run in parallel and declare no order among
+// themselves, so a dome can unpark before the mount does, and the mount
+// can park before the dome does. A step waits for every run it started
+// to end, so no procedure is still running when the next lifecycle step
+// begins.
 //
 // Activation runs the devices that the tree places on each server.
-// Deactivation runs the devices whose driver's pod runs on each server,
-// whether or not their parents still place them there, because a person
-// can delete a device or its train with the reservation, and a driver
-// that still runs can still close a dust cap or warm a camera.
+// Deactivation runs the devices whose driver pod runs on each server,
+// even when their parents no longer place them there. A person can
+// delete a device or its train together with the reservation, and a
+// driver that still runs can still close a dust cap or warm a camera.
 
 import (
 	"context"
@@ -27,8 +27,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// stepRun is one resource's run in a step, with the transition time it
-// answers. on is the server that a device left, for a run that acts
+// stepRun is one resource's run in a step. since is the transition time
+// of the run. on is the server that a device left, for a run that acts
 // through the driver that still runs there (procCall.on), and zero for
 // every other run.
 type stepRun struct {
@@ -43,7 +43,8 @@ type stepPlan struct {
 	tiers   [][]stepRun
 }
 
-// runners answers the runs of the plan that have actions.
+// runners returns the runs of the plan whose resource has actions for the
+// plan's trigger.
 func (p *stepPlan) runners() []stepRun {
 	var out []stepRun
 	for _, tier := range p.tiers {
@@ -56,8 +57,8 @@ func (p *stepPlan) runners() []stepRun {
 	return out
 }
 
-// event answers the step as the event that each action's after waits
-// on: the runs of the same step.
+// event returns the event that an action's after field waits on in this
+// step. Its members are the resources that have a run in the step.
 func (p *stepPlan) event() event {
 	return event{member: func(_ *tree, key string) (membership, bool) {
 		for _, m := range p.runners() {
@@ -69,11 +70,11 @@ func (p *stepPlan) event() event {
 	}}
 }
 
-// tier answers the resources of a list of devices on one server with
-// one transition time. A device that its parents no longer place on the
-// server, while its driver still runs there, is a resource in the place
-// it left, as a leaver is (leaves.go), so its deactivation resolves its
-// references there.
+// tier returns the runs of devices on one server, all with one
+// transition time. When a device's parents no longer place it on the
+// server but its driver still runs there, the run uses the resource that
+// leaver builds (leaves.go), so the deactivation resolves references on
+// the server that the device left.
 func tier(t *tree, ref serverRef, devices []*device, since time.Time) []stepRun {
 	var out []stepRun
 	for _, d := range devices {
@@ -86,9 +87,9 @@ func tier(t *tree, ref serverRef, devices []*device, since time.Time) []stepRun 
 	return out
 }
 
-// siteTiers are the Observatory and the devices of its server, the
-// devices that run a driver before the devices they serve
-// (deviceTiers).
+// siteTiers returns the Observatory as the first tier, then the devices
+// of its server. Devices that run a driver come before the devices they
+// serve (deviceTiers).
 func siteTiers(t *tree, site *observatory.Observatory, devices []*device, since time.Time) [][]stepRun {
 	ref := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
 	tiers := [][]stepRun{{{res: ofObservatory(site), since: since}}}
@@ -98,12 +99,14 @@ func siteTiers(t *tree, site *observatory.Observatory, devices []*device, since 
 	return tiers
 }
 
-// telescopeTiers are the Telescope, the devices of its server that name
-// no train, and the devices that name one, the devices that run a
-// driver before the devices they serve (deviceTiers). A device's own
-// spec.opticalTrain sorts it, not the train: in the Deactivation step a
-// device whose train a person deleted still runs on the server and
-// still has to run its deactivation after the devices of the telescope.
+// telescopeTiers returns the Telescope as the first tier, then the
+// devices of its server that name no optical train, then the devices
+// that name one. Within each group, devices that run a driver come
+// before the devices they serve (deviceTiers). The device's own
+// spec.opticalTrain decides the group, not the OpticalTrain resource,
+// because a device whose train a person deleted still runs on the server
+// during Deactivation, and it must still deactivate before the devices
+// that name no train.
 func telescopeTiers(t *tree, telescope *observatory.Telescope, devices []*device, since time.Time) [][]stepRun {
 	ref := serverRef{observatory.TelescopeKind, telescope.Metadata.Name}
 	var own, trains []*device
@@ -121,10 +124,9 @@ func telescopeTiers(t *tree, telescope *observatory.Telescope, devices []*device
 	return tiers
 }
 
-// withoutLacking answers tiers without the devices whose INDI device
-// does not serve their interface (detect). Such a device has no run of
-// the transition, so if its driver defines the interface later, its
-// activation runs then (lateactivation.go).
+// withoutLacking removes the devices whose INDI device does not
+// implement their kind's interface (lackingOf). If the driver defines
+// the interface later, their activation runs then (lateactivation.go).
 func (o *operator) withoutLacking(tiers [][]stepRun) [][]stepRun {
 	out := make([][]stepRun, 0, len(tiers))
 	for _, members := range tiers {
@@ -135,10 +137,10 @@ func (o *operator) withoutLacking(tiers [][]stepRun) [][]stepRun {
 	return out
 }
 
-// runTiers runs tiers from..to of a plan in order, the runs of each
-// tier in parallel, and copies their actions into the step's record as
-// they change. It answers the first failure of a tier, after every run
-// of the tier has ended.
+// runTiers runs plan.tiers[from:to] in order. The runs of one tier run
+// in parallel, and their actions are copied into
+// the step's record as they change. When every run of a tier has ended,
+// runTiers returns the first error of the tier and starts no later tier.
 func (r *runner) runTiers(ctx context.Context, w *stepWork, plan *stepPlan, from, to int, ending bool) error {
 	ev := plan.event()
 	for _, members := range plan.tiers[from:to] {
@@ -162,8 +164,8 @@ func (r *runner) runTiers(ctx context.Context, w *stepWork, plan *stepPlan, from
 	return nil
 }
 
-// follow copies the actions of a plan's runs into the step's record
-// after each change, until the group of runs ends.
+// follow copies the actions of the plan's runs into the step's record
+// each time one changes, until every run in group has ended.
 func (r *runner) follow(w *stepWork, plan *stepPlan, group *sync.WaitGroup) {
 	finished := make(chan struct{})
 	go func() {
@@ -182,17 +184,17 @@ func (r *runner) follow(w *stepWork, plan *stepPlan, group *sync.WaitGroup) {
 	}
 }
 
-// copyActions copies the actions of a plan's runs into the step's
-// record, each with its resource, and sets the step's summary to the
-// actions that run now. The record is written when the summary
-// changes, so each write changes what `kubectl get rsv -w` prints, and
-// the step's end writes the last copy.
+// copyActions copies the actions of the plan's runs, each with its
+// resource, into the step's record, and sets the step's summary to the
+// actions that are running. A change to the summary is written to the
+// Reservation, so `kubectl get rsv -w` prints it. The end of the step
+// writes the final copy.
 func (r *runner) copyActions(w *stepWork, plan *stepPlan) {
 	var actions []observatory.StepAction
 	var running []string
 	for _, m := range plan.runners() {
 		run, ok := r.o.runs.get(m.res.record(), plan.trigger)
-		if !ok || !answers(run, m.since, time.Time{}) {
+		if !ok || !isRunFor(run, m.since, time.Time{}) {
 			continue
 		}
 		for _, a := range run.Actions {
@@ -208,7 +210,8 @@ func (r *runner) copyActions(w *stepWork, plan *stepPlan) {
 	}
 }
 
-// ran says what a plan's runs did, for the step's summary.
+// ran returns the step's outcome: skipped when no run has actions, and
+// done otherwise, with notes added to the summary.
 func ran(plan *stepPlan, notes []string) (outcome, error) {
 	var names []string
 	for _, m := range plan.runners() {
@@ -220,12 +223,12 @@ func ran(plan *stepPlan, notes []string) (outcome, error) {
 	return done("%s", strings.Join(append([]string{"ran the " + plan.trigger + " of " + strings.Join(names, ", ")}, notes...), "; "))
 }
 
-// activation runs the activation procedures. Under the observatory's
-// lock, it makes the Observatory Active, unless another reservation
-// did, and runs the observatory's tiers. A second reservation in the
-// observatory waits for the lock, and then finds those runs Done. It
-// then makes the Telescope Active from the step's start, and runs the
-// telescope's tiers.
+// activation runs the activation procedures. It takes the observatory's
+// lock, makes the Observatory Active unless another reservation already
+// did, runs the observatory's tiers, and releases the lock. A second
+// reservation on the observatory waits for the lock, and then finds
+// those runs Done. Then it makes the Telescope Active from the start of
+// the step, and runs the telescope's tiers.
 func (r *runner) activation(ctx context.Context, w *stepWork) (outcome, error) {
 	t := r.o.snapshot()
 	telescope, site, err := r.siteOf(t)
@@ -238,9 +241,9 @@ func (r *runner) activation(ctx context.Context, w *stepWork) (outcome, error) {
 		return outcome{}, err
 	}
 	siteSince := r.o.activity.set(observatoryKey(site.Metadata.Name), true, stamp(), r.name)
-	// A telescope turns Active at the start of its holder's Activation
-	// step. A retry starts the step again, and the telescope keeps the
-	// time it turned Active, so a run that is Done stays Done.
+	// A telescope becomes Active at the start of its holder's Activation
+	// step. A retry of the step keeps the original time, so a run that is
+	// Done stays Done.
 	scopeKey := telescopeKey(telescope.Metadata.Name)
 	scopeSince := start
 	if held := r.o.activity.get(scopeKey); held.active {
@@ -261,9 +264,9 @@ func (r *runner) activation(ctx context.Context, w *stepWork) (outcome, error) {
 	return ran(plan, r.coolerNotes(t, telescope))
 }
 
-// coolerNotes names each camera of the telescope whose driver has a
-// cooler and whose activation does not cool it, so a missing procedure
-// is not silent.
+// coolerNotes returns a note for each camera of the telescope whose
+// driver has a cooler (CCD_COOLER) and whose spec.activation has no cool
+// action, so the missing procedure shows in the step's summary.
 func (r *runner) coolerNotes(t *tree, telescope *observatory.Telescope) []string {
 	ref := serverRef{observatory.TelescopeKind, telescope.Metadata.Name}
 	var notes []string
@@ -278,8 +281,8 @@ func (r *runner) coolerNotes(t *tree, telescope *observatory.Telescope) []string
 	return notes
 }
 
-// coolSetpoint answers the setpoint of a camera's first cool action in
-// its activation, or nil when it has none.
+// coolSetpoint returns the setpoint of the first cool action in a
+// camera's spec.activation, or nil when it has none.
 func coolSetpoint(d *device) *float64 {
 	for _, a := range d.object.Spec.Activation {
 		if a.Cool != nil {
@@ -289,14 +292,14 @@ func coolSetpoint(d *device) *float64 {
 	return nil
 }
 
-// deactivation runs the deactivation procedures, while every device is
-// still connected. It ends the Telescope's activity from the step's
-// start, and runs the telescope's tiers in reverse. Then, under the
-// observatory's lock, when every other telescope in the observatory
-// has ended its activity and run its tiers, it ends the Observatory's
-// activity and runs the observatory's tiers in reverse. An action on a device that is not
-// connected, after an activation that failed before it connected the
-// device, is Skipped.
+// deactivation runs the deactivation procedures while every device is
+// still connected. It ends the Telescope's activity from the start of
+// the step, and runs the telescope's tiers in reverse. Then it takes the
+// observatory's lock. When every other telescope in the observatory has
+// ended its activity and run its tiers, it ends the Observatory's
+// activity and runs the observatory's tiers in reverse. An action on a
+// device that is not connected is Skipped, as happens when an
+// activation failed before it connected the device.
 func (r *runner) deactivation(ctx context.Context, w *stepWork) (outcome, error) {
 	t := r.o.snapshot()
 	telescope, site, err := r.siteOf(t)
@@ -326,8 +329,9 @@ func (r *runner) deactivation(ctx context.Context, w *stepWork) (outcome, error)
 		return ran(plan, append(notes, "Observatory "+site.Metadata.Name+" stays active for Telescope "+other))
 	}
 	key := observatoryKey(site.Metadata.Name)
-	// The observatory's tiers run when this step ends its activity, or
-	// when this step ended it before an operator restart.
+	// Run the observatory's tiers when the Observatory is still Active,
+	// or when this reservation already ended it before an operator
+	// restart. Skip them when another reservation ended it.
 	if state := r.o.activity.get(key); !state.active && state.by != r.name {
 		return ran(plan, notes)
 	}
@@ -342,12 +346,12 @@ func (r *runner) deactivation(ctx context.Context, w *stepWork) (outcome, error)
 	return ran(plan, notes)
 }
 
-// otherTelescope answers another telescope in the observatory that is
-// Active, or that has not finished its deactivation tiers, or "". Two
-// reservations that end together both run their Deactivation steps
-// while both hold their telescopes, so a test of the holders would
-// leave the observatory Active. The last telescope to settle ends the
-// observatory's activity, after every mount ran its deactivation.
+// otherTelescope returns the name of another telescope in the
+// observatory that is Active or has not finished its deactivation
+// tiers, or "" when there is none. It reads the telescopes' activity,
+// not their holders, because two reservations that end together both
+// still hold their telescopes during Deactivation. Each would find the
+// other, and neither would end the observatory's activity.
 func (r *runner) otherTelescope(site string) string {
 	t := r.o.snapshot()
 	for _, name := range sortedNames(t.telescopes) {
@@ -361,6 +365,7 @@ func (r *runner) otherTelescope(site string) string {
 	return ""
 }
 
+// reversed returns tiers in the opposite order.
 func reversed(tiers [][]stepRun) [][]stepRun {
 	out := make([][]stepRun, 0, len(tiers))
 	for i := len(tiers) - 1; i >= 0; i-- {

@@ -5,10 +5,10 @@ import (
 	"strings"
 )
 
-// fieldsYAML writes the schema of fields as the properties of a CRD
-// schema, at the left margin, in the style of the hand-written parts:
-// the type first, then the description folded, then what the type
-// holds.
+// fieldsYAML renders fields as the YAML properties of a CRD schema,
+// starting at the left margin. It matches the style of the hand-written
+// parts of the CRD templates: type first, then the folded description,
+// then the nested content.
 func fieldsYAML(fields []field) string {
 	var b strings.Builder
 	for _, f := range fields {
@@ -69,8 +69,8 @@ func writeField(b *strings.Builder, indent int, key, description string, s *shap
 	}
 }
 
-// yamlBooleans are the words that YAML 1.1 reads as a boolean, so a
-// key that is one of them is quoted.
+// yamlBooleans lists the words that YAML 1.1 parses as booleans. A key
+// with one of these names must be quoted.
 var yamlBooleans = map[string]bool{
 	"y": true, "n": true, "yes": true, "no": true, "on": true, "off": true, "true": true, "false": true,
 }
@@ -88,8 +88,9 @@ func writeStringLimits(b *strings.Builder, pad string, s *shape) {
 	}
 }
 
-// writeDescription writes a folded description that tidy wraps again
-// at the indentation where the CRD puts it.
+// writeDescription writes description as a folded YAML scalar. It wraps
+// the text at the column that the CRD's indentation gives it, so that
+// tidy, which rewraps descriptions, leaves it unchanged.
 func writeDescription(b *strings.Builder, indent int, text string) {
 	pad := strings.Repeat(" ", indent)
 	b.WriteString(pad + "description: >-\n")

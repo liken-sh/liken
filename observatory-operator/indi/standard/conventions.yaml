@@ -1,14 +1,14 @@
-# The properties that drivers share by convention. No file in
-# libindi's libs/ defines them, so no bare driver captures them, but
-# KStars, Ekos, and PHD2 read them by name from every driver that has
-# them. Each entry gives the structure that most drivers in
-# indi-3rdparty v2.2.0 define, and names the definitions it was read
-# from. `interface` names the captures of the interface it belongs to.
+# INDI properties that drivers share by convention. libindi's libs/
+# does not define them, so the captures of the bare drivers do not
+# include them, but KStars, Ekos, and PHD2 look them up by name. Each
+# entry is the structure that most drivers in indi-3rdparty v2.2.0
+# define, and its comment cites the source lines. `standard.Load` adds
+# each entry to the properties of its `interface`.
 #
-# `simulators` lists the directories of indi/inditest/testdata whose transcripts
-# define the property. A test fails when that list is wrong, and the
-# report lists each place where a simulator's definition differs from
-# the entry.
+# `simulators` lists the directories of indi/inditest/testdata whose
+# transcripts define the property. `standard.Load` fails when that list
+# is wrong, and reports each difference between the entry and a
+# simulator's definition.
 
 - name: CCD_GAIN
   interface: ccd

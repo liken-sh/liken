@@ -10,10 +10,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// A number that JSON cannot hold, such as the NaN of a driver whose
-// sensor fails, stays absent from the typed field and from the limits,
-// because a status that does not encode is never written, and the rest
-// of the status would go stale with it.
+// A NaN or infinite number, such as a failed sensor's reading, is left
+// out, because a status that JSON cannot encode is never written.
 func TestANumberThatJSONCannotHoldStaysAbsent(t *testing.T) {
 	t.Parallel()
 	nan := math.NaN()
@@ -36,13 +34,12 @@ func TestANumberThatJSONCannotHoldStaysAbsent(t *testing.T) {
 	}
 	status := deviceStatus{Standard: camera}
 	if _, err := json.Marshal(status); err != nil {
-		t.Errorf("the status does not encode: %v", err)
+		t.Errorf("encoding the status: %v, want no error", err)
 	}
 }
 
-// The typed fields go beside the shared fields of a status, as the
-// status of each kind embeds them, and a resource that holds no
-// property writes the shared fields alone.
+// The typed fields encode at the top level of the status, beside the
+// shared fields, and absent typed fields encode to nothing.
 func TestTheTypedFieldsAreWrittenBesideTheRest(t *testing.T) {
 	t.Parallel()
 	value := 3.0
@@ -67,9 +64,6 @@ func TestTheTypedFieldsAreWrittenBesideTheRest(t *testing.T) {
 	}
 }
 
-// libindi's clients read a number whose min equals its max as one with
-// no range, so such a range carries no limit, and a read-only number
-// limits nothing that a client sends.
 func TestTheLimitsHoldOnlyTheRangesAClientMeets(t *testing.T) {
 	t.Parallel()
 	r := newReader([]indi.Property{

@@ -1,10 +1,8 @@
 package main
 
-// The log of each reservation. `kubectl logs` tells the same story as
-// the status: one line when the phase changes, one when a step starts,
-// and one when a step ends, with what it did and how long it took.
-// Each line leads with the reservation's name, so the lines of
-// several reservations can be read apart.
+// The operator's log lines for reservations: one when the phase
+// changes, one when a step starts or resumes, and one when a step ends,
+// with its summary and how long it took.
 
 import (
 	"fmt"
@@ -15,18 +13,18 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// logf writes one line to the operator's log, with the prefix that
-// begins every line. The prefix names the namespace, because the
-// observatories of several namespaces can use the same names.
+// logf writes one line to the operator's log. The prefix has the
+// namespace, because resources in different namespaces can have the
+// same names.
 func (o *operator) logf(format string, args ...any) {
 	fmt.Fprintf(o.logs, "observatory-operator: "+o.namespace+": "+format+"\n", args...)
 }
 
-// timedOut begins the summary of a step that passed its deadline.
+// timedOut starts the summary of a step that passed its deadline.
 const timedOut = "Timed out"
 
-// stepLine says how a step ended: "Prepare done in 19 s: cooled
-// east-main to -10 °C", or "Connect failed: ..." for a failed step.
+// stepLine returns the log line for a step that ended, such as
+// "Activation done in 19 s: cooled Camera east-main to -10 °C".
 func stepLine(s *observatory.Step) string {
 	if s.State == observatory.StepFailed {
 		return failedMessage(s)
@@ -41,14 +39,16 @@ func stepLine(s *observatory.Step) string {
 	return line
 }
 
-// failedMessage names a failed step and says why it failed. The Ready
-// condition, the Warning Event, and the log carry it.
+// failedMessage returns the step's name and the reason it failed. The
+// log line, the Warning Event, and the Ready condition all use it.
 func failedMessage(s *observatory.Step) string {
 	return string(s.Name) + " " + lowerFirst(s.Summary)
 }
 
-// phaseLine names a reservation's new phase, and the endpoint when it
-// is Ready. The step line before it gives the reason for a failure.
+// phaseLine returns the log line for a reservation's new phase. For a
+// Ready reservation it is the Ready condition's message, which has the
+// endpoint. A Failed phase logs only "Failed", because the step line
+// before it already has the reason.
 func phaseLine(s *observatory.ReservationStatus) string {
 	if s.Phase == observatory.ReservationReady {
 		for _, c := range s.Conditions {
@@ -60,9 +60,9 @@ func phaseLine(s *observatory.ReservationStatus) string {
 	return string(s.Phase)
 }
 
-// sentence makes a message start with a capital letter. The operator
-// writes its messages from fragments that start with a verb or a
-// state, so the first letter is never part of a resource's name.
+// sentence capitalizes the first letter of a message. It is safe
+// because the operator's message fragments begin with a verb or a
+// state, never with a resource's name.
 func sentence(s string) string {
 	if s == "" {
 		return s
@@ -71,9 +71,9 @@ func sentence(s string) string {
 	return string(unicode.ToUpper(r)) + s[size:]
 }
 
-// lowerFirst makes a sentence fit after a colon. A first word with a
-// capital after its first letter keeps its case: a word in capitals,
-// such as INDI, and a kind, such as WeatherStation.
+// lowerFirst lowercases the first letter of a sentence so that it can
+// follow a colon. It leaves the sentence alone when its first word has
+// another capital, as in INDI or a kind such as WeatherStation.
 func lowerFirst(s string) string {
 	if s == "" {
 		return s

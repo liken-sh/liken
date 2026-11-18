@@ -1,10 +1,10 @@
 // The replay server answers each message of a client with the bytes
-// that indiserver sent in reply to the same message, as the recorder
-// captured them in inditest/testdata/. It parses what the client sends with its
-// own types, so a client that sends a wrong message gets no reply, and
-// its test fails. The client dials it through WithDialer, and each dial
-// is one end of a net.Pipe, so the tests run in a synctest bubble on
-// the fake clock. A real socket would stop that clock.
+// that a real indiserver sent in reply to the same message, from the
+// transcripts in inditest/testdata/. It parses what the client sends
+// with its own types, so a client that sends a wrong message gets no
+// reply, and its test fails. The client dials it through WithDialer,
+// and each connection is a net.Pipe, so the tests run on the fake
+// clock of a synctest bubble, which a real socket would stop.
 
 package indi
 
@@ -49,11 +49,11 @@ func (r request) value(member string) (string, bool) {
 	return "", false
 }
 
-// answers reports whether a recorded phase's message asks for the same
-// change as the request. The client may send members that the
-// recorder's message left out, so every member of the phase must be in
-// the request with an equal value.
-func (r request) answers(p capture.Phase) bool {
+// matches reports whether the request makes the same change as the
+// message that a phase's transcript responds to. The client may send more
+// members than that message, so matches checks only that each of the
+// message's members is in the request with an equal value.
+func (r request) matches(p capture.Phase) bool {
 	var want request
 	if err := xml.Unmarshal([]byte(p.Message), &want); err != nil {
 		panic(err)
@@ -86,7 +86,7 @@ type replayServer struct {
 	phases    []capture.Phase
 
 	mutex sync.Mutex
-	// closed refuses every dial, as a closed port does.
+	// closed makes DialContext refuse every dial, as a closed port does.
 	closed   bool
 	conns    []*replayConn
 	requests []request
@@ -115,22 +115,22 @@ func transcript(t *testing.T, simulator, name string) []byte {
 	t.Helper()
 	data, err := inditest.Transcript(simulator, name)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the transcript %s of %s: %v", name, simulator, err)
 	}
 	return data
 }
 
-// replayAddress is the address every test client names. The replay
-// server answers each dial, whatever the address.
+// replayAddress is the address every test client dials. The replay
+// server accepts a dial to any address.
 const replayAddress = "indiserver.test:7624"
 
-// newClient answers a client that dials the replay server.
+// newClient returns a client that dials the replay server.
 func (s *replayServer) newClient() *Client {
 	return NewClient(replayAddress, WithDialer(s))
 }
 
-// DialContext opens one connection to the server, and refuses it after
-// close, the way a closed port answers ECONNREFUSED.
+// DialContext opens one connection to the server. After close it fails
+// with ECONNREFUSED, as a closed port does.
 func (s *replayServer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -145,9 +145,9 @@ func (s *replayServer) DialContext(ctx context.Context, network, address string)
 }
 
 // replayConn queues what the server writes, the way a socket's send
-// buffer does. A net.Pipe has no buffer: the server would block while
-// it writes a baseline, and the client would block while it writes the
-// next request, and neither would read.
+// buffer does. A net.Pipe has no buffer, so the server would block
+// writing a baseline while the client blocked writing its next
+// request, and neither would read.
 type replayConn struct {
 	conn net.Conn
 	out  chan []byte
@@ -217,7 +217,7 @@ func (s *replayServer) serve(conn *replayConn) {
 			if muted {
 				break
 			}
-			if r.answers(p) {
+			if r.matches(p) {
 				conn.write(transcript(s.t, s.simulator, p.Name))
 				break
 			}

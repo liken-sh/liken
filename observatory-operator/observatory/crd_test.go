@@ -1,10 +1,10 @@
 package observatory
 
-// These tests read the CRDs in deploy/ through the same code the API
-// server runs: the conversion to the internal schema, the check of the
-// whole definition, the structural validator, and the CEL validator.
-// A CRD that the cluster would refuse, or a resource it would refuse,
-// fails here first.
+// These tests load the CRDs in deploy/ with the same code that the API
+// server runs: the conversion to the internal schema, the validation of
+// the whole definition, the structural validator, and the CEL
+// validator. A CRD or a resource that a cluster would refuse fails
+// here first.
 
 import (
 	"os"
@@ -22,7 +22,6 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// crdPath is the file that holds one kind's CRD.
 func crdPath(kind Kind) string {
 	return filepath.Join("..", "deploy", kind.Plural+"-crd.yaml")
 }
@@ -31,7 +30,7 @@ func loadCRD(t *testing.T, kind Kind) *apiextensionsv1.CustomResourceDefinition 
 	t.Helper()
 	raw, err := os.ReadFile(crdPath(kind))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CRD file of %s: %v", kind.Name, err)
 	}
 	crd := &apiextensionsv1.CustomResourceDefinition{}
 	if err := yaml.UnmarshalStrict(raw, crd); err != nil {
@@ -40,7 +39,7 @@ func loadCRD(t *testing.T, kind Kind) *apiextensionsv1.CustomResourceDefinition 
 	return crd
 }
 
-// schemaOf is the schema of the one version that a CRD serves.
+// schemaOf returns the schema of the only version that a CRD serves.
 func schemaOf(t *testing.T, kind Kind) *apiextensionsv1.JSONSchemaProps {
 	t.Helper()
 	return loadCRD(t, kind).Spec.Versions[0].Schema.OpenAPIV3Schema
@@ -53,7 +52,7 @@ func newScheme() *runtime.Scheme {
 }
 
 // internalSchema converts a CRD's schema to the internal type that the
-// validators take, the same conversion the API server does.
+// validators take, as the API server does.
 func internalSchema(t *testing.T, kind Kind) *apiextensions.JSONSchemaProps {
 	t.Helper()
 	internal := &apiextensions.JSONSchemaProps{}
@@ -63,12 +62,12 @@ func internalSchema(t *testing.T, kind Kind) *apiextensions.JSONSchemaProps {
 	return internal
 }
 
-// The deploy/ directory holds one CRD for each kind and nothing else
-// that a test does not name, so a CRD with no Go type fails here.
+// The deploy/ directory has one CRD for each kind and no other CRD
+// file, so a CRD with no matching Go kind fails here.
 func TestDeployHoldsOneCRDForEachKind(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join("..", "deploy", "*-crd.yaml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the CRD files in deploy: %v", err)
 	}
 	var want []string
 	for _, kind := range Kinds {
@@ -77,7 +76,7 @@ func TestDeployHoldsOneCRDForEachKind(t *testing.T) {
 	slices.Sort(files)
 	slices.Sort(want)
 	if !slices.Equal(files, want) {
-		t.Errorf("CRD files = %v, want %v", files, want)
+		t.Errorf("deploy holds the CRD files %v, want %v", files, want)
 	}
 }
 
@@ -105,9 +104,9 @@ func TestEachCRDNamesItsKind(t *testing.T) {
 	}
 }
 
-// Each CRD serves one version, stores it, and splits the status into
-// its own subresource, so the operator's status writes never touch a
-// spec a person wrote. A kind with no status has no subresource.
+// Each CRD serves one version, stores that version, and has a status
+// subresource, so the operator's status writes cannot change a spec
+// that a person wrote. A kind with no status has no subresource.
 func TestEachCRDServesOneVersionWithAStatusSubresource(t *testing.T) {
 	for _, kind := range Kinds {
 		t.Run(kind.Name, func(t *testing.T) {
@@ -127,9 +126,10 @@ func TestEachCRDServesOneVersionWithAStatusSubresource(t *testing.T) {
 	}
 }
 
-// The short names, and the names that kubectl already answers for
-// built-in kinds and the kinds of common add-ons. A short name that
-// collides makes kubectl pick one of the two kinds without saying so.
+// shortNames lists each kind's short names. takenNames lists the names
+// that built-in kinds and the kinds of common add-ons already use. When
+// a short name collides with one of them, kubectl picks one of the two
+// kinds without reporting the conflict.
 var shortNames = map[string][]string{
 	"Observatory": {"obs"}, "Telescope": {"tel"}, "OpticalTube": {"ota"},
 	"OpticalTrain": {"train"}, "Mount": {"mnt"}, "Camera": {"cam"},
@@ -160,25 +160,25 @@ func TestTheShortNamesAreUniqueAndFree(t *testing.T) {
 		}
 		for _, name := range append([]string{names.Singular, names.Plural}, names.ShortNames...) {
 			if other, held := seen[name]; held {
-				t.Errorf("%s and %s both answer %q", other, kind.Name, name)
+				t.Errorf("%s and %s both use the name %q", other, kind.Name, name)
 			}
 			seen[name] = kind.Name
 		}
 		for _, name := range names.ShortNames {
 			if slices.Contains(takenNames, name) {
-				t.Errorf("%s's short name %q is taken", kind.Name, name)
+				t.Errorf("the short name %q of %s is already used by another resource", name, kind.Name)
 			}
 		}
 	}
 }
 
-// The fields that a list or a watch can select on, by kind. Each kind
-// with a parent selects on the parent's field, so `kubectl get cam
-// --field-selector spec.opticalTrain=east-imaging` lists one train's
-// cameras. A Reservation selects on its holder too, so
-// astrophotography-operator lists and watches only the reservations
-// that it holds. The API server checks that each path names a field of
-// a type it can select on (TestTheAPIServerWouldAcceptEachCRD).
+// selectableFields lists, by kind, the fields that a list or a watch can
+// select on. Each kind with a parent selects on the parent's field, so
+// `kubectl get cam --field-selector spec.opticalTrain=east-imaging`
+// lists one train's cameras. A Reservation also selects on its holder,
+// so astrophotography-operator can list and watch only its own
+// reservations. TestTheAPIServerWouldAcceptEachCRD checks that each
+// path names a field of a type that the API server can select on.
 var selectableFields = map[string][]string{
 	"Observatory": nil, "Telescope": {".spec.observatory"},
 	"OpticalTube": {".spec.telescope"}, "OpticalTrain": {".spec.telescope"},
@@ -209,33 +209,34 @@ func TestEachCRDSelectsOnItsFields(t *testing.T) {
 	}
 }
 
-// The API server checks the whole definition before it serves it,
-// and that check compiles each CEL rule and estimates its cost. A rule
-// that the estimator refuses makes the cluster refuse the whole CRD.
+// The API server validates the whole definition before it serves it.
+// That validation compiles each CEL rule and estimates its cost, and a
+// rule whose estimated cost is too high makes the API server refuse
+// the whole CRD.
 func TestTheAPIServerWouldAcceptEachCRD(t *testing.T) {
 	for _, kind := range Kinds {
 		t.Run(kind.Name, func(t *testing.T) {
 			internal := &apiextensions.CustomResourceDefinition{}
 			if err := newScheme().Convert(loadCRD(t, kind), internal, nil); err != nil {
-				t.Fatal(err)
+				t.Fatalf("converting the CRD of %s to the internal type: %v", kind.Name, err)
 			}
-			// The API server fills the stored versions in when it creates
-			// the definition; a manifest states none.
+			// The API server sets the stored versions when it creates
+			// the definition, so a manifest does not have them.
 			internal.Status.StoredVersions = []string{Version}
 			if errs := crdvalidation.ValidateCustomResourceDefinition(t.Context(), internal); len(errs) > 0 {
-				t.Errorf("the API server would refuse the definition: %v", errs)
+				t.Errorf("the API server would refuse the CRD of %s: %v", kind.Name, errs)
 			}
 		})
 	}
 }
 
 // `kubectl explain` prints each field's description, and the
-// descriptions hold the units, so every field has one.
+// descriptions give the units, so every field needs one.
 func TestEveryFieldHasADescription(t *testing.T) {
 	for _, kind := range Kinds {
 		t.Run(kind.Name, func(t *testing.T) {
 			for _, path := range undescribed(schemaOf(t, kind), "") {
-				t.Errorf("%s has no description", path)
+				t.Errorf("the schema field %s has no description", path)
 			}
 		})
 	}
@@ -255,10 +256,11 @@ func undescribed(schema *apiextensionsv1.JSONSchemaProps, path string) []string 
 	return missing
 }
 
-// A printer column whose path names no field prints an empty column
+// A printer column whose path matches no field prints an empty column
 // with no error, so each path must resolve in the schema. A column of
-// type string prints any value, so only the other types must match.
-func TestEachPrinterColumnNamesAField(t *testing.T) {
+// type string prints any value, so only the other types must match the
+// field's type.
+func TestEachPrinterColumnMatchesAField(t *testing.T) {
 	filter := regexp.MustCompile(`\[[^\]]*\]`)
 	for _, kind := range Kinds {
 		t.Run(kind.Name, func(t *testing.T) {
@@ -268,7 +270,7 @@ func TestEachPrinterColumnNamesAField(t *testing.T) {
 			if !slices.ContainsFunc(columns, func(c apiextensionsv1.CustomResourceColumnDefinition) bool {
 				return c.Name == "Age" && c.Priority == 0
 			}) {
-				t.Error("no Age column in the default view")
+				t.Error("the default view has no Age column")
 			}
 			for _, column := range columns {
 				if column.JSONPath == ".metadata.creationTimestamp" {
@@ -276,17 +278,17 @@ func TestEachPrinterColumnNamesAField(t *testing.T) {
 				}
 				path := filter.ReplaceAllString(column.JSONPath, "[]")
 				if field := resolve(schema, strings.Split(strings.TrimPrefix(path, "."), ".")); field == nil {
-					t.Errorf("column %s: %s names no field", column.Name, column.JSONPath)
+					t.Errorf("the JSONPath %s of column %s matches no field of the schema", column.JSONPath, column.Name)
 				} else if column.Type != "string" && field.Type != column.Type {
-					t.Errorf("column %s is %s, and %s is %s", column.Name, column.Type, column.JSONPath, field.Type)
+					t.Errorf("column %s has type %s, want %s, the type of the field at %s", column.Name, column.Type, field.Type, column.JSONPath)
 				}
 			}
 		})
 	}
 }
 
-// resolve walks a column's path through the schema. A step that ends
-// in [] steps into the array's items.
+// resolve follows a column's path through the schema. A step that ends
+// in [] continues into the array's items.
 func resolve(schema *apiextensionsv1.JSONSchemaProps, steps []string) *apiextensionsv1.JSONSchemaProps {
 	for _, step := range steps {
 		name, array := strings.CutSuffix(step, "[]")
@@ -305,17 +307,18 @@ func resolve(schema *apiextensionsv1.JSONSchemaProps, steps []string) *apiextens
 	return schema
 }
 
-// `kubectl apply` sends a JSON merge patch to a custom resource, and a
-// merge patch replaces a whole list when it differs from the live one.
-// A default inside a list's items makes the live list differ from the
-// file's list that omits the field, so every apply of an unchanged
-// file reports the resource as configured. So the operator applies
-// those defaults itself, and the schema states none inside a list.
+// `kubectl apply` sends a custom resource a JSON merge patch, which
+// replaces a whole list when it differs from the live one. The API
+// server writes a default inside a list's items into the stored list,
+// so the live list never equals the list in the file, and every apply
+// of an unchanged file reports the resource as configured. So no schema
+// has a default inside a list, and the operator applies those defaults
+// itself.
 func TestNoCRDStatesADefaultInsideAList(t *testing.T) {
 	for _, kind := range Kinds {
 		t.Run(kind.Name, func(t *testing.T) {
 			for _, path := range listDefaults(schemaOf(t, kind), "", false) {
-				t.Errorf("%s has a default inside a list", path)
+				t.Errorf("the schema field %s sets a default inside a list", path)
 			}
 		})
 	}
@@ -336,8 +339,8 @@ func TestListDefaultsFindsADefaultInsideAList(t *testing.T) {
 	}
 }
 
-// listDefaults answers the path of each default under an array's
-// items. A default outside every list is allowed.
+// listDefaults returns the path of each default under an array's items.
+// A default outside every list is allowed.
 func listDefaults(schema *apiextensionsv1.JSONSchemaProps, path string, inList bool) []string {
 	var found []string
 	if inList && schema.Default != nil {

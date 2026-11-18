@@ -1,8 +1,5 @@
 package main
 
-// The job action: a container that the operator runs once as a Job,
-// owned by the resource, with the environment that names what ran it.
-
 import (
 	"fmt"
 	"regexp"
@@ -15,15 +12,16 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// exampleJob is the Job of the example's Observatory, whose activation
-// runs at the first second of the bubble's clock.
+// exampleJob is the name of the Job for the example Observatory's
+// activation, which runs at the first second of the synctest bubble's
+// clock. The name depends on that time.
 const exampleJob = "observatory-lab-activation-a799431dd4"
 
-// exampleJobDone is the record of the example's job in the Activation
-// step.
+// exampleJobDone is the step record for the example's job action in
+// the Activation step.
 const exampleJobDone = "Observatory lab job: busybox:1.38.0 Done: Job " + exampleJob + " succeeded"
 
-// jobNamed answers the Job whose name begins with prefix.
+// jobNamed returns the Job whose name begins with prefix.
 func jobNamed(t *testing.T, w *world, prefix string) job {
 	t.Helper()
 	for _, name := range w.api.names(jobsPath) {
@@ -44,8 +42,9 @@ func environment(j job) []string {
 	return out
 }
 
-// mountWithAJob gives the east mount a job after its unpark, with a
-// variable of its own and one that the operator's own replaces.
+// mountWithAJob adds a job action after the east mount's unpark. The
+// job sets one variable of its own and one, LIKEN_TRIGGER, that the
+// operator's own value overrides.
 func mountWithAJob(w *world) {
 	w.amend(observatory.MountKind, "east", func(spec map[string]any) {
 		spec["activation"] = []any{
@@ -58,7 +57,7 @@ func mountWithAJob(w *world) {
 
 // The operator adds the resource, the trigger, and the INDI server to
 // each Job's environment, after the person's own variables.
-func TestAJobNamesWhatRanIt(t *testing.T) {
+func TestAJobEnvironmentIdentifiesTheResourceTriggerAndServer(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name     string
@@ -150,7 +149,7 @@ func TestAFailedJobFailsTheStepAndARetryRunsItAgain(t *testing.T) {
 		w.retry("east-tonight")
 		r = w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		if text := stepText(stepOf(r, observatory.StepActivation)); !strings.Contains(text, exampleJobDone) {
-			t.Errorf("Activation =\n%s", text)
+			t.Errorf("Activation =\n%s\nwant it to contain %q", text, exampleJobDone)
 		}
 		if n := w.api.creates(jobsPath); n != 2 {
 			t.Errorf("the operator created %d Jobs, want 2", n)
@@ -158,11 +157,12 @@ func TestAFailedJobFailsTheStepAndARetryRunsItAgain(t *testing.T) {
 	})
 }
 
-// A Job that fails names its pod's exit code and the last lines of its
-// termination message, which the kubelet takes from the end of the
-// container's log, bounded to 300 bytes. A pod with no terminated
-// container leaves the Job's own reason.
-func TestAFailedJobSaysWhy(t *testing.T) {
+// A failed Job's error includes its pod's exit code and the last lines
+// of its termination message, at most messageTail bytes. With
+// FallbackToLogsOnError, the kubelet fills the message from the end of
+// the container's log. When no pod has a terminated container, the
+// error has only the Job's own reason.
+func TestAFailedJobErrorIncludesThePodExit(t *testing.T) {
 	t.Parallel()
 	long := strings.Repeat("reading the relay board\n", 40) + "checking the dew heater\n"
 	cases := []struct {
@@ -196,8 +196,8 @@ func TestAFailedJobSaysWhy(t *testing.T) {
 	}
 }
 
-// An operator that restarts while a Job runs finds the Job it created,
-// and creates no second one.
+// An operator that restarts while a Job runs finds the Job it created
+// and does not create a second one.
 func TestANewOperatorFindsTheJobItCreated(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -247,13 +247,13 @@ func TestAJobsNameIsADNSLabel(t *testing.T) {
 		jobName(dome, "triggers[1]", since, 0),
 	}
 	if unique := slices.Compact(slices.Sorted(slices.Values(names))); len(unique) != len(names) {
-		t.Errorf("names repeat: %v", names)
+		t.Errorf("jobName returns the names %v, want all different", names)
 	}
 }
 
-// A device whose train a person deleted with its reservation runs the
-// Job of its deactivation on the server that its pod runs on, so the
-// Job's environment still names that INDI server.
+// When a person deletes a device's train while the reservation is
+// ending, the device's deactivation Job still runs on the device's
+// server. Its environment names the INDI server of the device's pod.
 func TestAJobOfADeviceWhoseTrainIsDeletedNamesItsServer(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

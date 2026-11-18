@@ -1,6 +1,6 @@
-# The typed fields of a `Focuser`, from the standard properties of
-# INDI's FOCUSER interface, with an absolute position and with a timer.
-# curated.go gives the format and the roles.
+# Typed fields of a `Focuser`, from INDI's FOCUSER interface, for both
+# a focuser with an absolute position and one that moves by a timer.
+# curated.go describes the format.
 kind: Focuser
 interfaces: [focuser]
 detect: [FOCUS_MOTION]

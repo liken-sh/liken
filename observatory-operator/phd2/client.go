@@ -1,18 +1,19 @@
 // Package phd2 is a client of PHD2's event server, the API that KStars
-// and astrophotography-operator drive PHD2 through. The server listens
+// and astrophotography-operator use to control PHD2. The server listens
 // on port 4400 for PHD2's first instance and speaks JSON-RPC 2.0 over
-// TCP: each message is one line of JSON that ends in CR LF. PHD2 sends
-// events on the same connection as the answers to requests, in the
-// order it makes them. The protocol is documented only on PHD2's wiki,
-// at https://github.com/OpenPHDGuiding/phd2/wiki/EventMonitoring, and
-// where the wiki is silent the client follows src/event_server.cpp.
+// TCP. Each message is one line of JSON that ends in CR LF. PHD2 sends
+// events on the same connection as the responses to requests, in the
+// order that they happen. The protocol is documented only on PHD2's
+// wiki, at https://github.com/OpenPHDGuiding/phd2/wiki/EventMonitoring,
+// and where the wiki says nothing the client follows
+// src/event_server.cpp.
 //
-// A Client follows the repository's rule for events. Run opens the
-// connection, which is the subscription, and then reads the app state,
-// the calibration, the equipment, and the pixel scale once as the
-// baseline. The events keep the state current after that. When the
-// connection ends, the state empties, and the next Run reads a new
-// baseline. Nothing in the package reads state again on a timer.
+// A Client keeps its state current from events, without polling. Run
+// opens the connection first, so no event is missed. Then it reads the
+// app state, the calibration, the equipment, and the pixel scale once,
+// to set the baseline. Events update the state after that. When the
+// connection ends, the state is emptied, and the next Run reads a new
+// baseline.
 package phd2
 
 import (
@@ -26,53 +27,54 @@ import (
 	"time"
 )
 
-// Port is the event server's port for PHD2's first instance. PHD2
-// listens on 4400 plus the instance number minus one.
+// Port is the event server's port for PHD2's first instance. Instance
+// n listens on 4400 + n - 1.
 const Port = 4400
 
-// DialTimeout bounds the TCP dial of each Run. The caller's context can
-// end the dial sooner.
+// DialTimeout is the timeout of the default dialer.
 const DialTimeout = 10 * time.Second
 
-// writeTimeout bounds each write. A PHD2 that reads nothing for this
-// long is stuck, and the write fails rather than block the caller.
+// writeTimeout is the longest that one write waits. A PHD2 that accepts
+// no data for this long is stuck, and the write fails instead of
+// blocking the caller.
 const writeTimeout = 10 * time.Second
 
-// maxLine bounds one message. The largest answer PHD2 sends is
-// get_star_image, which this client never asks for, and the events
-// are a few hundred bytes.
+// maxLine is the longest message that the client reads. The largest
+// response PHD2 sends is for get_star_image, which this client never
+// requests, and events are a few hundred bytes.
 const maxLine = 1 << 20
 
 var (
-	// ErrRunning is the error of a Run while another Run of the same
-	// Client has not returned.
+	// ErrRunning is returned by a Run that starts while another Run of
+	// the same Client has not returned.
 	ErrRunning = errors.New("phd2: the client is already running")
-	// ErrNotConnected is the error of a request while the client has no
-	// connection.
+	// ErrNotConnected is returned by a request that the client makes
+	// while it has no connection.
 	ErrNotConnected = errors.New("phd2: no connection to PHD2")
-	// ErrDisconnected is the error of a request whose connection ended
-	// before PHD2 answered, and the error that ends Run when PHD2
-	// closes the connection.
+	// ErrDisconnected is returned by a request whose connection ended
+	// before PHD2 responded. Run returns it when PHD2 closes the
+	// connection.
 	ErrDisconnected = errors.New("phd2: the connection ended")
 )
 
-// Dialer opens the connection of each Run. *net.Dialer is one.
+// Dialer opens the connection for each Run. *net.Dialer implements it.
 type Dialer interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
 
-// Option changes a Client that NewClient returns.
+// Option configures a Client in NewClient.
 type Option func(*Client)
 
 // WithDialer makes each Run open its connection through dialer. A test
-// passes a dialer that answers with one end of an in-memory pipe, so it
-// can run on the fake clock of testing/synctest, which a real socket
-// stops.
+// passes a dialer that returns one end of an in-memory pipe, so the
+// client runs on the fake clock of testing/synctest, which a real
+// socket would stop.
 func WithDialer(dialer Dialer) Option { return func(c *Client) { c.dialer = dialer } }
 
-// WithNotify calls notify with the state after each change. It runs
-// on the client's reader, so it must not block and must not call the
-// Client.
+// WithNotify calls notify with a copy of the state after each change.
+// The Client holds its lock while it calls notify, and Run reads no
+// message until notify returns, so notify must not block and must not
+// call a method of the Client.
 func WithNotify(notify func(State)) Option { return func(c *Client) { c.notify = notify } }
 
 // Client is a client of one PHD2. Its methods are safe to call from
@@ -82,8 +84,9 @@ type Client struct {
 	dialer  Dialer
 	notify  func(State)
 
-	// mu guards every field below it. The reader applies each message
-	// under it, so a reader of the state never reads half a message.
+	// mu guards every field from conn to reread. The reader goroutine
+	// applies each message while it holds mu, so State never returns a
+	// state that is half updated by a message.
 	mu      sync.Mutex
 	conn    net.Conn
 	running bool
@@ -92,32 +95,34 @@ type Client struct {
 	nextID  int
 	pending map[int]*request
 	// changed is closed and replaced on every change, which wakes each
-	// WaitFor to check its condition again.
+	// WaitFor so that it checks its condition again.
 	changed chan struct{}
-	// reread holds the reads that events asked for and the refresher
-	// has not sent yet.
+	// reread is the set of reads that an event requested and that refresh
+	// has not sent yet. refresh waits on wake for new entries.
 	reread map[string]bool
 	wake   chan struct{}
 
-	// writing serializes the writes, so two messages never interleave.
+	// writing makes writes to the connection one at a time, so two
+	// messages never interleave.
 	writing sync.Mutex
 }
 
-// request is one request that waits for its answer. The reader applies
-// a read's answer to the state itself, so a read needs no waiter.
+// request is a request that PHD2 has not responded to yet. done is nil
+// for a read, because the reader applies a read's result to the state
+// and no caller waits for it.
 type request struct {
 	method string
 	done   chan reply
 }
 
-// reply is PHD2's answer to one request: its result, or its error.
 type reply struct {
 	result json.RawMessage
 	err    error
 }
 
 // NewClient returns a client of the PHD2 at address, such as
-// "east-guider.observatory.svc:4400". It opens no connection until Run.
+// "east-guider.observatory.svc:4400". It opens no connection until you
+// call Run.
 func NewClient(address string, options ...Option) *Client {
 	c := &Client{
 		address: address,
@@ -133,10 +138,10 @@ func NewClient(address string, options ...Option) *Client {
 	return c
 }
 
-// Run dials PHD2, reads the baseline, and applies each message until
-// the connection fails or ctx ends. It always returns an error: the
-// reason the connection ended, or the error of ctx. Run opens one
-// connection, and the caller decides when to open the next.
+// Run connects to PHD2, reads the baseline, and applies each message
+// until the connection fails or ctx ends. It always returns an error:
+// the reason the connection ended, or the error of ctx. Run does not
+// reconnect, so the caller calls it again to open a new connection.
 func (c *Client) Run(ctx context.Context) error {
 	c.mu.Lock()
 	if c.running {
@@ -163,9 +168,6 @@ func (c *Client) Run(ctx context.Context) error {
 	c.conn = conn
 	c.state, c.rms = State{Open: true}, window{}
 	c.pending = map[int]*request{}
-	// The connection is open, so every event from here on reaches the
-	// reader. The baseline reads go out now, and their answers arrive
-	// after any event that PHD2 made before it read them.
 	c.reread = map[string]bool{methodAppState: true, methodCalibrated: true, methodConnected: true, methodPixelScale: true}
 	c.changeLocked()
 	c.mu.Unlock()
@@ -194,7 +196,6 @@ func (c *Client) Run(ctx context.Context) error {
 	return err
 }
 
-// read applies each line until the stream ends.
 func (c *Client) read(conn net.Conn) error {
 	lines := bufio.NewScanner(conn)
 	lines.Buffer(make([]byte, 64*1024), maxLine)
@@ -209,8 +210,9 @@ func (c *Client) read(conn net.Conn) error {
 	return ErrDisconnected
 }
 
-// The reads of the baseline. Each one also follows an event that can
-// change what it reads, because PHD2 sends no event for that change.
+// The methods that read state. Run sends each of them for the baseline.
+// After an event that can change one of these values, the client sends
+// its read again, because the event does not include the new value.
 const (
 	methodAppState   = "get_app_state"
 	methodCalibrated = "get_calibrated"
@@ -218,9 +220,10 @@ const (
 	methodPixelScale = "get_pixel_scale"
 )
 
-// refresh sends the reads that the baseline and the events ask for.
-// It runs beside the reader, because a read written from the reader
-// would wait on a PHD2 that waits for the reader.
+// refresh sends the reads queued in reread. It runs on its own
+// goroutine because the reader must not write. While PHD2 is blocked
+// writing an event to the client, it reads nothing, so a write from the
+// reader could block, and then nothing would read that event.
 func (c *Client) refresh(ctx context.Context) {
 	for {
 		c.mu.Lock()
@@ -245,7 +248,7 @@ func (c *Client) refresh(ctx context.Context) {
 	}
 }
 
-// rereadLocked asks the refresher to send reads. The caller holds mu.
+// rereadLocked queues reads for refresh to send. The caller holds mu.
 func (c *Client) rereadLocked(methods ...string) {
 	for _, m := range methods {
 		c.reread[m] = true
@@ -256,16 +259,18 @@ func (c *Client) rereadLocked(methods ...string) {
 	}
 }
 
-// changeLocked wakes each waiter and calls notify. The caller holds mu.
+// changeLocked wakes each WaitFor and calls notify. The caller holds
+// mu.
 func (c *Client) changeLocked() {
 	close(c.changed)
 	c.changed = make(chan struct{})
 	c.notify(c.state.clone())
 }
 
-// send writes one request. A request with done waits for its answer
-// there; one without is a read whose answer the reader applies. PHD2
-// takes params as a list in order, or as an object by name.
+// send writes one request, and the reader sends the response on done.
+// With a nil done, the reader applies the result to the state. PHD2
+// accepts params as a list in the order of the method's parameters, or
+// as an object by parameter name.
 func (c *Client) send(method string, params any, done chan reply) error {
 	c.mu.Lock()
 	conn := c.conn
@@ -294,13 +299,12 @@ func (c *Client) send(method string, params any, done chan reply) error {
 	return err
 }
 
-// call sends one request and waits for its answer, or for ctx.
+// call sends one request and waits for its response or for ctx.
 func (c *Client) call(ctx context.Context, method string, params any) error {
 	_, err := c.callResult(ctx, method, params)
 	return err
 }
 
-// callResult sends one request and answers its result, or its error.
 func (c *Client) callResult(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	done := make(chan reply, 1)
 	if err := c.send(method, params, done); err != nil {
@@ -314,10 +318,10 @@ func (c *Client) callResult(ctx context.Context, method string, params any) (jso
 	}
 }
 
-// SetConnected connects or disconnects the camera and the mount that
-// PHD2's profile names, and reads the equipment's state again. PHD2
-// answers when every connection has finished or failed, which takes
-// seconds on real hardware, so ctx bounds the wait.
+// SetConnected connects or disconnects the camera and the mount in
+// PHD2's profile, and then reads the equipment state again. PHD2
+// responds after every connection has finished or failed. That takes
+// seconds on real hardware, so ctx limits the wait.
 func (c *Client) SetConnected(ctx context.Context, connected bool) error {
 	if err := c.call(ctx, "set_connected", []any{connected}); err != nil {
 		return err
@@ -325,21 +329,21 @@ func (c *Client) SetConnected(ctx context.Context, connected bool) error {
 	return c.call(ctx, methodConnected, nil)
 }
 
-// StopCapture stops looping and guiding. PHD2 answers at once, and the
-// events that follow say where the stop left it.
+// StopCapture stops looping and guiding. PHD2 responds at once, and
+// the events that follow show the state it stopped in.
 func (c *Client) StopCapture(ctx context.Context) error {
 	return c.call(ctx, "stop_capture", nil)
 }
 
-// State answers a copy of the state now.
+// State returns a copy of the current state.
 func (c *Client) State() State {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.state.clone()
 }
 
-// WaitFor waits until condition holds on the state, or until ctx ends.
-// It checks at once, and again after each change, with no timer.
+// WaitFor waits until condition returns true for the state, or until
+// ctx ends. It checks at once and after each change.
 func (c *Client) WaitFor(ctx context.Context, condition func(State) bool) error {
 	for {
 		c.mu.Lock()

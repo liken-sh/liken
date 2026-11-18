@@ -1,18 +1,15 @@
 package main
 
-// The namespaces. The process watches every namespace and runs one
-// operator for each namespace that holds an object of the group or an
-// object the operator created. An observatory references its parts by
-// name, and the names of two namespaces can be the same, so each
-// namespace gets its own runners, connections, locks, and records. A
-// dome lock or a mount lock never crosses a namespace, because no
-// operator reads another namespace's tree.
+// The process watches every namespace and runs one operator for each
+// namespace that has an object of the group or an object that an
+// operator created. Two namespaces can use the same resource names,
+// and each operator reads only its own namespace, so a dome lock or a
+// mount lock never applies across namespaces.
 //
-// The cluster owner chooses the namespace, and every pod, Service,
-// ConfigMap, claim, and Job of an observatory runs in the namespace of
-// its resources. So the owner's ResourceQuota, NetworkPolicy, Pod
-// Security level, and RBAC grants in that namespace cover the
-// observatory.
+// Every pod, Service, ConfigMap, claim, and Job of an observatory is
+// created in the namespace of its resources. So the ResourceQuota,
+// NetworkPolicy, Pod Security level, and RBAC that the cluster owner
+// sets on that namespace apply to the observatory.
 
 import (
 	"context"
@@ -33,8 +30,8 @@ type namespaces struct {
 	recorder *events.Recorder
 	// metrics is the registry that the listener serves (metrics.go).
 	metrics *metrics
-	// changed rings on each change to the stores.
-	changed *bell
+	// changed is notified on each change to the stores.
+	changed *changeNotifier
 	stores  *stores
 
 	mu      sync.Mutex
@@ -54,14 +51,14 @@ func newNamespaces(client *apiclient.Client, dialer indi.Dialer) *namespaces {
 		dialer:  dialer,
 		logs:    os.Stderr,
 		metrics: newMetrics(version),
-		changed: newBell(nil),
+		changed: newChangeNotifier(nil),
 		running: map[string]*namespaceRun{},
 	}
 }
 
-// run opens the watches and runs the operator of each namespace until
+// run opens the watches and runs one operator for each namespace until
 // ctx ends.
-func (n *namespaces) run(ctx context.Context, watches func(context.Context, *bell) *stores) {
+func (n *namespaces) run(ctx context.Context, watches func(context.Context, *changeNotifier) *stores) {
 	n.stores = watches(ctx, n.changed)
 	var group sync.WaitGroup
 	defer func() {
@@ -86,10 +83,10 @@ func (n *namespaces) run(ctx context.Context, watches func(context.Context, *bel
 	}
 }
 
-// supervise starts the operator of each namespace that holds objects,
-// stops the operator of each namespace that holds none, and wakes each
-// operator that runs, since a change to the stores is a change to its
-// tree or to another namespace's.
+// supervise starts an operator for each namespace that has objects and
+// stops the operator of each namespace that has none. It notifies every
+// running operator, because the stores are shared and the change may be
+// in any namespace.
 func (n *namespaces) supervise(ctx context.Context, group *sync.WaitGroup) {
 	held := n.stores.namespaces()
 	n.mu.Lock()
@@ -109,10 +106,9 @@ func (n *namespaces) supervise(ctx context.Context, group *sync.WaitGroup) {
 	}
 }
 
-// start runs the operator of one namespace. The caller holds n.mu. The
-// operator leaves running when it stops, so a namespace that holds
-// objects again after a stop gets a new operator, and never two at
-// once.
+// start runs the operator of one namespace. The caller holds n.mu. A
+// stopped operator stays in running until its run returns, so a
+// namespace never has two operators at once.
 func (n *namespaces) start(ctx context.Context, group *sync.WaitGroup, namespace string) {
 	o := newOperator(namespace, n.client, n.dialer)
 	o.logs, o.recorder, o.series = n.logs, n.recorder, n.metrics.namespace(namespace)
@@ -125,14 +121,14 @@ func (n *namespaces) start(ctx context.Context, group *sync.WaitGroup, namespace
 		n.mu.Lock()
 		delete(n.running, namespace)
 		n.mu.Unlock()
-		// The next pass starts the namespace again if it holds objects
-		// again.
+		// The namespace may have objects again, so the next supervise
+		// may start a new operator for it.
 		n.changed.notify()
 	})
 }
 
-// operatorOf answers the operator of one namespace, or nil when none
-// runs.
+// operatorOf returns the running operator of a namespace, or nil when
+// the namespace has none.
 func (n *namespaces) operatorOf(namespace string) *operator {
 	n.mu.Lock()
 	defer n.mu.Unlock()

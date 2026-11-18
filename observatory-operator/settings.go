@@ -1,16 +1,13 @@
 package main
 
-// The settings of a device resource: the fields of its spec that hold
-// a standard property of its interface, which schema/ generates, such
-// as a camera's gain or a filter wheel's filter names. Each field's
-// indi tag names its property, and the field's shape follows the
-// property's (schema/fields.go): a number or a text with one member is
-// the value itself, a switch names the members that are on, a property
-// with several members is an object with a field for each, and a
-// property whose members the driver chooses lists them. The writer reads
-// the property's definition from the driver, so a field writes the
-// members that the driver defines, and a property or a member that the
-// driver lacks gets a note in the step's summary.
+// A device resource's settings are the spec fields that set a standard
+// INDI property, such as a camera's gain or a filter wheel's filter
+// names. schema/ generates each one with an indi tag that names its
+// property. The Go type of the field depends on the property's type and
+// members, and kind.specField in schema/fields.go chooses it.
+// writeSetting maps each Go type back to the property's members. It writes only properties and members that the driver
+// defines, and adds a note to the step's summary for each one that the
+// driver lacks.
 
 import (
 	"context"
@@ -25,8 +22,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// writeSettings writes each setting that a resource's spec states to
-// the INDI device that serves it, and answers whether it sent any.
+// writeSettings writes each setting in a resource's spec to its INDI
+// device, and returns whether it sent any change.
 func writeSettings(ctx context.Context, h handle, notes *[]string) (bool, error) {
 	newSettings := observatory.Standards[h.d.kind].Settings
 	if newSettings == nil || len(h.d.object.Spec.raw) == 0 {
@@ -52,7 +49,7 @@ func writeSettings(ctx context.Context, h handle, notes *[]string) (bool, error)
 	return changed, nil
 }
 
-// writeSetting writes one field to the property that its tag names.
+// writeSetting writes one field to the property in its indi tag.
 func writeSetting(ctx context.Context, h handle, property string, v reflect.Value, notes *[]string) (bool, error) {
 	if v.Kind() == reflect.Slice && v.Type().Elem().Kind() == reflect.Struct && v.Type().Elem() != reflect.TypeFor[observatory.NumberSetting]() {
 		return writeFamily(ctx, h, property, v, notes)
@@ -76,7 +73,7 @@ func writeSetting(ctx context.Context, h handle, property string, v reflect.Valu
 			values[m.Name] = slices.Contains(on, m.Name)
 		}
 	case v.Kind() == reflect.Slice:
-		// A text whose members the driver chooses, such as FILTER_NAME,
+		// A text whose members the driver defines, such as FILTER_NAME,
 		// takes the values in the order of its members.
 		texts := v.Interface().([]string)
 		for i, text := range texts {
@@ -96,9 +93,10 @@ func writeSetting(ctx context.Context, h handle, property string, v reflect.Valu
 	return writeMembers(ctx, h, p, values, notes)
 }
 
-// writeFamily writes each item of a family, such as the limits of each
-// weather parameter. An item names its property by a name or by the
-// number at the end of the property's name.
+// writeFamily writes each item of a family of similar properties, such
+// as the limits of each weather parameter. An item selects its property
+// with a Name field, or with a Number field that replaces the number at
+// the end of the property name in the indi tag.
 func writeFamily(ctx context.Context, h handle, tagged string, items reflect.Value, notes *[]string) (bool, error) {
 	changed := false
 	for i := range items.Len() {
@@ -123,8 +121,8 @@ func writeFamily(ctx context.Context, h handle, tagged string, items reflect.Val
 	return changed, nil
 }
 
-// members answers the values of an object's fields that name a member
-// in their indi tag, by member. A field that is absent writes nothing.
+// members returns the values of an object's set fields that have an
+// indi tag, by member name.
 func members(object reflect.Value) map[string]any {
 	out := map[string]any{}
 	for i, field := range slices.Collect(object.Type().Fields()) {
@@ -140,8 +138,8 @@ func members(object reflect.Value) map[string]any {
 	return out
 }
 
-// writeMembers writes the values of a property's members, by the
-// property's type, and notes each member that the driver lacks.
+// writeMembers adds a note for each member that the driver does not
+// define, and writes the others.
 func writeMembers(ctx context.Context, h handle, p indi.Property, values map[string]any, notes *[]string) (bool, error) {
 	numbers, texts, switches := map[string]float64{}, map[string]string{}, map[string]bool{}
 	for _, member := range sortedKeys(values) {

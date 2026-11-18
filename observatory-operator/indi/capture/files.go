@@ -7,7 +7,7 @@ import (
 )
 
 // WriteTranscripts writes each reply of a simulator to its own file in
-// dir, named for its phase.
+// dir, named after its phase.
 func WriteTranscripts(dir string, replies []Reply) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -21,9 +21,10 @@ func WriteTranscripts(dir string, replies []Reply) error {
 }
 
 // WriteCapture writes the capture of one bare driver to dir, and
-// returns the number of properties it holds. Every capture but the one
-// of DefaultDevice leaves out the properties that dir's capture of
-// DefaultDevice holds, so that one is written first.
+// returns the number of properties in the file. Every capture except
+// the one of DefaultDevice leaves out the properties that dir's capture
+// of DefaultDevice contains, so the capture of DefaultDevice must be
+// written first.
 func WriteCapture(dir string, bare Bare, version, device string, replies []Reply) (int, error) {
 	defs, err := Definitions(replies)
 	if err != nil {

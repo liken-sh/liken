@@ -1,16 +1,13 @@
 package main
 
-// The operator is a cluster singleton. It keeps the holder of each
-// telescope in memory (claims.go), runs one runner for each
-// Reservation, and sends commands to each device through the INDI
-// servers. Two copies that act at once each read the same holders
-// from the status, so both run the same Reservation's steps: both
-// create the device pods, one deletes a pod that the other just made,
-// both unpark the mount and open the dome, and their status writes
-// overwrite each other. A rollout, a node partition, and a replica
-// count above one each run a second copy, so only the copy that holds
-// the Lease of kubernetes/election acts. Every other copy reads the
-// Lease and does nothing else.
+// Only one copy of the operator may act at a time. Two copies that act
+// at once both run the same Reservation's steps: both create the device
+// pods, one deletes a pod that the other just created, both unpark the
+// mount and open the dome, and their status writes overwrite each
+// other. A rollout, a node partition, or more than one replica can run
+// a second copy, so only the copy that holds the Lease acts, and the
+// others wait for it (kubernetes/election). claims.go relies on this
+// when it keeps the holder of each Telescope in memory.
 
 import (
 	"context"
@@ -26,47 +23,46 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
-// leaseName names the Lease that the operator's copies compete for, in
-// the operator's own namespace. deploy/rbac.yaml grants it by this
-// name.
+// leaseName is the name of the Lease that the operator's copies compete
+// for, in the operator's own namespace. deploy/rbac.yaml grants access
+// to the Lease by this name.
 const leaseName = "observatory-operator"
 
-// actWhileLeading waits for the Lease, runs act, and releases the Lease
-// after act returns. act is everything the operator does: it opens the
-// watches, starts the runners, opens the INDI and PHD2 connections, and
-// writes the API. So a copy that waits does none of that. act receives
-// the lead's write guard for its client.
+// actWhileLeading waits to acquire the Lease, runs act, and releases
+// the Lease after act returns. act is everything the operator does,
+// from opening the watches to sending INDI commands, so a waiting copy
+// does none of it. act must guard its API client with the mayWrite
+// function it receives.
 //
-// act returns on a shutdown only after every goroutine that writes has
+// On a shutdown, act returns only after every goroutine that writes has
 // returned (namespaces.run) and the Event recorder's last write has
-// returned (namespaces.finish), so the release comes after the last
-// write to the API and the last command to a device. When act answers
-// an error, a write can still be in flight, so the Lease is not
-// released: the process exits holding it, and a waiting copy takes it
-// when it expires. A copy that stop ends before it leads holds nothing
-// and returns nil.
+// finished (namespaces.finish), so the Lease is released after the last
+// write and the last command to a device. When act returns an error, a
+// write can still be in triggerRun, so the Lease is not released, and a
+// waiting copy acquires it when it expires. When stop is cancelled
+// before the copy leads, actWhileLeading returns nil without running
+// act.
 func actWhileLeading(stop context.Context, config *rest.Config, options election.Options, act func(mayWrite func() error) error) error {
 	lead, err := election.Start(stop, config, options)
 	if errors.Is(err, election.ErrStopped) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("leader election: %w", err)
+		return fmt.Errorf("electing a leader: %w", err)
 	}
 	if err := act(lead.MayWrite); err != nil {
-		return fmt.Errorf("%w; leaving the Lease to expire", err)
+		return fmt.Errorf("%w, so the operator leaves the Lease to expire", err)
 	}
 	lead.StepDown()
 	return nil
 }
 
 // leadingNamespaces builds the operator of every namespace on a client
-// that mayWrite guards. The Events recorder writes through the same
-// client, so the guard covers every write the process sends: a copy
-// whose last renewal of the Lease is too old sends nothing, and after
-// the release nothing writes. The recorder outlives the stop, so the
-// Events of the last pass are written, and finish shuts it down before
-// the release.
+// guarded by mayWrite. The Event recorder writes through the same
+// client, so a copy whose last renewal of the Lease is too old writes
+// nothing at all. The recorder runs on its own context, so a stop does
+// not cancel it and it still writes the Events of the last pass. finish
+// shuts it down before the Lease is released.
 func leadingNamespaces(client *apiclient.Client, mayWrite func() error,
 	dialer indi.Dialer, logs io.Writer, instance string) *namespaces {
 	guarded := client.WithWriteGuard(mayWrite)
@@ -78,9 +74,9 @@ func leadingNamespaces(client *apiclient.Client, mayWrite func() error,
 	return n
 }
 
-// finish shuts the Event recorder down after run has returned, and
-// answers an error when the recorder's last write did not return in
-// time.
+// finish shuts the Event recorder down after run has returned. It
+// returns an error when the recorder's last write did not finish within
+// events.ShutdownTimeout.
 func (n *namespaces) finish() error {
 	ctx, cancel := context.WithTimeout(context.Background(), events.ShutdownTimeout)
 	defer cancel()

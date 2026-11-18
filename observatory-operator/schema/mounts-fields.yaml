@@ -1,6 +1,6 @@
-# The typed fields of a `Mount`, from the standard properties of INDI's
-# TELESCOPE interface in every variant of its park type. curated.go
-# gives the format and the roles.
+# Typed fields of a `Mount`, from INDI's TELESCOPE interface. The
+# members of TELESCOPE_PARK_POSITION depend on the mount's park type,
+# and this file covers every park type. curated.go describes the format.
 kind: Mount
 interfaces: [telescope]
 detect: [EQUATORIAL_EOD_COORD]

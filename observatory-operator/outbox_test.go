@@ -1,6 +1,6 @@
 package main
 
-// The outbox of plan 19: the claim that a reservation names, which the
+// Tests of the outbox: the claim that a reservation names, which the
 // telescope's imaging cameras mount and write their frames to.
 
 import (
@@ -16,8 +16,7 @@ import (
 
 const volumeClaimsCollection = "/api/v1/namespaces/" + testNamespace + "/persistentvolumeclaims"
 
-// putClaim creates a PersistentVolumeClaim in the example's namespace,
-// as a person does before naming it as an outbox.
+// putClaim creates a PersistentVolumeClaim in the example's namespace.
 func (w *world) putClaim(name string) {
 	w.api.put(volumeClaimsCollection, map[string]any{
 		"apiVersion": "v1", "kind": "PersistentVolumeClaim",
@@ -26,9 +25,9 @@ func (w *world) putClaim(name string) {
 	})
 }
 
-// outboxWorld runs the example with a claim named frames, and with
-// east-tonight Ready on a spec that names outbox, or no outbox when
-// outbox is "".
+// outboxWorld runs the example with a claim named frames. It starts
+// east-tonight Ready with spec.outbox set to the outbox argument, or
+// with no outbox when the argument is "".
 func outboxWorld(t *testing.T, outbox string) *world {
 	w := startWorld(t)
 	w.putClaim("frames")
@@ -43,12 +42,12 @@ func outboxWorld(t *testing.T, outbox string) *world {
 
 // mountedOutbox describes how a pod mounts an outbox: the claim, where
 // the driver sees it, and the group that the kubelet gives the volume.
-// It answers "" for a pod with no outbox and no pod security context.
+// It returns "" for a pod with no outbox and no pod security context.
 func (w *world) mountedOutbox(name string) string {
 	w.t.Helper()
 	p, ok := decode[pod](w.t, w.api, podsCollection, name)
 	if !ok {
-		w.t.Fatalf("no pod %s", name)
+		w.t.Fatalf("the Pod %s is not in the API server", name)
 	}
 	var parts []string
 	for _, v := range p.Spec.Volumes {
@@ -93,7 +92,7 @@ func TestOnlyAnImagingCameraMountsTheOutbox(t *testing.T) {
 	}
 }
 
-// uploads answers the changes to the upload properties that clients
+// uploads returns the changes to the upload properties that clients
 // sent, in order.
 func (w *world) uploads() []string {
 	var out []string
@@ -105,11 +104,10 @@ func (w *world) uploads() []string {
 	return out
 }
 
-// Configure points the imaging camera's driver at the outbox and has
-// it write every frame there and send it to the client too. The prefix
-// stays as the driver reports it. Configure leaves the guide camera,
-// and every camera of a reservation with no outbox, as their drivers
-// start.
+// Configure points the imaging camera's driver at the outbox, in
+// UPLOAD_BOTH mode, and keeps the driver's prefix. It changes no upload
+// setting of the guide camera, or of any camera when the reservation
+// has no outbox.
 func TestConfigurePointsTheImagingCameraAtTheOutbox(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -175,7 +173,7 @@ func TestAnOutboxThatDoesNotExistFailsPowerOn(t *testing.T) {
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "outbox": map[string]any{"claimName": "nightly"}})
 		r := w.phase("east-tonight", observatory.ReservationFailed, 15*time.Minute)
 
-		want := "missing PersistentVolumeClaim nightly in namespace observatory, which spec.outbox.claimName names"
+		want := "the PersistentVolumeClaim nightly that spec.outbox.claimName names is not in the namespace observatory"
 		if step := stepOf(r, observatory.StepPowerOn); step.State != observatory.StepFailed || !strings.Contains(step.Summary, want) {
 			t.Errorf("PowerOn = %+v, want Failed with %q", step, want)
 		}
@@ -236,8 +234,8 @@ func TestAnOutboxEditWaitsForTheNextSession(t *testing.T) {
 	}
 }
 
-// holdUnschedulable keeps a pod Pending with the condition that the
-// scheduler writes when no node fits it.
+// holdUnschedulable keeps a pod Pending and sets the condition that the
+// scheduler sets when no node fits the pod.
 func (w *world) holdUnschedulable(name, message string) {
 	w.until(time.Minute, "no pod "+name, func() bool {
 		_, ok := w.api.object(podsCollection, name)
@@ -253,8 +251,8 @@ func (w *world) holdUnschedulable(name, message string) {
 }
 
 // A camera pod that cannot be scheduled, such as one whose outbox is
-// bound on another node, holds StartDevices up, and the step's summary
-// gives the scheduler's message.
+// bound on another node, keeps StartDevices waiting, and the step's
+// summary reports the scheduler's message.
 func TestAPodThatCannotBeScheduledShowsTheSchedulersMessage(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

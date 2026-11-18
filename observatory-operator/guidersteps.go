@@ -1,15 +1,16 @@
 package main
 
-// The guider's steps. StartGuider runs last in activation: it starts
-// PHD2, connects it to the guide camera and the mount, and leaves it
-// idle. The operator never loops, calibrates, or guides, because
-// tracking stays off after Prepare until the holder aligns the mount,
-// and the holder drives PHD2 from then on. StopGuider runs before
-// Disconnect and deletes the guider's pod, so PHD2 never sees its
-// devices disconnect and never enters its reconnect path, which can
-// open a modal progress dialog, and a modal dialog ends PHD2 on a
-// compositor with no seat (plan 09). StopWork stops PHD2's exposures and
-// guiding first (deactivation.go).
+// StartGuider is the last activation step. It starts PHD2, connects it
+// to the guide camera and the mount, and leaves it idle. The operator
+// never loops, calibrates, or guides, because calibration needs a
+// tracking mount and a star. The holder aligns the mount, starts
+// tracking, and then starts guiding in PHD2.
+//
+// StopGuider runs before Disconnect and deletes the guider's pod, so
+// PHD2 never sees its devices disconnect and never runs its reconnect
+// code. That code can open a modal progress dialog, and a modal dialog
+// ends PHD2 on a compositor with no seat. StopWork, which runs earlier,
+// stops PHD2's exposures and guiding (deactivation.go).
 
 import (
 	"context"
@@ -24,9 +25,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/phd2"
 )
 
-// guiderOf answers the Guider of a telescope, the first by name when a
-// person declared two, or nil. While a session holds the telescope, it
-// is one that the session recorded (records.go).
+// guiderOf returns the first Guider of guidersOf by name, or nil when
+// the telescope has none.
 func (t *tree) guiderOf(telescope string) *observatory.Guider {
 	if guiders := t.guidersOf(telescope); len(guiders) > 0 {
 		return guiders[0]
@@ -34,9 +34,9 @@ func (t *tree) guiderOf(telescope string) *observatory.Guider {
 	return nil
 }
 
-// guiderDevices answers the guide camera and the mount that a Guider
-// uses, and the guide tube's focal length. mount is nil for a telescope
-// with no Mount whose guider pulses through the camera.
+// guiderDevices returns the guide camera and the mount that a Guider
+// uses, and the guide tube's focal length. mount is nil when the
+// telescope has no Mount and the Guider pulses through the camera.
 func (t *tree) guiderDevices(ref serverRef, guider *observatory.Guider) (camera, mount *device, focalLength float64, err error) {
 	train, ok := t.trains[guider.Spec.OpticalTrain]
 	if !ok || train.Spec.Telescope != ref.name {
@@ -62,15 +62,14 @@ func (t *tree) guiderDevices(ref serverRef, guider *observatory.Guider) (camera,
 	return camera, mount, focalLength, nil
 }
 
-// guiderName answers the name of a guider's pod, Service, and
+// guiderName returns the name of a guider's pod, Service, and
 // ConfigMap.
 func guiderName(guider *observatory.Guider) string {
 	return generatedName(observatory.GuiderKind, guider.Metadata.Name)
 }
 
-// guiderGear answers what PHD2's profile names, from the devices that
-// the telescope's server defines. handles answers the handle of each
-// device, by its key.
+// guiderGear returns the INDI device names for PHD2's profile, and
+// false when the camera or the mount has no entry in handles yet.
 func guiderGear(camera, mount *device, focalLength float64, handles map[string]handle) (guiderEquipment, bool) {
 	gear := guiderEquipment{focalLength: focalLength}
 	h, ok := handles[camera.key()]
@@ -88,8 +87,8 @@ func guiderGear(camera, mount *device, focalLength float64, handles map[string]h
 	return gear, true
 }
 
-// ensureFiles creates a ConfigMap, or replaces its data when it
-// differs from the data built now.
+// ensureFiles creates the ConfigMap, or updates it when its data
+// differs from built.
 func (o *operator) ensureFiles(ctx context.Context, report func(string), t *tree, built *configMap) error {
 	name := built.Metadata.Name
 	held, ok := t.configMaps[name]
@@ -109,8 +108,8 @@ func (o *operator) ensureFiles(ctx context.Context, report func(string), t *tree
 }
 
 // startGuider creates the guider's ConfigMap, pod, and Service, waits
-// until PHD2's event server answers, and connects PHD2 to its camera
-// and mount.
+// until PHD2's event server accepts the operator's connection, and
+// connects PHD2 to its camera and mount.
 func (r *runner) startGuider(ctx context.Context, w *stepWork) (outcome, error) {
 	t := r.o.snapshot()
 	ref, telescope, _, err := r.telescope(t)
@@ -155,8 +154,8 @@ func gearText(gear guiderEquipment) string {
 	return text
 }
 
-// startGuiderPod creates or replaces the guider's objects, and reports
-// whether it created the pod.
+// startGuiderPod creates the guider's ConfigMap, pod, and Service, or
+// updates them, and reports whether it created the pod.
 func (o *operator) startGuiderPod(ctx context.Context, report func(string), ref serverRef, guider *observatory.Guider, gear guiderEquipment) (bool, error) {
 	files, built, svc, err := guiderPod(o.namespace, ref, guider, gear)
 	if err != nil {
@@ -192,14 +191,12 @@ func (o *operator) waitGuider(ctx context.Context, report func(string), guider *
 	return conn, err
 }
 
-// equipment reports whether PHD2 reports its camera and mount
-// connected.
 func equipment(s phd2.State) bool { return s.Equipment != nil && *s.Equipment }
 
 // connectGuider sends set_connected and waits until PHD2 reports its
 // camera and mount connected. PHD2 refuses set_connected while it
-// captures, so a PHD2 that reports its equipment connected already
-// receives nothing.
+// captures, so connectGuider sends nothing when the equipment is
+// already connected.
 func (o *operator) connectGuider(ctx context.Context, report func(string), conn *guiderConn, gear guiderEquipment) error {
 	if equipment(conn.client.State()) {
 		return nil
@@ -226,11 +223,11 @@ func (r *runner) stopGuider(ctx context.Context, w *stepWork) (outcome, error) {
 	return done("stopped %s", strings.Join(stopped, ", "))
 }
 
-// stopCapture stops PHD2's exposures and guiding, for StopWork. It finds
-// PHD2 by the guider pod that runs on the telescope's server, not by the
-// Guider: a Guider has no finalizer, so one that a person deleted with
-// the reservation is gone while its PHD2 still guides. A PHD2 whose
-// connection is not open, or that takes no exposures, receives nothing.
+// stopCapture stops PHD2's exposures and guiding, for StopWork. It
+// finds PHD2 through the guider pods of the telescope's server and not
+// through the Guider, because a Guider has no finalizer: a person can
+// delete the Guider together with the reservation while PHD2 still
+// guides.
 func (r *runner) stopCapture(ctx context.Context, w *stepWork) (string, error) {
 	ref := serverRef{observatory.TelescopeKind, r.res.Spec.Telescope}
 	var stopped []string
@@ -253,15 +250,14 @@ func (r *runner) stopCapture(ctx context.Context, w *stepWork) (string, error) {
 			return "", fmt.Errorf("stopping PHD2: %w", err)
 		}
 		if err := conn.client.WaitFor(ctx, func(s phd2.State) bool { return !s.Open || !capturing(s) }); err != nil {
-			return "", fmt.Errorf("PHD2 still reports %s: %w", conn.client.State().AppState, err)
+			return "", fmt.Errorf("waiting for PHD2 to stop %s: %w", conn.client.State().AppState, err)
 		}
 		stopped = append(stopped, "stopped PHD2, which was "+state.AppState)
 	}
 	return strings.Join(stopped, "; "), nil
 }
 
-// capturing reports whether PHD2 takes exposures: it loops,
-// calibrates, or guides.
+// capturing reports whether PHD2 is looping, calibrating, or guiding.
 func capturing(s phd2.State) bool {
 	switch observatory.GuiderState(s.AppState) {
 	case observatory.GuiderStopped, observatory.GuiderSelected, "":
@@ -270,6 +266,7 @@ func capturing(s phd2.State) bool {
 	return true
 }
 
-// guiderLimit bounds the steady runner's work on a guider that came
-// back, as reapplyLimit bounds a device's.
+// guiderLimit is the deadline for the steady runner to create a
+// guider's pod again and connect PHD2, as reapplyLimit is for one
+// device.
 const guiderLimit = 2 * time.Minute

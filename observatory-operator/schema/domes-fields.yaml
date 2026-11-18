@@ -1,6 +1,5 @@
-# The typed fields of a `Dome`, from the standard properties of INDI's
-# DOME interface, as a rotating dome and as a roll-off roof. curated.go
-# gives the format and the roles.
+# Typed fields of a `Dome`, from INDI's DOME interface, for both a
+# rotating dome and a roll-off roof. curated.go describes the format.
 kind: Dome
 interfaces: [dome]
 detect: [DOME_MOTION, DOME_SHUTTER]

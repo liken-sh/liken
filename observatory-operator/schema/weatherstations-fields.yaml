@@ -1,6 +1,5 @@
-# The typed fields of a `WeatherStation`, from the standard properties
-# of INDI's WEATHER interface. curated.go gives the format and the
-# roles.
+# Typed fields of a `WeatherStation`, from INDI's WEATHER interface.
+# curated.go describes the format.
 kind: WeatherStation
 interfaces: [weather]
 detect: [WEATHER_STATUS]

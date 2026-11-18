@@ -1,33 +1,31 @@
 package main
 
-// One INDI device can serve several resources. INDI puts every
-// interface of one driver on one device: a QHY camera's filter wheel is
-// on the camera's device, and a Flip-Flat's dust cap and flat panel are
-// on one device. So a device resource either runs a driver, or names in
-// spec.device the resource whose driver serves it. The resource that
-// runs the driver owns the device: it gets the pod, the claim, the
-// power, and the finalizer, and its pod's life covers every resource it
-// serves.
+// INDI puts every interface of one driver on one INDI device. A QHY
+// camera's filter wheel is on the camera's device, and a Flip-Flat's
+// dust cap and flat panel are on one device. So a device resource
+// either runs a driver, or sets spec.device to the resource whose
+// driver serves it. The resource that runs the driver is the owner. It
+// gets the pod, the claim, the power, and the finalizer, and the
+// resources that it serves use its pod.
 //
-// A served resource acts through its owner's handle: the same server,
-// the same INDI device. Its lifecycle follows its owner's:
+// A served resource uses its owner's handle, so its changes go to the
+// same server and INDI device, and its lifecycle follows its owner's:
 //
 //   - It gets the finalizer when its owner does (startDevices), so a
 //     delete of either waits for the deactivation.
 //   - Its activation runs after its owner connects, and its
 //     deactivation runs before its owner's (deviceTiers), so a
-//     Flip-Flat's cap closes before the device stops.
-//   - When a person deletes it or its owner during a session, it runs
-//     its deactivation through its owner's driver before that driver
+//     Flip-Flat's cap closes before the device disconnects.
+//   - When a person deletes it or its owner during a session, its
+//     deactivation runs through the owner's driver before that driver
 //     stops (leaveServed). A spec edit that would move it takes effect
 //     when the session ends, as for any device (tree.server).
 //
 // The tree refuses a served resource that cannot share its owner's
-// device, and the refusal is its status's fault: an owner that does not
-// exist or runs no driver, an owner on another server, because one INDI
-// device runs on one server, and a second served resource of one kind
-// on one owner. A served resource whose owner connects and does not
-// define its interface reports Error, as any device does (detect).
+// INDI device, such as one whose owner runs on another server, and
+// writes the reason in the resource's status. When the owner connects
+// and its INDI device does not define the served resource's interface,
+// the resource reports Error (detect).
 
 import (
 	"context"
@@ -38,14 +36,14 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// runsDriver reports whether a device runs a driver of its own, and so
-// owns its INDI device.
+// runsDriver reports whether a device runs its own driver, which makes
+// it the owner of its INDI device.
 func (d *device) runsDriver() bool { return d.object.Spec.Device == nil }
 
-// named answers the device resource that a served device's spec.device
-// names, while it exists and runs a driver of its own. The answer
-// ignores the servers, so a served device that left its server still
-// finds the driver that served it there.
+// named returns the resource that a served device's spec.device refers
+// to, if that resource exists and runs its own driver. It does not
+// compare servers, so a served device that left its server can still
+// find the owner that served it there.
 func (t *tree) named(d *device) (*device, bool) {
 	ref := d.object.Spec.Device
 	if ref == nil {
@@ -62,10 +60,9 @@ func (t *tree) named(d *device) (*device, bool) {
 	return owner, true
 }
 
-// runnerOf answers the device whose driver serves a device on a server:
-// the device itself when it runs a driver, and the resource that its
-// spec.device names otherwise. The INDI device, the pod, and the
-// connection of a device are its runner's.
+// runnerOf returns the device whose driver serves d: d itself when it
+// runs a driver, and the resource named by its spec.device otherwise.
+// A device uses its runner's INDI device, pod, and connection.
 func (t *tree) runnerOf(d *device) (*device, bool) {
 	if d.runsDriver() {
 		return d, true
@@ -73,11 +70,9 @@ func (t *tree) runnerOf(d *device) (*device, bool) {
 	return t.named(d)
 }
 
-// podOf answers the name of the pod that runs a device's driver, and
-// the pod while it exists. A served device has the pod only while it
-// shares its owner's device (shares): a served device on the shelf
-// that let go of its owner has no pod, though its spec.device still
-// names the owner.
+// podOf returns the name of the pod that runs a device's driver, and
+// the pod if it exists. For a served device it returns no pod unless
+// shares reports true, even though spec.device still names the owner.
 func (t *tree) podOf(d *device) (string, *pod, bool) {
 	runner, ok := t.runnerOf(d)
 	if !ok {
@@ -94,52 +89,52 @@ func (t *tree) podOf(d *device) (string, *pod, bool) {
 	return name, p, ok
 }
 
-// shares reports whether a served device shares the INDI device of the
-// resource that its spec.device names: the tree serves it on its
-// server, or it left that server and still holds the finalizer, while
-// its deactivation runs there (leaveServed).
+// shares reports whether a served device uses its owner's INDI device:
+// while the tree serves it on a server, and after it leaves that server
+// while it keeps the finalizer, because leaveServed runs its
+// deactivation through the owner's driver.
 func (t *tree) shares(d *device) bool {
-	return t.verdict(d).owner != nil || holdsFinalizer(d.object.Metadata)
+	return t.ownershipOf(d).owner != nil || hasOperatorFinalizer(d.object.Metadata)
 }
 
-// serving is the tree's verdict on one served device that is placed on
-// a server: the owner that serves it, or why none does.
-type serving struct {
+// ownership is the result of checking one served device on a server:
+// the owner that serves it, or the reason why none does.
+type ownership struct {
 	owner   *device
 	refusal string
 }
 
-// servedVerdicts holds the verdict of each served device that is
-// placed on a server. The status writer asks for every device on each
-// pass, so a tree computes them once.
-type servedVerdicts struct {
+// servedOwnerships caches the ownership of each served device on a
+// server. The status writer reads every device on each pass, so the
+// tree computes them once.
+type servedOwnerships struct {
 	once     sync.Once
-	verdicts map[*device]serving
+	byDevice map[*device]ownership
 }
 
-// verdict answers the owner of a served device that is placed on a
-// server, or the refusal that keeps it from one. A device that runs a
-// driver, and a served device on no server, have neither.
-func (t *tree) verdict(d *device) serving {
-	t.served.once.Do(func() { t.served.verdicts = t.judgeServed() })
-	return t.served.verdicts[d]
+// ownershipOf returns the ownership of a served device on a server. A
+// device that runs a driver, and a served device on no server, get the
+// zero value.
+func (t *tree) ownershipOf(d *device) ownership {
+	t.served.once.Do(func() { t.served.byDevice = t.ownerships() })
+	return t.served.byDevice[d]
 }
 
-// judgeServed answers the verdict of each served device on a server.
-// Of two served devices of one kind on one owner, one is served: the
-// one that holds the finalizer, so a device that waits for the next
-// session never displaces one that its owner serves already, then the
-// older resource, then the one whose name sorts first. A served device
-// that waits for the next session of its server (tree.waits) is judged
-// there too, so its status names a refusal now, and it has no owner
-// until that session starts it.
-func (t *tree) judgeServed() map[*device]serving {
-	verdicts := map[*device]serving{}
-	type slot struct {
+// ownerships checks each served device on a server. When two served
+// devices of one kind name one owner, servedBefore picks the one that
+// is served, and the other is refused.
+//
+// A served device that waits for its server's next session
+// (tree.waits) is checked against the server that its spec declares,
+// so a refusal shows in its status at once. When it would be served,
+// it gets no owner and no refusal until the next session starts it.
+func (t *tree) ownerships() map[*device]ownership {
+	owners := map[*device]ownership{}
+	type ownerKind struct {
 		owner *device
 		kind  observatory.Kind
 	}
-	winners := map[slot]*device{}
+	winners := map[ownerKind]*device{}
 	waiting := map[*device]bool{}
 	for _, d := range t.devices {
 		if d.runsDriver() {
@@ -153,63 +148,67 @@ func (t *tree) judgeServed() map[*device]serving {
 		if !placed {
 			continue
 		}
-		v := t.judge(d, ref)
-		verdicts[d] = v
+		v := t.checkOwner(d, ref)
+		owners[d] = v
 		if v.refusal != "" {
 			continue
 		}
-		at := slot{v.owner, d.kind}
+		at := ownerKind{v.owner, d.kind}
 		if other, taken := winners[at]; !taken || servedBefore(d, other) {
 			winners[at] = d
 		}
 	}
-	for d, v := range verdicts {
+	for d, v := range owners {
 		if v.refusal != "" {
 			continue
 		}
-		switch winner := winners[slot{v.owner, d.kind}]; {
+		switch winner := winners[ownerKind{v.owner, d.kind}]; {
 		case winner != d:
-			verdicts[d] = serving{refusal: fmt.Sprintf("%s %s serves %s %s already: one INDI device serves one resource of each kind",
+			owners[d] = ownership{refusal: fmt.Sprintf("%s %s serves %s %s already: one INDI device serves one resource of each kind",
 				v.owner.kind.Name, v.owner.name(), winner.kind.Name, winner.name())}
 		case waiting[d]:
-			verdicts[d] = serving{}
+			owners[d] = ownership{}
 		}
 	}
-	return verdicts
+	return owners
 }
 
-// judge answers the verdict of one served device on a server, before
-// the choice between two served devices of one kind.
-func (t *tree) judge(d *device, ref serverRef) serving {
+// checkOwner checks one served device on the server ref against the
+// resource that its spec.device names. ownerships then picks one served
+// device of each kind for each owner.
+func (t *tree) checkOwner(d *device, ref serverRef) ownership {
 	names := d.object.Spec.Device.Kind + " " + d.object.Spec.Device.Name
 	kind, _ := observatory.KindNamed(d.object.Spec.Device.Kind)
 	target, exists := t.device(kind, d.object.Spec.Device.Name)
 	switch {
 	case !exists:
-		return serving{refusal: "spec.device names " + names + ", which does not exist"}
+		return ownership{refusal: "spec.device names " + names + ", which does not exist"}
 	case !target.runsDriver():
-		return serving{refusal: "spec.device names " + names + ", which runs no driver of its own: name the resource that runs the driver"}
+		return ownership{refusal: "spec.device names " + names + ", which runs no driver of its own: name the resource that runs the driver"}
 	case target.kind == d.kind:
-		return serving{refusal: "spec.device names " + names + ", which is a " + d.kind.Name + " itself: one INDI device serves one resource of each kind"}
+		return ownership{refusal: "spec.device names " + names + ", which is a " + d.kind.Name + " itself: one INDI device serves one resource of each kind"}
 	}
 	at, placed := t.server(target)
 	switch {
 	case !placed:
-		return serving{refusal: "spec.device names " + names + ", which runs on no server"}
+		return ownership{refusal: "spec.device names " + names + ", which runs on no server"}
 	case at != ref:
-		return serving{refusal: fmt.Sprintf("spec.device names %s, which runs on server %s, and %s %s is on server %s: one INDI device runs on one server",
+		return ownership{refusal: fmt.Sprintf("spec.device names %s, which runs on server %s, and %s %s is on server %s: one INDI device runs on one server",
 			names, at, d.kind.Name, d.name(), ref)}
 	}
-	if holder, taken := t.driverTakenBy(target); taken {
-		return serving{refusal: "spec.device names " + names + ", which does not run: " + sharedDriver(holder, ref)}
+	if holder, taken := t.driverHolder(target); taken {
+		return ownership{refusal: "spec.device names " + names + ", which does not run: " + sharedDriver(holder, ref)}
 	}
-	return serving{owner: target}
+	return ownership{owner: target}
 }
 
-// servedBefore reports whether a served device keeps its owner's
-// device rather than another served device of its kind.
+// servedBefore reports whether a is served in preference to b, when
+// both are served devices of one kind on one owner. The device that
+// holds the finalizer wins, so a device that waits for the next session
+// never displaces one that its owner already serves. Then the older
+// resource wins, then the one whose key sorts first.
 func servedBefore(a, b *device) bool {
-	if ha, hb := holdsFinalizer(a.object.Metadata), holdsFinalizer(b.object.Metadata); ha != hb {
+	if ha, hb := hasOperatorFinalizer(a.object.Metadata), hasOperatorFinalizer(b.object.Metadata); ha != hb {
 		return ha
 	}
 	ca, cb := createdAt(a), createdAt(b)
@@ -219,47 +218,45 @@ func servedBefore(a, b *device) bool {
 	return a.key() < b.key()
 }
 
-// ownerOf answers the device that a device's server runs a driver for:
-// the device itself when it runs one, and its owner when the tree
-// serves it.
+// ownerOf returns the device whose driver the server runs for d: d
+// itself when it runs a driver, and its owner when the tree serves it.
 func (t *tree) ownerOf(d *device) (*device, bool) {
 	if d.runsDriver() {
 		return d, true
 	}
-	v := t.verdict(d)
+	v := t.ownershipOf(d)
 	return v.owner, v.owner != nil
 }
 
-// servedBy answers the devices that an owner serves, in the order of
+// servedBy returns the devices that an owner serves, in the order of
 // t.devices.
 func (t *tree) servedBy(owner *device) []*device {
 	var out []*device
 	for _, d := range t.devices {
-		if !d.runsDriver() && t.verdict(d).owner == owner {
+		if !d.runsDriver() && t.ownershipOf(d).owner == owner {
 			out = append(out, d)
 		}
 	}
 	return out
 }
 
-// owners answers the handles of the devices that run a driver, one for
-// each INDI device. A connection or a disconnection belongs to the
-// INDI device, so it goes through its owner's handle alone.
+// owners returns the handles of the devices that run a driver, one for
+// each INDI device. Connecting and disconnecting apply to the INDI
+// device, so they go through the owner's handle only.
 func owners(handles []handle) []handle {
 	return slices.DeleteFunc(slices.Clone(handles), func(h handle) bool { return !h.d.runsDriver() })
 }
 
-// driverDevices answers the devices that run a driver of their own.
 func driverDevices(devices []*device) []*device {
 	return slices.DeleteFunc(slices.Clone(devices), func(d *device) bool { return !d.runsDriver() })
 }
 
-// deviceTiers splits groups of devices, in the order that activation
-// runs them, into tiers: each group's owners, then the served devices
-// of that group. A served device whose owner is in a later group waits
-// for that group, so its activation runs after its owner's, and in the
-// reversed tiers of deactivation its deactivation runs before its
-// owner's.
+// deviceTiers splits groups of devices, listed in activation order,
+// into tiers. Each group becomes two tiers: its devices that are not
+// served, then its served devices. A served device whose owner is in a
+// later group goes in the served tier of that later group, so its
+// activation runs after its owner's. Deactivation runs the tiers in
+// reverse, so it runs before its owner's.
 func deviceTiers(t *tree, groups [][]*device) [][]*device {
 	group := map[*device]int{}
 	for i, devices := range groups {
@@ -285,27 +282,26 @@ func deviceTiers(t *tree, groups [][]*device) [][]*device {
 	return tiers
 }
 
-// holdServed gives each device that an owner serves the finalizer,
-// with its owner's, and waits until the stores show it. The finalizer
-// keeps a deleted served device until its deactivation ran through its
-// owner's driver (leaveServed), so the served device holds it before
-// its owner's pod starts that driver. The owner
-// can come from another reading of the tree, so t finds it by kind and
-// name. A write that the API server refuses is sent again (send), and
-// the step's deadline bounds the tries.
-func (o *operator) holdServed(ctx context.Context, report func(string), t *tree, owner *device) error {
+// addServedFinalizers adds the finalizer to each device that owner serves, and
+// waits until the stores show it. The finalizer keeps a deleted served
+// device until leaveServed has run its deactivation through the owner's
+// driver, so it must be in place before the owner's pod starts that
+// driver. owner can come from an earlier read of the tree, so
+// addServedFinalizers looks it up in t by kind and name. send retries a write
+// that the API server refuses until ctx ends.
+func (o *operator) addServedFinalizers(ctx context.Context, report func(string), t *tree, owner *device) error {
 	var served []*device
 	if own, ok := t.device(owner.kind, owner.name()); ok {
 		served = t.servedBy(own)
 	}
 	for _, d := range served {
-		if err := o.holdDevice(ctx, report, d); err != nil {
+		if err := o.addDeviceFinalizer(ctx, report, d); err != nil {
 			return err
 		}
 	}
 	return o.waitFor(ctx, report, func(now *tree) (bool, string, error) {
 		for _, d := range served {
-			if held, ok := now.device(d.kind, d.name()); ok && !deleting(held.object.Metadata) && !holdsFinalizer(held.object.Metadata) {
+			if held, ok := now.device(d.kind, d.name()); ok && !deleting(held.object.Metadata) && !hasOperatorFinalizer(held.object.Metadata) {
 				return false, "waiting for the finalizer of " + d.kind.Name + " " + d.name(), nil
 			}
 		}
@@ -313,23 +309,21 @@ func (o *operator) holdServed(ctx context.Context, report func(string), t *tree,
 	})
 }
 
-// served reports whether a device holds the finalizer for a server: it
-// holds the finalizer, and the pod of the driver that its spec.device
-// names runs on the server.
-func served(t *tree, d *device, ref serverRef) bool {
-	if d.runsDriver() || !holdsFinalizer(d.object.Metadata) {
+// servedByPodOn reports whether d is a served device that holds the
+// finalizer and whose owner's pod runs on the server ref.
+func servedByPodOn(t *tree, d *device, ref serverRef) bool {
+	if d.runsDriver() || !hasOperatorFinalizer(d.object.Metadata) {
 		return false
 	}
 	_, p, running := t.podOf(d)
 	return running && p.Metadata.Labels[labelServer] == ref.String()
 }
 
-// leaveServed runs the deactivation of each served device that left a
-// running server and still holds the finalizer: a person deleted it or
-// its owner, so the tree no longer serves it there.
-// The run acts through the owner's driver, which still runs, so it
-// comes before setDrivers stops that driver. The finalizer goes once
-// the run ends, as a device's goes once its pod is gone.
+// leaveServed deactivates each served device whose owner's pod runs on
+// ref, that still holds the finalizer, and that the tree no longer
+// places on ref, such as after a person deletes it or its owner. The
+// deactivation goes through the owner's driver, so it must run before
+// setDrivers stops that driver. Then leaveServed removes the finalizer.
 func (r *runner) leaveServed(ctx context.Context, t *tree, ref serverRef) error {
 	on := map[*device]bool{}
 	for _, d := range t.devicesOn(ref) {
@@ -337,7 +331,7 @@ func (r *runner) leaveServed(ctx context.Context, t *tree, ref serverRef) error 
 	}
 	var left []*device
 	for _, d := range t.devices {
-		if served(t, d, ref) && !on[d] {
+		if servedByPodOn(t, d, ref) && !on[d] {
 			left = append(left, d)
 		}
 	}
@@ -352,7 +346,7 @@ func (r *runner) leaveServed(ctx context.Context, t *tree, ref serverRef) error 
 	var problems []error
 	for _, d := range left {
 		problems = append(problems, r.o.setFinalizerOf(d.kind, d.name(), false))
-		r.o.logf("Reservation %s: %s left %s", r.name, d.key(), ref)
+		r.o.logf("Reservation %s: %s left server %s", r.name, d.key(), ref)
 	}
 	return joinErrors(problems)
 }

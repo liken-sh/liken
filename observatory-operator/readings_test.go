@@ -7,9 +7,9 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// INDI's weather base class sets each light from its limits, and the
-// status reads the light as a verdict.
-func TestAWeatherLightIsAVerdict(t *testing.T) {
+// INDI's weather base class sets each light from the limits of its
+// parameter.
+func TestSafetyFollowsTheWeatherLight(t *testing.T) {
 	t.Parallel()
 	cases := map[indi.State]observatory.Safety{
 		indi.Ok:    observatory.SafetySafe,
@@ -24,11 +24,10 @@ func TestAWeatherLightIsAVerdict(t *testing.T) {
 	}
 }
 
-// A weather station's verdict is its SAFETY light. The weather
-// simulator leaves the light Idle and sets the state of SAFETY_STATUS,
-// as the transcript in indi/inditest/testdata/weather/connect.xml records, so
-// an Idle light reads the property's state.
-func TestAWeatherStationsVerdict(t *testing.T) {
+// The weather simulator leaves the SAFETY light Idle and sets the state
+// of SAFETY_STATUS, as indi/inditest/testdata/weather/connect.xml
+// records, so an Idle light falls back to the property's state.
+func TestAWeatherStationsSafety(t *testing.T) {
 	t.Parallel()
 	status := func(state, light indi.State) indi.Property {
 		return indi.Property{Name: "SAFETY_STATUS", State: state, Members: []indi.Member{{Name: "SAFETY", Light: light}}}
@@ -60,30 +59,30 @@ func TestADevicesPhase(t *testing.T) {
 	cases := []struct {
 		name               string
 		stopping, pod, def bool
-		standing           standing
+		use                serverUse
 		connection         indi.Property
 		fault              string
 		want               observatory.DevicePhase
 	}{
-		{"on the shelf", false, false, false, onShelf, indi.Property{}, "", observatory.DeviceInventory},
+		{"not installed", false, false, false, notInstalled, indi.Property{}, "", observatory.DeviceInventory},
 		{"installed, with no active reservation", false, false, false, idle, indi.Property{}, "", observatory.DeviceIdle},
 		{"no pod yet while a reservation activates", false, false, false, activating, indi.Property{}, "", observatory.DeviceStarting},
-		{"no pod while a Ready reservation keeps it", false, false, false, kept, indi.Property{}, "", observatory.DeviceStarting},
+		{"no pod while a Ready reservation keeps it", false, false, false, maintained, indi.Property{}, "", observatory.DeviceStarting},
 		{"a pod that stops", true, true, true, idle, connection(indi.Ok, true), "", observatory.DeviceDisconnecting},
 		{"a driver not yet on the server", false, true, false, activating, indi.Property{}, "", observatory.DeviceStarting},
-		{"a connect in flight", false, true, true, activating, connection(indi.Busy, true), "", observatory.DeviceConnecting},
-		{"a disconnect in flight", false, true, true, idle, connection(indi.Busy, false), "", observatory.DeviceDisconnecting},
+		{"a connect in triggerRun", false, true, true, activating, connection(indi.Busy, true), "", observatory.DeviceConnecting},
+		{"a disconnect in triggerRun", false, true, true, idle, connection(indi.Busy, false), "", observatory.DeviceDisconnecting},
 		{"a refused connect", false, true, true, activating, connection(indi.Alert, false), "", observatory.DeviceError},
 		{"a failed step", false, true, true, activating, connection(indi.Idle, false), "it broke", observatory.DeviceError},
-		{"connected", false, true, true, kept, connection(indi.Ok, true), "", observatory.DeviceConnected},
-		{"disconnected", false, true, true, kept, connection(indi.Idle, false), "", observatory.DeviceStarting},
+		{"connected", false, true, true, maintained, connection(indi.Ok, true), "", observatory.DeviceConnected},
+		{"disconnected", false, true, true, maintained, connection(indi.Idle, false), "", observatory.DeviceStarting},
 		{"connected while a release runs its deactivation", false, true, true, releasing, connection(indi.Ok, true), "", observatory.DeviceConnected},
 		{"disconnected by a release", false, true, true, releasing, connection(indi.Idle, false), "", observatory.DeviceDisconnecting},
 		{"a driver that a release stops", false, true, false, releasing, indi.Property{}, "", observatory.DeviceDisconnecting},
 		{"a pod that a release deleted", false, false, false, releasing, indi.Property{}, "", observatory.DeviceIdle},
 	}
 	for _, c := range cases {
-		if got := devicePhase(c.stopping, c.pod, c.def, c.standing, c.connection, c.fault); got != c.want {
+		if got := devicePhase(c.stopping, c.pod, c.def, c.use, c.connection, c.fault); got != c.want {
 			t.Errorf("%s: phase = %s, want %s", c.name, got, c.want)
 		}
 	}

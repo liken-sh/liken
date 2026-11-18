@@ -1,9 +1,8 @@
 package main
 
-// One device on its INDI server, and the changes the operator sends it.
-// Each change first reads what the device reports, and sends nothing
-// when the device already has the value, so a step that runs again
-// after an operator restart sends a device only what it still needs.
+// Each change to an INDI device first reads the property, and sends
+// nothing when the device already has the value. So a step that runs
+// again after an operator restart sends only what the device lacks.
 
 import (
 	"context"
@@ -15,22 +14,18 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
-// propertyWait bounds the wait for a property that a step needs. A
-// driver defines its properties when it starts and when it connects,
-// in a burst a few milliseconds long, and some drivers define a
-// property just after they report the connection: the dust cover
-// simulator defines CAP_PARK after CONNECTION. A property still missing
-// after this wait is one the driver does not have, and the step records
-// that and goes on.
+// propertyWait is how long a step waits for a property to be defined.
+// Some drivers define a property just after they report the
+// connection, such as CAP_PARK of the dust cover simulator. After this
+// wait, the step treats the property as one the driver does not have.
 const propertyWait = 3 * time.Second
 
-// indiName answers the INDI device that serves a resource on a server,
-// or "" while its driver has not defined it. Every driver defines
-// DRIVER_INFO, whose DRIVER_EXEC is the program's name, which is the
-// runner's spec.driver.name because socat starts the driver by that
-// name. A server runs one device for each driver (shareddrivers.go),
-// so the program's name finds one device. A served resource's runner is
-// the resource that its spec.device names (served.go).
+// indiName returns the name of the INDI device that serves a resource,
+// or "" until the driver defines it. It finds the device whose
+// DRIVER_INFO.DRIVER_EXEC equals the runner's spec.driver.name, because
+// socat starts the driver by that name, and a server runs one device
+// for each driver (shareddrivers.go). The runner of a served resource
+// is the resource that its spec.device names (served.go).
 func (t *tree) indiName(c *indi.Client, d *device) string {
 	runner, ok := t.runnerOf(d)
 	if !ok {
@@ -39,7 +34,7 @@ func (t *tree) indiName(c *indi.Client, d *device) string {
 	return definedBy(c, runner.object.Spec.Driver.Name)
 }
 
-// handle is one device on its server.
+// handle is one INDI device on its server.
 type handle struct {
 	d      *device
 	server *indiServer
@@ -50,7 +45,7 @@ func (h handle) String() string { return h.d.kind.Name + " " + h.d.name() }
 
 func (h handle) client() *indi.Client { return h.server.client }
 
-// property answers a property of the device, after it waits up to
+// property returns a property of the device. It waits up to
 // propertyWait for the driver to define it.
 func (h handle) property(ctx context.Context, name string) (indi.Property, bool) {
 	wait, cancel := context.WithTimeout(ctx, propertyWait)
@@ -62,7 +57,6 @@ func (h handle) property(ctx context.Context, name string) (indi.Property, bool)
 	return h.client().Property(h.name, name)
 }
 
-// connected reports whether the driver reports its device connected.
 func (h handle) connected() bool {
 	p, ok := h.client().Property(h.name, "CONNECTION")
 	return ok && p.State != indi.Alert && slices.Equal(p.On(), []string{"CONNECT"})
@@ -82,15 +76,15 @@ func (h handle) disconnect(ctx context.Context) error {
 	return nil
 }
 
-// switchOn turns one member of a switch property On, and answers false
-// when it was On already. Under OneOfMany and AtMostOne, the others
-// turn Off.
+// switchOn turns one member of a switch property On and returns false
+// when it was already On. Under OneOfMany and AtMostOne, the driver
+// turns the other members Off.
 func (h handle) switchOn(ctx context.Context, property, member string) (bool, error) {
 	return h.setSwitches(ctx, property, map[string]bool{member: true})
 }
 
-// setSwitches turns members of a switch property On or Off, and answers
-// false when every member had its state already.
+// setSwitches sets members of a switch property On or Off. It returns
+// false when every member already had the requested state.
 func (h handle) setSwitches(ctx context.Context, property string, values map[string]bool) (bool, error) {
 	p, ok := h.property(ctx, property)
 	if !ok {
@@ -102,9 +96,10 @@ func (h handle) setSwitches(ctx context.Context, property string, values map[str
 		same = same && has && m.Switch == on
 	}
 	if same && p.State == indi.Busy {
-		// The change runs already, sent by this step before an operator
-		// restart. Sending it again would stop it: libindi's telescope
-		// aborts a park when TELESCOPE_PARK arrives during the park.
+		// An earlier run of this step sent the change before an operator
+		// restart, and the driver is still carrying it out. Sending it
+		// again could stop it: libindi's telescope aborts a park when
+		// TELESCOPE_PARK arrives during the park.
 		return true, h.awaitBusy(ctx, property)
 	}
 	if same {
@@ -115,8 +110,8 @@ func (h handle) setSwitches(ctx context.Context, property string, values map[str
 	})
 }
 
-// setNumbers gives members of a number property new values, and answers
-// false when every member had its value already.
+// setNumbers sets members of a number property. It returns false when
+// every member already had its value.
 func (h handle) setNumbers(ctx context.Context, property string, values map[string]float64) (bool, error) {
 	p, ok := h.property(ctx, property)
 	if !ok {
@@ -135,8 +130,8 @@ func (h handle) setNumbers(ctx context.Context, property string, values map[stri
 	})
 }
 
-// setTexts gives members of a text property new values, and answers
-// false when every member had its value already.
+// setTexts sets members of a text property. It returns false when
+// every member already had its value.
 func (h handle) setTexts(ctx context.Context, property string, values map[string]string) (bool, error) {
 	p, ok := h.property(ctx, property)
 	if !ok {
@@ -166,8 +161,9 @@ func (h handle) settle(ctx context.Context, send func() (indi.Sent, error)) erro
 	return nil
 }
 
-// awaitBusy waits until a Busy property ends, and fails as settle does
-// when it ends in Alert or the device deletes it.
+// awaitBusy waits until a Busy property leaves that state. Like
+// settle, it fails when the property ends in Alert or the device
+// deletes it.
 func (h handle) awaitBusy(ctx context.Context, property string) error {
 	err := h.client().WaitFor(ctx, func(s *indi.Store) bool {
 		p, ok := s.Property(h.name, property)
@@ -186,7 +182,6 @@ func (h handle) awaitBusy(ctx context.Context, property string) error {
 	return nil
 }
 
-// number answers one member's value.
 func number(p indi.Property, member string) (float64, bool) {
 	m, ok := p.Member(member)
 	return m.Number, ok
