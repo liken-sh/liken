@@ -44,8 +44,8 @@ text against it before you publish it.
 @brand/voice.md
 
 The rules are ASD-STE100, Simplified Technical English, with additions.
-Three files beside `brand/voice.md` each hold the rules for one kind
-of text. Read `brand/messages.md` before you write an error, a log
+Files beside `brand/voice.md` each hold the rules for one kind of
+text. Read `brand/messages.md` before you write an error, a log
 line, the message of a condition or an `Event`, or a test failure.
 Read `brand/names.md` before you name an identifier, a file, a test,
 or a part of the API. Read `brand/instructions.md` before you write

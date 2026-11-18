@@ -12,7 +12,7 @@ the base, and the rules below add only what it does not state. STE
 keeps each word and sentence plain. It does not make a page clear on
 its own: a page of correct STE sentences can still be hard to follow.
 
-Three kinds of text have more rules, each in a file beside this one.
+Some kinds of text have more rules, each in a file beside this one.
 Read the file before you write that kind of text:
 
 - [`messages.md`](messages.md) for an error, a log line, the message
@@ -101,16 +101,16 @@ and its verb.
   heading does not repeat the heading, and it does not say what the
   section will cover.
 - **State a claim once, at its true strength.** "This could
-  potentially cause the pod to perhaps restart" has three hedges on
-  one fact. When the result happens only in some conditions, write
+  potentially cause the pod to perhaps restart" hedges one fact
+  again and again. When the result happens only in some conditions, write
   "can" and name the condition. When you do not know, say what you
   did not check.
 - **Name the source of a claim.** "It is generally recommended" and
   "many users report" name nobody. Name the specification, the
   upstream document, or the measurement, or delete the sentence.
 - **Break up a string of nouns.** "The claim device release grace
-  period" is five nouns, and the reader must work out which one
-  owns which. Write "the time that the operator waits before it
+  period" is a row of nouns, and the reader must work out which
+  noun describes which. Write "the time that the operator waits before it
   releases a claim's device".
 - **Write two sentences in place of a semicolon**, or join them with
   the word that states their relation: "because", "so", "but".
@@ -173,7 +173,7 @@ explanation into a slogan to give it personality.
 The `liken` repositories are literate: the scripts, manifests, and Go
 files are the documentation, and a comment is published writing in
 the same sense a page is. Every rule in this file applies inside a
-source file. Four more rules apply to comments:
+source file. More rules apply to comments:
 
 - Teach the domain, not the syntax. The reader knows the tools and
   reads to learn how the system works.
@@ -226,6 +226,16 @@ source file. Four more rules apply to comments:
 - Distinguish a measured result from a guarantee. Name the conditions
   under which a result was measured. Do not turn one successful test
   into a claim that an operation always succeeds.
+- **Do not count things for the reader.** "The two rules below",
+  "the one request of a `Firmware`", "three files hold the rules",
+  and "the only caller is `reconcile`" record how many things there
+  were on the day of writing. The next change makes the count wrong,
+  and the reader did not need it. Name the things, or say "each".
+  Keep a number that the system enforces or that a person measured:
+  a limit, a default, a retry count, a size. "A `Firmware` has at
+  most one request, and the API server refuses a second" states a
+  rule. "The one request of a `Firmware`" states a habit of the
+  author.
 - Delete a sentence whose only job is to sound good: a slogan, an
   aphorism, or a closing flourish.
 - End a section on its last fact, not on a summary of the section.

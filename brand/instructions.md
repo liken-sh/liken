@@ -1,8 +1,8 @@
 # Instructions for agents
 
-An agent does most of the work in this repository from three kinds
-of text: an `AGENTS.md` file, a skill, and the brief that one agent
-writes for another. The reader of each is a language model. It reads
+An agent does most of the work in this repository from an
+`AGENTS.md` file, a skill, or the brief that another agent wrote
+for it. The reader of each is a language model. It reads
 every word in every session, it has no memory of the session that
 wrote the text, and it applies what it reads closely. A rule that is
 wrong, too wide, or out of date changes the work of every session
