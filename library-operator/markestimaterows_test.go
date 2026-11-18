@@ -9,6 +9,7 @@ import (
 	"context"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 )
@@ -345,5 +346,38 @@ func TestADerivationKeepsThePlacementOfAFile(t *testing.T) {
 
 	if got, want := confidencesOfFile(t, agent, estimateLibrary, secondEpisode), []string{"0.30"}; !slices.Equal(got, want) {
 		t.Errorf("confidences = %v, want the placement kept", got)
+	}
+}
+
+// The dialogues read starts at the subtitle files and finds the files that
+// share a title with each one through the index on the item. The catalog
+// holds no statistics for the planner, and the plan it chose without this
+// order read every link of the library once for each subtitle file, which
+// took longer than the catalog client waits on a library of thousands of
+// episodes.
+func TestTheDialoguesReadFindsAVideoByTheItemIndex(t *testing.T) {
+	_, agent := newSQLiteCatalog(t)
+	rows, err := agent.db.Query(`EXPLAIN QUERY PLAN `+estimateDialoguesSQL, "house/series")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+
+	if len(plan) == 0 || !strings.Contains(plan[0], "subtitle") {
+		t.Errorf("the read does not start at the subtitle files: %v", plan)
+	}
+	if !slices.ContainsFunc(plan, func(line string) bool {
+		return strings.Contains(line, "shown") && strings.Contains(line, "file_items_library_item")
+	}) {
+		t.Errorf("the read does not find the files of a title by the item index: %v", plan)
 	}
 }

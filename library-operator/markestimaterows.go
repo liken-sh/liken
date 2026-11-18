@@ -173,6 +173,24 @@ type subtitleChoice struct {
 	dialogue string
 }
 
+// Every subtitle file of a library that holds dialogue, with each main video
+// that shares a title with it.
+//
+// The query names its join order and the index on the item. The catalog
+// holds no statistics, and without them SQLite's planner starts at the links
+// and reads every link of the library once for each subtitle file. CROSS JOIN
+// makes SQLite join the tables in the order written, so the read starts at
+// the subtitle files, and INDEXED BY makes it find the files of each title
+// through the index on the item.
+const estimateDialoguesSQL = `SELECT DISTINCT video.path, subtitle.path, subtitle.language, subtitle.role, subtitle.dialogue ` +
+	`FROM files AS subtitle ` +
+	`CROSS JOIN file_items AS spoken ON spoken.library = subtitle.library AND spoken.path = subtitle.path ` +
+	`CROSS JOIN file_items AS shown INDEXED BY file_items_library_item ` +
+	`ON shown.library = spoken.library AND shown.item = spoken.item ` +
+	`CROSS JOIN files AS video ON video.library = shown.library AND video.path = shown.path ` +
+	`AND video.type = '` + fileTypeVideo + `' AND video.role = '` + fileRolePrimary + `' ` +
+	`WHERE subtitle.library = ? AND subtitle.type = '` + fileTypeSubtitle + `' AND subtitle.dialogue != ''`
+
 // The dialogue of the one subtitle file each video's estimate reads. A
 // subtitle file belongs to the video that shares its title. The household's
 // first language that a file holds wins, then any language, and within a
@@ -181,26 +199,19 @@ type subtitleChoice struct {
 // two derivations choose the same file.
 func (c *Catalog) estimateDialogues(ctx context.Context, library string, languages []string) (map[string]*subtitleDialogue, error) {
 	choices := map[string][]subtitleChoice{}
-	err := c.stream(ctx, `SELECT DISTINCT video.path, subtitle.path, subtitle.language, subtitle.role, subtitle.dialogue `+
-		`FROM files AS subtitle `+
-		`JOIN file_items AS spoken ON spoken.library = subtitle.library AND spoken.path = subtitle.path `+
-		`JOIN file_items AS shown ON shown.library = spoken.library AND shown.item = spoken.item `+
-		`JOIN files AS video ON video.library = shown.library AND video.path = shown.path `+
-		`AND video.type = '`+fileTypeVideo+`' AND video.role = '`+fileRolePrimary+`' `+
-		`WHERE subtitle.library = ? AND subtitle.type = '`+fileTypeSubtitle+`' AND subtitle.dialogue != ''`,
-		[]any{library}, func(cells []any) error {
-			if len(cells) < 5 {
-				return nil
-			}
-			video, _ := cells[0].(string)
-			choice := subtitleChoice{}
-			choice.path, _ = cells[1].(string)
-			choice.language, _ = cells[2].(string)
-			choice.role, _ = cells[3].(string)
-			choice.dialogue, _ = cells[4].(string)
-			choices[video] = append(choices[video], choice)
+	err := c.stream(ctx, estimateDialoguesSQL, []any{library}, func(cells []any) error {
+		if len(cells) < 5 {
 			return nil
-		})
+		}
+		video, _ := cells[0].(string)
+		choice := subtitleChoice{}
+		choice.path, _ = cells[1].(string)
+		choice.language, _ = cells[2].(string)
+		choice.role, _ = cells[3].(string)
+		choice.dialogue, _ = cells[4].(string)
+		choices[video] = append(choices[video], choice)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
