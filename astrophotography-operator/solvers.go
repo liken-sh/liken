@@ -1,11 +1,9 @@
 package main
 
-// The Solver loop (plan 02). For each Solver, the operator keeps its
-// Deployment and Service, and reports in the status where the solver
-// listens, the index series it holds, and the condition Ready. The
-// solver's pod follows its claim's directory, so the operator follows
-// the pod's index list from the time the pod turns Ready, and each new
-// list wakes the loop.
+// The Solver loop. For each Solver, the operator creates its
+// Deployment and Service, and writes the solver's endpoint, its index
+// series, and the Ready condition to the status. solverindexes.go reads
+// each ready pod's list of index files.
 
 import (
 	"context"
@@ -31,16 +29,15 @@ func solverPath(namespace, name string) string {
 	return "/apis/" + astrophotography.Group + "/" + astrophotography.Version + "/namespaces/" + namespace + "/solvers/" + name
 }
 
-// solverLoop is the memory of the Solver loop: the memo of the
-// Solvers' status writes, and the index list that each solver pod
-// reports, by the pod's UID (solverindexes.go). Both are caches: a new
-// lead follows each pod's list again.
+// solverLoop holds the memo of status writes and the index list of each
+// solver pod, keyed by the pod's UID. Both are caches, and a new leader
+// fills them again from the API server and the pods.
 type solverLoop struct {
 	versions *memo.Versions
 	mu       sync.Mutex
 	follows  map[string]*indexFollow
-	// running counts the goroutines that follow a pod's list, so the
-	// operator stops them all before it releases the Lease.
+	// running counts the goroutines that read a pod's list, so the
+	// operator can wait for them to stop before it releases the Lease.
 	running sync.WaitGroup
 }
 
@@ -48,10 +45,11 @@ func newSolverLoop() *solverLoop {
 	return &solverLoop{versions: memo.New(), follows: map[string]*indexFollow{}}
 }
 
-// solverPass serves every Solver once.
+// solverPass reconciles every Solver once, and stops reading the list
+// of each pod that no Solver reports.
 func (o *operator) solverPass(ctx context.Context, loop *solverLoop) error {
-	held := informer.Held{View: o.stores.collections[astrophotography.SolverKind.Name].View(), Versions: loop.versions}
-	solvers, err := informer.List[astrophotography.Solver](o.client, held, solversPath, memo.NamespacedPath(solverPath))
+	store := informer.Held{View: o.stores.collections[astrophotography.SolverKind.Name].View(), Versions: loop.versions}
+	solvers, err := informer.List[astrophotography.Solver](o.client, store, solversPath, memo.NamespacedPath(solverPath))
 	if err != nil {
 		return err
 	}
@@ -62,20 +60,20 @@ func (o *operator) solverPass(ctx context.Context, loop *solverLoop) error {
 		if s.Metadata.DeletionTimestamp != nil {
 			continue
 		}
-		uid, err := o.serveSolver(ctx, loop, s)
+		uid, err := o.reconcileSolver(ctx, loop, s)
 		pods[uid] = true
 		if err != nil {
-			errs = append(errs, fmt.Errorf("Solver %s/%s: %w", s.Metadata.Namespace, s.Metadata.Name, err))
+			errs = append(errs, fmt.Errorf("reconciling Solver %s/%s: %w", s.Metadata.Namespace, s.Metadata.Name, err))
 		}
 	}
 	loop.forget(pods)
 	return errors.Join(errs...)
 }
 
-// serveSolver keeps one Solver's workload and writes its status. It
-// answers the UID of the pod it reported, so the loop keeps that pod's
-// index list.
-func (o *operator) serveSolver(ctx context.Context, loop *solverLoop, s *astrophotography.Solver) (string, error) {
+// reconcileSolver creates the Solver's workload and writes its status.
+// It returns the UID of the pod that the status reports, so that
+// solverPass keeps reading that pod's index list.
+func (o *operator) reconcileSolver(ctx context.Context, loop *solverLoop, s *astrophotography.Solver) (string, error) {
 	var failed error
 	if o.workerImage == "" {
 		failed = errNoWorkerImage
@@ -97,11 +95,10 @@ func (o *operator) serveSolver(ctx context.Context, loop *solverLoop, s *astroph
 	return uid, errors.Join(failed, o.writeSolverStatus(s, loop, report))
 }
 
-// errNoWorkerImage is the failure of a lead that could not name the
-// worker image, which the Ready condition reports.
-var errNoWorkerImage = errors.New("the operator could not name the image of the solver's pod; see its log")
+// errNoWorkerImage is the Ready message when workerImage in images.go
+// failed at start. The operator's log has that error.
+var errNoWorkerImage = errors.New("the operator has no image for the solver's pod, and its log has the reason")
 
-// solverReport is what the pass learned of one Solver.
 type solverReport struct {
 	claim    string
 	pod      *podObject
@@ -110,8 +107,9 @@ type solverReport struct {
 	failure  error
 }
 
-// ready composes the condition Ready, and answers whether its status
-// needs a person.
+// ready returns the Ready condition, and the status for which
+// events.Recorder.Transition posts a Warning. A Ready that is False only
+// because the pod is starting returns "", so its Event is Normal.
 func (r solverReport) ready() (conditions.Condition, conditions.Status) {
 	waits := ""
 	if r.pod != nil {
@@ -121,17 +119,17 @@ func (r solverReport) ready() (conditions.Condition, conditions.Status) {
 	case r.failure != nil:
 		return notReady(astrophotography.ReasonPodNotReady, r.failure.Error()), conditions.False
 	case claimMissing(waits, r.claim):
-		return notReady(astrophotography.ReasonClaimMissing, "the PersistentVolumeClaim "+r.claim+" does not exist: "+waits), conditions.False
+		return notReady(astrophotography.ReasonClaimMissing, "The PersistentVolumeClaim "+r.claim+" does not exist: "+waits), conditions.False
 	case r.pod == nil:
-		return notReady(astrophotography.ReasonPodNotReady, "the solver's Deployment has no pod yet"), ""
+		return notReady(astrophotography.ReasonPodNotReady, "The solver's Deployment has no pod yet"), ""
 	case waits != "":
-		return notReady(astrophotography.ReasonPodNotReady, "the solver's pod cannot start: "+waits), conditions.False
+		return notReady(astrophotography.ReasonPodNotReady, "The solver's pod cannot start: "+waits), conditions.False
 	case !r.pod.ready():
-		return notReady(astrophotography.ReasonPodNotReady, "the solver's pod "+r.pod.Metadata.Name+" is not ready"), ""
+		return notReady(astrophotography.ReasonPodNotReady, "The solver's pod "+r.pod.Metadata.Name+" is not ready"), ""
 	case r.indexes == nil:
-		return notReady(astrophotography.ReasonPodNotReady, "the operator is reading the index list of the solver's pod "+r.pod.Metadata.Name), ""
+		return notReady(astrophotography.ReasonPodNotReady, "The operator is reading the index list of the solver's pod "+r.pod.Metadata.Name), ""
 	case len(r.indexes) == 0:
-		return notReady(astrophotography.ReasonNoIndexFiles, "the claim "+r.claim+" holds no index-*.fits file in the directory spec.indexFiles.path names"), conditions.False
+		return notReady(astrophotography.ReasonNoIndexFiles, "The claim "+r.claim+" has no index-*.fits file in the directory that spec.indexFiles.path sets"), conditions.False
 	}
 	files, series := int32(0), make([]string, 0, len(r.indexes))
 	for _, s := range r.indexes {
@@ -146,17 +144,15 @@ func notReady(reason, message string) conditions.Condition {
 	return conditions.Condition{Type: astrophotography.ConditionReady, Status: conditions.False, Reason: reason, Message: message}
 }
 
-// claimMissing reads the scheduler's message for a pod whose claim does
-// not exist. The operator watches no claims, so the scheduler, which
-// does, says so in the pod's PodScheduled condition, in the form
-// persistentvolumeclaim "<name>" not found.
+// claimMissing reports whether the message of the pod's PodScheduled
+// condition says that the claim does not exist. The scheduler writes
+// persistentvolumeclaim "<name>" not found there.
 func claimMissing(message, claim string) bool {
 	return strings.Contains(message, `persistentvolumeclaim "`+claim+`" not found`)
 }
 
-// writeSolverStatus writes the status that the report composes, when
-// it differs from the stored one, and posts the Event of a transition
-// of Ready after the write lands.
+// writeSolverStatus writes the status when it differs from the stored
+// one, and posts an Event when the write changed Ready.
 func (o *operator) writeSolverStatus(s *astrophotography.Solver, loop *solverLoop, r solverReport) error {
 	next, bad := r.ready()
 	transitioned := false
@@ -171,8 +167,8 @@ func (o *operator) writeSolverStatus(s *astrophotography.Solver, loop *solverLoo
 			status.Endpoint = &endpoint
 		}
 		if r.indexes != nil {
-			// The API server stores an empty list as no list, so an empty
-			// list is written as none, and compares equal to what it stores.
+			// The API server drops an empty list, so write nil, or the
+			// comparison with the stored status always differs.
 			status.Indexes = nil
 			if len(r.indexes) > 0 {
 				status.Indexes = r.indexes

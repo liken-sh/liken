@@ -1,10 +1,11 @@
 package catalog
 
-// The writer of a catalog. The promotion Job is its one writer, and it
-// appends one line for each frame after the frame is verified in the
-// archive. The line must survive a power cut once Append returns,
-// because the Job deletes the frame from the outbox next, so Append
-// syncs the file, and the directory when it created the file.
+// The promotion Job is the only writer of a catalog. It appends a
+// frame's line before the frame's outbox copy is deleted: after it
+// verifies a copied frame in the archive, or before the rename when
+// the outbox and the archive are one claim. So the line must
+// survive a power cut once Append returns, and Append syncs the file,
+// and the directory when it created the file.
 
 import (
 	"encoding/json"
@@ -14,14 +15,13 @@ import (
 	"path/filepath"
 )
 
-// Append writes one line at the end of the catalog at name, and creates
-// the file and its directory when they do not exist.
-//
-// A crash during an earlier append can leave a last line with no
-// newline. Append then writes a newline first, so the cut line stays a
-// line of its own that a reader skips, and the new line reads whole.
+// Append writes line at the end of the catalog at name, and creates
+// the file and its directory when they do not exist. A crash during an
+// earlier append can leave a last line with no newline. Append then
+// writes a newline first, so the new line starts on a line of its own
+// and the reader skips only the cut one.
 func Append(name string, line Line) error {
-	// A Line holds strings and numbers only, so it always encodes.
+	// A Line holds only strings and numbers, so Marshal cannot fail.
 	encoded, _ := json.Marshal(line)
 	dir := filepath.Dir(name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -52,8 +52,8 @@ func Append(name string, line Line) error {
 	return err
 }
 
-// endsCut reports whether a file is not empty and its last byte is not
-// a newline.
+// endsCut reports whether the file is not empty and its last byte is
+// not a newline.
 func endsCut(file *os.File) (bool, error) {
 	info, err := file.Stat()
 	if err != nil || info.Size() == 0 {
@@ -66,8 +66,8 @@ func endsCut(file *os.File) (bool, error) {
 	return last[0] != '\n', nil
 }
 
-// SyncDir syncs a directory, so a file created, renamed, or removed in
-// it survives a power cut.
+// SyncDir syncs dir, so that a file created, renamed, or removed in it
+// survives a power cut.
 func SyncDir(dir string) error {
 	file, err := os.Open(dir)
 	if err != nil {

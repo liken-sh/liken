@@ -1,16 +1,16 @@
 package main
 
-// The runner of one Reservation (plan 01). observatory-operator readies
-// the telescope for the holder that a Reservation names, and while a
-// reservation of this operator is Ready, its runner drives the
-// telescope's INDI server as a client: it finishes the exposure that a
-// restart interrupted, chooses a target, claims it, and images it until
-// the target has no work left. Then it chooses the next one.
+// The runner of one Reservation. observatory-operator prepares the
+// telescope for the holder of a Reservation. While the reservation is
+// Ready, its runner connects to the telescope's INDI server as a
+// client. The runner finishes any exposure that a restart interrupted,
+// chooses a target, claims it, and images it until the target has no
+// work left. Then it chooses the next target.
 //
-// The runner holds nothing it cannot read again. The record of a night
-// is in the targets' statuses and in the outbox, so a runner that
-// starts again, after a restart of the operator or a lost connection,
-// reads where its work stands from them.
+// The runner keeps no state that it cannot rebuild. The record of a
+// night is in the targets' statuses and in the outbox, so a runner that
+// starts again after an operator restart or a lost connection reads
+// its progress from them.
 
 import (
 	"context"
@@ -25,18 +25,18 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// retryWait is how long the runner waits after a pass that failed, such
-// as a write the API server refused, before it tries again. A change to
-// a watched object wakes it sooner.
+// retryWait is how long the runner waits after a failed pass, such as
+// a write that the API server refused, before it tries again. A change
+// to a watched object ends the wait sooner.
 const retryWait = 30 * time.Second
 
 type runner struct {
 	o         *operator
 	namespace string
 	name      string
-	// res is the reservation as it was when it turned Ready. Its session
-	// is a record that does not change while the reservation is Ready,
-	// and the supervisor stops the runner when the phase changes.
+	// res is the reservation as it was when it became Ready. Its session
+	// does not change while the reservation is Ready, and the supervisor
+	// stops the runner when the reservation leaves Ready.
 	res         *observatory.Reservation
 	client      *indi.Client
 	centering   centering
@@ -64,8 +64,8 @@ func reservationRef(res *observatory.Reservation) events.ObjectReference {
 	}
 }
 
-// run works until ctx ends. The supervisor ends it when the
-// reservation leaves Ready, and the operator ends it when it stops.
+// run works until ctx ends. The supervisor cancels ctx when the
+// reservation leaves Ready, and the operator cancels it when it stops.
 func (r *runner) run(ctx context.Context) {
 	address, err := indiAddress(r.res)
 	if err != nil {
@@ -101,13 +101,14 @@ func (r *runner) run(ctx context.Context) {
 	}
 }
 
-// pass does one piece of work, and answers whether more work waits at
-// once.
+// pass finishes an interrupted exposure, claims the next eligible
+// target, and images it. It returns true after it imaged a target, so
+// the next pass starts at once.
 func (r *runner) pass(ctx context.Context) (bool, error) {
 	if r.res.Status.Session.Outbox == nil {
 		if !r.warnedNoBox {
 			r.o.recorder.Warning(reservationRef(r.res), reasonNoOutbox,
-				"The reservation names no spec.outbox, so astrophotography-operator images nothing: a frame must land in a claim that outlives the camera's pod.")
+				"The reservation has no spec.outbox, so the operator takes no frames. A frame must be saved to a claim that outlives the camera's pod")
 			r.warnedNoBox = true
 		}
 		return false, nil
@@ -119,7 +120,7 @@ func (r *runner) pass(ctx context.Context) (bool, error) {
 	if err != nil || t == nil {
 		if err == nil && !r.idle {
 			r.o.recorder.Normal(reservationRef(r.res), reasonIdle,
-				fmt.Sprintf("No Target in namespace %s is eligible, so the telescope waits.", r.namespace))
+				fmt.Sprintf("No Target in namespace %s is eligible, so the telescope waits", r.namespace))
 			r.idle = true
 		}
 		return false, err
@@ -128,15 +129,15 @@ func (r *runner) pass(ctx context.Context) (bool, error) {
 	return true, r.image(ctx, t)
 }
 
-// connect keeps the INDI connection open until ctx ends.
 func (r *runner) connect(ctx context.Context) {
 	r.keepOpen(ctx, "the INDI connection", r.client.Run)
 }
 
-// keepOpen runs one connection after another until ctx ends. A
-// connection that ends opens again after a backoff, which a connection
-// that lasted resets, so a server that restarts is reached again within
-// seconds, and a server that is down is not dialed in a tight loop.
+// keepOpen runs a connection again each time it ends, until ctx ends.
+// The wait between connections starts at one second and doubles up to
+// one minute, and resets after a connection that lasted longer than a
+// minute. So a server that restarts is reached again within seconds,
+// and a server that is down is not dialed in a tight loop.
 func (r *runner) keepOpen(ctx context.Context, what string, run func(context.Context) error) {
 	const first, most = time.Second, time.Minute
 	backoff := first
@@ -157,11 +158,12 @@ func (r *runner) keepOpen(ctx context.Context, what string, run func(context.Con
 	}
 }
 
-// forever is a wait that only a wake or the end of a context ends.
+// forever is the wait for a runner that has no scheduled work. Only a
+// wake or the end of the context ends it.
 const forever = time.Duration(1 << 62)
 
-// sleep waits for d, for the wake channel, or for the end of ctx, and
-// answers false when ctx ended. A nil wake never wakes it.
+// sleep waits until d passes, wake receives, or ctx ends. It returns
+// false when ctx ended. A nil wake channel never wakes it.
 func sleep(ctx context.Context, d time.Duration, wake <-chan struct{}) bool {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
@@ -174,16 +176,15 @@ func sleep(ctx context.Context, d time.Duration, wake <-chan struct{}) bool {
 	return true
 }
 
-// lostConnection reports whether an error of the INDI client means
-// that the connection ended, or that a driver went with its
-// properties, so the work waits for the server and goes on.
+// lostConnection reports whether err means that the INDI connection
+// ended or that the server deleted a driver's properties.
 func lostConnection(err error) bool {
 	return errors.Is(err, indi.ErrDisconnected) || errors.Is(err, indi.ErrNotConnected) || errors.Is(err, indi.ErrDeleted)
 }
 
-// readyIn answers the Reservations of this operator in a namespace
-// whose phase is Ready, by name. A target whose status.reservation
-// names any other claims nothing.
+// readyIn returns the names of the Ready reservations in a namespace.
+// A target whose status.reservation names a reservation that is not in
+// this set has a claim that ended.
 func (o *operator) readyIn(namespace string) map[string]bool {
 	view := o.stores.collections[observatory.ReservationKind.Name].View()
 	ready := map[string]bool{}
@@ -195,13 +196,13 @@ func (o *operator) readyIn(namespace string) map[string]bool {
 	return ready
 }
 
-// isReady reports whether a reservation is Ready, with the session that
-// observatory-operator records before it turns Ready.
+// isReady reports whether the reservation is Ready, is not being
+// deleted, and has the session that observatory-operator records
+// before it sets the phase to Ready.
 func isReady(res *observatory.Reservation) bool {
 	return res.Status.Phase == observatory.ReservationReady && res.Metadata.DeletionTimestamp == nil && res.Status.Session != nil
 }
 
-// targetName names a target in a message.
 func targetName(t *astrophotography.Target) string {
 	return t.Metadata.Namespace + "/" + t.Metadata.Name
 }

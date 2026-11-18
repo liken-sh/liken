@@ -1,26 +1,21 @@
 package main
 
-// The series of plate solves (plan 08): how many solves each Solver
-// answered, by their outcome, and how long a solver took to answer.
-// The operator sets them when a solve returns, so a scrape reads them
-// from memory.
-
 import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// The outcomes of one request to a solver.
+// The values of the result label.
 const (
 	solveSolved   = "solved"
 	solveUnsolved = "unsolved"
 	solveFailed   = "failed"
 )
 
-// solveBuckets cover a solve: about 1 s for a field that solves, and
-// up to the solver's wall time of two minutes, after a wait in its
-// queue, for one that does not.
+// solveBuckets run from 0.25 s to 256 s. A field that does not solve
+// runs until the solver's two-minute timeout, plus any time it waited
+// in the solver's queue.
 var solveBuckets = prometheus.ExponentialBuckets(0.25, 2, 11)
 
 type solveMetrics struct {
@@ -36,7 +31,7 @@ func newSolveMetrics(registry *prometheus.Registry) *solveMetrics {
 		}, []string{"result"}),
 		duration: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    metricsPrefix + "solve_duration_seconds",
-			Help:    "How long a solver took to answer one star list, with the wait in its queue.",
+			Help:    "How long a solver took to solve one star list, including the wait in its queue.",
 			Buckets: solveBuckets,
 		}),
 	}
@@ -47,8 +42,8 @@ func newSolveMetrics(registry *prometheus.Registry) *solveMetrics {
 	return m
 }
 
-// observeSolve counts one attempt, and records the solver's time for an
-// attempt that the solver answered.
+// observeSolve counts one attempt. A failed request has no solver
+// time, so it adds no duration sample.
 func (m *metrics) observeSolve(result string, took time.Duration) {
 	m.solve.solves.WithLabelValues(result).Inc()
 	if result != solveFailed {

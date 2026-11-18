@@ -1,7 +1,7 @@
 package main
 
-// The progress of a target before its first frame: the promotion loop
-// writes it as soon as the store holds the target, with no reservation.
+// The promotion loop writes a target's progress as soon as the target
+// exists, before any reservation takes it.
 
 import (
 	"reflect"
@@ -24,8 +24,6 @@ func lrgb() astrophotography.Target {
 	return t
 }
 
-// A new target shows 0 of its frames in PROGRESS, a zero count for
-// each sequence, and Complete False, before any reservation claims it.
 func TestANewTargetShowsItsProgress(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -36,12 +34,12 @@ func TestANewTargetShowsItsProgress(t *testing.T) {
 		status := readTarget(api).Status
 		wantSequences := []astrophotography.SequenceProgress{{Sequence: lrgb().Spec.Sequences[0]}, {Sequence: lrgb().Spec.Sequences[1]}}
 		if status.Progress != "0/6" || !reflect.DeepEqual(status.Sequences, wantSequences) {
-			t.Errorf("the status is %+v", status)
+			t.Errorf("the status is %+v, want progress 0/6 and sequences %+v", status, wantSequences)
 		}
 		complete, _ := conditions.Find(status.Conditions, astrophotography.ConditionComplete)
 		if complete.Status != conditions.False || complete.Reason != astrophotography.ReasonWorkLeft ||
 			complete.Message != "0 frames of 6 are in the archive" {
-			t.Errorf("Complete is %+v", complete)
+			t.Errorf("Complete is %+v, want False with reason WorkLeft and message \"0 frames of 6 are in the archive\"", complete)
 		}
 		if got, want := targetEvents(api), []string{"Normal WorkLeft"}; !slices.Equal(got, want) {
 			t.Errorf("the Events are %q, want %q", got, want)
@@ -49,8 +47,8 @@ func TestANewTargetShowsItsProgress(t *testing.T) {
 	})
 }
 
-// An edit of the sequences changes the frames wanted at once, and
-// keeps the counts of each sequence that stays.
+// An edit of the sequences changes the number of frames wanted, and
+// keeps each sequence's archived count.
 func TestAnEditOfTheSequencesChangesTheProgress(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -67,14 +65,14 @@ func TestAnEditOfTheSequencesChangesTheProgress(t *testing.T) {
 
 		status := readTarget(api).Status
 		if status.Progress != "3/9" || status.Sequences[1].Count != 5 || status.Sequences[0].Archived != 3 {
-			t.Errorf("the status is %+v", status)
+			t.Errorf("the status is %+v, want progress 3/9, a second sequence of count 5, and 3 frames archived in the first", status)
 		}
 	})
 }
 
-// A refused write of the progress posts no Event, and the loop writes
-// it again, after its backoff at the latest.
-func TestARefusedWriteOfTheProgressIsTriedAgain(t *testing.T) {
+// A failed write of the progress posts no Event, and the loop retries
+// it after its first backoff.
+func TestAFailedWriteOfTheProgressIsRetried(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
 		api.failStatus = 1

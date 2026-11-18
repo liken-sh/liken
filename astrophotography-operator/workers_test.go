@@ -6,8 +6,9 @@ import (
 	"testing/synctest"
 )
 
-// reservationObject builds a Reservation held by this operator, in one
-// phase, with the outbox its session recorded, if any.
+// reservationObject builds a Reservation held by this operator, in the
+// given phase, whose session records the outbox claim if outbox is not
+// empty.
 func reservationObject(name, phase, outbox string) map[string]any {
 	o := object("observatory", name, nil, map[string]any{"telescope": "east", "holder": managedBy})
 	status := map[string]any{"phase": phase}
@@ -18,17 +19,14 @@ func reservationObject(name, phase, outbox string) map[string]any {
 	return o
 }
 
-// A reservation that is Ready with an outbox gets a worker that mounts
-// the outbox at /outbox, as the drivers' group, owned by the
-// Reservation.
 func TestAReservationGetsItsWorker(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
 		w.api.put(reservationsPath, reservationObject("tonight", "Ready", "frames"))
 		settle()
-		d, held := objectOf[deployment](t, w.api, deploymentsPath, "observatory", "tonight-astrophotography")
-		if !held {
-			t.Fatal("no Deployment tonight-astrophotography")
+		d, found := objectOf[deployment](t, w.api, deploymentsPath, "observatory", "tonight-astrophotography")
+		if !found {
+			t.Fatal("the Deployment tonight-astrophotography does not exist")
 		}
 		pod := d.Spec.Template.Spec
 		cases := []struct {
@@ -47,13 +45,11 @@ func TestAReservationGetsItsWorker(t *testing.T) {
 			}
 		}
 		if _, held := objectOf[service](t, w.api, servicesPath, "observatory", "tonight-astrophotography"); !held {
-			t.Error("no Service tonight-astrophotography")
+			t.Error("the Service tonight-astrophotography does not exist")
 		}
 	})
 }
 
-// A worker runs only while its reservation is Activating or Ready with
-// an outbox, and goes when the reservation ends.
 func TestAWorkerRunsWhileItsReservationIsActive(t *testing.T) {
 	cases := []struct {
 		name, phase, outbox string
@@ -78,16 +74,14 @@ func TestAWorkerRunsWhileItsReservationIsActive(t *testing.T) {
 				_, deployed := objectOf[deployment](t, w.api, deploymentsPath, "observatory", "tonight-astrophotography")
 				_, served := objectOf[service](t, w.api, servicesPath, "observatory", "tonight-astrophotography")
 				if deployed != c.runs || served != c.runs {
-					t.Errorf("Deployment %v and Service %v, want %v", deployed, served, c.runs)
+					t.Errorf("Deployment exists = %v and Service exists = %v, want both %v", deployed, served, c.runs)
 				}
 			})
 		})
 	}
 }
 
-// A worker whose reservation is gone, or no longer held by this
-// operator, goes too.
-func TestAWorkerGoesWithItsReservation(t *testing.T) {
+func TestAWorkerIsDeletedWithItsReservation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
 		w.api.put(reservationsPath, reservationObject("tonight", "Ready", "frames"))
@@ -95,15 +89,12 @@ func TestAWorkerGoesWithItsReservation(t *testing.T) {
 		w.api.remove(reservationsPath, "observatory", "tonight")
 		settle()
 		if _, held := objectOf[deployment](t, w.api, deploymentsPath, "observatory", "tonight-astrophotography"); held {
-			t.Error("the worker stayed")
+			t.Error("the worker Deployment still exists, want it deleted")
 		}
 	})
 }
 
-// A worker pod that cannot start posts one Warning on the reservation
-// with the scheduler's message, and another only when the message
-// changes.
-func TestAWorkerThatCannotStartWarnsOnce(t *testing.T) {
+func TestAWorkerPodThatCannotBeScheduledWarnsOncePerMessage(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
 		w.api.put(reservationsPath, reservationObject("tonight", "Ready", "frames"))
@@ -122,8 +113,8 @@ func TestAWorkerThatCannotStartWarnsOnce(t *testing.T) {
 			messages = append(messages, e.Type+" "+e.Reason+": "+e.Message)
 		}
 		want := []string{
-			"Warning AstrophotographyWorkerPending: the worker's pod tonight-astrophotography-0 cannot start: " + waiting,
-			"Warning AstrophotographyWorkerPending: the worker's pod tonight-astrophotography-0 cannot start: 0/1 nodes are available: 1 Insufficient cpu.",
+			"Warning AstrophotographyWorkerPending: The worker pod tonight-astrophotography-0 cannot start: " + waiting,
+			"Warning AstrophotographyWorkerPending: The worker pod tonight-astrophotography-0 cannot start: 0/1 nodes are available: 1 Insufficient cpu.",
 		}
 		if strings.Join(messages, "\n") != strings.Join(want, "\n") {
 			t.Errorf("Events\n%s\nwant\n%s", strings.Join(messages, "\n"), strings.Join(want, "\n"))
@@ -131,29 +122,28 @@ func TestAWorkerThatCannotStartWarnsOnce(t *testing.T) {
 	})
 }
 
-// A Service's name is a DNS label, so a reservation whose name is too
-// long for <name>-astrophotography gets no worker, and the log says so.
+// A Service name is a DNS label of at most 63 characters, so a
+// Reservation whose name is too long for <name>-astrophotography gets
+// no worker, and the operator logs why.
 func TestAReservationWithALongNameGetsNoWorker(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
 		name := strings.Repeat("a", 48)
 		w.api.put(reservationsPath, reservationObject(name, "Ready", "frames"))
 		settle()
-		if writes := w.api.writes(deploymentsPath); len(writes) != 0 || !strings.Contains(w.logs.String(), "too long") {
-			t.Errorf("writes %q and log %q", writes, w.logs.String())
+		if writes := w.api.writes(deploymentsPath); len(writes) != 0 || !strings.Contains(w.logs.String(), workerName(name)) {
+			t.Errorf("writes %q, want none, and the log %q, want the Service name %s", writes, w.logs.String(), workerName(name))
 		}
 	})
 }
 
-// A lead with no worker image starts no worker, and its pass fails, so
-// the log says why.
-func TestAWorkerWithNoImageIsNotStarted(t *testing.T) {
+func TestNoWorkerIsCreatedWithoutAnImage(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, func(o *operator) { o.workerImage = "" })
 		w.api.put(reservationsPath, reservationObject("tonight", "Ready", "frames"))
 		settle()
 		if writes := w.api.writes(deploymentsPath); len(writes) != 0 || !strings.Contains(w.logs.String(), errNoWorkerImage.Error()) {
-			t.Errorf("writes %q and log %q", writes, w.logs.String())
+			t.Errorf("writes %q, want none, and the log %q, want %q", writes, w.logs.String(), errNoWorkerImage.Error())
 		}
 	})
 }

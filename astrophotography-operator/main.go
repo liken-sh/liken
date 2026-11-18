@@ -4,11 +4,10 @@
 // namespace, and the Reservations of the observatory.liken.sh group
 // that name it as their holder.
 //
-// One binary holds every program of the component, and its first
-// argument names the program. With no argument it runs the operator.
-// promote runs the container of a promotion Job (plan 03), and modes.go
-// names the modes of the operator's other pods, the solver and the
-// worker of plan 02.
+// One binary serves every program of the component, and its first
+// argument selects the program. With no argument it runs the operator.
+// promote runs the container of a promotion Job, and modes.go lists the
+// modes of the operator's other pods: the solver and the worker.
 package main
 
 import (
@@ -26,18 +25,16 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// The pod's name and namespace, from the downward API in
-// deploy/operator.yaml. They name the Lease and the identity that
-// holds it.
+// The pod's name and namespace, set from the downward API in
+// deploy/operator.yaml. The namespace locates the Lease, and the pod
+// name is the identity that holds it.
 const (
 	podNameVariable      = "POD_NAME"
 	podNamespaceVariable = "POD_NAMESPACE"
 )
 
-// metricsAddressVariable names where /metrics listens, as host:port.
-// Root plan 65 gives every process on the cluster network port 9200,
-// and deploy/operator.yaml sets it. An empty value turns the listener
-// off.
+// metricsAddressVariable sets the host:port where /metrics listens.
+// An empty value turns the listener off.
 const metricsAddressVariable = "ASTROPHOTOGRAPHY_METRICS_ADDRESS"
 
 func main() {
@@ -47,7 +44,7 @@ func main() {
 	if len(os.Args) > 1 {
 		run, known := modes[os.Args[1]]
 		if !known {
-			fmt.Fprintf(os.Stderr, "%s: no mode %q; run with no argument for the operator\n", managedBy, os.Args[1])
+			fmt.Fprintf(os.Stderr, "%s: %q is not a mode, and the operator runs when no argument is given\n", managedBy, os.Args[1])
 			os.Exit(2)
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
@@ -65,15 +62,14 @@ func main() {
 	}
 }
 
-// operate builds the in-cluster clients, which send nothing yet, and
-// runs the operator's process (leader.go). A SIGTERM ends the process,
-// and the process releases the Lease after its last write.
+// operate builds the in-cluster clients and runs process.operate in
+// leader.go until SIGTERM.
 func operate() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 	namespace, pod := os.Getenv(podNamespaceVariable), os.Getenv(podNameVariable)
 	if namespace == "" || pod == "" {
-		return fmt.Errorf("%s and %s are unset, so the operator cannot name its Lease", podNamespaceVariable, podNameVariable)
+		return fmt.Errorf("%s and %s are not set, and the operator needs them to name its Lease", podNamespaceVariable, podNameVariable)
 	}
 	lease, err := rest.InClusterConfig()
 	if err != nil {
@@ -88,9 +84,9 @@ func operate() error {
 		return err
 	}
 	return process{
-		// The stop ends the wait after a 429, and does not cut off a
-		// request in flight, so a write either returns before the
-		// release or was never sent.
+		// On SIGTERM the client stops waiting out a 429 but lets a sent
+		// request finish, so no write is in flight when the Lease is
+		// released.
 		client:         client.WithWaitContext(ctx),
 		watcher:        watcher,
 		lease:          lease,

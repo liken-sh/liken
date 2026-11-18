@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// The Job's container runs Main with the flags the operator writes, and
-// the operator reads the report it leaves.
+// The Job's container runs Main with the flags the operator sets, and
+// the operator reads the report that Main writes.
 func TestMainWritesTheReport(t *testing.T) {
 	w := newWorld(t)
 	w.expose("M42_0001", lightFrame(frameID))
@@ -25,11 +25,11 @@ func TestMainWritesTheReport(t *testing.T) {
 	raw, _ := os.ReadFile(reportFile)
 	waiting := "east-main/east-tonight/m42/M42_0002.fits: Incomplete the file ends inside its header"
 	if err := json.Unmarshal(raw, &report); err != nil || code != 0 || report.Promoted != 1 || !strings.Contains(log.String(), waiting) {
-		t.Errorf("Main answered %d and the report %s, %v; the log is\n%s", code, raw, err, log.String())
+		t.Errorf("Main returned exit code %d, the report is %s (decoding it returned %v), and the log is\n%s\nwant exit code 0, 1 promoted frame, and the log line %q", code, raw, err, log.String(), waiting)
 	}
 	lines, _ := w.catalogLines()
 	if lines[frameID].Telescope != "east" || lines[frameID].Train != "east-imaging" {
-		t.Errorf("the line is %+v", lines[frameID])
+		t.Errorf("the catalog line is %+v, want telescope east and train east-imaging", lines[frameID])
 	}
 }
 
@@ -65,7 +65,7 @@ func TestMainExitCodes(t *testing.T) {
 				c.prepare(w)
 			}
 			if got := Main(c.args(w, filepath.Join(t.TempDir(), "report")), io.Discard); got != c.want {
-				t.Errorf("Main answered %d, want %d", got, c.want)
+				t.Errorf("Main returned exit code %d, want %d", got, c.want)
 			}
 		})
 	}

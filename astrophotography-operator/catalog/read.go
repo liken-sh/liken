@@ -1,11 +1,12 @@
 package catalog
 
-// The reader of a catalog. The promotion Job reads the whole catalog
-// before each run, to find the frames that an earlier run recorded, and
-// reports the totals of the whole file after it. The totals come from
-// the file and not from what one run did, so the archived counts in a
-// target's status survive a restart of the operator, a report that the
-// operator never read, and a status that a person cleared.
+// The promotion Job reads the whole catalog before each run, to find
+// the frames that an earlier run already recorded, and reports the
+// totals of the whole file when the run ends. Because the totals come
+// from the file and not from one run, the archived counts in a target's
+// status become correct again after the operator restarts, after a
+// report that the operator never read, and after a person clears the
+// status.
 
 import (
 	"bufio"
@@ -18,29 +19,31 @@ import (
 	"slices"
 )
 
-// Total counts the catalog's frames of one combination of settings.
+// Total is the number of frames in the catalog with one set of
+// settings.
 type Total struct {
 	Settings
 	Frames int32 `json:"frames"`
 }
 
-// Catalog is what a reader learned from one catalog file.
+// Catalog is the frames read from one catalog file.
 type Catalog struct {
 	frames map[string]Line
-	// order holds each FRAMEID in the order of its first line.
+	// order lists each FRAMEID in the order of its first line.
 	order []string
 }
 
-// maxLine bounds one line. A line of the frame record takes about 500
-// bytes, and a later record keyed by FRAMEID is of the same size.
+// maxLine is the longest line that Read accepts. A longer line makes
+// Read fail. A frame line has a fixed set of short fields, so it is far
+// below this limit.
 const maxLine = 1 << 20
 
-// Read reads a whole catalog. A line that does not decode is skipped:
-// a crash during an append can leave the last line cut short, and the
-// next append starts a new line after it (Append). A line of a record
-// other than RecordFrame is skipped too, so a reader of this version
-// reads a catalog that a later version extended. A FRAMEID recorded
-// twice counts once, by its first line.
+// Read reads a whole catalog. It skips a line that is not valid JSON,
+// because a crash during an append can leave a cut-off line in the
+// middle of the file. It also skips a line whose record is not
+// RecordFrame, so this version can read a catalog that a later version
+// added other records to. When two lines have the same FRAMEID, the
+// first one counts.
 func Read(r io.Reader) (*Catalog, error) {
 	c := &Catalog{frames: map[string]Line{}}
 	scanner := bufio.NewScanner(r)
@@ -55,8 +58,9 @@ func Read(r io.Reader) (*Catalog, error) {
 	return c, scanner.Err()
 }
 
-// ReadFile reads the catalog at a path. A catalog that does not exist
-// yet is empty: no frame of the target reached the archive.
+// ReadFile reads the catalog at a path. A catalog file that does not
+// exist is an empty catalog, because no frame of the target has reached
+// the archive yet.
 func ReadFile(name string) (*Catalog, error) {
 	file, err := os.Open(name)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -69,23 +73,24 @@ func ReadFile(name string) (*Catalog, error) {
 	return Read(file)
 }
 
-// Add records a frame's line, unless the catalog holds its FRAMEID.
+// Add adds a frame's line, unless the catalog already has a line with
+// its FRAMEID.
 func (c *Catalog) Add(line Line) {
-	if _, held := c.frames[line.FrameID]; held {
+	if _, found := c.frames[line.FrameID]; found {
 		return
 	}
 	c.frames[line.FrameID] = line
 	c.order = append(c.order, line.FrameID)
 }
 
-// Frame answers the line of a frame by its FRAMEID.
+// Frame returns the line with a FRAMEID, and false when there is none.
 func (c *Catalog) Frame(id string) (Line, bool) {
 	line, found := c.frames[id]
 	return line, found
 }
 
-// Totals counts the frames by their settings, sorted by filter,
-// exposure, binning, gain, and offset, with an absent gain or offset
+// Totals counts the frames for each set of settings, sorted by filter,
+// exposure, binning, gain, and offset. A missing gain or offset sorts
 // before any value.
 func (c *Catalog) Totals() []Total {
 	var totals []Total
@@ -117,7 +122,6 @@ func (s Settings) compare(other Settings) int {
 	)
 }
 
-// compareOptional orders an absent value before any value.
 func compareOptional(a, b *float64) int {
 	switch {
 	case a == nil && b == nil:

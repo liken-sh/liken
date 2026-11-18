@@ -1,35 +1,33 @@
 package main
 
-// The promotion loop of plan 03. It moves each target's frames from the
-// outboxes to the target's archive with promotion Jobs, and keeps the
-// target's counts and its ArchiveAvailable condition from their reports.
+// The promotion loop runs promotion Jobs that move each Target's frames
+// from the outbox claims to the Target's archive claim, and sets the
+// Target's frame counts and its ArchiveAvailable condition from the
+// Jobs' reports.
 //
-// The loop reads the stores, and the Target's status is the whole of
-// what tells it that a frame waits. It reads a Job it created from the
-// API server until the watch delivers the create (currentJobs). The
-// runner adds one to the outbox's pending in status.outboxes after each
-// exposure, and that write wakes the loop (watch.go). So the runner and the loop share no
-// memory, and a restart of the operator loses nothing: the next pass
-// reads the same status.
+// The loop reads the frames that wait in an outbox only from the
+// Target's status.outboxes. The runner increments that count after each
+// exposure, and the status write wakes the loop. Because the count is in
+// the status and not in memory, a restart of the operator loses nothing.
 //
-// For each target, a pass first keeps status.sequences,
-// status.progress, and Complete current with the spec (progress), so a
-// target shows its progress from the moment the store holds it, before
-// any reservation claims it. Then it does one of three things:
+// For each Target, a pass first updates status.sequences,
+// status.progress, and the Complete condition from the spec, so a new
+// Target shows its progress before a reservation claims it. Then the
+// pass does one of these:
 //
-//  1. When the target's next Job has ended, it applies the Job's report
-//     to the status (promotionstatus.go). When the Job succeeded and its
-//     pod is gone with the report, it deletes the Job, and the next pass
-//     starts it again.
-//  2. When the next Job runs, it reports a pod that cannot start.
-//  3. Otherwise, it serves the retry annotation (promotionretry.go),
-//     and when an outbox holds more frames than the last Job left
-//     there, it creates the next Job, if the target's pacing allows and
-//     no other Job uses the outbox claim.
+//  1. When the Target's next Job has ended, it applies the Job's report
+//     to the status (promotionstatus.go). When the Job succeeded but its
+//     pod, and so its report, is gone, it deletes the Job, and the next
+//     pass creates it again.
+//  2. When the next Job is running, it reports a pod that cannot be
+//     scheduled.
+//  3. Otherwise it handles the retry annotation (promotionretry.go), and
+//     creates the next Job when an outbox holds more frames than the
+//     last Job left there.
 //
-// So one Job runs for a target at a time, because one Job writes the
-// target's catalog, and one runs for an outbox claim at a time, so the
-// link carries one copy at a time.
+// At most one Job runs for a Target, because a Job writes the Target's
+// catalog. At most one Job runs for an outbox claim, so a network
+// archive receives one copy at a time.
 
 import (
 	"bytes"
@@ -51,20 +49,22 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// promotions is the state of the promotion loop. Each field is a cache
-// or a fact of this process, and a new process starts without them.
+// promotions is the state of the promotion loop. Every field is a cache,
+// so a new process starts with none of it.
 type promotions struct {
 	*operator
-	// versions is the memo of the Targets whose status the loop wrote,
-	// and jobs the memo of the Jobs it created.
+	// versions records the resourceVersion of each Target that the
+	// operator last read or wrote, and jobs records it for each Job that
+	// this loop created.
 	versions, jobs *memo.Versions
 	// image is the operator's own image, which the Jobs run.
 	image   string
 	metrics *promotionMetrics
 }
 
-// The backoff of a pass that failed, such as a write that the API
-// server refused. Every other pass waits for a change.
+// After a failed pass, the loop runs again after a delay that doubles
+// from firstRetry up to lastRetry. After a pass that succeeds, it waits
+// for the next change.
 const (
 	firstRetry = time.Second
 	lastRetry  = time.Minute
@@ -105,14 +105,13 @@ type world struct {
 	pods         []podObject
 	claims       map[string]claimObject
 	reservations []observatory.Reservation
-	// cameras holds each namespace's cameras, with the telescope and
-	// the train of each.
+	// cameras maps each namespace's Camera names to the telescope and
+	// optical train of each.
 	cameras map[string]map[string]promote.Camera
-	// created holds each outbox claim, as namespace/name, that a Job
-	// this pass created uses. The pass lists its Jobs once, before it
-	// creates any, so without the record a second target on the same
-	// claim would start a second Job in the same pass. The next pass
-	// lists the new Job (currentJobs), so the record lives for one pass.
+	// created has each outbox claim, as namespace/name, that a Job
+	// created in this pass uses. jobs was listed before the pass created
+	// any Job, so without created, a second Target with the same outbox
+	// claim would start a second Job on it in the same pass.
 	created map[string]bool
 }
 
@@ -151,18 +150,14 @@ func (p *promotions) read() (world, error) {
 	return w, nil
 }
 
-// currentJobs lists the Jobs through the memo of the loop's creates.
-// The watch selects every Job with the operator's label, and each Job
-// the loop creates has it. So the list also holds each Job the loop
-// created that the store does not hold yet (informer.View.Whole), and
-// a pass that runs before the watch delivers the create does not create
-// the Job again. A read of such a Job that fails leaves its version
-// unknown, and the next list reads the Job again. The memo forgets each
-// Job that the list leaves out and the store no longer holds.
+// currentJobs lists the Jobs, including each Job that the loop created
+// and the watch has not delivered to the store yet, so a pass does not
+// create a Job twice. It then removes from p.jobs each Job that is in
+// neither the list nor the store.
 func (p *promotions) currentJobs() ([]jobObject, error) {
-	held := p.held("Job", p.jobs)
-	held.View.Whole = true
-	jobs, err := informer.CurrentList[jobObject](p.client, held, memo.NamespacedPath(jobPath))
+	store := p.storeOf("Job", p.jobs)
+	store.View.Whole = true
+	jobs, err := informer.CurrentList[jobObject](p.client, store, memo.NamespacedPath(jobPath))
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +165,7 @@ func (p *promotions) currentJobs() ([]jobObject, error) {
 	for i := range jobs {
 		listed[memo.Key(&jobs[i].Metadata.ObjectMeta)] = true
 	}
-	p.jobs.ForgetGone(held.View.Store, listed)
+	p.jobs.ForgetGone(store.View.Store, listed)
 	return jobs, nil
 }
 
@@ -182,11 +177,11 @@ func targetPath(namespace, name string) string {
 	return "/apis/" + astrophotography.APIVersion + "/namespaces/" + namespace + "/" + astrophotography.TargetKind.Plural + "/" + name
 }
 
-// pass serves every target once, with the finalizer of each, and then
-// the finalizers of the outbox claims.
+// pass handles every Target once, including its finalizer, and then
+// handles the finalizers of the outbox claims.
 func (p *promotions) pass() error {
-	held := informer.Held{View: p.stores.view(astrophotography.TargetKind.Name), Versions: p.versions}
-	targets, err := informer.CurrentList[astrophotography.Target](p.client, held, memo.NamespacedPath(targetPath))
+	store := informer.Held{View: p.stores.view(astrophotography.TargetKind.Name), Versions: p.versions}
+	targets, err := informer.CurrentList[astrophotography.Target](p.client, store, memo.NamespacedPath(targetPath))
 	if err != nil {
 		return err
 	}
@@ -201,15 +196,13 @@ func (p *promotions) pass() error {
 			err = p.keepTargetFinalizer(&targets[i], w)
 		}
 		if err != nil {
-			problems = append(problems, fmt.Errorf("Target %s/%s: %w", targets[i].Metadata.Namespace, targets[i].Metadata.Name, err))
+			problems = append(problems, fmt.Errorf("promoting Target %s/%s: %w", targets[i].Metadata.Namespace, targets[i].Metadata.Name, err))
 		}
 	}
 	problems = append(problems, p.keepFinalizers(targets, w.claims))
 	return errors.Join(problems...)
 }
 
-// target serves one target: the report of its next Job when that Job
-// has ended, the pod of that Job while it runs, or a new Job.
 func (p *promotions) target(t *astrophotography.Target, w world) error {
 	if err := p.progress(t); err != nil {
 		return err
@@ -230,8 +223,8 @@ func (p *promotions) target(t *astrophotography.Target, w world) error {
 		if !ready {
 			return nil
 		}
-		landed, err := p.settle(t, result.apply)
-		if landed && result.report != nil {
+		written, err := p.settle(t, result.apply)
+		if written && result.report != nil {
 			p.metrics.observe(*result.report)
 		}
 		return err
@@ -242,22 +235,20 @@ func (p *promotions) target(t *astrophotography.Target, w world) error {
 	return nil
 }
 
-// progress writes status.sequences, status.progress, and Complete from
-// the spec and the counts the status holds, when they differ. A new
-// target then shows 0 of its frames, and an edit of the sequences
-// changes the frames wanted before the next report.
+// progress writes status.sequences, status.progress, and the Complete
+// condition from the spec and the counts already in the status, so an
+// edit of spec.sequences shows in the status before the next report.
 func (p *promotions) progress(t *astrophotography.Target) error {
-	_, err := p.settle(t, func(held *astrophotography.Target) ([]conditions.Condition, bool) {
-		before, _ := json.Marshal(held.Status)
-		alignSequences(held)
-		changed := setCondition(held, nil, completeness(held))
-		after, _ := json.Marshal(held.Status)
+	_, err := p.settle(t, func(current *astrophotography.Target) ([]conditions.Condition, bool) {
+		before, _ := json.Marshal(current.Status)
+		alignSequences(current)
+		changed := setCondition(current, nil, completeness(current))
+		after, _ := json.Marshal(current.Status)
 		return changed, !bytes.Equal(before, after)
 	})
 	return err
 }
 
-// promotionJob answers the target's promotion Job of a number.
 func (w world) promotionJob(t *astrophotography.Target, number int32) (jobObject, bool) {
 	index := slices.IndexFunc(w.jobs, func(j jobObject) bool {
 		n, ok := promotionNumber(j)
@@ -269,7 +260,6 @@ func (w world) promotionJob(t *astrophotography.Target, number int32) (jobObject
 	return w.jobs[index], true
 }
 
-// hasPod reports whether the store holds a pod of a Job.
 func (w world) hasPod(j jobObject) bool {
 	return slices.ContainsFunc(w.pods, func(pod podObject) bool {
 		return pod.Metadata.Namespace == j.Metadata.Namespace && pod.Metadata.Labels[labelPromotionJob] == j.Metadata.Name
@@ -277,16 +267,12 @@ func (w world) hasPod(j jobObject) bool {
 }
 
 // rerun deletes a Job that succeeded and whose pod is gone. The report
-// was the pod's termination message, so a person, the garbage
-// collector, or a lost node that deleted the pod deleted the report
-// too, and no later change brings it back. Each Job reads the whole
-// catalog and skips the frames that the catalog holds, so the next
-// pass starts the same Job again, and its report gives the counts that
-// the lost one held. The Job's pods go with it, because the delete
-// propagates in the background; the API's own default for a Job
-// orphans them. A Job that is already going, such as one that the TTL
-// controller deletes in the foreground, needs no second delete: the
-// loop starts it again when the store no longer holds it.
+// is the pod's termination message, so it is lost with the pod. The
+// next pass creates the same Job again, and because a report's totals
+// come from the whole catalog, the new report restores the lost counts.
+// The delete sets background propagation because the API's default for
+// a Job orphans its pods. A Job that is already being deleted, for
+// example by the TTL controller, needs no second delete.
 func (p *promotions) rerun(t *astrophotography.Target, j jobObject) error {
 	if j.Metadata.DeletionTimestamp != nil {
 		return nil
@@ -298,15 +284,15 @@ func (p *promotions) rerun(t *astrophotography.Target, j jobObject) error {
 	if err != nil {
 		return err
 	}
-	message := fmt.Sprintf("the pod of the promotion Job %s is gone with its report, so the Job runs again", j.Metadata.Name)
+	message := fmt.Sprintf("Deleted the promotion Job %s to run it again, because its pod was deleted before the operator read its report", j.Metadata.Name)
 	fmt.Fprintf(p.logs, "%s: Target %s/%s: %s\n", managedBy, t.Metadata.Namespace, t.Metadata.Name, message)
 	p.recorder.Normal(events.ObjectReference{APIVersion: astrophotography.APIVersion, Kind: astrophotography.TargetKind.Name,
 		Namespace: t.Metadata.Namespace, Name: t.Metadata.Name, UID: t.Metadata.UID}, reasonReportLost, message)
 	return nil
 }
 
-// claimBusy reports whether a promotion Job that has not ended uses an
-// outbox claim: one the pass listed, or one the pass created.
+// claimBusy reports whether a promotion Job that has not ended uses the
+// outbox claim, whether the pass listed that Job or created it.
 func (w world) claimBusy(namespace, claim string) bool {
 	if w.created[namespace+"/"+claim] {
 		return true
@@ -318,22 +304,24 @@ func (w world) claimBusy(namespace, claim string) bool {
 	})
 }
 
-// unschedulable answers the scheduler's message for a Job's pod that
-// cannot start, such as for two claims that no one node can mount.
+// unschedulable returns the scheduler's message for a Job's pod that
+// cannot be scheduled, for example when no node can mount both the
+// outbox claim and the archive claim, and true when there is such a pod.
 func unschedulable(j jobObject, pods []podObject) (string, bool) {
 	for _, pod := range pods {
 		if pod.Metadata.Labels[labelPromotionJob] != j.Metadata.Name {
 			continue
 		}
 		if c, ok := condition(pod.Status.Conditions, "PodScheduled", "False"); ok && c.Reason == "Unschedulable" {
-			return fmt.Sprintf("the pod of the promotion Job %s cannot start: %s", j.Metadata.Name, c.Message), true
+			return fmt.Sprintf("The pod of the promotion Job %s cannot start: %s", j.Metadata.Name, c.Message), true
 		}
 	}
 	return "", false
 }
 
-// startJob creates the target's next Job for the first outbox claim
-// that needs one.
+// startJob creates the Target's next Job for the first outbox claim
+// that has frames to promote and no other Job, when the Target's
+// promotion setting allows it and the archive claim exists.
 func (p *promotions) startJob(t *astrophotography.Target, w world, number int32) error {
 	namespace := t.Metadata.Namespace
 	for _, entry := range t.Status.Outboxes {
@@ -341,7 +329,7 @@ func (p *promotions) startJob(t *astrophotography.Target, w world, number int32)
 			continue
 		}
 		if _, exists := w.claims[namespace+"/"+t.Spec.Archive.ClaimName]; !exists {
-			message := fmt.Sprintf("the PersistentVolumeClaim %s does not exist in %s", t.Spec.Archive.ClaimName, namespace)
+			message := fmt.Sprintf("The PersistentVolumeClaim %s that spec.archive.claimName refers to does not exist in namespace %s", t.Spec.Archive.ClaimName, namespace)
 			return p.setCondition(t, archiveAvailable(conditions.False, astrophotography.ReasonClaimMissing, message))
 		}
 		image, err := p.ownImage()
@@ -359,9 +347,9 @@ func (p *promotions) startJob(t *astrophotography.Target, w world, number int32)
 	return nil
 }
 
-// waitsForReservation reports whether a target that promotes after the
-// reservation waits for one that still runs on the outbox claim: it is
-// activating, ready, or deactivating, so the telescope may still work.
+// waitsForReservation reports whether a Target whose promotion is
+// AfterReservation must wait, because a Reservation that uses the outbox
+// claim has not ended and its runner can still add frames.
 func waitsForReservation(t *astrophotography.Target, claim string, reservations []observatory.Reservation) bool {
 	if t.Spec.Archive.Promotion != astrophotography.PromotionAfterReservation {
 		return false
@@ -377,40 +365,41 @@ func waitsForReservation(t *astrophotography.Target, claim string, reservations 
 	})
 }
 
-// setCondition writes one condition, when it differs from the status.
 func (p *promotions) setCondition(t *astrophotography.Target, next conditions.Condition) error {
-	_, err := p.settle(t, func(held *astrophotography.Target) ([]conditions.Condition, bool) {
-		before, _ := conditions.Find(held.Status.Conditions, next.Type)
-		changed := setCondition(held, nil, next)
-		after, _ := conditions.Find(held.Status.Conditions, next.Type)
+	_, err := p.settle(t, func(current *astrophotography.Target) ([]conditions.Condition, bool) {
+		before, _ := conditions.Find(current.Status.Conditions, next.Type)
+		changed := setCondition(current, nil, next)
+		after, _ := conditions.Find(current.Status.Conditions, next.Type)
 		return changed, before != after
 	})
 	return err
 }
 
-// settle writes the status that apply composes, and posts the Event of
-// each condition that transitioned once the write lands.
+// settle writes the status that apply returns, and after the write
+// succeeds, posts an Event for each condition that transitioned. It
+// returns whether the write succeeded.
 func (p *promotions) settle(t *astrophotography.Target, apply func(*astrophotography.Target) ([]conditions.Condition, bool)) (bool, error) {
 	var changed []conditions.Condition
 	path := targetPath(t.Metadata.Namespace, t.Metadata.Name)
 	t.APIVersion, t.Kind = astrophotography.APIVersion, astrophotography.TargetKind.Name
-	landed, err := informer.SettleStatus[astrophotography.Target](p.client, p.versions, path, t, func(held *astrophotography.Target) bool {
+	written, err := informer.SettleStatus[astrophotography.Target](p.client, p.versions, path, t, func(current *astrophotography.Target) bool {
 		var needed bool
-		changed, needed = apply(held)
+		changed, needed = apply(current)
 		return needed
 	})
-	if landed {
+	if written {
 		reference := events.ObjectReference{APIVersion: astrophotography.APIVersion, Kind: astrophotography.TargetKind.Name,
 			Namespace: t.Metadata.Namespace, Name: t.Metadata.Name, UID: t.Metadata.UID}
 		for _, c := range changed {
 			p.recorder.Transition(reference, c, badStatus(c))
 		}
 	}
-	return landed, err
+	return written, err
 }
 
-// badStatus answers the status of a condition that needs a person:
-// ArchiveAvailable False. Complete needs no person either way.
+// badStatus returns the status of the condition that needs a person, so
+// a transition to it posts a Warning Event. That is False for
+// ArchiveAvailable, and none for Complete.
 func badStatus(c conditions.Condition) conditions.Status {
 	if c.Type == astrophotography.ConditionArchiveAvailable {
 		return conditions.False

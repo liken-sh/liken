@@ -21,12 +21,13 @@ packages:
   Algorithms*.
 - `outbox/`, the layout of a reservation's outbox, which the runner,
   the worker, and the promotion `Job` share.
-- `catalog/`, a target's frame catalog: the line, the reader that
-  counts the totals, and the writer that appends.
+- `catalog/`, a target's frame catalog: the line (`catalog.go`), the
+  reader that counts the totals (`read.go`), and the writer that
+  appends (`append.go`).
 - `promote/`, `worker/`, and `solver/`, the three modes of the binary
-  that do not run the operator. Each holds the contract that the
-  operator speaks with it: the promotion report, and the HTTP requests
-  and answers of the worker and the solver. `promote/` also holds the
+  that do not run the operator. Each has the types of its interface
+  with the operator: the promotion report, and the HTTP requests and
+  responses of the worker and the solver. `promote/` also has the
   promotion `Job`'s run and `promote.Name`, which renders a frame's
   name from `archive.format`.
 
@@ -44,37 +45,39 @@ from the CRDs, and `skills/` is generated from the guides, so run
 ## The resources
 
 The tests in `astrophotography/` read the CRDs through the API
-server's own validators and hold them to the Go types, the way
+server's own validators and compare them with the Go types, the way
 `observatory-operator`'s tests do:
 
 - `drift_test.go` compares each Go type with its CRD, field by field.
-- `enum_test.go` holds each CRD enum equal to the Go constants.
+- `enum_test.go` checks that each CRD enum equals the Go constants.
 - `validation_test.go` runs resources that a person could write
   through the structural schema and the CEL rules, and
   `target_test.go` checks the defaults that the CRD fills in.
-- `fitskeywords_test.go` holds the `Target`'s `spec.fitsKeywords` to
-  `observatory-operator`'s field, and its refused names to
+- `fitskeywords_test.go` compares the `Target`'s `spec.fitsKeywords`
+  with `observatory-operator`'s field, and its refused names with
   `RefusedFITSKeywords`.
-- `example_test.go` holds `examples/first-session.yaml`, the drill of
-  plan 08, to both operators' CRDs, to the Go types, and to itself.
+- `example_test.go` checks `examples/first-session.yaml`, the drill of
+  plan 08, against both operators' CRDs, against the Go types, and for
+  references to objects that it does not declare.
 
 ## The operator
 
 `main.go` builds the clients, and `leader.go` waits for the `Lease`,
 runs the operator, and releases the `Lease` after the last write.
-`operator.go` opens the watches of `watch.go`, which ring one bell on
-every change: the `Target`s and `Solver`s, the `Reservation`s whose
+`operator.go` opens the watches of `watch.go`, which notify one
+`changeNotifier` on every change: the `Target`s and `Solver`s, the `Reservation`s whose
 `spec.holder` is `astrophotography-operator`, the kinds of
 `observatory-operator` that the runner reads, and the pods,
 `Service`s, `Deployment`s, and `Job`s the operator creates, and every
 `PersistentVolumeClaim`. `runners.go` starts the runner of plan 01
 for each `Ready` reservation (`runner.go`): it chooses and claims a
-target (`selection.go`) that stands above the telescope's horizon
-(`horizon.go`), checks that the filter wheel holds its filters
+target (`selection.go`) that is above the telescope's horizon
+(`horizon.go`), checks that the filter wheel has its filters
 (`filters.go`), slews (`slew.go`), exposes each frame
 (`exposure.go`, `framesaved.go`), counts it into the target's status
 (`counting.go`), and finishes a frame in flight after a restart
-(`resume.go`). `steps.go` holds the seams of guiding and centering.
+(`resume.go`). `steps.go` declares the interfaces of guiding and
+centering, which the tests replace.
 `centering.go` centers a target with a plate solve, through the
 centering frames of `centeringframe.go` and the client of
 `platesolve.go`. `guider.go`, `guiding.go`, and `dither.go` guide and
@@ -84,15 +87,16 @@ starts the promotion `Job`s and applies their reports
 (`promotionstatus.go`), and starts a `Job` again for the frames a `Job`
 left when a person adds the retry annotation (`promotionretry.go`). `outboxfinalizer.go` keeps the finalizer on
 the outbox claims, and `targetfinalizer.go` keeps it on the `Target`s,
-so a delete waits for the frames that promotion has not moved. `metrics.go` holds the registry and the listener
-of root plan 65, and `events.go` the reasons of the `Event`s that no
+so a delete waits for the frames that promotion has not moved.
+`metrics.go` has the registry and the listener of root plan 65, and
+`events.go` the reasons of the `Event`s that no
 condition transition gives. Each loop of plans 01, 02, and 03 starts in
-`operator.run` and waits on the bell.
+`operator.run` and waits on the `changeNotifier`.
 
 The tests run the operator in a `testing/synctest` bubble against
 `fakeapi_test.go`, an API server on `kubernetes/apiservertest` that
-holds every watched collection, and the Lease server of
-`kubernetes/election/electiontest`. `fakeobjects_test.go` answers the
+serves every watched collection, and the Lease server of
+`kubernetes/election/electiontest`. `fakeobjects_test.go` serves the
 reads and writes of one object, with a 409 for a stale
 `resourceVersion`, and `promote/` runs against files in
 `t.TempDir()`.

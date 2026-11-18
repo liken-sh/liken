@@ -1,9 +1,9 @@
-# The operator's identity. It reads the Targets and Solvers in every
-# namespace, and the observatory resources that a held Reservation
-# names, and it runs each worker, solver, and promotion Job in the
-# namespace of the resource it serves, so a ClusterRole grants what it
-# needs. It writes no spec and no status of observatory-operator's
-# resources.
+# The operator's service account and permissions. The operator reads
+# Targets and Solvers in every namespace, reads the observatory
+# resources that a Reservation it holds refers to, and runs each worker,
+# solver, and promotion Job in the namespace of the resource it serves.
+# So it needs a ClusterRole. It never writes the spec or status of
+# observatory-operator's resources.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -15,10 +15,10 @@ kind: ClusterRole
 metadata:
   name: astrophotography-operator
 rules:
-  # A watch of each kind that the runner reads: the Reservations that
-  # name this operator as their holder, the site, the telescope, its
-  # horizon, and its optics, the devices it drives, and the guider. get
-  # reads one again after a write that met a conflict.
+  # The operator watches these kinds: the Reservations that name it as
+  # holder, and the observatory, telescope, horizon, optics, devices,
+  # and guider that such a Reservation refers to. get reads one object
+  # again after a write fails with a conflict.
   - apiGroups: [observatory.liken.sh]
     resources:
       - reservations
@@ -36,43 +36,44 @@ rules:
   - apiGroups: [astrophotography.liken.sh]
     resources: [targets, solvers]
     verbs: [get, list, watch]
-  # A merge patch adds and removes the finalizer that holds a delete of
-  # a Target while frames of it wait in an outbox, and removes the
-  # retry annotation after the operator acts on it.
+  # Merge patches add and remove the finalizer that blocks the deletion
+  # of a Target while its frames are still in an outbox, and remove the
+  # retry annotation after the operator has acted on it.
   - apiGroups: [astrophotography.liken.sh]
     resources: [targets]
     verbs: [patch]
-  # The operator writes each status with a PUT to the status
-  # subresource, which is the update verb, and never writes a spec.
+  # The operator writes status with a PUT to the status subresource,
+  # which needs the update verb. It never writes a spec.
   - apiGroups: [astrophotography.liken.sh]
     resources: [targets/status, solvers/status]
     verbs: [update]
-  # The worker of each held reservation and the pod of each Solver, each
-  # a Deployment with a Service in the namespace of its resource.
+  # The worker for each Reservation the operator holds and the pod for
+  # each Solver. Each is a Deployment with a Service, in the namespace
+  # of its resource.
   - apiGroups: [apps]
     resources: [deployments]
     verbs: [get, list, watch, create, update, delete]
   - apiGroups: [""]
     resources: [services]
     verbs: [get, list, watch, create, update, delete]
-  # The promotion Jobs, the pods whose status holds a promotion's
-  # report and the reason a worker waits, and the operator's own pod,
-  # whose image the promotion Jobs run.
+  # The promotion Jobs, and the pods. The operator reads a promotion's
+  # report and the reason a worker is waiting from pod status. It reads
+  # its own pod for its image, which the promotion Jobs run and whose
+  # tag the worker image shares.
   - apiGroups: [batch]
     resources: [jobs]
     verbs: [get, list, watch, create, delete]
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch, create, delete]
-  # The outbox claims and the archive claims. A merge patch adds and
-  # removes the finalizer that keeps an outbox until its frames are
-  # promoted.
+  # The outbox and archive claims. A merge patch adds and removes the
+  # finalizer that keeps an outbox claim until its frames are promoted.
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
     verbs: [get, list, watch, update, patch]
-  # The Events of each resource's transitions and of the runner's
-  # actions on a Reservation. A repeat of an Event within 10 minutes
-  # patches its count.
+  # Events for each condition transition and for the operator's actions
+  # on a Reservation. An Event that repeats within 10 minutes is patched
+  # with a new count.
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]
@@ -90,10 +91,10 @@ subjects:
     name: astrophotography-operator
     namespace: liken-system
 ---
-# The Lease that elects the one copy of the operator that acts
-# (leader.go). client-go's election reads the Lease with a get, takes
-# and renews it with an update, and releases it with an update. A
-# namespaced Role, because the Lease is in the operator's own namespace.
+# The Lease for leader election (leader.go), so that only one copy of
+# the operator acts. client-go's election reads the Lease with get, and
+# takes, renews, and releases it with update. The Lease is in the
+# operator's own namespace, so a namespaced Role is enough.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -103,8 +104,9 @@ rules:
     resources: [leases]
     resourceNames: [astrophotography-operator]
     verbs: [get, update]
-  # create carries no resourceNames, because RBAC cannot read a name off
-  # a create. The first copy to start creates the Lease.
+  # create has no resourceNames, because RBAC cannot match the name of
+  # an object that does not exist yet. The first copy to start creates
+  # the Lease.
   - apiGroups: [coordination.k8s.io]
     resources: [leases]
     verbs: [create]

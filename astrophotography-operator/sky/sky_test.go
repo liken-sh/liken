@@ -2,8 +2,8 @@ package sky
 
 // Each case is a worked example from Jean Meeus, Astronomical
 // Algorithms, second edition (1998), named by its chapter and letter.
-// The book prints each result to a stated precision, and a case checks
-// to that precision unless the case says why it checks to less.
+// A case checks to the precision the book prints, unless its comment
+// gives the reason for a looser limit.
 
 import (
 	"math"
@@ -41,9 +41,10 @@ func TestJulianDay(t *testing.T) {
 	}
 }
 
-// Example 21.b: θ Persei, at J2000.0 with its proper motion of 28.86705
-// years applied, precessed to the equinox of 2028 November 13.19 TD by
-// the rigorous method. The book prints the result to 0.000001°.
+// Example 21.b: θ Persei at J2000.0 with 28.86705 years of proper
+// motion applied, precessed to the equinox of 2028 November 13.19 TD by
+// the rigorous method. The book prints the result to 0.000001°, and the
+// limit is 0.000002°.
 func TestPrecessFromJ2000(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -67,18 +68,18 @@ func TestPrecessFromJ2000(t *testing.T) {
 	}
 }
 
-// Example 22.a: 1987 April 10, 0h TD. The book computes the nutation
-// from the full table of 63 terms. This package uses the abridged
-// series of the same chapter, which Meeus gives as accurate to 0.5″ in
-// longitude and 0.1″ in obliquity, so those are the limits here. The
-// mean obliquity comes from equation 22.2, the same formula the book
-// uses, so it checks to the book's 0.001″.
+// Example 22.a: 1987 April 10, 0h TD. The book computes nutation from
+// its full table of 63 terms. This package uses the abridged series of
+// the same chapter, which Meeus gives as accurate to 0.5″ in longitude
+// and 0.1″ in obliquity, so those are the limits for the nutation
+// angles. The mean obliquity uses the book's own equation 22.2, so it
+// checks to the book's 0.001″.
 func TestNutation(t *testing.T) {
 	n := NutationAt(2446895.5)
 	cases := []struct {
-		name       string
-		got, want  float64
-		limitInArc float64
+		name            string
+		got, want       float64
+		limitArcseconds float64
 	}{
 		{"nutation in longitude", n.Longitude, arcseconds(-3.788), 0.5},
 		{"nutation in obliquity", n.Obliquity, arcseconds(9.443), 0.1},
@@ -87,7 +88,7 @@ func TestNutation(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if !near(c.got, c.want, arcseconds(c.limitInArc)) {
+			if !near(c.got, c.want, arcseconds(c.limitArcseconds)) {
 				t.Errorf("%s = %.3f″, want %.3f″", c.name, c.got*3600, c.want*3600)
 			}
 		})
@@ -96,10 +97,10 @@ func TestNutation(t *testing.T) {
 
 // Example 23.a: θ Persei on 2028 November 13.19 TD, after precession.
 // With the book's nutation, Δψ = +14.861″ and Δε = +2.705″, and the
-// obliquity of 23.436°, the nutation moves the star by Δα = +15.843″
-// and Δδ = +6.218″. The book takes them from the first-order formulas
-// of equation 23.1, and this package rotates the vector, so the two
-// agree to far less than the book's 0.001″.
+// obliquity of 23.436°, nutation moves the star by Δα = +15.843″ and
+// Δδ = +6.218″. The book uses the first-order formulas of equation
+// 23.1, and this package rotates the vector. The two results differ by
+// less than the limit of 0.002″.
 func TestNutationMovesAStar(t *testing.T) {
 	precessed := Position{RA: 41.547214, Dec: 49.348483}
 	n := Nutation{Longitude: arcseconds(14.861), Obliquity: arcseconds(2.705), MeanObliquity: 23.436 - arcseconds(2.705)}
@@ -120,9 +121,7 @@ func TestNutationMovesAStar(t *testing.T) {
 	}
 }
 
-// The conversion that a slew uses is precession and then nutation, and
-// the way back undoes both. A round trip must return the start to far
-// better than any limit the operator applies.
+// FromDate undoes ToDate to within 1e-6 arcseconds.
 func TestToDateAndBack(t *testing.T) {
 	at := time.Date(2026, 10, 12, 23, 21, 6, 0, time.UTC)
 	cases := []struct {
@@ -144,9 +143,9 @@ func TestToDateAndBack(t *testing.T) {
 	}
 }
 
-// Plan 02 measured the cost of the epoch for M42 in 2026: the mount
-// took the J2000 coordinates as JNow, and the frame's center was about
-// 20 arcminutes from M42. The conversion must move M42 by that much.
+// A mount that takes J2000 coordinates as JNow in 2026 points about 20
+// arcminutes away from M42, so the conversion must move M42 by about
+// that much.
 func TestTheEpochMovesM42ByAboutTwentyArcminutes(t *testing.T) {
 	m42 := Position{RA: 83.822083, Dec: -5.391111}
 	moved := Separation(m42, ToDate(m42, time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC))) * 60
@@ -155,7 +154,9 @@ func TestTheEpochMovesM42ByAboutTwentyArcminutes(t *testing.T) {
 	}
 }
 
-// Example 17.a: the angular distance from Arcturus to Spica.
+// Example 17.a: the angular distance from Arcturus to Spica. The other
+// cases check the identical, nearby, and opposite points that the
+// cosine formula handles badly.
 func TestSeparation(t *testing.T) {
 	cases := []struct {
 		name string

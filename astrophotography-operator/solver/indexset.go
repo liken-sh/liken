@@ -1,11 +1,11 @@
 package solver
 
-// The index set is the files that the engine reads and the series that
-// GET /indexes answers. indexwatch.go changes it as files come and go,
-// and each change writes the engine's configuration again and wakes
-// every client that follows the series. The engine reads its
-// configuration at the start of each solve, so the next solve after a
-// change reads the new set.
+// indexSet tracks the index files in the index directory and the series
+// that GET /indexes returns for them. indexwatch.go updates it as files
+// appear and disappear. When the list of files changes, indexSet
+// rewrites the engine's configuration and wakes the clients that watch
+// GET /indexes. The engine reads its configuration at the start of each
+// solve, so the next solve uses the new files.
 
 import (
 	"cmp"
@@ -18,21 +18,20 @@ import (
 )
 
 type indexSet struct {
-	// config is the path of the engine's configuration, and cpuLimit
-	// the limit it gives the engine.
+	// config is the path of the engine's configuration file.
 	config   string
 	cpuLimit int
 	logs     io.Writer
 
-	mu sync.Mutex
-	// files holds each index file by its path.
+	mu    sync.Mutex
 	files map[string]IndexFile
-	// written is the list of files that config names, and loaded is
-	// false until the first write.
+	// written is the sorted list of files in the last configuration
+	// written. loaded is false until the first write, so the first change
+	// writes the configuration even when the list is empty.
 	written []IndexFile
 	loaded  bool
 	series  Indexes
-	// changed closes at the next change of the files.
+	// changed is closed, and replaced, at each change to the series.
 	changed chan struct{}
 }
 
@@ -40,37 +39,35 @@ func newIndexSet(config string, cpuLimit int, logs io.Writer) *indexSet {
 	return &indexSet{config: config, cpuLimit: cpuLimit, logs: logs, files: map[string]IndexFile{}, series: Indexes{}, changed: make(chan struct{})}
 }
 
-// current answers the series, and a channel that closes when they
-// change.
+// current returns the series and a channel that closes when it changes.
 func (s *indexSet) current() (Indexes, <-chan struct{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.series, s.changed
 }
 
-// replace sets the whole set, after a read of the whole directory.
+// replace sets the files to the result of a listing of the whole
+// directory.
 func (s *indexSet) replace(files []IndexFile) error {
-	return s.change(func(held map[string]IndexFile) {
-		clear(held)
+	return s.change(func(byPath map[string]IndexFile) {
+		clear(byPath)
 		for _, file := range files {
-			held[file.Path] = file
+			byPath[file.Path] = file
 		}
 	})
 }
 
-// put adds a file, or replaces the one at the same path.
 func (s *indexSet) put(file IndexFile) error {
-	return s.change(func(held map[string]IndexFile) { held[file.Path] = file })
+	return s.change(func(byPath map[string]IndexFile) { byPath[file.Path] = file })
 }
 
-// drop removes the file at a path, when the set holds one.
 func (s *indexSet) drop(path string) error {
-	return s.change(func(held map[string]IndexFile) { delete(held, path) })
+	return s.change(func(byPath map[string]IndexFile) { delete(byPath, path) })
 }
 
-// change applies an edit to the files. When the list of files changed,
-// it writes the configuration, logs the series, and wakes the
-// followers.
+// change applies edit to the files. When the sorted list of files is
+// different after the edit, it rewrites the engine's configuration,
+// logs the new series, and wakes the clients that watch the series.
 func (s *indexSet) change(edit func(map[string]IndexFile)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -93,14 +90,14 @@ func (s *indexSet) change(edit func(map[string]IndexFile)) error {
 		fmt.Fprintf(s.logs, "index series %d: %d files, quads of %g to %g arcminutes\n", one.ID, one.Files, one.ScaleArcmin.Low, one.ScaleArcmin.High)
 	}
 	if len(s.series) == 0 {
-		fmt.Fprintln(s.logs, "no index-*.fits to read, so every solve answers no solution")
+		fmt.Fprintln(s.logs, "no index-*.fits file to read, so every solve returns no solution")
 	}
 	return nil
 }
 
-// writeConfig replaces the configuration by a rename, so an engine
-// that starts during the write reads the old file or the new one,
-// never a part of one.
+// writeConfig writes to a temporary file and renames it over path, so an
+// engine that starts during the write reads the old file or the new one,
+// never a partial file.
 func writeConfig(path, config string) error {
 	next := path + ".next"
 	if err := os.WriteFile(next, []byte(config), 0o600); err != nil {

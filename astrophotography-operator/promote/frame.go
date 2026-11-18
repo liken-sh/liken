@@ -1,8 +1,8 @@
 package promote
 
-// What the promotion Job reads from a frame's header: its identity, the
-// settings that decide which sequence it counts toward, the start of
-// the exposure, and whether the file is whole.
+// Reads a frame's FITS header for the promotion Job: the frame's
+// identity, the settings that decide which sequence it belongs to, the
+// start time of the exposure, and whether the whole file is there.
 
 import (
 	"errors"
@@ -14,23 +14,22 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/catalog"
 )
 
-// incomplete is a frame shorter than its header and data: the driver
-// is still writing it, or never finished. Its text says how much of
-// the file is there.
+// incomplete is the error for a frame file that is shorter than its
+// header and data, because the driver is still writing it or never
+// finished.
 type incomplete string
 
 func (i incomplete) Error() string { return string(i) }
 
-// dateObs is how the driver writes DATE-OBS: UTC with milliseconds and
-// no zone, such as 2026-10-12T20:08:26.864.
+// dateObs is the layout of DATE-OBS in the driver's frames: UTC with
+// milliseconds and no zone, such as 2026-10-12T20:08:26.864.
 const dateObs = "2006-01-02T15:04:05.999999999"
 
-// startTime is how a catalog line writes the start of an exposure.
+// startTime is the layout of a catalog line's exposure start time.
 const startTime = "2006-01-02T15:04:05.000Z07:00"
 
-// readFrame reads a frame's header into the fields of its catalog line.
-// A file that ends before its header and data do answers an
-// incomplete.
+// readFrame reads a frame's header into a catalog line. It returns
+// incomplete when the file ends before its header or data do.
 func readFrame(name string) (catalog.Line, error) {
 	file, err := os.Open(name)
 	if err != nil {
@@ -58,8 +57,8 @@ func readFrame(name string) (catalog.Line, error) {
 	return lineOf(h), nil
 }
 
-// lineOf answers the fields of a catalog line that the header gives. A
-// header with no XBINNING took the camera's binning of 1.
+// lineOf returns the catalog line fields that the header holds. A
+// header with no XBINNING gives a binning of 1.
 func lineOf(h header) catalog.Line {
 	line := catalog.Line{Record: catalog.RecordFrame}
 	line.FrameID, _ = h.text("FRAMEID")

@@ -11,47 +11,44 @@ import (
 	"time"
 )
 
-// The engine solved the fixture's frame at 29.6070°, 59.8193°, with
-// index 4207, at 2.68 arcseconds per pixel, as the image's probe in
-// plan 02 recorded. Its CD matrix has a positive determinant, which
-// solve-field reports as negative parity, and a rotation of 180°.
-func TestAFieldThatSolvesAnswersItsSolution(t *testing.T) {
-	answer, err := fakeEngineAt(t, engineSolves).Solve(t.Context(), readFixture(t, fixtureAXY))
+// The expected values are what the real engine returned for the
+// fixture's frame. The fixture's CD matrix has a positive determinant,
+// which astrometry.net calls negative parity.
+func TestAFieldThatSolvesReturnsItsSolution(t *testing.T) {
+	solution, err := fakeEngineAt(t, engineSolves).Solve(t.Context(), readFixture(t, fixtureAXY))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("solving the fixture frame: %v", err)
 	}
 	cases := []struct {
 		name      string
 		got, want float64
 		within    float64
 	}{
-		{"ra", answer.Center.RA, 29.6070, 1e-4},
-		{"dec", answer.Center.Dec, 59.8193, 1e-4},
-		{"scale", answer.Scale, 2.6815, 1e-3},
-		{"rotation", answer.Rotation, 180.0, 0.05},
-		{"index", float64(answer.Index), 4207, 0},
+		{"ra", solution.Center.RA, 29.6070, 1e-4},
+		{"dec", solution.Center.Dec, 59.8193, 1e-4},
+		{"scale", solution.Scale, 2.6815, 1e-3},
+		{"rotation", solution.Rotation, 180.0, 0.05},
+		{"index", float64(solution.Index), 4207, 0},
 	}
 	for _, c := range cases {
 		if math.Abs(c.got-c.want) > c.within {
 			t.Errorf("%s = %v, want %v", c.name, c.got, c.want)
 		}
 	}
-	if !answer.Solved || answer.Parity != ParityNegative {
-		t.Errorf("solved %v with parity %q, want solved with %q", answer.Solved, answer.Parity, ParityNegative)
+	if !solution.Solved || solution.Parity != ParityNegative {
+		t.Errorf("solved %v with parity %q, want solved with %q", solution.Solved, solution.Parity, ParityNegative)
 	}
 }
 
-// The engine writes no file for a field it does not solve, and its exit
-// ends the job.
-func TestAFieldThatDoesNotSolveAnswersNoSolution(t *testing.T) {
-	answer, err := fakeEngineAt(t, engineMisses).Solve(t.Context(), readFixture(t, fixtureAXY))
-	if err != nil || answer.Solved {
-		t.Errorf("answered %+v and %v, want no solution", answer, err)
+func TestAFieldThatDoesNotSolveReturnsNoSolution(t *testing.T) {
+	solution, err := fakeEngineAt(t, engineMisses).Solve(t.Context(), readFixture(t, fixtureAXY))
+	if err != nil || solution.Solved {
+		t.Errorf("Solve returned %+v and %v, want an empty response and no error", solution, err)
 	}
 }
 
-// Each job's files go when it ends, so the emptyDir does not fill.
-func TestTheJobsFilesGoWhenItEnds(t *testing.T) {
+// Solve deletes each job's directory, so the emptyDir does not fill up.
+func TestTheJobDirectoryIsDeletedWhenTheJobEnds(t *testing.T) {
 	cases := []string{engineSolves, engineMisses, engineFails}
 	for _, behavior := range cases {
 		t.Run(behavior, func(t *testing.T) {
@@ -65,10 +62,10 @@ func TestTheJobsFilesGoWhenItEnds(t *testing.T) {
 	}
 }
 
-func TestAnEngineThatFailsAnswersItsLog(t *testing.T) {
+func TestAnEngineThatFailsReturnsItsLog(t *testing.T) {
 	_, err := fakeEngineAt(t, engineFails).Solve(t.Context(), readFixture(t, fixtureAXY))
 	if err == nil || !strings.Contains(err.Error(), "Failed to load index file") {
-		t.Errorf("answered %v, want the engine's log", err)
+		t.Errorf("Solve returned %v, want an error that holds the engine's log", err)
 	}
 }
 
@@ -78,32 +75,32 @@ func TestAnEngineThatHangsIsStoppedAtTheTimeout(t *testing.T) {
 	started := time.Now()
 	_, err := engine.Solve(t.Context(), readFixture(t, fixtureAXY))
 	if err == nil || time.Since(started) > 5*time.Second {
-		t.Errorf("answered %v after %s, want an error at the timeout", err, time.Since(started))
+		t.Errorf("Solve returned %v after %s, want an error within 5s of the 200ms timeout", err, time.Since(started))
 	}
 }
 
-// A WCS file the solver cannot read is an error, not a solution: one
-// that is a directory, one that is not FITS, and one with no CRVAL1,
-// for which the fake writes the .axy itself.
-func TestAWCSFileThatDoesNotReadIsAnError(t *testing.T) {
+// A WCS file that Solve cannot read is an error, not a missing
+// solution. FAKE_ENGINE_WCS makes the fake engine write the .axy fixture
+// as the WCS file, which is FITS with no CRVAL1.
+func TestAnUnreadableWCSFileIsAnError(t *testing.T) {
 	cases := []string{engineWritesADirectory, engineWritesGarbage, engineSolves}
 	for _, behavior := range cases {
 		t.Run(behavior, func(t *testing.T) {
 			engine := fakeEngineAt(t, behavior)
 			axy, err := filepath.Abs(fixtureAXY)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("resolving the path of %s: %v", fixtureAXY, err)
 			}
 			t.Setenv("FAKE_ENGINE_WCS", axy)
 			if _, err := engine.Solve(t.Context(), readFixture(t, fixtureAXY)); err == nil {
-				t.Error("no error")
+				t.Error("Solve returned no error, want one for the unreadable WCS file")
 			}
 		})
 	}
 }
 
-// replaceCard answers the .axy with the card of one key replaced by
-// another card, padded to 80 characters.
+// replaceCard returns a copy of the .axy in which the card for key is
+// replaced by card, padded to 80 characters.
 func replaceCard(axy []byte, key, card string) []byte {
 	card += strings.Repeat(" ", 80-len(card))
 	out := bytes.Clone(axy)
@@ -116,8 +113,8 @@ func replaceCard(axy []byte, key, card string) []byte {
 	return out
 }
 
-// The solver runs only an .axy whose outputs stay in the job's
-// directory, so the engine writes nothing anywhere else in the pod.
+// Solve refuses an .axy that is not FITS, names no WCS file, or names
+// an output outside the job's directory.
 func TestAStarListTheSolverDoesNotRunIsRefused(t *testing.T) {
 	axy := readFixture(t, fixtureAXY)
 	cases := []struct {
@@ -133,7 +130,7 @@ func TestAStarListTheSolverDoesNotRunIsRefused(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := fakeEngineAt(t, engineSolves).Solve(t.Context(), c.axy)
 			if !errors.Is(err, ErrBadStarList) {
-				t.Errorf("answered %v, want %v", err, ErrBadStarList)
+				t.Errorf("Solve returned %v, want %v", err, ErrBadStarList)
 			}
 		})
 	}
@@ -143,6 +140,6 @@ func TestAWorkDirectoryThatIsGoneIsAnError(t *testing.T) {
 	engine := fakeEngineAt(t, engineSolves)
 	engine.Work += "/gone"
 	if _, err := engine.Solve(t.Context(), readFixture(t, fixtureAXY)); err == nil {
-		t.Error("no error")
+		t.Error("Solve returned no error, want one for the missing work directory")
 	}
 }

@@ -1,12 +1,12 @@
 package main
 
-// The world of a runner's test: the fake API server with an observatory
-// whose telescope east has a mount, an imaging camera, and a filter
-// wheel on the train east-imaging; a fake INDI server that runs the
-// telescope, CCD, and filter wheel simulators from their transcripts;
-// and a fake worker that lists the outbox. Each test declares its
-// targets and its reservation, starts the operator, and plays the
-// camera's exposures.
+// The fixtures for the runner's tests: a fake API server with an
+// observatory whose telescope east has a mount, an imaging camera, and
+// a filter wheel on the train east-imaging; a fake INDI server that
+// runs the telescope, CCD, and filter wheel simulators from recorded
+// transcripts; and a fake worker that lists the outbox. Each test
+// declares its Targets and its Reservation, starts the operator, and
+// plays the camera's exposures.
 
 import (
 	"context"
@@ -38,29 +38,31 @@ const (
 	filterWheelsPath  = "/apis/observatory.liken.sh/v1alpha1/filterwheels"
 )
 
-type night struct {
-	// t is the test of the bubble the world lives in.
+type runnerWorld struct {
+	// t is the test that runs inside the synctest bubble.
 	t    *testing.T
 	api  *fakeAPI
 	indi *inditest.Server
-	// phd2 is the switchboard of the telescope's PHD2. Only a session
-	// that names a Guider dials it (guided).
-	phd2   *switchboard
+	// phd2 is the fake PHD2 server of the telescope. The operator
+	// connects to it only when the session has a Guider, as guided sets
+	// up.
+	phd2   *phd2Dialer
 	worker *fakeWorker
 	o      *operator
-	// stop stops the operator, as a SIGTERM does, and waits for it.
+	// stop stops the operator, as a SIGTERM does, and waits for it to
+	// exit.
 	stop func()
-	// configure changes the operator before it runs.
+	// configure changes the operator before it starts.
 	configure func(*operator)
 }
 
-// newWorld declares the observatory and connects the simulators, as
-// observatory-operator's Connect step does before a reservation is
+// newWorld declares the observatory and connects the simulators, as the
+// Connect step of observatory-operator does before a Reservation is
 // Ready.
-func newWorld(t *testing.T) *night {
-	w := &night{t: t, api: startFakeAPI(t), indi: inditest.NewServer(t, "telescope", "ccd", "wheel")}
+func newWorld(t *testing.T) *runnerWorld {
+	w := &runnerWorld{t: t, api: startFakeAPI(t), indi: inditest.NewServer(t, "telescope", "ccd", "wheel")}
 	w.worker = startFakeWorker(t)
-	w.phd2 = newSwitchboard()
+	w.phd2 = newPHD2Dialer()
 	w.put(observatoriesPath, &observatory.Observatory{Metadata: meta("lab"),
 		Spec: observatory.ObservatorySpec{Location: observatory.Location{Latitude: 51.5, Longitude: -75}}})
 	w.put(mountsPath, &observatory.Mount{Metadata: meta("east-mount"),
@@ -81,7 +83,7 @@ func meta(name string) observatory.ObjectMeta {
 }
 
 // put stores a typed object in a collection.
-func (w *night) put(path string, object any) {
+func (w *runnerWorld) put(path string, object any) {
 	body, _ := json.Marshal(object)
 	var out map[string]any
 	_ = json.Unmarshal(body, &out)
@@ -95,16 +97,16 @@ func connectSimulators(t *testing.T, server *inditest.Server) {
 	go func() { _ = client.Run(ctx) }()
 	for _, device := range []string{mountINDI, ccdINDI, wheelINDI} {
 		if err := client.ConnectDevice(ctx, device); err != nil {
-			t.Fatal(err)
+			t.Fatalf("connecting the INDI device %s: %v", device, err)
 		}
 	}
 }
 
-// readyOrNot is east-tonight in a phase, with the session that
-// observatory-operator records: the three devices, the train and its
-// tube of 480 mm, the outbox frames, and the session's keywords for
-// the camera.
-func readyOrNot(phase observatory.ReservationPhase) *observatory.Reservation {
+// reservationIn returns the Reservation east-tonight in the given phase,
+// with the session status that observatory-operator writes: the three
+// devices, the train and its 480 mm tube, the outbox claim, and the
+// FITS keywords for the camera.
+func reservationIn(phase observatory.ReservationPhase) *observatory.Reservation {
 	return &observatory.Reservation{
 		Metadata: meta(tonight),
 		Spec:     observatory.ReservationSpec{Telescope: "east", Holder: managedBy, Outbox: &observatory.Outbox{ClaimName: "frames"}},
@@ -133,7 +135,7 @@ func readyOrNot(phase observatory.ReservationPhase) *observatory.Reservation {
 	}
 }
 
-// target is a target of M42 on east-imaging, with one sequence.
+// target returns a Target of M42 on east-imaging, with one sequence.
 func target(name string, sequences ...astrophotography.Sequence) *astrophotography.Target {
 	created := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	m := meta(name)
@@ -155,18 +157,18 @@ func lights(count int32) astrophotography.Sequence {
 	return astrophotography.Sequence{Filter: "Luminance", Exposure: "10s", Count: count}
 }
 
-// start runs the operator until the test ends, or until stop.
-func (w *night) start(t *testing.T) { w.startWith(t, w.indi) }
+// start runs the operator until the test ends or stop is called.
+func (w *runnerWorld) start(t *testing.T) { w.startWith(t, w.indi) }
 
-// startWith runs the operator with a dialer of the INDI server.
-func (w *night) startWith(t *testing.T, dialer indi.Dialer) {
+// startWith runs the operator with the given INDI dialer.
+func (w *runnerWorld) startWith(t *testing.T, dialer indi.Dialer) {
 	ctx, cancel := context.WithCancel(t.Context())
 	client := apiclient.New(apiservertest.Host, w.api.server.Client(), "")
 	recorder := events.New(t.Context(), client, managedBy, events.Options{Log: io.Discard})
 	o := newOperator(client, recorder, newMetrics("dev"), testLog{t})
 	o.indiDialer = dialer
 	o.phd2Dialer = w.phd2
-	o.workerClient = w.worker.server.Client()
+	o.peerClient = w.worker.server.Client()
 	if w.configure != nil {
 		w.configure(o)
 	}
@@ -183,8 +185,8 @@ func (w *night) startWith(t *testing.T, dialer indi.Dialer) {
 	t.Cleanup(w.stop)
 }
 
-// waitUntil lets the bubble's clock run, a second at a time, until
-// done holds, and fails the test after an hour.
+// waitUntil advances the bubble's fake clock one second at a time until
+// done returns true, and fails the test after one hour of fake time.
 func waitUntil(t *testing.T, done func() bool) {
 	t.Helper()
 	for range 3600 {
@@ -194,10 +196,10 @@ func waitUntil(t *testing.T, done func() bool) {
 		}
 		time.Sleep(time.Second)
 	}
-	t.Fatal("waited an hour")
+	t.Fatal("the condition was still false after waiting 3600 seconds")
 }
 
-// testLog writes the operator's log lines to the test's log.
+// testLog sends the operator's log lines to the test's log.
 type testLog struct{ t *testing.T }
 
 func (l testLog) Write(p []byte) (int, error) {
@@ -205,23 +207,25 @@ func (l testLog) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// targetNow answers a target as the fake API server holds it.
-func (w *night) targetNow(t *testing.T, name string) *astrophotography.Target {
+// targetNow returns a Target as the fake API server currently stores
+// it.
+func (w *runnerWorld) targetNow(t *testing.T, name string) *astrophotography.Target {
 	t.Helper()
 	object := w.api.get(targetsPath, ns, name)
 	if object == nil {
-		t.Fatalf("no target %s", name)
+		t.Fatalf("the fake API server has no Target %s", name)
 	}
 	body, _ := json.Marshal(object)
 	var out astrophotography.Target
 	if err := json.Unmarshal(body, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the Target %s: %v", name, err)
 	}
 	return &out
 }
 
-// imaging answers a target's Imaging condition as "<status> <reason>".
-func (w *night) imaging(t *testing.T, name string) string {
+// imaging returns the Imaging condition of a Target as "<status>
+// <reason>", or "" when the Target has no such condition.
+func (w *runnerWorld) imaging(t *testing.T, name string) string {
 	for _, c := range w.targetNow(t, name).Status.Conditions {
 		if c.Type == astrophotography.ConditionImaging {
 			return string(c.Status) + " " + c.Reason
@@ -230,18 +234,20 @@ func (w *night) imaging(t *testing.T, name string) string {
 	return ""
 }
 
-// runnerEvents answers the Events about one object, in order, without
-// the Events of Complete. The promotion loop posts Complete's first
-// Event on each target in its first pass, in no fixed order with the
-// runner's, and targetprogress_test.go tests it.
-func (w *night) runnerEvents(kind, name string) []events.Event {
+// runnerEvents returns the Events about one object, in the order they
+// were posted, without the Events for the Complete condition. The
+// promotion loop posts the first of those Events for each Target in its
+// first pass, and the order relative to the runner's Events is not
+// fixed. targetprogress_test.go tests them.
+func (w *runnerWorld) runnerEvents(kind, name string) []events.Event {
 	return slices.DeleteFunc(w.api.recorded.About(kind, name), func(e events.Event) bool {
 		return e.Reason == astrophotography.ReasonWorkLeft || e.Reason == astrophotography.ReasonArchived
 	})
 }
 
-// eventReasons answers the reasons of runnerEvents.
-func (w *night) eventReasons(kind, name string) []string {
+// eventReasons returns the reasons of the Events that runnerEvents
+// returns.
+func (w *runnerWorld) eventReasons(kind, name string) []string {
 	var out []string
 	for _, e := range w.runnerEvents(kind, name) {
 		out = append(out, e.Reason)
@@ -249,29 +255,29 @@ func (w *night) eventReasons(kind, name string) []string {
 	return out
 }
 
-// failStatusWrites makes the fake API server refuse the next status
-// writes.
-func (w *night) failStatusWrites(count int) {
+// failStatusWrites makes the fake API server reject the next count
+// status writes.
+func (w *runnerWorld) failStatusWrites(count int) {
 	w.api.mu.Lock()
 	defer w.api.mu.Unlock()
 	w.api.failStatus = count
 }
 
-// disconnect disconnects a simulator's driver from its hardware, so it
-// deletes the properties it defined on connect.
-func (w *night) disconnect(device string) {
+// disconnect disconnects an INDI simulator's driver from its device.
+// The driver then deletes the properties it defined when it connected.
+func (w *runnerWorld) disconnect(device string) {
 	t := w.t
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	client := indi.NewClient("indiserver", indi.WithDialer(w.indi))
 	go func() { _ = client.Run(ctx) }()
 	if err := client.DisconnectDevice(ctx, device); err != nil {
-		t.Fatal(err)
+		t.Fatalf("disconnecting the INDI device %s: %v", device, err)
 	}
 }
 
-// imagingIn answers the message of the Imaging condition in the body of
-// a status write.
+// imagingIn returns the message of the Imaging condition in the body of
+// a status write, or "" when the body has none.
 func imagingIn(body map[string]any) string {
 	status, _ := body["status"].(map[string]any)
 	list, _ := status["conditions"].([]any)

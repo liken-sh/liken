@@ -1,11 +1,11 @@
 package main
 
-// A target's progress, as the runner reads it (plan 01). status.sequences
-// holds one entry for each sequence of the spec, with the frames
-// archived and the frames pending. The promotion loop owns archived,
-// status.progress, and Complete (promotionstatus.go), and the runner
-// adds only to pending, so both align the list with the spec by one
-// rule, sequenceProgress.
+// status.sequences has one entry for each sequence in the spec, with
+// its numbers of frames archived and pending. The runner adds one to
+// pending for each frame it saves. The promotion loop sets archived
+// from each Job's report, takes the frames it archived out of pending,
+// and sets status.progress and the Complete condition. Both match the
+// entries to the spec with sequenceProgress.
 
 import (
 	"fmt"
@@ -15,8 +15,8 @@ import (
 )
 
 // sequenceSettings are the settings of one sequence that the runner
-// writes before an exposure. A nil pointer leaves the camera's own
-// value.
+// writes to the camera before an exposure. A nil pointer leaves the
+// camera's current value.
 type sequenceSettings struct {
 	filter                string
 	exposure              time.Duration
@@ -24,17 +24,17 @@ type sequenceSettings struct {
 }
 
 // settingsOf reads a sequence's settings. The CRD accepts only an
-// exposure that time.ParseDuration reads, so an error means the object
-// did not come through the API server.
+// exposure that time.ParseDuration can parse, so an error means the
+// object did not pass through API server validation.
 func settingsOf(s astrophotography.Sequence) (sequenceSettings, error) {
 	exposure, err := s.ExposureDuration()
 	if err != nil {
-		return sequenceSettings{}, fmt.Errorf("exposure %q: %w", s.Exposure, err)
+		return sequenceSettings{}, fmt.Errorf("parsing the exposure %q of a sequence: %w", s.Exposure, err)
 	}
 	return sequenceSettings{filter: s.Filter, exposure: exposure, binning: s.Binning, gain: s.Gain, offset: s.Offset}, nil
 }
 
-// String names the settings in a message, such as "Luminance 5m0s".
+// String formats the settings for a message, such as "Luminance 5m0s".
 func (s sequenceSettings) String() string {
 	filter := s.filter
 	if filter == "" {
@@ -43,30 +43,30 @@ func (s sequenceSettings) String() string {
 	return filter + " " + s.exposure.String()
 }
 
-// alignSequences aligns status.sequences with the spec, and keeps the
-// counts of each sequence that stays.
+// alignSequences matches status.sequences to the spec and keeps the
+// counts of each sequence that is still in the spec.
 func alignSequences(t *astrophotography.Target) {
 	t.Status.Sequences = sequenceProgress(t.Spec.Sequences, t.Status.Sequences, nil, true)
 }
 
-// aligned answers a copy of a target with its sequences aligned, and
-// leaves the target as it was.
+// aligned returns a copy of the target with its sequences matched to
+// the spec. The target itself does not change.
 func aligned(t *astrophotography.Target) *astrophotography.Target {
 	c := *t
 	alignSequences(&c)
 	return &c
 }
 
-// workLeft answers how many frames a sequence still needs, which is
-// never below zero: a target can end with more frames than it asked
-// for when a promotion lags.
+// workLeft returns how many more frames a sequence needs. It is never
+// below zero, because a sequence can have more frames than its count.
 func workLeft(p astrophotography.SequenceProgress) int32 {
 	return max(0, p.Count-p.Archived-p.Pending)
 }
 
-// nextSequence answers the index of the first sequence with work left,
-// and false when none has any. One filter at a time is the cheapest
-// order, because a change of filter costs a refocus on a real rig.
+// nextSequence returns the index of the first sequence with work left,
+// and false when no sequence has any. Finishing one sequence before the
+// next keeps filter changes few, because a filter change can need a
+// refocus.
 func nextSequence(t *astrophotography.Target) (int, bool) {
 	for i, p := range t.Status.Sequences {
 		if workLeft(p) > 0 {

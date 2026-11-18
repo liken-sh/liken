@@ -1,7 +1,8 @@
 package main
 
-// The frame in flight when the operator stops, and when the reservation
-// ends.
+// status.exposure records the frame in flight: the frame that the
+// camera exposes or the driver saves. These tests cover that frame when
+// the operator stops or the reservation ends.
 
 import (
 	"slices"
@@ -13,14 +14,13 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// inFlight reports whether a target has a frame in flight.
-func (w *night) inFlight(t *testing.T, name string) func() bool {
+func (w *runnerWorld) inFlight(t *testing.T, name string) func() bool {
 	return func() bool { return w.targetNow(t, name).Status.Exposure != nil }
 }
 
-// pendingOf answers the pending count of each sequence. The runner adds
-// a sequence's entry with its first frame, so a target of one sequence
-// with no entry has counted none.
+// pendingOf returns the pending count of each sequence. The runner adds
+// a sequence's entry with its first frame, so it returns [0] for a
+// status with no entries.
 func pendingOf(status astrophotography.TargetStatus) []int32 {
 	out := []int32{}
 	if len(status.Sequences) == 0 {
@@ -32,16 +32,16 @@ func pendingOf(status astrophotography.TargetStatus) []int32 {
 	return out
 }
 
-// The operator stops during an exposure, and the driver goes on and
-// writes the frame. The next operator reads CCD_EXPOSURE before it
-// writes anything: while it is Busy it waits, and then it counts the
-// frame that status.exposure names once, and goes on with the next.
-// No exposure is lost or repeated.
+// The operator stops during an exposure, and the driver finishes and
+// saves the frame. The next operator reads CCD_EXPOSURE before it
+// writes anything. While CCD_EXPOSURE is Busy it waits. Then it counts
+// the frame in status.exposure once and continues with the next frame,
+// so no frame is lost or counted twice.
 func TestARestartDuringAnExposureCountsTheFrameOnce(t *testing.T) {
 	cases := []struct {
 		name string
-		// ended reports whether the next operator starts after the
-		// driver finished the frame.
+		// ended is true when the next operator starts after the driver
+		// has finished the frame.
 		ended bool
 	}{
 		{"the next operator starts while the camera exposes", false},
@@ -52,13 +52,13 @@ func TestARestartDuringAnExposureCountsTheFrameOnce(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				w := newWorld(t)
 				w.put(targetsPath, target("m42", lights(2)))
-				w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+				w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 				w.playCamera(t, saves)
 				w.start(t)
 				waitUntil(t, w.inFlight(t, "m42"))
 				w.stop()
 				if c.ended {
-					waitUntil(t, func() bool { return len(w.worker.held()) == 1 })
+					waitUntil(t, func() bool { return len(w.worker.outboxFrames()) == 1 })
 				}
 				exposures := len(slices.DeleteFunc(w.indi.Changes(), func(change string) bool {
 					return !isExposure(change)
@@ -70,7 +70,7 @@ func TestARestartDuringAnExposureCountsTheFrameOnce(t *testing.T) {
 				if got := pendingOf(status); !slices.Equal(got, []int32{2}) {
 					t.Errorf("pending %v, want [2]", got)
 				}
-				if got := len(w.worker.held()); got != 2 {
+				if got := len(w.worker.outboxFrames()); got != 2 {
 					t.Errorf("%d frames in the outbox, want 2", got)
 				}
 				after := len(slices.DeleteFunc(w.indi.Changes(), func(change string) bool { return !isExposure(change) }))
@@ -87,14 +87,14 @@ func isExposure(change string) bool {
 	return len(change) > len(ccdINDI) && change[:len(ccdINDI)+13] == ccdINDI+".CCD_EXPOSURE"
 }
 
-// A status write that the API server refuses after the frame is saved
-// leaves status.exposure in place, and the next pass counts the frame
-// from it, once.
-func TestARefusedCountIsCountedOnTheNextPass(t *testing.T) {
+// When the API server refuses the status write that follows a saved
+// frame, status.exposure stays set, and the next pass counts that frame
+// once.
+func TestARefusedStatusWriteIsRetriedOnTheNextPass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		w.put(targetsPath, target("m42", lights(2)))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.playCamera(t, saves)
 		w.start(t)
 		waitUntil(t, w.inFlight(t, "m42"))
@@ -110,32 +110,33 @@ func TestARefusedCountIsCountedOnTheNextPass(t *testing.T) {
 }
 
 // The INDI connection drops during an exposure. The runner waits for
-// the server, finishes the frame from status.exposure the way a restart
-// does, and goes on. Every frame counts once.
-func TestACutConnectionLosesNoFrame(t *testing.T) {
+// the server, finishes the frame from status.exposure as it does after
+// a restart, and continues. Every frame is counted once.
+func TestADroppedINDIConnectionLosesNoFrame(t *testing.T) {
 	cases := []struct {
 		name string
-		// before is the number of frames saved before the cut.
+		// before is how many frames were saved before the connection
+		// dropped.
 		before int
 	}{
-		{"a cut during the first frame", 0},
-		{"a cut after a connection that lasted minutes", 7},
+		{"the connection drops during the first frame", 0},
+		{"the connection drops after it lasted for minutes", 7},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				w := newWorld(t)
 				w.put(targetsPath, target("m42", lights(9)))
-				w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+				w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 				w.playCamera(t, saves)
 				w.start(t)
-				waitUntil(t, func() bool { return len(w.worker.held()) == c.before && w.inFlight(t, "m42")() })
+				waitUntil(t, func() bool { return len(w.worker.outboxFrames()) == c.before && w.inFlight(t, "m42")() })
 				w.indi.Cut()
 				waitUntil(t, func() bool { return w.imaging(t, "m42") == "False SequencesDone" })
 				if got := pendingOf(w.targetNow(t, "m42").Status); !slices.Equal(got, []int32{9}) {
 					t.Errorf("pending %v, want [9]", got)
 				}
-				if got := len(w.worker.held()); got != 9 {
+				if got := len(w.worker.outboxFrames()); got != 9 {
 					t.Errorf("%d frames in the outbox, want 9", got)
 				}
 				requireSample(t, scrape(t, w.o.metrics), `astrophotography_frames_exposed_total{namespace="observatory",target="m42"} 9`)
@@ -144,11 +145,11 @@ func TestACutConnectionLosesNoFrame(t *testing.T) {
 	}
 }
 
-// A frame in flight that cannot be counted: a file that is no frame of
-// the outbox's layout, a file the outbox does not hold, and a frame of a
-// camera the server does not serve. Each clears status.exposure and
-// counts nothing.
-func TestAFrameInFlightThatIsNotInTheOutboxDoesNotCount(t *testing.T) {
+// A frame in flight that cannot be counted is a path outside the
+// outbox's layout, a file that is not in the outbox, or a frame of a
+// camera that the INDI server does not serve. The runner clears
+// status.exposure for each and counts nothing.
+func TestAFrameInFlightThatIsNotInTheOutboxIsNotCounted(t *testing.T) {
 	cases := []struct{ name, file string }{
 		{"a path outside the layout", "east-main/stray.fits"},
 		{"a frame the driver never wrote", "east-main/east-tonight/m42/M42/x.fits"},
@@ -162,11 +163,11 @@ func TestAFrameInFlightThatIsNotInTheOutboxDoesNotCount(t *testing.T) {
 				x.Status.Reservation = tonight
 				x.Status.Exposure = &astrophotography.Exposure{FrameID: "0199d3a0-0000-7000-8000-000000000001", Reservation: tonight, File: c.file}
 				w.put(targetsPath, x)
-				w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+				w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 				w.playCamera(t, saves)
 				w.start(t)
 				waitUntil(t, func() bool { return w.imaging(t, "m42") == "False SequencesDone" })
-				if got := len(w.worker.held()); got != 1 {
+				if got := len(w.worker.outboxFrames()); got != 1 {
 					t.Errorf("%d frames, want 1", got)
 				}
 			})
@@ -174,25 +175,25 @@ func TestAFrameInFlightThatIsNotInTheOutboxDoesNotCount(t *testing.T) {
 	}
 }
 
-// The worker does not answer when the next operator starts, so the
+// The worker does not respond when the next operator starts, so the
 // runner cannot tell whether the frame in flight is in the outbox. It
-// waits, and counts the frame once the worker answers.
-func TestARestartWaitsForTheWorkerToCountTheFrame(t *testing.T) {
+// waits until the worker responds, then counts the frame.
+func TestARestartWaitsForTheWorkerBeforeCountingTheFrame(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		w.put(targetsPath, target("m42", lights(1)))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.playCamera(t, saves)
 		w.start(t)
 		waitUntil(t, w.inFlight(t, "m42"))
 		w.stop()
-		waitUntil(t, func() bool { return len(w.worker.held()) == 1 })
+		waitUntil(t, func() bool { return len(w.worker.outboxFrames()) == 1 })
 		w.worker.set(func() { w.worker.down = true })
 		w.start(t)
 		time.Sleep(5 * time.Minute)
 		synctest.Wait()
 		if !w.inFlight(t, "m42")() {
-			t.Fatal("the runner cleared the frame in flight with no answer from the worker")
+			t.Fatal("the runner cleared the frame in flight with no response from the worker")
 		}
 		w.worker.set(func() { w.worker.down = false })
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False SequencesDone" })
@@ -202,10 +203,10 @@ func TestARestartWaitsForTheWorkerToCountTheFrame(t *testing.T) {
 	})
 }
 
-// A camera that another client keeps exposing after a restart, such as
-// KStars: the runner waits for the frame's end and the readout, finds
-// no frame in the outbox, and counts nothing.
-func TestARestartDoesNotWaitForAnotherClientsExposure(t *testing.T) {
+// After a restart, another client such as KStars is exposing the
+// camera. The runner waits for the exposure to end and for the readout,
+// finds no frame in the outbox, and counts nothing.
+func TestARestartWaitsForAnotherClientsExposureAndCountsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		w.indi.Move(ccdINDI, "CCD_EXPOSURE")
@@ -215,7 +216,7 @@ func TestARestartDoesNotWaitForAnotherClientsExposure(t *testing.T) {
 		x.Status.Exposure = &astrophotography.Exposure{FrameID: "0199d3a0-0000-7000-8000-000000000001",
 			Reservation: tonight, File: "east-main/east-tonight/m42/M42/x.fits", StartTime: time.Now()}
 		w.put(targetsPath, x)
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.start(t)
 		started := time.Now()
 		waitUntil(t, func() bool { return !w.inFlight(t, "m42")() })
@@ -229,8 +230,8 @@ func TestARestartDoesNotWaitForAnotherClientsExposure(t *testing.T) {
 }
 
 // The reservation ends while the runner waits for a frame in flight
-// after a restart: the wait ends, and the release clears the frame.
-func TestAReservationThatEndsDuringTheWaitForAFrameInFlight(t *testing.T) {
+// after a restart. The wait ends, and the release clears the frame.
+func TestTheReleaseClearsAFrameInFlightWhenTheReservationEndsDuringTheWait(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		w.indi.Move(ccdINDI, "CCD_EXPOSURE")
@@ -240,10 +241,10 @@ func TestAReservationThatEndsDuringTheWaitForAFrameInFlight(t *testing.T) {
 		x.Status.Exposure = &astrophotography.Exposure{FrameID: "0199d3a0-0000-7000-8000-000000000001",
 			Reservation: tonight, File: "east-main/east-tonight/m42/M42/x.fits", StartTime: time.Now()}
 		w.put(targetsPath, x)
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.start(t)
 		time.Sleep(time.Minute)
-		w.put(reservationsPath, readyOrNot(observatory.ReservationDeactivating))
+		w.put(reservationsPath, reservationIn(observatory.ReservationDeactivating))
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False Waiting" })
 		if w.inFlight(t, "m42")() {
 			t.Error("the release left the frame in flight")

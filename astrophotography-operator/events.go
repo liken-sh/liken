@@ -1,54 +1,46 @@
 package main
 
-// The Events of astrophotography-operator. `kubectl describe` lists
-// them under the status, so a person reads what happened to a resource
-// in the last hour with no log to open. kubernetes/events writes them,
-// and root plan 78 gives the rule for a condition, an Event, and a log
-// line:
+// The Events that astrophotography-operator posts, so that `kubectl
+// describe` shows what happened to a resource in the last hour without
+// a look at the operator's log.
 //
 //   - Each condition transition of a Target or a Solver posts one Event
 //     on that resource, with the condition's reason and message.
-//   - The runner's actions on a Reservation post an Event on the
-//     Reservation, with the reasons below. They take the prefix
-//     Astrophotography, because the Reservation is observatory-operator's
-//     resource.
-//   - The promotion loop posts reasonReportLost on a Target when it
-//     runs a Job again because the Job's report is gone, and
-//     reasonPromotionRetry when a person's retry annotation starts a
-//     Job for the frames that the last Jobs left in the outbox.
-//   - An exposure and a dither change no condition and post nothing, so
-//     a target posts a few Events in a night, not one for each frame.
+//   - A runner posts the Events below on its Reservation. Their reasons
+//     start with Astrophotography because observatory-operator owns the
+//     Reservation.
+//   - An exposure or a dither posts no Event, so a Target gets a few
+//     Events in a night, not one for each frame.
 
-// The reasons of the Events on a Reservation (plans 01, 02, and 03).
 const (
-	// reasonNoOutbox is a Warning: the reservation has no outbox, so the
-	// runner images nothing, because a frame must land in a claim that
-	// outlives the camera's pod.
+	// A Warning when the reservation has no outbox. The runner then takes
+	// no images, because a frame must be saved to a claim that outlives
+	// the camera's pod.
 	reasonNoOutbox = "AstrophotographyNoOutbox"
-	// reasonUnparked is Normal: the runner unparked the mount before a
-	// slew.
+	// Normal, when the runner unparked the mount before a slew.
 	reasonUnparked = "AstrophotographyUnparked"
-	// reasonIdle is Normal: no target of the namespace is eligible.
+	// Normal, when no target in the namespace is eligible.
 	reasonIdle = "AstrophotographyIdle"
-	// reasonWorkerPending is a Warning: the reservation's worker pod
-	// cannot start, with the scheduler's message, such as for an outbox
-	// claim whose access mode is ReadWriteOncePod.
+	// A Warning with the scheduler's message when the reservation's
+	// worker pod cannot start. A common cause is an outbox claim with the
+	// access mode ReadWriteOncePod.
 	reasonWorkerPending = "AstrophotographyWorkerPending"
-	// reasonOutboxFull is a Warning: the outbox has less than three
-	// frames' space free, so the runner does not expose.
+	// A Warning when the outbox has less free space than three frames
+	// need, so the runner does not expose.
 	reasonOutboxFull = "AstrophotographyOutboxFull"
-	// reasonNotCentered is a Warning: the target's Solver is missing or
-	// not Ready, so the runner images the target without centering it.
+	// A Warning when the target's Solver is missing or not Ready. The
+	// runner then images the target without centering it.
 	reasonNotCentered = "AstrophotographyNotCentered"
 )
 
-// reasonReportLost is Normal, on a Target: the pod of a promotion Job
-// that succeeded is gone, and its report with it, so the loop deleted
-// the Job and starts it again (plan 03).
+// reasonReportLost is Normal, on a Target. The pod of a succeeded
+// promotion Job is gone, and the Job's report was that pod's
+// termination message. So the promotion loop deleted the Job, and the
+// next pass creates it again.
 const reasonReportLost = "PromotionReportLost"
 
-// reasonPromotionRetry is Normal, on a Target: a person asked with the
-// annotation astrophotography.liken.sh/retry, so the loop tries again
-// the frames that the last promotion Jobs left in the outbox
+// reasonPromotionRetry is Normal, on a Target. A person set the
+// annotation astrophotography.liken.sh/retry, so the promotion loop
+// starts a Job for the frames that earlier Jobs left in the outbox
 // (promotionretry.go).
 const reasonPromotionRetry = "PromotionRetry"

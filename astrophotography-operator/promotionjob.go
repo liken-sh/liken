@@ -1,16 +1,16 @@
 package main
 
-// The promotion Job of plan 03: one run of the binary's promote mode,
-// in the target's namespace, that mounts the outbox claim and the
-// archive claim and moves the target's frames from one to the other.
-// One Job serves one target and one outbox claim.
+// A promotion Job runs the binary's promote mode in the target's
+// namespace. It mounts one outbox claim and the target's archive claim,
+// and moves the target's frames from the outbox to the archive.
 //
-// The Job names no node. The scheduler places its pod where both
-// claims can be mounted, so a local-path outbox puts it on the
-// machine that holds the outbox, and the archive must be mountable
-// there too: a ReadWriteMany share, or a local-path claim on the same
-// node. When no node can mount both, the pod stays Pending, and the
-// loop reports the scheduler's message as Unschedulable.
+// The Job sets no node, so the scheduler places its pod on a node that
+// can mount both claims. A local-path outbox exists on one machine
+// only, so the archive must be mountable there too: a ReadWriteMany
+// volume, or a local-path claim on the same node. When no node can
+// mount both, the pod stays Pending, and the operator sets
+// ArchiveAvailable to False with the reason Unschedulable and the
+// scheduler's message.
 
 import (
 	"crypto/sha256"
@@ -24,10 +24,9 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/promote"
 )
 
-// The labels and annotations of a promotion Job and its pod. A label
-// value holds at most 63 characters and a Target's name can hold 253,
-// so the Job's target and claim are annotations, and the Target is the
-// Job's owner.
+// A label value is limited to 63 characters and a Target's name can
+// have 253, so a promotion Job records its target and claim in
+// annotations, not labels.
 const (
 	labelComponent      = "app.kubernetes.io/component"
 	componentPromotion  = "promotion"
@@ -49,10 +48,10 @@ const (
 	promotionCPURequest = "10m"
 )
 
-// promotionJobName answers the name of a target's Job of a number, such
-// as m42-promote-3. A long target name is cut and takes a hash of the
-// whole name, so the Job's name stays a DNS label that its pod's
-// job-name label can hold.
+// promotionJobName returns a name such as m42-promote-3. The Job
+// controller copies the Job's name into the job-name label of its pod,
+// so the name must fit in 63 characters. A longer target name is cut
+// short, and a hash of the full name keeps two long names apart.
 func promotionJobName(target string, number int32) string {
 	tail := "-promote-" + strconv.Itoa(int(number))
 	if len(target)+len(tail) <= maxJobName {
@@ -63,11 +62,11 @@ func promotionJobName(target string, number int32) string {
 	return target[:maxJobName-len(tail)-len(hash)] + hash + tail
 }
 
-// promotionJob answers the Job that promotes a target's frames from one
-// outbox claim. pending is the claim's count of the target's frames
-// when the Job is created. The report's frames left, with the frames
-// counted since then, become the claim's count when the Job ends
-// (promotionstatus.go).
+// promotionJob builds the Job that moves a target's frames out of one
+// outbox claim. pending is the number of the target's frames in the
+// claim when the Job is created. When the Job ends, the operator sets
+// the claim's pending count to the frames that the report says are
+// left, plus the frames exposed since the Job was created.
 func promotionJob(t *astrophotography.Target, claim string, number, pending int32, image string, cameras map[string]promote.Camera) jobObject {
 	name := promotionJobName(t.Metadata.Name, number)
 	same := claim == t.Spec.Archive.ClaimName
@@ -91,8 +90,8 @@ func promotionJob(t *astrophotography.Target, claim string, number, pending int3
 		annotationNumber: strconv.Itoa(int(number)), annotationPending: strconv.Itoa(int(pending)),
 	}
 	var podMeta objectMeta
-	// The pod carries the operator's label, so the pod watch holds it
-	// and the loop reads the report from its status.
+	// The operator's pod watch selects on labelManagedBy, and the
+	// operator reads the Job's report from the pod's status.
 	podMeta.Labels = map[string]string{labelManagedBy: managedBy, labelComponent: componentPromotion, labelPromotionJob: name}
 	return jobObject{
 		APIVersion: "batch/v1", Kind: "Job", Metadata: meta,
@@ -100,11 +99,12 @@ func promotionJob(t *astrophotography.Target, claim string, number, pending int3
 			BackoffLimit: promotionBackoff, ActiveDeadlineSeconds: promotionDeadline, TTLSecondsAfterFinished: promotionTTL,
 			Template: podTemplate{Metadata: podMeta, Spec: podSpec{
 				RestartPolicy: "Never",
-				// The driver writes the frames as user and group 1000, so
-				// the Job does too. fsGroup lets it write a new archive
-				// claim, and OnRootMismatch changes the owner only when the
-				// claim's root is not the group's, so a large archive is
-				// not walked on every run.
+				// The INDI driver pods of observatory-operator run as user
+				// and group 1000 and write the frames, so the Job runs as
+				// 1000 too. fsGroup makes a new archive claim writable.
+				// OnRootMismatch changes ownership only when the claim's
+				// root directory does not already belong to the group, so
+				// the kubelet does not walk a large archive on every run.
 				SecurityContext: &podSecurity{
 					RunAsUser: promotionUser, RunAsGroup: promotionUser, RunAsNonRoot: true,
 					FSGroup: promotionUser, FSGroupChangePolicy: "OnRootMismatch",
@@ -124,8 +124,8 @@ func promotionJob(t *astrophotography.Target, claim string, number, pending int3
 	}
 }
 
-// promotionNumber answers the number of a promotion Job, and false for a
-// Job that is not one.
+// promotionNumber returns the number of a promotion Job, and false when
+// the Job is not a promotion Job.
 func promotionNumber(j jobObject) (int32, bool) {
 	if j.Metadata.Labels[labelComponent] != componentPromotion {
 		return 0, false
@@ -137,7 +137,7 @@ func promotionNumber(j jobObject) (int32, bool) {
 	return int32(number), true
 }
 
-// finished reports whether a Job ended, and whether it succeeded.
+// finished reports whether a Job has ended, and whether it succeeded.
 func finished(j jobObject) (ended, succeeded bool) {
 	if _, ok := condition(j.Status.Conditions, "Complete", "True"); ok {
 		return true, true

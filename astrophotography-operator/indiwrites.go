@@ -1,9 +1,9 @@
 package main
 
-// The runner's writes to the INDI server. Each write settles with the
-// INDI client's Settle, which reads the driver's answer from the updates
-// after the write, and each wait has a limit, because a driver whose
-// hardware stops answering never answers at all.
+// After each write to the INDI server, the runner waits for the
+// driver's reply in the property updates that follow. Every wait has a
+// timeout, because a driver whose hardware stops responding never
+// replies.
 
 import (
 	"context"
@@ -14,19 +14,17 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
-// settingTimeout bounds the answer to one setting, such as the upload
-// directory or a FITS keyword. plan 20's drill measured 2 to 43 ms for
-// a keyword.
+// settingTimeout limits each wait for a reply that a driver sends at
+// once: a property definition, a sync, or one setting such as the
+// upload directory or a FITS keyword.
 const settingTimeout = 30 * time.Second
 
-// connected waits until the client has a connection to the server.
 func (r *runner) connected(ctx context.Context) error {
 	return r.client.WaitFor(ctx, func(s *indi.Store) bool { return s.Connected() })
 }
 
-// property waits until a device defines a property, and answers it. A
-// device that a connected driver serves defines its properties at
-// once, so the wait has the limit of one setting.
+// property waits until device defines the property name, and returns
+// it.
 func (r *runner) property(ctx context.Context, device, name string) (indi.Property, error) {
 	ctx, cancel := context.WithTimeout(ctx, settingTimeout)
 	defer cancel()
@@ -42,13 +40,13 @@ func (r *runner) property(ctx context.Context, device, name string) (indi.Proper
 	return p, err
 }
 
-// syncDevices waits until the client holds every property that each
-// device defined, before the runner reads a device to decide what to
-// write. A new connection receives each device's properties one by one,
-// so a read just after one property arrives can miss the next, such as
-// a mount's TELESCOPE_PARK after its EQUATORIAL_EOD_COORD. Each sync
-// makes the driver define its properties again for every client, so the
-// runner syncs once at the start of each target's work.
+// syncDevices waits until the client has every property of each
+// device, so the runner reads the whole device before it chooses what
+// to write. After a connection the properties arrive one at a time, and
+// a read can see a mount's EQUATORIAL_EOD_COORD before its
+// TELESCOPE_PARK has arrived. indiserver sends the definitions of a
+// sync to every client, so the runner syncs only at the start of each
+// Target's work. An empty device name is skipped.
 func (r *runner) syncDevices(ctx context.Context, devices ...string) error {
 	for _, device := range devices {
 		if device == "" {
@@ -67,16 +65,16 @@ func (r *runner) syncDevices(ctx context.Context, devices ...string) error {
 	return nil
 }
 
-// settle sends one change and waits up to timeout for the driver's
-// answer with the values sent.
+// settle sends one change and waits up to timeout until the driver
+// reports the values that were sent.
 func (r *runner) settle(ctx context.Context, timeout time.Duration, send func() (indi.Sent, error)) (indi.Property, error) {
-	return r.answer(ctx, timeout, send, r.client.Settle)
+	return r.sendAndWait(ctx, timeout, send, r.client.Settle)
 }
 
-// answer sends one change and waits up to timeout for the driver's
-// answer, as wait reads it: Settle for the values sent, or Answered for
-// any answer that is not Busy.
-func (r *runner) answer(ctx context.Context, timeout time.Duration, send func() (indi.Sent, error), wait func(context.Context, indi.Sent) (indi.Property, error)) (indi.Property, error) {
+// sendAndWait sends one change and waits up to timeout for the reply that
+// wait accepts: r.client.Settle accepts only a reply with the values
+// that were sent, and r.client.Answered accepts any values.
+func (r *runner) sendAndWait(ctx context.Context, timeout time.Duration, send func() (indi.Sent, error), wait func(context.Context, indi.Sent) (indi.Property, error)) (indi.Property, error) {
 	sent, err := send()
 	if err != nil {
 		return indi.Property{}, err
@@ -85,12 +83,12 @@ func (r *runner) answer(ctx context.Context, timeout time.Duration, send func() 
 	defer cancel()
 	p, err := wait(ctx, sent)
 	if err != nil {
-		return p, fmt.Errorf("%s.%s: %w", sent.Device, sent.Property, err)
+		return p, fmt.Errorf("waiting for the driver to report %s.%s: %w", sent.Device, sent.Property, err)
 	}
 	return p, nil
 }
 
-// switchOn reports whether a switch property has one member On.
+// switchOn reports whether the named member of a switch property is On.
 func switchOn(p indi.Property, member string) bool {
 	m, ok := p.Member(member)
 	return ok && m.Switch

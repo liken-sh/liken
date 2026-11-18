@@ -1,10 +1,9 @@
 package main
 
-// The modes of the binary that do not run the operator. The first
-// argument names one, and the rest are its flags. The solver and the
-// worker each serve HTTP on port 8080 in a pod that the operator
-// creates, in the worker image, which holds the astrometry programs
-// beside this binary.
+// The binary runs as the solver or the worker when its first argument
+// is the mode's name, and the rest are the mode's flags. The operator
+// runs both modes in pods from the worker image, which has the
+// astrometry programs.
 
 import (
 	"context"
@@ -19,8 +18,8 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/worker"
 )
 
-// mode runs one mode until ctx ends, with the arguments after its name,
-// and logs to logs.
+// mode runs one mode until ctx ends. args are the arguments after the
+// mode's name, and the mode writes its log to logs.
 type mode func(ctx context.Context, args []string, logs io.Writer) error
 
 var modes = map[string]mode{
@@ -39,8 +38,9 @@ func runSolver(ctx context.Context, args []string, logs io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// A watch of the index directory that fails for good ends the mode,
-	// so the kubelet starts the container again and it watches again.
+	// When the watch of the index directory fails for good, the mode
+	// ends, so that the kubelet restarts the container and the watch
+	// starts again.
 	go func() {
 		select {
 		case err := <-server.Failed():
@@ -65,9 +65,10 @@ func runWorker(ctx context.Context, args []string, logs io.Writer) error {
 	return serveMode(ctx, ":"+strconv.Itoa(worker.Port), worker.NewServer(extractor, logs))
 }
 
-// serveMode serves a mode's handler until ctx ends. The kubelet's
-// SIGTERM ends ctx, and the server closes at once: a solve or an
-// extraction in flight fails, and the operator asks again.
+// serveMode serves a mode's handler until ctx ends, which the kubelet's
+// SIGTERM does. The server then closes its connections at once, so a
+// solve or an extraction in flight fails and the operator requests it
+// again.
 func serveMode(ctx context.Context, address string, handler http.Handler) error {
 	listener, err := listen("tcp", address)
 	if err != nil {
@@ -75,8 +76,9 @@ func serveMode(ctx context.Context, address string, handler http.Handler) error 
 	}
 	server := &http.Server{
 		Handler: handler,
-		// A client that opens a connection and sends no headers holds a
-		// goroutine until this bound. The handlers bound their own work.
+		// Without this timeout, a client that connects and sends no
+		// request headers keeps a goroutine forever. The handlers limit
+		// their own work.
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	context.AfterFunc(ctx, func() { _ = server.Close() })

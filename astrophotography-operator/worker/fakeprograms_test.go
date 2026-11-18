@@ -1,12 +1,13 @@
 package worker
 
 // CI has neither source-extractor nor solve-field, so the tests run
-// fakes of both: this test binary itself, started again through a link
-// named for the program, with FAKE_WORKER set. Each fake checks the
-// options that plan 02 proved on the real programs, records its
-// arguments, and writes the file the real program writes, from the
-// fixtures of the fits package: a real catalog and a real .axy of a
-// frame of the CCD simulator.
+// this test binary in their place, through a symlink named after each
+// program. With FAKE_WORKER set, TestMain runs the fake program instead
+// of the tests. Each fake appends its arguments to a log, checks the
+// options that the real program needs, and writes the file that the
+// real program would write, copied from the fixtures of the fits
+// package: a catalog and an .axy of a frame from the INDI CCD
+// simulator.
 
 import (
 	"bytes"
@@ -20,7 +21,7 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/fits"
 )
 
-// The fakes' behaviors, by the value of FAKE_WORKER.
+// The behaviors of the fakes, selected by the value of FAKE_WORKER.
 const (
 	programsWork     = "work"
 	programsFindNone = "none"
@@ -67,8 +68,9 @@ func fakeProgram(program, behavior string, args []string) int {
 	return 2
 }
 
-// fakeSourceExtractor reads the columns it is to write, as the real one
-// does, and writes the fixture catalog, or a catalog with no row.
+// fakeSourceExtractor reads the list of output columns from its
+// parameters file, as the real program does, and writes the fixture
+// catalog, or a catalog with no rows.
 func fakeSourceExtractor(behavior, fixtures string, args []string) int {
 	parameters, err := os.ReadFile(option(args, "-PARAMETERS_NAME"))
 	if err != nil || strings.Fields(string(parameters))[3] != "FWHM_IMAGE" {
@@ -87,9 +89,9 @@ func fakeSourceExtractor(behavior, fixtures string, args []string) int {
 	return written(option(args, "-CATALOG_NAME"), catalog)
 }
 
-// fakeSolveField refuses to run without the two options that keep the
-// real one from running Python, and writes the fixture .axy as
-// <-o>.axy in the directory -D names.
+// fakeSolveField fails unless it gets the two options that stop the
+// real program from running Python. It writes the fixture .axy to
+// <-D>/<-o>.axy.
 func fakeSolveField(behavior, fixtures string, args []string) int {
 	if !slices.Contains(args, "--no-remove-lines") || option(args, "--uniformize") != "0" {
 		fmt.Fprintln(os.Stderr, "/usr/bin/python3: not found")
@@ -118,8 +120,8 @@ func written(path string, data []byte) int {
 	return 0
 }
 
-// emptied answers a catalog with the fixture's header and no row, the
-// catalog of a frame with no star in it.
+// emptied returns a copy of the catalog with the same header and no
+// rows, like the catalog of a frame with no stars.
 func emptied(catalog []byte) []byte {
 	table := headerEnd(catalog, 0)
 	rows := headerEnd(catalog, table)
@@ -132,8 +134,8 @@ func emptied(catalog []byte) []byte {
 	return out
 }
 
-// headerEnd answers the end of the block that holds the END card of the
-// header that starts at from.
+// headerEnd returns the offset after the FITS block that contains the
+// END card of the header that starts at from.
 func headerEnd(data []byte, from int) int {
 	for at := from; at+80 <= len(data); at += 80 {
 		if strings.TrimRight(string(data[at:at+80]), " ") == "END" {
@@ -143,27 +145,29 @@ func headerEnd(data []byte, from int) int {
 	return len(data)
 }
 
-// programs is the two fakes and the outbox they read, for one test.
+// programs holds the Extractor that runs the fake programs of one test,
+// and the log of their runs.
 type programs struct {
 	extractor Extractor
-	// log holds one line for each run: the program and its arguments.
+	// log is the path of a file with one line per run: the program and
+	// its arguments.
 	log string
 }
 
 // fakePrograms links both programs to this test binary in a new
-// directory, with one behavior, and answers an Extractor of a new
-// outbox and work directory.
+// directory, sets their behavior, and returns an Extractor that uses
+// them with a new outbox and work directory.
 func fakePrograms(t *testing.T, behavior string) programs {
 	t.Helper()
 	bin := t.TempDir()
 	for _, name := range []string{"source-extractor", "solve-field"} {
 		if err := os.Symlink(os.Args[0], filepath.Join(bin, name)); err != nil {
-			t.Fatal(err)
+			t.Fatalf("linking %s to the test binary: %v", name, err)
 		}
 	}
 	fixtures, err := filepath.Abs("../fits/testdata")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the fixture directory: %v", err)
 	}
 	log := filepath.Join(t.TempDir(), "runs.log")
 	t.Setenv("FAKE_WORKER", behavior)
@@ -180,7 +184,7 @@ func fakePrograms(t *testing.T, behavior string) programs {
 	}
 }
 
-// runs answers the arguments of each run of a program, in order.
+// runs returns the arguments of each run of a program, in order.
 func (p programs) runs(t *testing.T, program string) [][]string {
 	t.Helper()
 	data, _ := os.ReadFile(p.log)
@@ -194,8 +198,8 @@ func (p programs) runs(t *testing.T, program string) [][]string {
 	return out
 }
 
-// frameHeader is the header of a frame of the CCD simulator, 1280 by
-// 1024. The fakes read no pixel, so the frame has none.
+// frameHeader builds a FITS header from cards, padded to one block,
+// with no pixel data, because the fakes never read pixels.
 func frameHeader(cards ...string) []byte {
 	var b bytes.Buffer
 	for _, c := range append(cards, "END") {
@@ -212,9 +216,9 @@ func (p programs) put(t *testing.T, path string, data []byte) {
 	t.Helper()
 	full := filepath.Join(p.extractor.Outbox, path)
 	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory of %s: %v", path, err)
 	}
 	if err := os.WriteFile(full, data, 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing %s: %v", path, err)
 	}
 }

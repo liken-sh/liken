@@ -1,12 +1,10 @@
 package main
 
-// The check that the driver saved the frame where the runner named it.
-// The driver answers every exposure with the message "[INFO] Image
-// saved to <path>", and sends it before CCD_EXPOSURE turns Ok. A frame
-// saved anywhere else is not in the target's directory of the outbox,
-// so promotion would never find it, and the runner does not count it:
-// that happens when a person in KStars changes the upload settings
-// between the runner's write and the exposure.
+// Checks that the INDI driver saved each frame at the outbox path that
+// the runner wrote to UPLOAD_SETTINGS. When a person changes the upload
+// settings in KStars before the exposure, the driver saves the frame
+// outside the target's directory, where promotion never looks. The
+// runner does not count such a frame.
 
 import (
 	"context"
@@ -20,18 +18,19 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
-// savedPrefix is the start of the driver's message that names a saved
-// file (INDI::CCD::uploadFile in libs/indibase/indiccd.cpp).
+// savedPrefix starts the driver's message that gives the path of a
+// saved file (INDI::CCD::uploadFile in libs/indibase/indiccd.cpp).
 const savedPrefix = "Image saved to "
 
-// savedWait bounds the wait for the message after CCD_EXPOSURE turned
-// Ok. The message comes first on the wire, so it is already queued and
-// the wait ends at once, and the limit matters only for a driver that
-// sends no message, which the outbox's own list then answers.
+// savedWait is how long checkSaved waits for the message after
+// CCD_EXPOSURE turns Ok. The driver sends the message first, so it is
+// normally already queued. The limit matters only for a driver that
+// sends none, and then checkSaved lists the outbox instead.
 const savedWait = 5 * time.Second
 
-// savedFrames answers the paths of the files a device reports it saved,
-// from now until ctx ends.
+// savedFrames returns a channel of the paths that a device reports it
+// saved, from now until ctx ends. A path is dropped when 16 are
+// already waiting.
 func savedFrames(ctx context.Context, client *indi.Client, device string) <-chan string {
 	events := client.Subscribe(ctx)
 	saved := make(chan string, 16)
@@ -51,9 +50,10 @@ func savedFrames(ctx context.Context, client *indi.Client, device string) <-chan
 	return saved
 }
 
-// checkSaved answers nil when the driver saved the frame in its file.
-// When no message names a file, the worker's list of the outbox
-// answers instead.
+// checkSaved returns nil when the driver reports saving the frame at its
+// outbox path within savedWait, and an error when the driver reports
+// only other paths. When the driver reports no path at all, it asks the
+// worker for the outbox's frame list and looks for the frame there.
 func (w *work) checkSaved(ctx context.Context, saved <-chan string, file outbox.Frame) error {
 	want := path.Join(outbox.Root, file.Path())
 	var elsewhere []string
@@ -74,7 +74,7 @@ func (w *work) checkSaved(ctx context.Context, saved <-chan string, file outbox.
 		break
 	}
 	if len(elsewhere) > 0 {
-		return fmt.Errorf("the driver saved the frame as %s, not %s; a client changed the upload settings", strings.Join(elsewhere, ", "), want)
+		return fmt.Errorf("the driver saved the frame as %s and not %s, so a client changed the upload settings", strings.Join(elsewhere, ", "), want)
 	}
 	box, err := w.r.o.outboxOf(ctx, w.r.namespace, w.r.name)
 	if err != nil {

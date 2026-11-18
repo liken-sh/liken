@@ -8,7 +8,7 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/catalog"
 )
 
-func TestACardsValue(t *testing.T) {
+func TestCardValueDropsQuotesAndComment(t *testing.T) {
 	cases := []struct{ field, want string }{
 		{"'Luminance'          / filter name", "Luminance"},
 		{"'It''s a frame'", "It's a frame"},
@@ -26,7 +26,7 @@ func TestACardsValue(t *testing.T) {
 	}
 }
 
-func TestTheSettingsOfAHeader(t *testing.T) {
+func TestLineOfReadsTheSettingsOfAHeader(t *testing.T) {
 	cases := []struct {
 		name  string
 		cards []string
@@ -47,7 +47,7 @@ func TestTheSettingsOfAHeader(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			h, err := readHeader(bytes.NewReader(fitsFrame(frameID, c.cards...)))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the header: %v", err)
 			}
 			if got := lineOf(h); got.FrameID != c.want.FrameID || got.StartTime != c.want.StartTime || !got.Settings.Equal(c.want.Settings) {
 				t.Errorf("lineOf = %+v, want %+v", got, c.want)
@@ -56,16 +56,16 @@ func TestTheSettingsOfAHeader(t *testing.T) {
 	}
 }
 
-func TestAHeaderThatEndsEarlyIsCut(t *testing.T) {
+func TestReadHeaderFailsWhenTheFileEndsInsideTheHeader(t *testing.T) {
 	if _, err := readHeader(bytes.NewReader(fitsFrame(frameID)[:100])); err != io.ErrUnexpectedEOF {
-		t.Errorf("readHeader answered %v", err)
+		t.Errorf("readHeader of a file that ends inside the header returned %v, want io.ErrUnexpectedEOF", err)
 	}
 	if _, err := readHeader(bytes.NewReader(nil)); err != io.ErrUnexpectedEOF {
-		t.Errorf("readHeader of nothing answered %v", err)
+		t.Errorf("readHeader of an empty file returned %v, want io.ErrUnexpectedEOF", err)
 	}
 }
 
-func TestTheSizeOfAFrame(t *testing.T) {
+func TestFileSizeFollowsBitpixAndAxes(t *testing.T) {
 	cases := []struct {
 		name  string
 		cards []string
@@ -88,7 +88,7 @@ func TestTheSizeOfAFrame(t *testing.T) {
 	}
 	missing := header{values: map[string]string{"BITPIX": "16", "NAXIS": "2", "NAXIS1": "4"}}
 	if _, err := missing.fileSize(); err == nil {
-		t.Error("a header with no NAXIS2 has a size")
+		t.Error("fileSize of a header with no NAXIS2 returned no error, want one")
 	}
 }
 

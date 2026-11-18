@@ -1,12 +1,10 @@
 package solver
 
 // CI has no astrometry-engine, so the tests run a fake one: this test
-// binary itself, started again with FAKE_ENGINE set. It reads the .axy
-// that it is given the way the engine does, and writes the files the
-// probe of plan 02 recorded: the WCS file and the .solved file that
-// the .axy names when the field solves, and nothing when it does not.
-// The WCS file is a real one, which the engine wrote for the same
-// frame as the fixture .axy.
+// binary, started again with FAKE_ENGINE set to a behavior. Like the
+// engine, it reads the .axy file that it is given. When the field
+// solves, it writes the WCS file and the .solved file that the .axy
+// names, and when the field does not solve, it writes nothing.
 
 import (
 	"fmt"
@@ -19,19 +17,19 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/fits"
 )
 
-// The fake's behaviors, by the value of FAKE_ENGINE.
 const (
 	engineSolves = "solves"
 	engineMisses = "misses"
 	engineFails  = "fails"
 	engineHangs  = "hangs"
-	// The two that write a WCS file the solver cannot read.
+	// These two write a WCS file that the solver cannot read.
 	engineWritesADirectory = "directory"
 	engineWritesGarbage    = "garbage"
 )
 
-// The fixtures of the fits package: an .axy that the worker's options
-// made of a frame of the CCD simulator, and the engine's solution.
+// Fixtures in the fits package: an .axy file that the worker made from
+// a frame of the CCD simulator, and the WCS file that the engine wrote
+// for it.
 const (
 	fixtureAXY = "../fits/testdata/axy.fits"
 	fixtureWCS = "../fits/testdata/wcs.fits"
@@ -44,8 +42,8 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// fakeEngine takes the engine's arguments, -c <config> <axy>, and runs
-// in the job's directory.
+// fakeEngine runs the fake with the engine's arguments, -c <config>
+// <axy>.
 func fakeEngine(behavior string, args []string) int {
 	if len(args) != 3 || args[0] != "-c" {
 		fmt.Fprintf(os.Stderr, "usage: astrometry-engine -c <config> <axy>, not %q\n", args)
@@ -68,8 +66,8 @@ func fakeEngine(behavior string, args []string) int {
 	wcs, _ := h.String("ANWCS")
 	switch behavior {
 	case engineFails:
-		// The engine logs a line for each index file before it fails, so
-		// the error keeps only the end of the log.
+		// Many lines of log come before the failure, so a test can check
+		// that the error keeps only the end of the log.
 		fmt.Fprintln(os.Stderr, strings.Repeat("Loading index file\n", 50)+"Failed to load index file")
 		return 1
 	case engineWritesADirectory:
@@ -98,20 +96,20 @@ func fakeEngine(behavior string, args []string) int {
 	return 0
 }
 
-// fakeEngineAt answers an Engine that runs the fake with one behavior,
-// with a configuration file and a work directory of its own.
+// fakeEngineAt returns an Engine that runs the fake with one behavior,
+// in a new work directory with its own configuration file.
 func fakeEngineAt(t *testing.T, behavior string) Engine {
 	t.Helper()
 	wcs, err := filepath.Abs(fixtureWCS)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the path of %s: %v", fixtureWCS, err)
 	}
 	t.Setenv("FAKE_ENGINE", behavior)
 	t.Setenv("FAKE_ENGINE_WCS", wcs)
 	work := t.TempDir()
 	config := filepath.Join(work, "engine.cfg")
 	if err := os.WriteFile(config, []byte("index /indexes/index-4207-00.fits\ncpulimit 60\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the engine configuration: %v", err)
 	}
 	return Engine{Program: os.Args[0], Config: config, Work: work, Timeout: 10 * time.Second}
 }
@@ -120,7 +118,7 @@ func readFixture(t *testing.T, path string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the fixture %s: %v", path, err)
 	}
 	return data
 }

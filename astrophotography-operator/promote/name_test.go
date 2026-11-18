@@ -7,8 +7,8 @@ import (
 
 func int32p(v int32) *int32 { return &v }
 
-// tonight is a frame of the drill: the Luminance sequence of m42 on
-// east, requested at 23:15:06 UTC on 2026-10-12.
+// tonight returns the values of one Luminance frame of the Target m42
+// on the telescope east, requested at 23:15:06 UTC on 2026-10-12.
 func tonight() Values {
 	return Values{
 		Target: "m42", Object: "M42", Filter: "Luminance", Exposure: 300 * time.Second,
@@ -62,8 +62,6 @@ func TestNameRendersEachToken(t *testing.T) {
 	}
 }
 
-// One night has one date: the local mean solar date at the
-// observatory's longitude, 12 hours before the exposure.
 func TestTheNightIsTheDateOfTheEvening(t *testing.T) {
 	cases := []struct {
 		name      string

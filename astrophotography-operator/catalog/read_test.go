@@ -1,9 +1,5 @@
 package catalog
 
-// The reader rebuilds the totals from the whole file, so a target's
-// archived counts survive a restart of the operator, a lost report, and
-// a wiped status.
-
 import (
 	"os"
 	"path/filepath"
@@ -13,7 +9,7 @@ import (
 	"testing"
 )
 
-// frameLine is one catalog line of a frame, in the wire form.
+// frameLine returns the JSON of a frame's catalog line.
 func frameLine(id, filter string, seconds float64) string {
 	return `{"record":"frame","frameID":"` + id + `","target":"m42","reservation":"r","telescope":"s","camera":"c",` +
 		`"path":"` + id + `.fits","sizeBytes":1,"sha256":"h","filter":"` + filter + `","exposureSeconds":` +
@@ -57,10 +53,10 @@ func TestReadCountsEachFrameOnceBySettings(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			read, err := Read(strings.NewReader(c.file))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the catalog: %v", err)
 			}
 			if got := read.Totals(); !reflect.DeepEqual(got, c.want) {
-				t.Errorf("totals %+v, want %+v", got, c.want)
+				t.Errorf("the totals are %+v, want %+v", got, c.want)
 			}
 		})
 	}
@@ -69,35 +65,35 @@ func TestReadCountsEachFrameOnceBySettings(t *testing.T) {
 func TestReadFindsAFrameByItsIdentity(t *testing.T) {
 	read, err := Read(strings.NewReader(frameLine("a", "L", 300) + "\n"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the catalog: %v", err)
 	}
 	line, found := read.Frame("a")
 	_, other := read.Frame("b")
 	if !found || line.Path != "a.fits" || other {
-		t.Errorf("Frame(a) = %+v, %v; Frame(b) found %v", line, found, other)
+		t.Errorf("Frame(\"a\") = %+v, found %v, want found with path a.fits; Frame(\"b\") found %v, want not found", line, found, other)
 	}
 }
 
 func TestReadFileOfACatalogThatDoesNotExistIsEmpty(t *testing.T) {
 	read, err := ReadFile(filepath.Join(t.TempDir(), "catalog", "m42.jsonl"))
 	if err != nil || len(read.Totals()) != 0 {
-		t.Errorf("ReadFile = %+v, %v", read.Totals(), err)
+		t.Errorf("ReadFile of a missing file has totals %+v and error %v, want no totals and no error", read.Totals(), err)
 	}
 }
 
 func TestReadFileFailsOnADirectory(t *testing.T) {
 	if _, err := ReadFile(t.TempDir()); err == nil {
-		t.Error("ReadFile of a directory answered no error")
+		t.Error("ReadFile of a directory returned no error, want one")
 	}
 }
 
 func writeFile(t *testing.T, name, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory of %s: %v", name, err)
 	}
 	if err := os.WriteFile(name, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing %s: %v", name, err)
 	}
 }
 
@@ -105,7 +101,7 @@ func readFile(t *testing.T, name string) string {
 	t.Helper()
 	content, err := os.ReadFile(name)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading %s: %v", name, err)
 	}
 	return string(content)
 }

@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestAFramesPlaceInTheOutbox(t *testing.T) {
+func TestFramePathUploadAndParseAgree(t *testing.T) {
 	cases := []struct {
 		name   string
 		frame  Frame
@@ -38,7 +38,7 @@ func TestAFramesPlaceInTheOutbox(t *testing.T) {
 				t.Errorf("Upload = %q, %q; want %q, %q", dir, prefix, c.dir, c.prefix)
 			}
 			if parsed, err := Parse(c.path); err != nil || parsed != c.frame {
-				t.Errorf("Parse = %+v, %v; want %+v", parsed, err, c.frame)
+				t.Errorf("Parse(%q) = %+v, %v; want %+v, nil", c.path, parsed, err, c.frame)
 			}
 		})
 	}
@@ -57,13 +57,13 @@ func TestParseRefusesWhatNoFrameIs(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if frame, err := Parse(c.path); err == nil {
-				t.Errorf("Parse = %+v, want an error", frame)
+				t.Errorf("Parse(%q) = %+v, want an error", c.path, frame)
 			}
 		})
 	}
 }
 
-func TestTheGlobOfATargetsFrames(t *testing.T) {
+func TestTargetGlobMatchesEveryCameraAndReservation(t *testing.T) {
 	if got, want := TargetGlob("m42"), "/outbox/*/*/m42"; got != want {
 		t.Errorf("TargetGlob = %q, want %q", got, want)
 	}

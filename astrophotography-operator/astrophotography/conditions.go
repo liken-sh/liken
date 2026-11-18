@@ -1,16 +1,15 @@
 package astrophotography
 
-// The conditions of each kind and the reasons they carry, from plans
-// 01, 02, and 03. Each transition posts one Event, under the rule of
-// root plan 78.
+// The condition types of Target and Solver, and the reasons each one
+// reports. Each transition of a condition posts one Event.
 
 // The conditions of a Target.
 const (
-	// ConditionComplete is True when every sequence has at least its
-	// count of frames archived.
+	// ConditionComplete is True when every sequence has archived at
+	// least its count of frames.
 	ConditionComplete = "Complete"
-	// ConditionImaging is True while a reservation images the target,
-	// and its reason names the step.
+	// ConditionImaging is True while a Reservation images the Target,
+	// and its reason is the current step.
 	ConditionImaging = "Imaging"
 	// ConditionArchiveAvailable is True when the last promotion
 	// succeeded.
@@ -23,8 +22,9 @@ const (
 	ReasonWorkLeft = "WorkLeft"
 )
 
-// The reasons of Imaging. The first four are the steps of a True
-// condition, and the rest say why it is False.
+// The reasons of Imaging. Slewing, Centering, Guiding, and Exposing
+// are the steps while the condition is True. The others give the
+// reason it is False.
 const (
 	ReasonSlewing         = "Slewing"
 	ReasonCentering       = "Centering"
@@ -39,18 +39,18 @@ const (
 	ReasonCenteringFailed = "CenteringFailed"
 	ReasonGuidingFailed   = "GuidingFailed"
 	ReasonOutboxFull      = "OutboxFull"
-	// ReasonExposureFailed says that the last exposure gave no frame:
-	// the driver answered Alert, did not finish in time, or saved the
-	// frame under another name. The runner keeps the target and tries
-	// the next frame after a wait.
+	// ReasonExposureFailed means the last exposure produced no frame.
+	// When the camera failed, the runner keeps the Target and starts the
+	// next exposure after a wait. When a sequence's settings do not
+	// parse, the runner releases the Target and records status.failed.
 	ReasonExposureFailed = "ExposureFailed"
-	// ReasonDeleting says that a person deleted the target while frames
-	// of it wait in an outbox. No reservation claims it, and its
-	// finalizer keeps it until promotion moves those frames.
+	// ReasonDeleting means the Target is deleted but frames of it are
+	// still in an outbox. No Reservation claims it, and its finalizer
+	// keeps it until promotion moves those frames.
 	ReasonDeleting = "Deleting"
-	// ReasonBelowHorizon says that the target stands below the horizon
-	// of the telescope, so no runner claims it, and a runner that held
-	// it released it before its next frame.
+	// ReasonBelowHorizon means the Target is below the telescope's
+	// horizon. No runner claims it, and the runner that had claimed it
+	// releases it before the next frame.
 	ReasonBelowHorizon = "BelowHorizon"
 )
 
@@ -64,8 +64,8 @@ const (
 	ReasonNameConflict  = "NameConflict"
 )
 
-// The condition of a Solver and its reasons. ClaimMissing is shared
-// with ArchiveAvailable.
+// The condition of a Solver and its reasons. ReasonClaimMissing is
+// also a reason of ArchiveAvailable.
 const (
 	ConditionReady     = "Ready"
 	ReasonLoaded       = "Loaded"

@@ -15,33 +15,33 @@ import (
 
 const centeringFrame = "east-main/east-tonight/_centering/0f3a.fits"
 
-// The hint of a 400 mm tube and the simulator's pixels of 5.2 µm,
-// 2.68 arcseconds per pixel ±10%, near where the fixture's frame
-// solved.
+// nearTheField is a hint for a 400 mm tube and the simulator's 5.2 µm
+// pixels, 2.68 arcseconds per pixel with a range of 10% each way,
+// centered near where the fixture frame solves.
 var nearTheField = Hint{Center: sky.Position{RA: 29.6, Dec: 59.8}, Radius: 5, ScaleLow: 2.41, ScaleHigh: 2.95}
 
-// The fixture catalog holds 1,675 stars, and astropy reads the median
-// of their FWHM_IMAGE as 4.92813 pixels.
-func TestExtractAnswersTheAXYAndTheStars(t *testing.T) {
+// The fixture catalog has 1,675 stars, and astropy reads the median of
+// their FWHM_IMAGE as 4.92813 pixels.
+func TestExtractReturnsTheAXYAndTheStars(t *testing.T) {
 	p := fakePrograms(t, programsWork)
 	p.put(t, centeringFrame, simulatorFrame)
-	answer, err := p.extractor.Extract(t.Context(), ExtractRequest{Frame: centeringFrame, Hint: nearTheField})
+	response, err := p.extractor.Extract(t.Context(), ExtractRequest{Frame: centeringFrame, Hint: nearTheField})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("extracting the frame: %v", err)
 	}
 	axy, _ := os.ReadFile(fixtureAXY)
-	if !bytes.Equal(answer.AXY, axy) || answer.Stars != 1675 || math.Abs(answer.MedianFWHM-4.92813) > 1e-4 {
-		t.Errorf("answered %d bytes, %d stars, FWHM %v", len(answer.AXY), answer.Stars, answer.MedianFWHM)
+	if !bytes.Equal(response.AXY, axy) || response.Stars != 1675 || math.Abs(response.MedianFWHM-4.92813) > 1e-4 {
+		t.Errorf("the response has %d bytes of .axy, %d stars, and FWHM %v, want the fixture's .axy, 1675 stars, and FWHM 4.92813", len(response.AXY), response.Stars, response.MedianFWHM)
 	}
 }
 
-// The command lines are the ones that plan 02 and the image's smoke
-// check proved on the real programs.
-func TestTheProgramsRunWithTheOptionsOfPlan02(t *testing.T) {
+// These command lines work with the real programs, so a change to an
+// option must change this test too.
+func TestEachProgramRunsWithItsOptions(t *testing.T) {
 	p := fakePrograms(t, programsWork)
 	p.put(t, centeringFrame, simulatorFrame)
 	if _, err := p.extractor.Extract(t.Context(), ExtractRequest{Frame: centeringFrame, Hint: nearTheField}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("extracting the frame: %v", err)
 	}
 	cases := []struct {
 		program string
@@ -62,14 +62,14 @@ func TestTheProgramsRunWithTheOptionsOfPlan02(t *testing.T) {
 	}
 }
 
-// A radius of 0 asks for a blind solve, so the .axy holds no position.
+// A radius of 0 asks for a blind solve, so the .axy has no position.
 func TestABlindHintWritesNoPosition(t *testing.T) {
 	p := fakePrograms(t, programsWork)
 	p.put(t, centeringFrame, simulatorFrame)
 	blind := nearTheField
 	blind.Radius = 0
 	if _, err := p.extractor.Extract(t.Context(), ExtractRequest{Frame: centeringFrame, Hint: blind}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("extracting the frame: %v", err)
 	}
 	runs := p.runs(t, "solve-field")
 	if len(runs) != 1 || slices.Contains(runs[0], "--ra") || slices.Contains(runs[0], "--radius") {
@@ -77,29 +77,28 @@ func TestABlindHintWritesNoPosition(t *testing.T) {
 	}
 }
 
-// A frame with no star cannot solve, so the worker answers no .axy and
-// runs no solve-field.
-func TestAFrameWithNoStarAnswersNoAXY(t *testing.T) {
+// A frame with no star cannot solve, so the worker returns no .axy and
+// does not run solve-field.
+func TestAFrameWithNoStarReturnsNoAXY(t *testing.T) {
 	p := fakePrograms(t, programsFindNone)
 	p.put(t, centeringFrame, simulatorFrame)
-	answer, err := p.extractor.Extract(t.Context(), ExtractRequest{Frame: centeringFrame, Hint: nearTheField})
-	if err != nil || answer.Stars != 0 || answer.AXY != nil || len(p.runs(t, "solve-field")) != 0 {
-		t.Errorf("answered %+v, %v, and ran solve-field %d times", answer, err, len(p.runs(t, "solve-field")))
+	response, err := p.extractor.Extract(t.Context(), ExtractRequest{Frame: centeringFrame, Hint: nearTheField})
+	if err != nil || response.Stars != 0 || response.AXY != nil || len(p.runs(t, "solve-field")) != 0 {
+		t.Errorf("the response is %+v with error %v and solve-field ran %d times, want no stars, no .axy, no error, and no run", response, err, len(p.runs(t, "solve-field")))
 	}
 }
 
-// Each job's files go when it ends, so the emptyDir does not fill.
-func TestTheJobsFilesGoWhenItEnds(t *testing.T) {
+func TestTheJobsFilesAreDeletedWhenItEnds(t *testing.T) {
 	p := fakePrograms(t, programsWork)
 	p.put(t, centeringFrame, simulatorFrame)
 	_, _ = p.extractor.Extract(t.Context(), ExtractRequest{Frame: centeringFrame, Hint: nearTheField})
 	if left, _ := os.ReadDir(p.extractor.Work); len(left) != 0 {
-		t.Errorf("the work directory holds %v", left)
+		t.Errorf("after the extraction the work directory holds %v, want nothing", left)
 	}
 }
 
-// The worker reads only a frame of the outbox's layout, so a request
-// cannot name a file elsewhere in the pod.
+// The worker reads only a path in the outbox's layout, so a request
+// cannot read another file in the pod.
 func TestARequestTheWorkerDoesNotRunIsRefused(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -115,14 +114,14 @@ func TestARequestTheWorkerDoesNotRunIsRefused(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			p := fakePrograms(t, programsWork)
 			if _, err := p.extractor.Extract(t.Context(), c.request); !errors.Is(err, ErrBadRequest) {
-				t.Errorf("answered %v, want %v", err, ErrBadRequest)
+				t.Errorf("Extract returned %v, want %v", err, ErrBadRequest)
 			}
 		})
 	}
 }
 
 // The extractor refuses a frame whose path leaves the outbox even when
-// the frame did not come from outbox.Parse, and finds a normal frame
+// the frame did not come from outbox.Parse, and reads a normal frame
 // under the outbox.
 func TestTheExtractorReadsOnlyAFrameUnderTheOutbox(t *testing.T) {
 	cases := []struct {
@@ -146,7 +145,7 @@ func TestTheExtractorReadsOnlyAFrameUnderTheOutbox(t *testing.T) {
 	}
 }
 
-func TestAnExtractionThatFailsSaysWhy(t *testing.T) {
+func TestAFailedExtractionReportsTheProgramsOutput(t *testing.T) {
 	cases := []struct {
 		name     string
 		behavior string
@@ -174,7 +173,7 @@ func TestAnExtractionThatFailsSaysWhy(t *testing.T) {
 			}
 			_, err := p.extractor.Extract(t.Context(), ExtractRequest{Frame: centeringFrame, Hint: nearTheField})
 			if err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Errorf("answered %v, want an error that says %q", err, c.want)
+				t.Errorf("Extract returned %v, want an error that contains %q", err, c.want)
 			}
 		})
 	}
@@ -200,7 +199,7 @@ func TestTheFlagsOfTheWorkerMode(t *testing.T) {
 	got, err := ParseOptions(nil, nil)
 	want := Extractor{Outbox: "/outbox", Work: "/work", SourceExtractor: "/usr/bin/source-extractor", SolveField: "/usr/bin/solve-field"}
 	if err != nil || got != want {
-		t.Errorf("%+v, %v, want %+v", got, err, want)
+		t.Errorf("ParseOptions(nil) = %+v, %v, want %+v and no error", got, err, want)
 	}
 }
 
@@ -208,7 +207,7 @@ func TestTheWorkerModeRefusesWhatItDoesNotTake(t *testing.T) {
 	cases := [][]string{{"--no-such-flag"}, {"extra"}}
 	for _, args := range cases {
 		if _, err := ParseOptions(args, &bytes.Buffer{}); err == nil {
-			t.Errorf("%q: no error", args)
+			t.Errorf("ParseOptions(%q) returned no error, want one", args)
 		}
 	}
 }

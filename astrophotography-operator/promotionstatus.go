@@ -1,24 +1,26 @@
 package main
 
-// What a promotion Job's report changes in its Target's status. Each
-// write is composed from the copy it writes over, so it holds after a
-// conflict, and a report is applied once: the Job's number goes into
-// status.promotion.applied in the same write.
+// How a promotion Job's report changes its Target's status. Each change
+// is applied to the copy of the Target that the write replaces, so after
+// a conflict it is applied again to the newer copy. The same write sets
+// status.promotion.applied to the Job's number, so a report is applied
+// once.
 //
-// The counts come from two writers. The runner adds one to a
-// sequence's pending and to the outbox's pending after each exposure,
-// and the report sets them again from what the Job found:
+// The runner adds one to a sequence's pending count and to the outbox's
+// pending count after each exposure. The report then sets them again
+// from what the Job found:
 //
-//   - A sequence's archived is the catalog's total for it, and its
-//     pending drops by as many frames as archived rose. The catalog's
-//     totals are of the whole file, so a report that the operator never
-//     read is made up by the next one.
-//   - An outbox's pending becomes the frames the Job left, plus the
-//     frames counted after the Job was created. A frame that the runner
-//     counted after the Job's start and that the Job moved anyway counts
-//     once too often, and the next Job, which finds nothing, corrects it.
-//     A frame is never counted too few times, so the finalizer on the
-//     outbox claim never comes off while a frame is in it.
+//   - A sequence's archived count becomes the catalog's total for it,
+//     and its pending count drops by as much as archived rose. The
+//     totals cover the whole catalog, so the next report corrects the
+//     counts after a report that the operator never read.
+//   - An outbox's pending count becomes the frames the Job left plus
+//     the frames the runner counted after the Job was created. When the
+//     Job also moved one of those later frames, that frame is counted
+//     once too often, and the next Job finds nothing to move and
+//     corrects the count. A frame is never counted too few times, so the
+//     finalizer on the outbox claim is never removed while a frame is
+//     still in the outbox.
 
 import (
 	"encoding/json"
@@ -33,23 +35,21 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// promotionResult is what a finished promotion Job tells its Target.
 type promotionResult struct {
 	job    string
 	number int32
 	claim  string
-	// pending is the claim's count of the target's frames when the Job
-	// was created.
+	// pending is the outbox's pending count of the Target's frames when
+	// the Job was created.
 	pending int32
 	// report is nil when the Job ended with no report.
 	report *promote.Report
-	// failure says why there is no report.
+	// failure is the reason there is no report.
 	failure string
 }
 
-// promotionPending reads the count of frames that a promotion Job's
-// annotation records. An annotation that is missing, is not a number, or
-// does not fit in an int32 reads as zero.
+// promotionPending returns the pending count in the Job's annotation, or
+// zero when the annotation is missing or is not an int32.
 func promotionPending(j jobObject) int32 {
 	pending, err := strconv.ParseInt(j.Metadata.Annotations[annotationPending], 10, 32)
 	if err != nil {
@@ -58,20 +58,19 @@ func promotionPending(j jobObject) int32 {
 	return int32(pending)
 }
 
-// resultOf answers the result of a finished promotion Job, with the
-// report from the termination message of the pod that succeeded.
+// resultOf returns the result of a finished promotion Job, read from the
+// termination message of the pod that succeeded. It returns false when
+// that report is not in the store yet.
 //
-// The watches of Jobs and pods deliver their changes apart, so a Job
-// that succeeded can reach the store before its pod's last status. The
-// result is then not ready, and the pod's change wakes the loop again.
-// The loop waits only while the store holds the pod: a pod that is gone
-// never changes again, so the loop runs the Job again (rerun in
-// promotion.go). A Job that failed has no report to wait for.
+// The Job and pod watches deliver events independently, so a Job that
+// succeeded can reach the store before its pod's final status. The
+// pod's update then wakes the loop again. When the pod is gone, the
+// report never arrives, and rerun creates the Job again.
 func resultOf(j jobObject, number int32, succeeded bool, pods []podObject) (promotionResult, bool) {
 	result := promotionResult{job: j.Metadata.Name, number: number, claim: j.Metadata.Annotations[annotationClaim], pending: promotionPending(j)}
 	if !succeeded {
 		failed, _ := condition(j.Status.Conditions, "Failed", "True")
-		result.failure = fmt.Sprintf("the promotion Job %s failed: %s", j.Metadata.Name, failed.Message)
+		result.failure = fmt.Sprintf("The promotion Job %s failed: %s", j.Metadata.Name, failed.Message)
 		return result, true
 	}
 	for _, pod := range pods {
@@ -85,7 +84,7 @@ func resultOf(j jobObject, number int32, succeeded bool, pods []podObject) (prom
 			}
 			var report promote.Report
 			if err := json.Unmarshal([]byte(ended.Message), &report); err != nil {
-				result.failure = fmt.Sprintf("the report of the promotion Job %s does not read: %v", j.Metadata.Name, err)
+				result.failure = fmt.Sprintf("The report of the promotion Job %s does not decode: %v", j.Metadata.Name, err)
 				return result, true
 			}
 			result.report = &report
@@ -95,8 +94,8 @@ func resultOf(j jobObject, number int32, succeeded bool, pods []podObject) (prom
 	return result, false
 }
 
-// applied answers the number of the last Job whose report the status
-// holds.
+// applied returns the number of the last Job whose report is in the
+// status.
 func applied(t *astrophotography.Target) int32 {
 	if t.Status.Promotion == nil {
 		return 0
@@ -104,8 +103,9 @@ func applied(t *astrophotography.Target) int32 {
 	return t.Status.Promotion.Applied
 }
 
-// apply composes the status after the Job, and answers the conditions
-// that transitioned, or false when the status holds the Job already.
+// apply updates the Target's status from the result. It returns the
+// conditions that transitioned, and false when the status already has
+// this Job's result.
 func (r promotionResult) apply(t *astrophotography.Target) ([]conditions.Condition, bool) {
 	if applied(t) >= r.number {
 		return nil, false
@@ -121,10 +121,10 @@ func (r promotionResult) apply(t *astrophotography.Target) ([]conditions.Conditi
 	}
 	t.Status.Sequences = sequenceProgress(t.Spec.Sequences, t.Status.Sequences, r.report.Totals, r.report.Truncated)
 	if entry >= 0 {
-		held := &t.Status.Outboxes[entry]
-		held.Pending = r.report.Left + max(0, held.Pending-r.pending)
-		held.Left = r.report.Left
-		if held.Pending == 0 {
+		outbox := &t.Status.Outboxes[entry]
+		outbox.Pending = r.report.Left + max(0, outbox.Pending-r.pending)
+		outbox.Left = r.report.Left
+		if outbox.Pending == 0 {
 			t.Status.Outboxes = slices.Delete(t.Status.Outboxes, entry, entry+1)
 		}
 	}
@@ -132,19 +132,18 @@ func (r promotionResult) apply(t *astrophotography.Target) ([]conditions.Conditi
 	return setCondition(t, changed, r.availability()), true
 }
 
-// availability answers ArchiveAvailable after a report: False with the
-// reason of the first failure, or True.
+// availability returns ArchiveAvailable False with the reason of the
+// report's first failure, or True when there is no failure.
 func (r promotionResult) availability() conditions.Condition {
 	if failures := r.report.Failures; len(failures) > 0 {
-		message := fmt.Sprintf("the promotion Job %s left %s in the outbox; the first failure is %s: %s",
+		message := fmt.Sprintf("The promotion Job %s left %s in the outbox, and the first failure is %s: %s",
 			r.job, frames(r.report.Left), failures[0].File, failures[0].Message)
 		return archiveAvailable(conditions.False, failures[0].Reason, message)
 	}
-	message := fmt.Sprintf("the promotion Job %s moved %s to the archive", r.job, frames(r.report.Promoted))
+	message := fmt.Sprintf("The promotion Job %s moved %s to the archive", r.job, frames(r.report.Promoted))
 	return archiveAvailable(conditions.True, astrophotography.ReasonPromoted, message)
 }
 
-// frames counts frames for a message: "1 frame", "2 frames".
 func frames(n int32) string {
 	if n == 1 {
 		return "1 frame"
@@ -156,8 +155,8 @@ func archiveAvailable(status conditions.Status, reason, message string) conditio
 	return conditions.Condition{Type: astrophotography.ConditionArchiveAvailable, Status: status, Reason: reason, Message: message}
 }
 
-// setCondition sets a condition, and adds it to the list of
-// transitions when it transitioned.
+// setCondition sets a condition on the Target and appends it to changed
+// when it transitioned.
 func setCondition(t *astrophotography.Target, changed []conditions.Condition, next conditions.Condition) []conditions.Condition {
 	next.ObservedGeneration = t.Metadata.Generation
 	if conditions.Set(&t.Status.Conditions, next) {
@@ -166,9 +165,10 @@ func setCondition(t *astrophotography.Target, changed []conditions.Condition, ne
 	return changed
 }
 
-// completeness answers Complete, and sets the progress of the printer
-// column: the frames archived of the frames wanted. A sequence's frames
-// beyond its count do not count toward another's.
+// completeness returns the Complete condition, and sets status.progress,
+// a printer column, to the archived frames over the wanted frames. A
+// sequence's archived frames beyond its count do not count toward
+// another sequence.
 func completeness(t *astrophotography.Target) conditions.Condition {
 	var archived, wanted int32
 	for _, s := range t.Status.Sequences {
@@ -189,19 +189,20 @@ func completeness(t *astrophotography.Target) conditions.Condition {
 		Reason: astrophotography.ReasonArchived, Message: message}
 }
 
-// sequenceProgress answers each sequence of the spec with its counts.
-// A sequence keeps the counts of the status's entry with the same
-// settings, so an edit of the list or of a count keeps the counts of
-// the sequences that stay. Each total counts toward the first sequence it matches.
-// When the report holds only the first totals, a sequence that matches
-// none of them keeps its archived count.
-func sequenceProgress(spec []astrophotography.Sequence, held []astrophotography.SequenceProgress,
+// sequenceProgress returns the progress of each sequence in the spec.
+// A sequence starts with the counts of the status entry that has the
+// same settings, so an edit of the list or of a count keeps the counts
+// of the sequences that remain. Each total counts toward the first
+// sequence that it matches. A truncated report can leave out a
+// sequence's total, so after a truncated report, a sequence that no
+// total matches keeps its archived count.
+func sequenceProgress(spec []astrophotography.Sequence, stored []astrophotography.SequenceProgress,
 	totals []catalog.Total, truncated bool) []astrophotography.SequenceProgress {
 	out := make([]astrophotography.SequenceProgress, len(spec))
 	for i, s := range spec {
 		out[i].Sequence = s
-		if j := slices.IndexFunc(held, func(p astrophotography.SequenceProgress) bool { return sameSettings(p.Sequence, s) }); j >= 0 {
-			out[i].Archived, out[i].Pending = held[j].Archived, held[j].Pending
+		if j := slices.IndexFunc(stored, func(p astrophotography.SequenceProgress) bool { return sameSettings(p.Sequence, s) }); j >= 0 {
+			out[i].Archived, out[i].Pending = stored[j].Archived, stored[j].Pending
 		}
 	}
 	counted := make([]int32, len(spec))
@@ -222,10 +223,10 @@ func sequenceProgress(spec []astrophotography.Sequence, held []astrophotography.
 	return out
 }
 
-// countsToward reports whether a frame of these settings counts toward
-// a sequence: the same filter, exposure, binning, gain, and offset. A
-// field that the sequence leaves out takes the camera's own value, so
-// it matches any value.
+// countsToward reports whether a frame with these settings counts
+// toward the sequence: it has the same filter, exposure, binning, gain,
+// and offset. A field that the sequence leaves out matches any value,
+// because the camera used its own value for it.
 func countsToward(s astrophotography.Sequence, frame catalog.Settings) bool {
 	exposure, err := s.ExposureDuration()
 	return err == nil &&
@@ -239,8 +240,7 @@ func optionalMatches(want *int32, got *float64) bool {
 	return want == nil || (got != nil && float64(*want) == *got)
 }
 
-// sameSettings reports whether two sequences take the same frames,
-// whatever their counts.
+// sameSettings compares two sequences without their counts.
 func sameSettings(a, b astrophotography.Sequence) bool {
 	return a.Filter == b.Filter && a.Exposure == b.Exposure &&
 		sameOptional(a.Binning, b.Binning) && sameOptional(a.Gain, b.Gain) && sameOptional(a.Offset, b.Offset)

@@ -1,7 +1,8 @@
 package promote
 
-// The fixtures of the promote mode's tests: FITS frames as the INDI
-// driver writes them, and an outbox and an archive in t.TempDir().
+// Fixtures for the promote mode's tests: FITS frames in the form the
+// INDI driver writes them, and an outbox and an archive in
+// t.TempDir().
 
 import (
 	"encoding/json"
@@ -19,10 +20,9 @@ func card(keyword, value string) string {
 	return fmt.Sprintf("%-8s= %-70s", keyword, value)
 }
 
-// fitsFrame answers a FITS file of a 4 x 4 image of 16-bit pixels with
-// the cards given, each a card(), and the cards of every frame of this
-// operator before them. The data take one block of 2,880 bytes, so the
-// file takes two blocks.
+// fitsFrame returns a FITS file of a 4 x 4 image of 16-bit pixels. The
+// header has the mandatory cards, FRAMEID unless frameID is empty, and
+// the cards given, each made with card().
 func fitsFrame(frameID string, cards ...string) []byte {
 	all := []string{
 		card("SIMPLE", "T"), card("BITPIX", "16"), card("NAXIS", "2"),
@@ -40,15 +40,16 @@ func fitsFrame(frameID string, cards ...string) []byte {
 	return append(header, data...)
 }
 
-// lightFrame is a frame of a Luminance sequence, 300 s at 1x1, gain 100
-// and offset 10, as the driver writes it.
+// lightFrame returns a Luminance frame of 300 s at 1x1 binning, gain
+// 100 and offset 10.
 func lightFrame(frameID string) []byte {
 	return fitsFrame(frameID,
 		card("FILTER", "'Luminance'"), card("EXPTIME", "3.000000E+02"), card("XBINNING", "1"),
 		card("GAIN", "100."), card("OFFSET", "10."), card("DATE-OBS", "'2026-10-12T23:15:06.864'"))
 }
 
-// world is an outbox and an archive, each the root of a claim.
+// world is one test's outbox and archive directories, in place of the
+// mounted claims.
 type world struct {
 	t       *testing.T
 	outbox  string
@@ -60,7 +61,7 @@ func newWorld(t *testing.T) *world {
 	return &world{t: t, outbox: filepath.Join(root, "outbox"), archive: filepath.Join(root, "archive")}
 }
 
-// options are the options of a run for the target m42 into astro/.
+// options returns the options of a run for the target m42 into astro/.
 func (w *world) options() Options {
 	return Options{
 		Outbox: w.outbox, Archive: w.archive, Path: "astro", Target: "m42",
@@ -68,8 +69,8 @@ func (w *world) options() Options {
 	}
 }
 
-// expose writes a frame into the outbox under its name, the way the
-// driver does, and answers its path relative to the outbox's root.
+// expose writes a frame into the outbox where the driver would, and
+// returns its path relative to the outbox root.
 func (w *world) expose(name string, content []byte) string {
 	rel := filepath.Join("east-main", "east-tonight", "m42", name+".fits")
 	w.write(filepath.Join(w.outbox, rel), content)
@@ -79,15 +80,15 @@ func (w *world) expose(name string, content []byte) string {
 func (w *world) write(name string, content []byte) {
 	w.t.Helper()
 	if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
-		w.t.Fatal(err)
+		w.t.Fatalf("creating the directory of %s: %v", name, err)
 	}
 	if err := os.WriteFile(name, content, 0o644); err != nil {
-		w.t.Fatal(err)
+		w.t.Fatalf("writing %s: %v", name, err)
 	}
 }
 
-// files answers every file under a root, relative to it, with its
-// content.
+// files returns the content of every file under root, by path relative
+// to root.
 func (w *world) files(root string) map[string]string {
 	w.t.Helper()
 	out := map[string]string{}
@@ -101,18 +102,18 @@ func (w *world) files(root string) map[string]string {
 		return err
 	})
 	if err != nil && !os.IsNotExist(err) {
-		w.t.Fatal(err)
+		w.t.Fatalf("reading the files under %s: %v", root, err)
 	}
 	return out
 }
 
-// catalogLines answers the catalog's lines of frames, by FRAMEID, with
-// how many lines each FRAMEID has.
+// catalogLines returns the catalog's frame lines by FRAMEID, and the
+// number of lines that each FRAMEID has.
 func (w *world) catalogLines() (map[string]catalog.Line, map[string]int) {
 	w.t.Helper()
 	content, err := os.ReadFile(filepath.Join(w.archive, "astro", "catalog", "m42.jsonl"))
 	if err != nil && !os.IsNotExist(err) {
-		w.t.Fatal(err)
+		w.t.Fatalf("reading the catalog: %v", err)
 	}
 	lines, counts := map[string]catalog.Line{}, map[string]int{}
 	for raw := range strings.Lines(string(content)) {

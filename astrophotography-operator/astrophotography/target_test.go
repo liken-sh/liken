@@ -23,36 +23,36 @@ func TestExposureDuration(t *testing.T) {
 		t.Run(c.exposure, func(t *testing.T) {
 			got, err := Sequence{Exposure: c.exposure}.ExposureDuration()
 			if err != nil || got != c.want {
-				t.Errorf("ExposureDuration = %v, %v; want %v", got, err, c.want)
+				t.Errorf("ExposureDuration(%q) = %v, %v; want %v, nil", c.exposure, got, err, c.want)
 			}
 		})
 	}
 }
 
-// defaulted answers a Target as the API server stores it, with the
+// defaulted returns a Target as the API server stores it, with the
 // CRD's defaults filled in.
 func defaulted(t *testing.T, spec map[string]any) Target {
 	t.Helper()
 	structural, err := structuralschema.NewStructural(internalSchema(t, loadCRD(t, TargetKind)))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the structural schema of the Target CRD: %v", err)
 	}
 	object := resource(TargetKind, spec)
 	defaulting.Default(object, structural)
 	raw, err := json.Marshal(object)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the defaulted Target: %v", err)
 	}
 	var target Target
 	if err := json.Unmarshal(raw, &target); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the defaulted Target: %v", err)
 	}
 	return target
 }
 
-// The design gives a default for each of these fields, and the
-// operator reads the stored value, so the CRD must fill each one.
-func TestTheCRDFillsTheDefaultsOfPlans02And03(t *testing.T) {
+// The operator reads these fields as the API server stores them, with
+// no defaults of its own.
+func TestTheCRDFillsTheCenteringAndArchiveDefaults(t *testing.T) {
 	target := defaulted(t, m42(map[string]any{"centering": map[string]any{"solver": "lab"}}))
 	cases := []struct {
 		field     string
@@ -75,12 +75,12 @@ func TestTheCRDFillsTheDefaultsOfPlans02And03(t *testing.T) {
 	}
 }
 
-// The operator orders an unset priority as 0. The CRD stores that 0,
-// so the Priority printer column shows it instead of a blank.
+// The CRD stores an unset priority as 0, so the Priority printer column
+// shows 0 instead of a blank.
 func TestTheCRDStoresAnUnsetPriorityAsZero(t *testing.T) {
 	structural, err := structuralschema.NewStructural(internalSchema(t, loadCRD(t, TargetKind)))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the structural schema of the Target CRD: %v", err)
 	}
 	object := resource(TargetKind, m42(nil))
 	defaulting.Default(object, structural)

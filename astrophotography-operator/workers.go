@@ -1,16 +1,18 @@
 package main
 
-// The worker of each reservation (plan 02): a Deployment of one pod and
-// a Service named <Reservation>-astrophotography, in the reservation's
-// namespace, owned by the Reservation. The pod mounts the outbox claim
-// at /outbox and runs this binary in its worker mode, in the same image
-// as the solver. A local-path outbox is bound to the pier machine, so
-// the scheduler starts the worker on the camera's node, and the frames
-// never cross the network.
+// Each Reservation gets a worker: a Deployment with one pod and a
+// Service, both named <Reservation>-astrophotography, in the
+// Reservation's namespace and owned by it. The pod mounts the outbox
+// claim at /outbox and runs this binary in its worker mode, from the
+// same image as the solver. A local-path outbox is bound to the node
+// where the camera is attached, so the scheduler starts the worker on
+// that node, and the frames never cross the network.
 //
-// A worker runs while its reservation is Activating or Ready with an
-// outbox in its session. The loop removes every other worker: one whose
-// reservation ends, fails, or leaves this operator.
+// A worker exists while its Reservation is Activating or Ready and its
+// session records an outbox. workerPass deletes every other worker. That
+// includes the worker of a Reservation that another operator now holds,
+// because the Reservation watch reads only the Reservations this
+// operator holds.
 
 import (
 	"context"
@@ -26,21 +28,18 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// roleWorker labels the objects of a worker, with its reservation's
-// name.
 const roleWorker = "worker"
 
-// workerName names the Deployment and the Service of a reservation's
-// worker.
 func workerName(reservation string) string { return reservation + "-astrophotography" }
 
-// maxServiceName is the length of a DNS label, the longest name a
-// Service can have.
+// maxServiceName is the longest Service name, because a Service name
+// is a DNS label.
 const maxServiceName = 63
 
-// workerLoop remembers the scheduler's message it posted for each
-// worker pod, so a pod that waits posts one Event, not one for each
-// pass. A new lead posts each one again.
+// workerLoop caches, by pod UID, the last scheduling message it posted
+// an Event for, so a pod that stays Pending gets one Event for each
+// message instead of one for each pass. A new leader starts with an
+// empty cache and posts each message again.
 type workerLoop struct {
 	mu      sync.Mutex
 	pending map[string]string
@@ -48,8 +47,8 @@ type workerLoop struct {
 
 func newWorkerLoop() *workerLoop { return &workerLoop{pending: map[string]string{}} }
 
-// workerPass runs a worker for each reservation that needs one, and
-// removes each other worker.
+// workerPass creates or updates the worker of each Reservation that
+// needs one, and deletes every other worker Deployment.
 func (o *operator) workerPass(_ context.Context, loop *workerLoop) error {
 	wanted, seen := map[string]bool{}, map[string]bool{}
 	var errs []error
@@ -60,8 +59,8 @@ func (o *operator) workerPass(_ context.Context, loop *workerLoop) error {
 		}
 		name := workerName(r.Metadata.Name)
 		if len(name) > maxServiceName {
-			fmt.Fprintf(o.logs, "%s: the Reservation %s/%s has a name too long for its worker's Service %s\n",
-				managedBy, r.Metadata.Namespace, r.Metadata.Name, name)
+			fmt.Fprintf(o.logs, "%s: no worker is created for Reservation %s/%s, because the name %s of its worker's Service is %d characters and a Service name allows %d\n",
+				managedBy, r.Metadata.Namespace, r.Metadata.Name, name, len(name), maxServiceName)
 			continue
 		}
 		wanted[r.Metadata.Namespace+"/"+name] = true
@@ -70,7 +69,7 @@ func (o *operator) workerPass(_ context.Context, loop *workerLoop) error {
 			continue
 		}
 		if err := o.ensure(workerWorkload(&r, claim, o.workerImage)); err != nil {
-			errs = append(errs, fmt.Errorf("the worker of Reservation %s/%s: %w", r.Metadata.Namespace, r.Metadata.Name, err))
+			errs = append(errs, fmt.Errorf("creating or updating the worker of Reservation %s/%s: %w", r.Metadata.Namespace, r.Metadata.Name, err))
 		}
 		loop.warnPending(o, &r, seen)
 	}
@@ -86,13 +85,10 @@ func (o *operator) workerPass(_ context.Context, loop *workerLoop) error {
 	return errors.Join(errs...)
 }
 
-// workerLabel is the label of every object of a worker.
 const workerLabel = astrophotography.Group + "/" + roleWorker
 
-// workerClaim answers the outbox claim of a reservation that needs a
-// worker, and "" for one that does not. The session's record of the
-// outbox is what the camera's pod mounts, so the worker mounts the same
-// claim.
+// workerClaim returns the outbox claim that the camera's pod mounts, or
+// "" when the Reservation needs no worker.
 func workerClaim(r *observatory.Reservation) string {
 	session := r.Status.Session
 	switch {
@@ -104,11 +100,10 @@ func workerClaim(r *observatory.Reservation) string {
 	return ""
 }
 
-// warnPending posts the Warning AstrophotographyWorkerPending on the
-// reservation when its worker's pod cannot start, with the scheduler's
-// message, such as for an outbox whose access mode is
-// ReadWriteOncePod, once for each pod and message. It adds each pod it
-// read to seen.
+// warnPending posts a Warning on the Reservation with the scheduler's
+// message when the worker's pod cannot be scheduled, once for each pod
+// and message. A common cause is a ReadWriteOncePod outbox claim that
+// another pod already mounts. It adds each pod it reads to seen.
 func (loop *workerLoop) warnPending(o *operator, r *observatory.Reservation, seen map[string]bool) {
 	for _, p := range o.podsOf(r.Metadata.Namespace, workerLabel, r.Metadata.Name) {
 		seen[p.Metadata.UID] = true
@@ -123,11 +118,11 @@ func (loop *workerLoop) warnPending(o *operator, r *observatory.Reservation, see
 		o.recorder.Warning(events.ObjectReference{
 			APIVersion: observatory.APIVersion, Kind: observatory.ReservationKind.Name,
 			Namespace: r.Metadata.Namespace, Name: r.Metadata.Name, UID: r.Metadata.UID,
-		}, reasonWorkerPending, "the worker's pod "+p.Metadata.Name+" cannot start: "+message)
+		}, reasonWorkerPending, "The worker pod "+p.Metadata.Name+" cannot start: "+message)
 	}
 }
 
-// forget drops the message of each pod that no worker has any more.
+// forget drops the cached message of each pod that is not in seen.
 func (loop *workerLoop) forget(seen map[string]bool) {
 	loop.mu.Lock()
 	defer loop.mu.Unlock()
@@ -151,14 +146,12 @@ func workerWorkload(r *observatory.Reservation, claim, image string) workload {
 		VolumeMounts: []volumeMount{
 			{Name: "outbox", MountPath: outbox.Root},
 			{Name: "work", MountPath: workDir},
-			// solve-field writes its own temporary files to /tmp, and the
-			// root is read-only.
+			// solve-field writes temporary files to /tmp, and the root
+			// filesystem is read-only.
 			{Name: "tmp", MountPath: "/tmp"},
 		},
 		ReadinessProbe: &probe{HTTPGet: &httpGet{Path: worker.PathOutbox, Port: "http"}, PeriodSeconds: 10},
-		// SourceExtractor peaked at 28 MB of resident memory on a frame
-		// of the CCD simulator in plan 02's probe.
-		Resources: &resources{Requests: map[string]string{"cpu": "50m", "memory": "32Mi"}},
+		Resources:      &resources{Requests: map[string]string{"cpu": "50m", "memory": "32Mi"}},
 	}
 	d := &deployment{
 		APIVersion: "apps/v1", Kind: "Deployment",
@@ -170,9 +163,9 @@ func workerWorkload(r *observatory.Reservation, claim, image string) workload {
 			Template: podTemplate{
 				Metadata: metaOf("", "", labels, nil),
 				Spec: podSpec{
-					// The server holds no state, and a stop loses only the
-					// extraction in flight, which the operator asks for
-					// again.
+					// The worker keeps no state. Stopping it loses only the
+					// extraction in flight, and the operator requests that
+					// extraction again.
 					TerminationGracePeriodSeconds: int64Pointer(5),
 					EnableServiceLinks:            boolPointer(false),
 					AutomountServiceAccountToken:  boolPointer(false),

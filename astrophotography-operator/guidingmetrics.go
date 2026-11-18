@@ -1,9 +1,8 @@
 package main
 
-// The series of guiding and dithering (root plan 65, layer 3): the
-// dithers that settled, the failures to guide, and how long PHD2 takes
-// to settle. A night whose frames wait on the guiding shows it here
-// before it shows in the frames.
+// The metrics for guiding and dithering: the dithers that settled, the
+// failures to guide, and how long PHD2 takes to settle. They show a
+// guiding problem before it shows as fewer frames in the archive.
 
 import "github.com/prometheus/client_golang/prometheus"
 
@@ -23,9 +22,8 @@ func newGuidingMetrics(registry *prometheus.Registry) *guidingMetrics {
 			Name: metricsPrefix + "guiding_failures_total",
 			Help: "Attempts to guide or dither that failed, such as a settle that timed out or no star found, by target.",
 		}, []string{"namespace", "target"}),
-		// Plan 09's drill settled a guide in 10 seconds after a
-		// calibration of 73, so the buckets run from a second to over
-		// eight minutes.
+		// The buckets double from 1 second to 512 seconds, which covers a
+		// settle with a calibration before it.
 		settle: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    metricsPrefix + "settle_seconds",
 			Help:    "How long a guide or a dither takes from the request to SettleDone, calibration included, by operation.",

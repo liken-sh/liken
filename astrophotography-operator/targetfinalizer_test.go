@@ -1,8 +1,5 @@
 package main
 
-// The finalizer on a Target: a delete waits while frames of the target
-// are pending in an outbox claim, so promotion still moves them.
-
 import (
 	"slices"
 	"testing"
@@ -13,9 +10,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// The operator puts the finalizer on every target it reads, and keeps
-// another controller's finalizer.
-func TestATargetCarriesTheFramesFinalizer(t *testing.T) {
+// The operator adds the finalizer to every Target it reads, and leaves
+// another controller's finalizer in place.
+func TestATargetHasTheFramesFinalizer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
 		target := m42()
@@ -25,14 +22,15 @@ func TestATargetCarriesTheFramesFinalizer(t *testing.T) {
 		synctest.Wait()
 
 		if got := readTarget(api).Metadata.Finalizers; !slices.Equal(got, []string{"example.com/keep", framesFinalizer}) {
-			t.Errorf("finalizers %v", got)
+			t.Errorf("the finalizers are %v, want example.com/keep and %s", got, framesFinalizer)
 		}
 	})
 }
 
-// A person deletes a target while frames of it wait in the outbox. The
-// target stays, with Imaging False and Deleting, until promotion moves
-// the frames. Then the finalizer comes off and the target goes.
+// A person deletes a Target while frames of it are waiting in the
+// outbox. The Target remains, with Imaging False and reason Deleting,
+// until promotion moves the frames. Then the operator removes the
+// finalizer and the Target is deleted.
 func TestADeletedTargetWaitsForItsPendingFrames(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -46,27 +44,27 @@ func TestADeletedTargetWaitsForItsPendingFrames(t *testing.T) {
 		api.delete(targetsPath, observatoryNS, "m42")
 		synctest.Wait()
 
-		held := readTarget(api)
-		imaging, _ := conditions.Find(held.Status.Conditions, astrophotography.ConditionImaging)
-		if held.Metadata.DeletionTimestamp == nil || imaging.Status != conditions.False || imaging.Reason != astrophotography.ReasonDeleting {
-			t.Fatalf("the target is %+v, Imaging %+v", held.Metadata, imaging)
+		stored := readTarget(api)
+		imaging, _ := conditions.Find(stored.Status.Conditions, astrophotography.ConditionImaging)
+		if stored.Metadata.DeletionTimestamp == nil || imaging.Status != conditions.False || imaging.Reason != astrophotography.ReasonDeleting {
+			t.Fatalf("the target metadata is %+v and Imaging is %+v, want a deletion timestamp and Imaging False with reason Deleting", stored.Metadata, imaging)
 		}
 		if got := targetEvents(api); !slices.Contains(got, "Normal "+astrophotography.ReasonDeleting) {
-			t.Errorf("Events %v, want Normal Deleting", got)
+			t.Errorf("the Events are %v, want Normal Deleting", got)
 		}
 
 		finish(t, api, "m42-promote-1", &promote.Report{Totals: luminance(2), Promoted: 2})
 		synctest.Wait()
 
 		if api.get(targetsPath, observatoryNS, "m42") != nil {
-			t.Error("the target stays after its frames reached the archive")
+			t.Error("the Target still exists after promotion moved its frames to the archive, want it deleted")
 		}
 	})
 }
 
-// A delete goes at once when no frame waits, and when the outbox claim
-// that held the frames is gone with them.
-func TestADeletedTargetGoesWhenNoFrameCanWait(t *testing.T) {
+// A delete proceeds at once when no frame is waiting, and when the
+// outbox claim that held the frames is gone.
+func TestADeletedTargetIsRemovedWhenNoFrameCanWait(t *testing.T) {
 	cases := []struct {
 		name   string
 		target astrophotography.Target
@@ -87,7 +85,7 @@ func TestADeletedTargetGoesWhenNoFrameCanWait(t *testing.T) {
 				synctest.Wait()
 
 				if api.get(targetsPath, observatoryNS, "m42") != nil {
-					t.Error("the target stays")
+					t.Error("the Target still exists after its deletion, want it deleted")
 				}
 			})
 		})

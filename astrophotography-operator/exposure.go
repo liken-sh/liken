@@ -1,13 +1,12 @@
 package main
 
-// One frame (plan 01, step 7). Before each exposure the runner writes
-// every setting the frame depends on, not once for each target:
-// observatory-operator writes the upload settings and its keywords
-// again when a camera's driver comes back in a new pod, and a person in
-// KStars can change a setting during the night. A full write before
-// each frame states the frame's header in full, so no earlier write
-// leaks into it. Ten keywords cost well under a second against an
-// exposure of minutes.
+// The runner writes every setting a frame depends on before each
+// exposure, not once for each target, because the settings can change
+// between frames. observatory-operator writes the upload settings and
+// keywords again when a camera's driver restarts in a new pod, and a
+// person using KStars can change a setting during the night. Writing
+// the keywords after INDI_CLEAR each time also keeps keywords of earlier
+// writes out of the FITS header.
 //
 // The runner records the frame in status.exposure before the exposure
 // starts and clears it when the frame is counted, so a runner that
@@ -26,19 +25,21 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
-// filterTimeout bounds a turn of the filter wheel.
+// filterTimeout is how long the runner waits for the filter wheel to
+// reach a filter.
 const filterTimeout = 2 * time.Minute
 
-// readoutAllowance is the time past the exposure that the runner waits
-// for the frame: the camera reads the sensor out, and the driver writes
-// the file.
+// readoutAllowance is how long past the exposure time the runner waits
+// for the frame. The camera reads out the sensor and the driver writes
+// the file in that time.
 const readoutAllowance = 2 * time.Minute
 
-// headerBlocks is the space of a frame's header in the outbox: three
-// FITS blocks of 2,880 bytes.
-const headerBlocks = 3 * 2880
+// headerBytes is the number of bytes that the outbox space check
+// reserves for a frame's FITS header: three blocks of 2,880 bytes.
+const headerBytes = 3 * 2880
 
-// expose takes one frame of the sequence at index, and counts it.
+// expose takes one frame of the sequence at index and adds it to the
+// target's pending frames.
 func (w *work) expose(ctx context.Context, index int) error {
 	t := w.target
 	settings, err := settingsOf(t.Spec.Sequences[index])
@@ -75,14 +76,14 @@ func (w *work) expose(ctx context.Context, index int) error {
 	}
 	w.r.o.metrics.runner.framesExposed.WithLabelValues(t.Metadata.Namespace, t.Metadata.Name).Inc()
 	_, err = w.r.count(t, exposure, true, w.res.Status.Session.Outbox.ClaimName,
-		fmt.Sprintf("Reservation %s exposes %s, %s.", w.r.name, settings, w.how))
+		fmt.Sprintf("Reservation %s exposes %s, %s", w.r.name, settings, w.how))
 	return err
 }
 
-// writeFrame writes the settings of one frame, in plan 01's order: the
-// upload, the frame type, the binning, gain, and offset that the
-// sequence states, the filter, and the keywords, INDI_CLEAR first and
-// FRAMEID last.
+// writeFrame sends the camera's settings for one frame in this order:
+// the upload location, the frame type, the binning, gain, and offset
+// that the sequence sets, the filter, and the FITS keywords. The
+// keywords start with INDI_CLEAR and end with FRAMEID.
 func (w *work) writeFrame(ctx context.Context, s sequenceSettings, file outbox.Frame, frameID string) error {
 	c, cam := w.r.client, w.cameraDevice
 	dir, prefix := file.Upload()
@@ -133,10 +134,10 @@ func (w *work) writeFrame(ctx context.Context, s sequenceSettings, file outbox.F
 	return nil
 }
 
-// record writes the frame in flight into status.exposure. Imaging turns
-// True with the reason Exposing, except after a failed exposure: that
-// condition stays until a frame is counted, so a retry that fails again
-// posts no second pair of Events.
+// record writes the frame to status.exposure and sets Imaging to True
+// with the reason Exposing. When Imaging already has the reason
+// ExposureFailed, record leaves it, so each retry of a failing frame
+// does not post an Exposing Event and another ExposureFailed Event.
 func (w *work) record(exposure *astrophotography.Exposure, s sequenceSettings) error {
 	wrote := false
 	_, err := w.r.o.writeTarget(w.target, func(t *astrophotography.Target, change *statusChange) bool {
@@ -147,7 +148,7 @@ func (w *work) record(exposure *astrophotography.Exposure, s sequenceSettings) e
 		t.Status.Exposure = exposure
 		if !imagingReason(t, astrophotography.ReasonExposureFailed) {
 			change.setImaging(t, true, astrophotography.ReasonExposing,
-				fmt.Sprintf("Reservation %s exposes %s, %s.", w.r.name, s, w.how))
+				fmt.Sprintf("Reservation %s exposes %s, %s", w.r.name, s, w.how))
 		}
 		return true
 	})
@@ -157,15 +158,15 @@ func (w *work) record(exposure *astrophotography.Exposure, s sequenceSettings) e
 	return err
 }
 
-// errClaimLost ends the work on a target whose status.reservation no
-// longer names the runner's reservation.
-var errClaimLost = errors.New("the target's status.reservation names another reservation")
+// errClaimLost means that the target's status.reservation names another
+// reservation, so the runner stops working on the target.
+var errClaimLost = errors.New("the Target's status.reservation is set to another Reservation")
 
 // exposeAndWait starts the exposure and waits for the frame. The driver
-// sends the message "[INFO] Image saved to <path>" before CCD_EXPOSURE
-// turns Ok (a probe of the pinned indi-simulators image on 2026-10-12),
-// so the runner listens for messages before it starts the exposure, and
-// checks that the driver saved the file the runner named.
+// sends "[INFO] Image saved to <path>" before CCD_EXPOSURE turns Ok, so
+// exposeAndWait subscribes to the driver's messages before it starts
+// the exposure. Then it checks that the saved path is the one it asked
+// for.
 func (w *work) exposeAndWait(ctx context.Context, s sequenceSettings, file outbox.Frame) error {
 	listening, stop := context.WithCancel(ctx)
 	defer stop()
@@ -174,10 +175,10 @@ func (w *work) exposeAndWait(ctx context.Context, s sequenceSettings, file outbo
 		return w.r.client.SetNumbers(w.cameraDevice, "CCD_EXPOSURE", map[string]float64{"CCD_EXPOSURE_VALUE": s.exposure.Seconds()})
 	})
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-		// A driver that never finishes still exposes, so the runner
-		// aborts the exposure before it writes the next one's settings.
+		// The camera may still be exposing, so abort before the next
+		// frame's settings reach it.
 		_, _ = w.r.client.SetSwitches(w.cameraDevice, "CCD_ABORT_EXPOSURE", map[string]bool{"ABORT": true})
-		return fmt.Errorf("the driver did not finish the exposure of %s in %s", s.exposure, s.exposure+readoutAllowance)
+		return fmt.Errorf("the camera driver did not finish an exposure of %s within %s", s.exposure, s.exposure+readoutAllowance)
 	}
 	if err != nil {
 		return err
@@ -185,8 +186,8 @@ func (w *work) exposeAndWait(ctx context.Context, s sequenceSettings, file outbo
 	return w.checkSaved(ctx, saved, file)
 }
 
-// imagingReason reports whether a target's Imaging condition has a
-// reason.
+// imagingReason reports whether the target's Imaging condition has the
+// given reason.
 func imagingReason(t *astrophotography.Target, reason string) bool {
 	c, _ := conditions.Find(t.Status.Conditions, astrophotography.ConditionImaging)
 	return c.Reason == reason

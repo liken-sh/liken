@@ -1,7 +1,5 @@
 package main
 
-// The counts of a report, by sequence, and the names of the Jobs.
-
 import (
 	"reflect"
 	"strings"
@@ -16,9 +14,6 @@ func int32p(v int32) *int32 { return &v }
 
 func float(v float64) *float64 { return &v }
 
-// A frame counts toward a sequence with the same filter, exposure,
-// binning, gain, and offset. A field the sequence leaves out matches
-// any value, because the camera's own value took its place.
 func TestAFrameCountsTowardASequenceByItsSettings(t *testing.T) {
 	frame := catalog.Settings{Filter: "Red", ExposureSeconds: 0.5, Binning: 2, Gain: float(100), Offset: float(10)}
 	cases := []struct {
@@ -44,7 +39,7 @@ func TestAFrameCountsTowardASequenceByItsSettings(t *testing.T) {
 	}
 	noGain := catalog.Settings{ExposureSeconds: 0.5, Binning: 1}
 	if countsToward(astrophotography.Sequence{Exposure: "500ms", Gain: int32p(100)}, noGain) {
-		t.Error("a frame with no GAIN counts toward a sequence that states one")
+		t.Error("a frame with no GAIN counts toward a sequence that sets one, want it not to count")
 	}
 }
 
@@ -57,7 +52,7 @@ func TestSequenceProgress(t *testing.T) {
 	cases := []struct {
 		name      string
 		spec      []astrophotography.Sequence
-		held      []astrophotography.SequenceProgress
+		stored    []astrophotography.SequenceProgress
 		totals    []catalog.Total
 		truncated bool
 		want      []astrophotography.SequenceProgress
@@ -83,7 +78,7 @@ func TestSequenceProgress(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := sequenceProgress(c.spec, c.held, c.totals, c.truncated); !reflect.DeepEqual(got, c.want) {
+			if got := sequenceProgress(c.spec, c.stored, c.totals, c.truncated); !reflect.DeepEqual(got, c.want) {
 				t.Errorf("sequenceProgress = %+v, want %+v", got, c.want)
 			}
 		})
@@ -104,9 +99,9 @@ func TestAJobNameIsADNSLabel(t *testing.T) {
 	}
 }
 
-// The report names its failures with the reasons of ArchiveAvailable,
-// which the loop copies into the condition.
-func TestTheReportsReasonsAreArchiveAvailablesReasons(t *testing.T) {
+// The loop copies a failure's reason into ArchiveAvailable, so the two
+// packages must spell each reason the same way.
+func TestReportFailureReasonsAreArchiveAvailableReasons(t *testing.T) {
 	got := []string{promote.ReasonCopyFailed, promote.ReasonVerifyFailed, promote.ReasonNameConflict}
 	want := []string{astrophotography.ReasonCopyFailed, astrophotography.ReasonVerifyFailed, astrophotography.ReasonNameConflict}
 	if !reflect.DeepEqual(got, want) {
@@ -114,9 +109,9 @@ func TestTheReportsReasonsAreArchiveAvailablesReasons(t *testing.T) {
 	}
 }
 
-// A report of a Job that succeeded but does not decode is a failure,
-// not a wait.
-func TestAReportThatDoesNotReadIsAFailure(t *testing.T) {
+// A Job that succeeded with a report that does not decode is a failure,
+// and the loop does not wait for another report.
+func TestAReportThatDoesNotDecodeIsAFailure(t *testing.T) {
 	job := jobObject{}
 	job.Metadata.Name = "m42-promote-1"
 	pod := podObject{}
@@ -125,13 +120,13 @@ func TestAReportThatDoesNotReadIsAFailure(t *testing.T) {
 
 	result, ready := resultOf(job, 1, true, []podObject{pod})
 
-	if !ready || result.report != nil || !strings.HasPrefix(result.failure, "the report of the promotion Job m42-promote-1 does not read") {
-		t.Errorf("resultOf = %+v, %v", result, ready)
+	if !ready || result.report != nil || !strings.HasPrefix(result.failure, "The report of the promotion Job m42-promote-1 does not decode") {
+		t.Errorf("resultOf = %+v, ready %v, want a failure that starts with the report of the promotion Job m42-promote-1 and no report", result, ready)
 	}
 }
 
-// A Job's pod that failed an attempt holds no report. The report is
-// in the pod of the attempt that succeeded.
+// A Job's pods include the failed attempts, and only the pod that
+// succeeded has the report.
 func TestTheReportIsInThePodThatSucceeded(t *testing.T) {
 	job := jobObject{}
 	job.Metadata.Name = "m42-promote-1"
@@ -148,7 +143,7 @@ func TestTheReportIsInThePodThatSucceeded(t *testing.T) {
 	result, ready := resultOf(job, 1, true, []podObject{other, attempt(1, ""), attempt(0, `{"promoted":2}`)})
 
 	if !ready || result.report == nil || result.report.Promoted != 2 {
-		t.Errorf("resultOf = %+v, %v", result, ready)
+		t.Errorf("resultOf = %+v, ready %v, want a report of 2 promoted frames", result, ready)
 	}
 }
 
@@ -195,14 +190,12 @@ func TestPromotionNumber(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got, ok := promotionNumber(c.job); got != c.want || ok != c.ok {
-				t.Errorf("promotionNumber = %d, %v", got, ok)
+				t.Errorf("promotionNumber = %d, %v, want %d, %v", got, ok, c.want, c.ok)
 			}
 		})
 	}
 }
 
-// A report is applied once. Its Job's number goes into the status in
-// the same write, so a second pass over the same Job changes nothing.
 func TestAReportIsAppliedOnce(t *testing.T) {
 	target := withPending(m42(), 2, 0)
 	result := promotionResult{job: "m42-promote-1", number: 1, claim: "frames", pending: 2,
@@ -213,21 +206,20 @@ func TestAReportIsAppliedOnce(t *testing.T) {
 	_, second := result.apply(&target)
 
 	if !first || second || target.Status.Sequences[0] != after || after.Archived != 2 || after.Pending != 0 {
-		t.Errorf("the applies answered %v and %v, and the sequence is %+v", first, second, target.Status.Sequences[0])
+		t.Errorf("apply returned %v and %v, and the sequence is %+v", first, second, target.Status.Sequences[0])
 	}
 }
 
-// A Job that succeeded is not applied until its pod's report reaches the
-// store, because the two watches deliver their changes apart.
+// The Job and pod watches deliver events independently, so a Job that
+// succeeded can be in the store before its pod.
 func TestASucceededJobWaitsForItsPod(t *testing.T) {
 	job := jobObject{}
 	job.Metadata.Name = "m42-promote-1"
 	if _, ready := resultOf(job, 1, true, nil); ready {
-		t.Error("the result is ready with no pod")
+		t.Error("the result of a succeeded Job is ready with no pod, want it to wait")
 	}
 }
 
-// ArchiveAvailable's message counts frames in the singular for one.
 func TestTheArchiveMessageCountsFrames(t *testing.T) {
 	failed := []promote.Frame{{File: "m42/a.fits", Reason: astrophotography.ReasonCopyFailed, Message: "disk full"}}
 	cases := []struct {
@@ -235,12 +227,12 @@ func TestTheArchiveMessageCountsFrames(t *testing.T) {
 		report promote.Report
 		want   string
 	}{
-		{"one moved", promote.Report{Promoted: 1}, "the promotion Job m42-promote-1 moved 1 frame to the archive"},
-		{"two moved", promote.Report{Promoted: 2}, "the promotion Job m42-promote-1 moved 2 frames to the archive"},
+		{"one moved", promote.Report{Promoted: 1}, "The promotion Job m42-promote-1 moved 1 frame to the archive"},
+		{"two moved", promote.Report{Promoted: 2}, "The promotion Job m42-promote-1 moved 2 frames to the archive"},
 		{"one left", promote.Report{Left: 1, Failures: failed},
-			"the promotion Job m42-promote-1 left 1 frame in the outbox; the first failure is m42/a.fits: disk full"},
+			"The promotion Job m42-promote-1 left 1 frame in the outbox, and the first failure is m42/a.fits: disk full"},
 		{"two left", promote.Report{Left: 2, Failures: failed},
-			"the promotion Job m42-promote-1 left 2 frames in the outbox; the first failure is m42/a.fits: disk full"},
+			"The promotion Job m42-promote-1 left 2 frames in the outbox, and the first failure is m42/a.fits: disk full"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -252,8 +244,6 @@ func TestTheArchiveMessageCountsFrames(t *testing.T) {
 	}
 }
 
-// Complete's message counts the archived frames in the singular for
-// one.
 func TestTheCompleteMessageCountsFrames(t *testing.T) {
 	cases := []struct {
 		name            string

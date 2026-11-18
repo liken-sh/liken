@@ -7,12 +7,12 @@ This skill is the guide at https://liken.sh/astrophotography/docs/guides/declare
 
 # Declare a target
 
-A `Target` says what you want to image and how many frames of it. You
-declare it once, and every reservation of the operator in its
-namespace works on it until it has all its frames, across as many
-nights as that takes. At the end of this guide you have a `Target` and
-the claim that holds its frames, and the target shows how many frames
-it still needs. No telescope moves until
+A `Target` says what you want to image and how many frames you want.
+You declare it once, and each reservation for this operator in the same
+namespace images it until it has all its frames, over as many nights as
+that takes. At the end of this guide you have a `Target` and the archive
+claim for its frames, and the target shows how many frames it still
+needs. No telescope moves until
 [Image a target](https://liken.sh/astrophotography/docs/guides/image-a-target/) reserves one.
 
 You need:
@@ -35,8 +35,8 @@ and a pod can mount only the claims of its own namespace.
 
 ## Find the train and the filter names
 
-A target names the `OpticalTrain` it is imaged through, and each
-sequence names a filter by its name in the filter wheel. List both:
+A target refers to the `OpticalTrain` it is imaged through, and each
+sequence refers to a filter by its name in the filter wheel. List both:
 
 ```sh
 kubectl get opticaltrains -n observatory
@@ -54,10 +54,10 @@ imaging camera.
 
 ## Create the archive claim
 
-The archive is the `PersistentVolumeClaim` where the frames stay after
-the night, with a catalog of every frame. You choose it, and it cannot
-change after you create the target, because the target's counts come
-from the catalog in that claim.
+The archive is the `PersistentVolumeClaim` that keeps the frames after
+the night, together with a catalog of every frame. You choose the claim,
+and you cannot change it after you create the target, because the
+target's counts come from the catalog in that claim.
 
 A promotion `Job` mounts the archive and the reservation's outbox in
 one pod, so a node must be able to mount both. A `ReadWriteMany`
@@ -82,8 +82,8 @@ spec:
 EOF
 ```
 
-A `local-path` claim stays `Pending` until the first pod mounts it.
-That is the normal state until the first promotion.
+A `local-path` archive stays `Pending` until the first promotion `Job`
+mounts it.
 
 ## Write the target
 
@@ -125,16 +125,16 @@ and `archive.promotion: Continuous`. To choose the file names, see
 [Targets](https://liken.sh/astrophotography/docs/concepts/targets/) explains each field, and
 [`Target`](https://liken.sh/astrophotography/docs/reference/targets/) lists them all.
 
-The operator images a target only while it stands above the
-telescope's horizon: the `Horizon` that the `Telescope`'s
-`spec.horizon` names, or 0° when it names none. A target below the
+The operator images a target only while it is above the telescope's
+horizon. That is the `Horizon` named in the `Telescope`'s
+`spec.horizon`, or 0° when `spec.horizon` is not set. A target below the
 horizon gets `Imaging` `False` with the reason `BelowHorizon`, and its
 message gives its altitude and when it rises.
 [The horizon](https://liken.sh/astrophotography/docs/concepts/imaging/#the-horizon) gives the detail.
 
 ## Check the target
 
-The operator writes the target's progress as soon as it reads it:
+The operator writes the target's progress right after you create it:
 
 ```sh
 kubectl get target m42 -n observatory
@@ -145,14 +145,14 @@ NAME   OBJECT   PROGRESS   RESERVATION   COMPLETE   AGE
 m42    M42      0/5                      False      10s
 ```
 
-`PROGRESS` counts the frames in the archive of the frames you asked
-for. `Complete` is `False` with the reason `WorkLeft` until every
+`PROGRESS` is the number of frames in the archive, out of the number
+you asked for. `Complete` is `False` with the reason `WorkLeft` until every
 sequence has its count in the archive. `kubectl get target -o wide`
 adds the `Imaging` reason and the priority.
 
 ## Add guiding, dithering, centering, and keywords
 
-These fields are optional. Add them to the same `spec`:
+These fields are optional, and go in the same `spec`:
 
 ```yaml
 spec:
@@ -171,10 +171,10 @@ spec:
   different part of the sky in each frame and stacking removes it. A
   telescope with no `Guider` does not dither.
 * `centering` plate-solves a short frame after each slew and corrects
-  the mount until the error is at most `tolerance` arcseconds. It
-  names a `Solver`, which
+  the mount until the error is at most `tolerance` arcseconds.
+  `solver` is the name of a `Solver`, which
   [Set up a solver](https://liken.sh/astrophotography/docs/guides/set-up-a-solver/) creates. With no
-  `centering`, the frames are taken where the slew leaves the mount.
+  `centering`, the frames are taken wherever the slew ends.
 * `fitsKeywords` adds keywords to each frame's header, after the ones
   that `observatory-operator` writes for the observatory, the
   telescope, the camera, and the reservation, so a keyword here
@@ -182,22 +182,23 @@ spec:
   `OBJECT` and `FRAMEID`, which this operator writes, and each keyword
   the camera's driver measures, such as `EXPTIME`.
   [FITS keywords](https://liken.sh/observatory/docs/concepts/fits-keywords/)
-  explains the levels.
+  explains which resource writes which keywords.
 
 ## Choose which target goes first
 
-A reservation images one target at a time. It takes the eligible
-target with the highest `priority`, then the oldest, then the first
-name. The default priority is `0`:
+A reservation images one target at a time. From the targets it can
+image, it picks the one with the highest `priority`. A tie goes to the
+oldest target, then to the first name in alphabetical order. The
+default priority is `0`:
 
 ```sh
 kubectl patch target m42 -n observatory --type merge -p '{"spec":{"priority":10}}'
 ```
 
 The reservation keeps its target until the target has no work left,
-is suspended, sets below the horizon, or fails. A higher priority on another target does not
-take the telescope away from the target in progress. To switch now,
-suspend the target in progress.
+is suspended, drops below the horizon, or fails. A target with a higher
+priority does not interrupt the current one. To switch at once, suspend
+the current target.
 
 ## Pause a target
 
@@ -207,7 +208,7 @@ suspend the target in progress.
 kubectl patch target m42 -n observatory --type merge -p '{"spec":{"suspend":true}}'
 ```
 
-A reservation that images the target finishes the frame in flight,
+A reservation that images the target finishes the current exposure,
 releases the target with `Imaging` `False` and the reason `Suspended`,
 and moves to the next target. Set `suspend` to `false` to make it
 eligible again.
@@ -222,15 +223,16 @@ the target again before each frame:
   offset, so you can reorder sequences or raise a count, and the frames
   that still match keep counting.
 * New `coordinates` stop guiding, slew the mount again, and center the
-  target again when it states `centering`.
-* A new `archive.format` names the next frames. Frames already taken
-  keep their names.
+  target again when the target sets `centering`.
+* A new `archive.format` applies to the next frames. Frames already
+  taken keep their names.
 * `archive.claimName` cannot change. To use another claim, create
   another target.
 
-A target that failed on a reservation, such as with `NoFilter` or
-`SlewFailed`, is not taken again by that reservation until you edit it.
-Its `status.failed` names that reservation.
+When a target fails on a reservation, with a reason such as `NoFilter`
+or `SlewFailed`, that reservation does not pick it again until you edit
+the target's spec. `status.failed.reservation` is the name of that
+reservation, and other reservations can still pick the target.
 [Troubleshoot](https://liken.sh/astrophotography/docs/guides/troubleshoot/) gives the fix for each
 reason.
 
@@ -244,21 +246,21 @@ kubectl delete target m42 -n observatory
 ```
 
 The operator puts the finalizer `astrophotography.liken.sh/frames` on
-each target, so the delete waits while frames of the target are
-pending in an outbox. During the wait, no reservation claims the
-target, a reservation that images it finishes the frame in flight and
-releases it, and promotion moves the pending frames to the archive.
-`Imaging` is `False` with the reason `Deleting`, and the target gets
-the `Event` `Deleting`. The target goes when `status.outboxes`
-shows no `pending` frame:
+each target, so the delete waits while frames of the target are still
+in an outbox. During the wait, no reservation picks the target, a
+reservation that images it finishes the current exposure and releases
+it, and promotion moves the remaining frames to the archive. `Imaging`
+is `False` with the reason `Deleting`, and the target gets the `Event`
+`Deleting`. The operator removes the finalizer, and Kubernetes deletes
+the target, when no entry of `status.outboxes` has `pending` frames:
 
 ```sh
 kubectl get target m42 -n observatory -o jsonpath='{.status.outboxes}'
 ```
 
-With `promotion: AfterReservation`, the frames move after the
-reservation that writes to the outbox ends, so the delete waits for
-that too. When a frame cannot reach the archive, the delete waits until
+With `promotion: AfterReservation`, the frames move only after the
+reservation that writes to the outbox ends, so the delete also waits
+for that reservation to end. When a frame cannot reach the archive, the delete waits until
 you fix the cause, or until you remove the finalizer:
 [A target does not delete](https://liken.sh/astrophotography/docs/guides/troubleshoot/#a-target-does-not-delete)
 gives both.

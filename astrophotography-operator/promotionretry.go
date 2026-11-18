@@ -1,23 +1,15 @@
 package main
 
-// The retry of the frames that a promotion Job left in an outbox. A
-// claim starts a Job when its pending frames are more than the frames
-// the last Job left (status.outboxes[].left), so a frame that failed
-// starts no Job again by itself, because a NameConflict or a CopyFailed
-// needs a person to fix the archive first. The next Job starts when a
-// new frame of the target arrives in the claim, or when a person adds
-// the annotation astrophotography.liken.sh/retry to the target after
-// the fix. The count is in the target's status, so a restart of the
-// operator retries nothing. observatory-operator reads the annotation
+// Retrying the frames that a promotion Job left in an outbox. The
+// operator starts a Job for a claim only when the claim has more
+// pending frames than the last Job left (status.outboxes[].left). So a
+// frame that failed starts no Job on its own, because a NameConflict
+// or a CopyFailed needs a person to fix the archive first. The next Job
+// starts when a new frame arrives in the claim, or when the person adds
+// the annotation astrophotography.liken.sh/retry to the Target after
+// the fix. The count of frames left is in the Target's status, so a
+// restart of the operator retries nothing. observatory-operator handles
 // observatory.liken.sh/retry on its resources the same way.
-//
-// The loop acts on the annotation only when no Job of the target runs,
-// so a Job that started before the fix does not use up the retry. It
-// first sets left to 0 on every outbox entry, and then removes the
-// annotation. A restart between the two writes finds the annotation
-// again with nothing left to clear, and the Job starts as before. The
-// retry asks once: a frame that fails again waits for a new frame or
-// the next annotation.
 
 import (
 	"encoding/json"
@@ -30,29 +22,35 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// annotationRetry asks the promotion loop to try again the frames that
-// the target's last Jobs left in the outbox. Its value is not read.
+// annotationRetry is the retry annotation. The loop ignores its value.
 const annotationRetry = astrophotography.Group + "/retry"
 
-// retry serves the retry annotation of a target that no Job runs for.
+// retry handles the retry annotation. The loop calls it only after it
+// applied the report of the target's last Job, so a Job that started
+// before the person's fix does not use up the retry. retry sets left to
+// 0 on every outbox entry, then removes the annotation. If the operator
+// restarts between the two writes, it finds the annotation again with
+// nothing left to clear, and the Job starts as before. Each annotation
+// causes one retry: a frame that fails again waits for a new frame or
+// the next annotation.
 func (p *promotions) retry(t *astrophotography.Target) error {
-	if _, asked := t.Metadata.Annotations[annotationRetry]; !asked {
+	if _, annotated := t.Metadata.Annotations[annotationRetry]; !annotated {
 		return nil
 	}
 	var left int32
-	landed, err := p.settle(t, func(held *astrophotography.Target) ([]conditions.Condition, bool) {
+	written, err := p.settle(t, func(current *astrophotography.Target) ([]conditions.Condition, bool) {
 		left = 0
-		for i := range held.Status.Outboxes {
-			left += held.Status.Outboxes[i].Left
-			held.Status.Outboxes[i].Left = 0
+		for i := range current.Status.Outboxes {
+			left += current.Status.Outboxes[i].Left
+			current.Status.Outboxes[i].Left = 0
 		}
 		return nil, left > 0
 	})
 	if err != nil {
 		return err
 	}
-	if landed {
-		message := fmt.Sprintf("the annotation %s asked for a retry, so the next promotion Job tries the %s that the last Job left in the outbox again",
+	if written {
+		message := fmt.Sprintf("Cleared status.outboxes[].left because of the annotation %s, so the next promotion Job copies the %s that the last Job left in the outbox again",
 			annotationRetry, frames(left))
 		fmt.Fprintf(p.logs, "%s: Target %s: %s\n", managedBy, targetName(t), message)
 		p.recorder.Normal(events.ObjectReference{APIVersion: astrophotography.APIVersion, Kind: astrophotography.TargetKind.Name,
@@ -61,22 +59,23 @@ func (p *promotions) retry(t *astrophotography.Target) error {
 	return p.clearRetry(t)
 }
 
-// clearRetry removes the annotation with a merge patch, and keeps the
-// API server's answer in t, so the pass's next write of the target
-// states its new resourceVersion. The patch states no resourceVersion:
-// a person who annotates again in between asks for the Job that starts
-// next anyway.
+// clearRetry removes the annotation with a merge patch and stores the
+// API server's response in t, so the next write of the Target in this
+// pass uses its new resourceVersion. The patch has no resourceVersion
+// precondition, so it also removes an annotation that a person added
+// again after the status write. That loses nothing, because left is
+// already 0 and the next Job starts anyway.
 func (p *promotions) clearRetry(t *astrophotography.Target) error {
 	body, _ := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]any{annotationRetry: nil}}})
 	path := targetPath(t.Metadata.Namespace, t.Metadata.Name)
-	answer, err := memo.Written[astrophotography.Target](p.versions, memo.Key(&t.Metadata), func() (*astrophotography.Target, error) {
-		var answer astrophotography.Target
-		err := p.client.Request(http.MethodPatch, path, mergePatchType, body, &answer)
-		return &answer, err
+	patched, err := memo.Written[astrophotography.Target](p.versions, memo.Key(&t.Metadata), func() (*astrophotography.Target, error) {
+		var patched astrophotography.Target
+		err := p.client.Request(http.MethodPatch, path, mergePatchType, body, &patched)
+		return &patched, err
 	})
 	if err != nil {
 		return err
 	}
-	*t = *answer
+	*t = *patched
 	return nil
 }

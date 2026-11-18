@@ -1,10 +1,9 @@
 package worker
 
-// The extraction: SourceExtractor finds the stars in a frame and writes
-// a catalog, and solve-field --just-augment turns the catalog into an
-// .axy with the hints, which the operator carries to the solver. Plan
-// 02 measured both on a frame of the CCD simulator: 0.26 s and 0.25 s
-// in their own containers, with the containers' start.
+// Extraction runs two programs on a frame. SourceExtractor finds the
+// stars and writes a catalog. solve-field --just-augment turns the
+// catalog and the hint into an .axy file, which the operator sends to
+// the solver.
 
 import (
 	"bytes"
@@ -21,89 +20,91 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/outbox"
 )
 
-// The columns of SourceExtractor's catalog. solve-field reads the
-// position and sorts by the flux, and the size, the shape, and the
-// flags are there for the grading of plan 06.
+// catalogColumns are the columns SourceExtractor writes. solve-field
+// reads the positions and sorts by FLUX_AUTO, and measure reads
+// FWHM_IMAGE. No code reads ELONGATION and FLAGS. They are in the
+// catalog for grading frames.
 var catalogColumns = []string{"X_IMAGE", "Y_IMAGE", "FLUX_AUTO", "FWHM_IMAGE", "ELONGATION", "FLAGS"}
 
-// cpuLimit is the ANCLIM of each .axy, in seconds, from plan 02, so a
-// field that cannot solve does not hold the solver's queue. The solver
-// applies its own limit too.
+// cpuLimit is the ANCLIM header of each .axy, in seconds, so a field
+// that cannot solve does not occupy the solver for long. The solver's
+// engine also caps it at its own limit.
 const cpuLimit = 60
 
-// The files of a job, in its own directory. solve-field names each
-// output after field, relative to the directory, because it runs with
-// -D ., so the solver finds them in the directory where it writes the
-// .axy.
+// The files of one job, in the job's own directory. solve-field runs
+// with -D . and -o field, so it writes field.axy there.
 const (
 	parametersFile = "catalog.param"
 	catalogFile    = "catalog.fits"
 	fieldName      = "field"
 )
 
-// ErrBadRequest is the error of a request that the worker refuses
-// before it runs a program.
-var ErrBadRequest = errors.New("the request is not one the worker runs")
+// ErrBadRequest marks a request that the worker refuses before it runs
+// a program.
+var ErrBadRequest = errors.New("the worker does not accept the request")
 
-// Extractor runs the two programs on the frames of one outbox.
+// Extractor runs SourceExtractor and solve-field on the frames of one
+// outbox.
 type Extractor struct {
-	// Outbox is where the pod mounts the outbox claim, outbox.Root.
+	// Outbox is the directory where the pod mounts the outbox claim,
+	// outbox.Root.
 	Outbox string
 	// Work is a writable directory for each job's files, an emptyDir.
 	Work string
-	// SourceExtractor and SolveField are the programs' paths.
+	// SourceExtractor and SolveField are the paths of the programs.
 	SourceExtractor string
 	SolveField      string
 }
 
-// Extract finds the stars of one frame and answers the .axy, with the
-// count and median size of the stars.
-func (e Extractor) Extract(ctx context.Context, request ExtractRequest) (ExtractAnswer, error) {
+// Extract finds the stars of one frame and returns the .axy, with the
+// number of stars and their median FWHM. For a frame with no star it
+// returns an empty ExtractResponse and no error, and does not run
+// solve-field.
+func (e Extractor) Extract(ctx context.Context, request ExtractRequest) (ExtractResponse, error) {
 	frame, err := outbox.Parse(request.Frame)
 	if err != nil {
-		return ExtractAnswer{}, fmt.Errorf("%w: %v", ErrBadRequest, err)
+		return ExtractResponse{}, fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
 	if err := checkHint(request.Hint); err != nil {
-		return ExtractAnswer{}, err
+		return ExtractResponse{}, err
 	}
 	path, err := framePath(e.Outbox, frame)
 	if err != nil {
-		return ExtractAnswer{}, err
+		return ExtractResponse{}, err
 	}
 	width, height, err := frameSize(path)
 	if err != nil {
-		return ExtractAnswer{}, err
+		return ExtractResponse{}, err
 	}
 	dir, err := os.MkdirTemp(e.Work, "job-")
 	if err != nil {
-		return ExtractAnswer{}, err
+		return ExtractResponse{}, err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	if err := os.WriteFile(filepath.Join(dir, parametersFile), []byte(columnList()), 0o600); err != nil {
-		return ExtractAnswer{}, err
+		return ExtractResponse{}, err
 	}
 	if err := run(ctx, dir, e.SourceExtractor, sourceExtractorArgs(path)); err != nil {
-		return ExtractAnswer{}, err
+		return ExtractResponse{}, err
 	}
 	stars, fwhm, err := measure(filepath.Join(dir, catalogFile))
 	if err != nil || stars == 0 {
-		return ExtractAnswer{}, err
+		return ExtractResponse{}, err
 	}
 	if err := run(ctx, dir, e.SolveField, augmentArgs(width, height, request.Hint)); err != nil {
-		return ExtractAnswer{}, err
+		return ExtractResponse{}, err
 	}
 	axy, err := os.ReadFile(filepath.Join(dir, fieldName+".axy"))
 	if err != nil {
-		return ExtractAnswer{}, err
+		return ExtractResponse{}, err
 	}
-	return ExtractAnswer{AXY: axy, Stars: stars, MedianFWHM: fwhm}, nil
+	return ExtractResponse{AXY: axy, Stars: stars, MedianFWHM: fwhm}, nil
 }
 
-// framePath answers where a frame is in the outbox, and refuses a frame
-// whose path is not under the outbox. The frame comes from a request,
-// and the extractor keeps this guarantee itself instead of relying on
-// the rules of outbox.Parse, so a change to the parser cannot let a
-// request read a file outside the outbox.
+// framePath refuses a frame whose path is not under the outbox. The
+// frame comes from a request, and this check does not depend on
+// outbox.Parse, so a change to the parser cannot let a request read a
+// file outside the outbox.
 func framePath(outboxRoot string, frame outbox.Frame) (string, error) {
 	relative := frame.Path()
 	if !filepath.IsLocal(relative) {
@@ -112,20 +113,19 @@ func framePath(outboxRoot string, frame outbox.Frame) (string, error) {
 	return filepath.Join(outboxRoot, relative), nil
 }
 
-// checkHint refuses a hint that solve-field would refuse or misread: a
-// scale range that is not a range, and a radius below zero.
+// checkHint refuses a hint that solve-field would reject or misread.
 func checkHint(h Hint) error {
 	switch {
 	case h.ScaleLow <= 0 || h.ScaleHigh < h.ScaleLow:
-		return fmt.Errorf("%w: the scale %g to %g is not a range of arcseconds per pixel", ErrBadRequest, h.ScaleLow, h.ScaleHigh)
+		return fmt.Errorf("%w: the scale range %g to %g arcseconds per pixel must start above 0 and must not end below its start", ErrBadRequest, h.ScaleLow, h.ScaleHigh)
 	case h.Radius < 0:
-		return fmt.Errorf("%w: the radius %g is below zero", ErrBadRequest, h.Radius)
+		return fmt.Errorf("%w: the radius %g is below 0", ErrBadRequest, h.Radius)
 	}
 	return nil
 }
 
-// frameSize reads a frame's width and height from its header, which
-// solve-field needs because a catalog holds only the stars.
+// frameSize reads a frame's width and height from its FITS header.
+// solve-field needs them because the catalog has only star positions.
 func frameSize(path string) (width, height int64, err error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -153,10 +153,8 @@ func columnList() string {
 	return b.String()
 }
 
-// sourceExtractorArgs are the options of the image's smoke check, which
-// proved them on Debian's SourceExtractor. With no filter, it reads
-// each pixel as the camera wrote it, and it needs no file of the
-// convolution kernel.
+// -FILTER N turns off convolution, so SourceExtractor detects stars on
+// the pixels as the camera wrote them and needs no kernel file.
 func sourceExtractorArgs(frame string) []string {
 	return []string{frame,
 		"-CATALOG_TYPE", "FITS_1.0", "-CATALOG_NAME", catalogFile,
@@ -164,11 +162,11 @@ func sourceExtractorArgs(frame string) []string {
 	}
 }
 
-// augmentArgs are the options of plan 02. Without --no-remove-lines
-// and --uniformize 0, solve-field runs two Python modules, and the
-// image holds no Python. --crpix-center makes the solution's reference
-// point the center of the frame. A radius of 0 gives no position, so
-// the solver searches the whole sky.
+// augmentArgs returns the command line of solve-field. Without
+// --no-remove-lines and --uniformize 0, solve-field runs two Python
+// modules, and the image has no Python. --crpix-center puts the
+// solution's reference point at the center of the frame. A hint with
+// radius 0 adds no position, so the solver searches the whole sky.
 func augmentArgs(width, height int64, h Hint) []string {
 	args := []string{"--just-augment", "--overwrite", "--no-plots",
 		"--no-remove-lines", "--uniformize", "0",
@@ -186,20 +184,20 @@ func augmentArgs(width, height int64, h Hint) []string {
 
 func number(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
 
-// run runs one program in the job's directory, and answers its output
-// with the error when it fails.
+// run runs one program in the job's directory. Its error includes the
+// program's output.
 func run(ctx context.Context, dir, program string, args []string) error {
 	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%s: %w: %s", filepath.Base(program), err, bytes.TrimSpace(output))
+		return fmt.Errorf("running %s: %w: %s", filepath.Base(program), err, bytes.TrimSpace(output))
 	}
 	return nil
 }
 
-// measure counts the catalog's stars and answers the median of their
-// FWHM_IMAGE, in pixels, or 0 when it holds no star.
+// measure returns the number of stars in the catalog and the median of
+// their FWHM_IMAGE in pixels, which is 0 when there is no star.
 func measure(catalog string) (int32, float64, error) {
 	f, err := os.Open(catalog)
 	if err != nil {
@@ -208,11 +206,11 @@ func measure(catalog string) (int32, float64, error) {
 	defer func() { _ = f.Close() }()
 	table, err := fits.ReadTable(f)
 	if err != nil {
-		return 0, 0, fmt.Errorf("the catalog: %w", err)
+		return 0, 0, fmt.Errorf("reading the catalog: %w", err)
 	}
 	fwhm, err := table.Column("FWHM_IMAGE")
 	if err != nil {
-		return 0, 0, fmt.Errorf("the catalog: %w", err)
+		return 0, 0, fmt.Errorf("reading the FWHM_IMAGE column of the catalog: %w", err)
 	}
 	return int32(len(fwhm)), median(fwhm), nil
 }

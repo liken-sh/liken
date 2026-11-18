@@ -1,9 +1,9 @@
 package worker
 
-// The worker's answers about the outbox: the space left, the frames of
-// the targets, and the removal of a centering frame after its solve.
-// The worker mounts the outbox read and write for that removal alone,
-// and deletes nothing else.
+// The worker's operations on the outbox: reporting its free space and
+// its frames, and deleting a centering frame after its solve. The
+// worker's pod mounts the outbox read-write only so that it can delete
+// centering frames, and the worker deletes nothing else.
 
 import (
 	"errors"
@@ -17,39 +17,38 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/outbox"
 )
 
-// ErrNoSuchFrame is the error of a centering frame that the outbox
-// does not hold.
+// ErrNoSuchFrame is the error for a centering frame that is not in the
+// outbox.
 var ErrNoSuchFrame = errors.New("no such centering frame")
 
-// State answers the free bytes of the outbox's file system and every
-// frame in a target's directory, in the order of their paths.
-func (e Extractor) State() (OutboxAnswer, error) {
+// State returns the free bytes of the outbox's file system and the
+// paths of the frames in the targets' directories, in path order.
+func (e Extractor) State() (OutboxResponse, error) {
 	var stat syscall.Statfs_t
-	// The error does not wrap the cause, so an outbox that is not
-	// mounted answers 500, not the 404 of a frame that is missing.
+	// Do not wrap the cause. The server maps fs.ErrNotExist to 404,
+	// which means a missing frame, and a missing mount must be a 500.
 	if err := syscall.Statfs(e.Outbox, &stat); err != nil {
-		return OutboxAnswer{}, fmt.Errorf("statfs %s: %v", e.Outbox, err)
+		return OutboxResponse{}, fmt.Errorf("reading the free space of the outbox %s: %v", e.Outbox, err)
 	}
-	answer := OutboxAnswer{FreeBytes: int64(stat.Bavail) * stat.Bsize, Frames: []string{}}
+	response := OutboxResponse{FreeBytes: int64(stat.Bavail) * stat.Bsize, Frames: []string{}}
 	err := filepath.WalkDir(e.Outbox, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
 		relative, _ := filepath.Rel(e.Outbox, path)
 		if frame, err := outbox.Parse(filepath.ToSlash(relative)); err == nil && frame.Target != "" {
-			answer.Frames = append(answer.Frames, frame.Path())
+			response.Frames = append(response.Frames, frame.Path())
 		}
 		return nil
 	})
-	return answer, err
+	return response, err
 }
 
-// RemoveCentering deletes the centering frame of one FRAMEID from every
-// camera's and reservation's directory that holds it. A FRAMEID is one
-// local file name: filepath.IsLocal refuses an empty name, "..", and
-// an absolute path, and the name must be its own base, so it holds no
-// separator. It must also hold no pattern of filepath.Glob, and no
-// backslash, which Glob reads as an escape.
+// RemoveCentering deletes the centering frame of one FRAMEID from the
+// _centering directory of every camera and reservation. The FRAMEID
+// goes into a Glob pattern, so the check accepts only a plain file name
+// with none of the characters that Glob reads as a pattern or an
+// escape.
 func (e Extractor) RemoveCentering(frameID string) error {
 	if !filepath.IsLocal(frameID) || filepath.Base(frameID) != frameID || frameID == "." || strings.ContainsAny(frameID, `\*?[`) {
 		return fmt.Errorf("%w: %q is not a FRAMEID", ErrBadRequest, frameID)

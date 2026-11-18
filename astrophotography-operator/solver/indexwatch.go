@@ -1,24 +1,24 @@
 package solver
 
-// The watch of the index directory. A Job can download index files
-// into the claim while the solver runs, and a person can copy more in
-// later, so the solver follows the directory with inotify instead of
-// reading it once. It opens the watch first, then reads the whole
-// directory, so a file that lands during the read is not lost. When the
-// watch ends, it opens a new one and reads the directory again.
+// indexWatch keeps the set of index files current with the index
+// directory. A Job can download index files into the claim while the
+// solver runs, and a person can copy more in later, so the solver
+// follows the directory with inotify instead of reading it once. It
+// opens the watch first and then reads the whole directory, so a file
+// that arrives during the read is not lost. When the watch ends, it
+// opens a new one and reads the directory again.
 //
 // A file joins the set only when its writer closes it or renames it
-// into the directory, and it leaves the set at its first write, its
-// delete, or its rename away. So the engine never opens a file that a
-// download has half written. A file already in the directory when the
-// watch opens may still be in the middle of its download, so each read
-// checks that the file holds all of its data (fits.Complete).
+// into the directory, and leaves the set at a write, a delete, or a
+// rename away. So the solver never opens a file that a download has
+// half written. A file that is already in the directory when the watch
+// opens can still be partway through a download, so each read also
+// checks with fits.Complete that the file has all of its data.
 //
-// inotify watches an inode, and reports the writes that this machine's
-// kernel makes. Every pod on a node that mounts a local claim writes
-// the same inodes, so a Job on the solver's node reaches the watch. A
-// network file system, such as NFS, reports no write that another
-// machine makes.
+// inotify reports only the changes that this machine's kernel makes. A
+// Job on the solver's node writes to a local claim through the same
+// kernel, so the watch receives events for its files. On a network file system such as
+// NFS, the watch receives no event for a file that another machine writes.
 
 import (
 	"bytes"
@@ -34,30 +34,31 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The events of the index directory. IN_MODIFY is the first write of a
-// file in place, so the file leaves the set until IN_CLOSE_WRITE. The
-// events of reopenMask end the watch: the directory left its path, or
-// the kernel's queue overflowed and dropped events. The kernel sends
-// IN_IGNORED, IN_UNMOUNT, and IN_Q_OVERFLOW with no request.
+// A file that a writer changes in place leaves the set on IN_MODIFY and
+// joins again on IN_CLOSE_WRITE. An event in reopenMask means that the
+// directory left its path or that the kernel's queue overflowed and
+// dropped events, so the watch must open again and read the whole
+// directory. The kernel sends IN_IGNORED, IN_UNMOUNT, and IN_Q_OVERFLOW
+// without a request, so indexMask leaves them out.
 const (
 	joinMask   = unix.IN_CLOSE_WRITE | unix.IN_MOVED_TO
 	leaveMask  = unix.IN_MODIFY | unix.IN_DELETE | unix.IN_MOVED_FROM
 	reopenMask = unix.IN_DELETE_SELF | unix.IN_MOVE_SELF | unix.IN_IGNORED | unix.IN_UNMOUNT | unix.IN_Q_OVERFLOW
 	indexMask  = joinMask | leaveMask | unix.IN_DELETE_SELF | unix.IN_MOVE_SELF | unix.IN_ONLYDIR
-	// aboveMask watches the nearest directory above a directory that
-	// does not exist yet, for the directory that a Job makes.
+	// aboveMask watches the nearest existing directory above an index
+	// directory that does not exist yet, so the watch receives an event when a
+	// Job creates it.
 	aboveMask = unix.IN_CREATE | unix.IN_MOVED_TO | unix.IN_DELETE_SELF | unix.IN_MOVE_SELF | unix.IN_ONLYDIR
 )
 
-// inotify is one inotify instance that watches one directory.
 type inotify struct {
 	file *os.File
 	buf  []byte
 }
 
 // watchDir opens an inotify instance on one directory. The descriptor
-// is non-blocking, so os.File reads it through Go's poller, and a Close
-// ends a read that waits.
+// is non-blocking, so os.File reads it through Go's poller, and closing
+// the file ends a read that is waiting.
 func watchDir(path string, mask uint32) (*inotify, error) {
 	fd, err := unix.InotifyInit1(unix.IN_NONBLOCK | unix.IN_CLOEXEC)
 	if err != nil {
@@ -72,16 +73,16 @@ func watchDir(path string, mask uint32) (*inotify, error) {
 
 func (w *inotify) close() { _ = w.file.Close() }
 
-// event is one inotify event: its mask, and the name in the directory
-// it is about, empty for an event on the directory itself.
+// event is one inotify event. name is empty for an event on the watched
+// directory itself.
 type event struct {
 	mask uint32
 	name string
 }
 
-// read waits for events and answers them. The kernel writes each
-// record in the host's byte order: the watch descriptor, the mask, a
-// cookie, the length of the name, and the name padded with zero bytes.
+// read waits for events and returns them. The kernel writes each record
+// in the host's byte order: the watch descriptor, the mask, a cookie,
+// the length of the name, and the name padded with zero bytes.
 func (w *inotify) read() ([]event, error) {
 	n, err := w.file.Read(w.buf)
 	if err != nil {
@@ -98,19 +99,18 @@ func (w *inotify) read() ([]event, error) {
 	return events, nil
 }
 
-// indexWatch keeps an index set current with one directory.
 type indexWatch struct {
 	dir  string
 	set  *indexSet
 	logs io.Writer
 }
 
-// open opens a watch and reads the state it covers. When the directory
-// exists, it watches it and reads every file in it. When it does not,
-// it watches the nearest directory above it that exists, and empties
-// the set, so the next event there tries the directory again. inside
-// answers which of the two the watch covers. A watch that the kernel
-// refuses for any other reason is an error.
+// open watches the index directory and then loads every index file in
+// it. When the directory does not exist, open empties the set and
+// watches the nearest existing directory above it instead, and inside
+// is false. The next event there ends that watch, and run calls open
+// again. open returns an error when the kernel refuses a watch for any
+// reason other than a missing directory.
 func (w *indexWatch) open() (watch *inotify, inside bool, err error) {
 	for {
 		watch, err := watchDir(w.dir, indexMask)
@@ -136,8 +136,9 @@ func (w *indexWatch) open() (watch *inotify, inside bool, err error) {
 		if err != nil {
 			return nil, false, err
 		}
-		// The directory can appear between the two watches, and no event
-		// above would then announce it, so look once more.
+		// The directory can appear after the first watch failed and
+		// before the watch above opened. No event reports it then, so
+		// check for it once more.
 		if _, err := os.Stat(w.dir); err == nil {
 			watch.close()
 			continue
@@ -152,7 +153,7 @@ func (w *indexWatch) open() (watch *inotify, inside bool, err error) {
 }
 
 // watchAbove watches the nearest directory above dir that exists. The
-// root always exists, so the walk ends.
+// loop ends at the root, which always exists.
 func watchAbove(dir string) (*inotify, error) {
 	for above := filepath.Dir(dir); ; above = filepath.Dir(above) {
 		watch, err := watchDir(above, aboveMask)
@@ -163,8 +164,8 @@ func watchAbove(dir string) (*inotify, error) {
 }
 
 // run follows the watch until ctx ends, and opens a new watch each time
-// one ends. It answers the error of a watch that the kernel refuses, or
-// of a configuration that does not write.
+// one ends. It returns an error when the kernel refuses a watch or the
+// set fails to write the engine's configuration.
 func (w *indexWatch) run(ctx context.Context, watch *inotify, inside bool) error {
 	for {
 		stop := context.AfterFunc(ctx, watch.close)
@@ -181,11 +182,10 @@ func (w *indexWatch) run(ctx context.Context, watch *inotify, inside bool) error
 	}
 }
 
-// follow applies each event to the set until the watch ends: an event
-// that ends the watch, any event above a directory that does not exist,
-// an overflow of the kernel's queue, or a read that fails, such as the
-// read that the close at the end of ctx ends. Each of them needs a new
-// read of the whole directory.
+// follow applies each event to the set. It returns nil, so that run
+// opens a new watch and reads the whole directory again, on an event in
+// reopenMask, on any event of a watch above a missing directory, and on
+// a failed read, such as the read that run interrupts when ctx ends.
 func (w *indexWatch) follow(watch *inotify, inside bool) error {
 	for {
 		events, err := watch.read()
@@ -206,8 +206,8 @@ func (w *indexWatch) follow(watch *inotify, inside bool) error {
 	}
 }
 
-// apply adds a file that its writer finished, and drops one that is
-// written, deleted, or renamed away, or that does not read.
+// apply adds a file on an event in joinMask, and drops it on any other
+// event or when it cannot be read.
 func (w *indexWatch) apply(e event) error {
 	path := filepath.Join(w.dir, e.name)
 	if e.mask&joinMask == 0 {

@@ -1,11 +1,11 @@
 package main
 
-// A fake API server that holds every collection the operator watches,
-// and answers a list and a streaming watch of each, with a label or a
+// A fake API server that stores every collection the operator watches,
+// and serves a list and a streaming watch of each, with a label or a
 // field selector of the form key=value. It records each request, so a
-// test reads what the operator asked. It answers over the in-memory
-// connections of apiservertest, so each test runs in a synctest bubble
-// on the fake clock.
+// test can read what the operator requested. It serves over the
+// in-memory connections of apiservertest, so each test runs in a
+// synctest bubble on the fake clock.
 
 import (
 	"encoding/json"
@@ -38,7 +38,7 @@ type collection struct {
 	kind       string
 }
 
-// collectionOf answers the cluster-wide collection of a watch.
+// collectionOf returns the cluster-wide collection of a watch.
 func collectionOf(w watched) collection {
 	r := w.source.Resource
 	if r.Group == "" {
@@ -63,24 +63,22 @@ type fakeAPI struct {
 	objects     map[string]map[string]map[string]any // collection, key, object
 	events      []fakeEvent
 	changed     chan struct{}
-	// requests holds each request's method and URL, in order.
+	// requests lists each request's method and URL, in order.
 	requests []string
-	// absent holds the collections whose kind the cluster does not
-	// serve, which answer 404 the way an uninstalled CRD does.
+	// absent is the set of collections whose kind the cluster does not
+	// serve. They return 404, as an uninstalled CRD does.
 	absent map[string]bool
-	// lagging holds the collections whose watches deliver no change
-	// until the test calls catchUp, the way a watch delivers a write some
-	// time after the API server answers it.
-	lagging map[string]bool
-	// recorded holds the Events that the operator writes.
+	// lagging is the set of collections whose watches send no change
+	// until the test calls catchUp. This reproduces a watch that
+	// delivers a write some time after the API server accepted it.
+	lagging  map[string]bool
 	recorded eventstest.Events
-	// refusing makes every write to a collection answer 500, the way an
-	// API server that cannot reach etcd does (fakeobjects_test.go).
-	refusing bool
-	// refusingReads makes every read of one object answer 500, and
-	// leaves the lists and the watches alone (fakereads_test.go).
+	// refusing and refusingReads are set by refuse and refuseReads in
+	// fakereads_test.go.
+	refusing      bool
 	refusingReads bool
-	// objectHooks script the status writes (fakewrites_test.go).
+	// objectHooks lets a test script the status writes
+	// (fakewrites_test.go).
 	objectHooks
 }
 
@@ -98,40 +96,41 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 		api.objects[c.path] = map[string]map[string]any{}
 	}
 	api.server = apiservertest.Start(t, api.recorded.Around(api))
-	// The reflector waits out its backoff after a refused list without
-	// reading its context, so the bubble waits past it (apiservertest).
+	// After a failed list, the reflector waits out its backoff without
+	// checking its context, so the test waits past it (apiservertest).
 	t.Cleanup(func() { time.Sleep(time.Minute) })
 	return api
 }
 
-// watcher is a client of the watches, as informer.InCluster builds one
-// in a pod.
+// watcher returns a client for the watches, like the one that
+// informer.InCluster builds in a pod.
 func (a *fakeAPI) watcher(t *testing.T) dynamic.Interface {
 	t.Helper()
 	client, err := dynamic.NewForConfig(a.server.Config())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the dynamic client: %v", err)
 	}
 	return client
 }
 
-// drop makes a collection one whose kind the cluster does not serve.
+// drop makes every request to a collection return 404, as when its CRD
+// is not installed.
 func (a *fakeAPI) drop(path string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.absent[path] = true
 }
 
-// lag makes the watches of a collection deliver no change, while reads
-// and writes of the collection still answer at once.
+// lag makes the watches of a collection send no change. Reads and
+// writes of the collection still work at once.
 func (a *fakeAPI) lag(path string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.lagging[path] = true
 }
 
-// catchUp makes the watches of a lagging collection deliver every
-// change they held back, in order.
+// catchUp makes the watches of a lagging collection send every change
+// they held back, in order.
 func (a *fakeAPI) catchUp(path string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -140,15 +139,13 @@ func (a *fakeAPI) catchUp(path string) {
 	a.changed = make(chan struct{})
 }
 
-// put stores an object in a collection, created or replaced, and tells
-// each watch.
 func (a *fakeAPI) put(path string, object map[string]any) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	metadata := object["metadata"].(map[string]any)
 	key := fmt.Sprint(metadata["namespace"], "/", metadata["name"])
 	kind := "ADDED"
-	if _, held := a.objects[path][key]; held {
+	if _, exists := a.objects[path][key]; exists {
 		kind = "MODIFIED"
 	}
 	c := a.collections[path]
@@ -156,7 +153,6 @@ func (a *fakeAPI) put(path string, object map[string]any) {
 	a.store(path, key, object, kind)
 }
 
-// remove deletes an object from a collection, and tells each watch.
 func (a *fakeAPI) remove(path, namespace, name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -164,8 +160,8 @@ func (a *fakeAPI) remove(path, namespace, name string) {
 	a.store(path, key, a.objects[path][key], "DELETED")
 }
 
-// store records an object at the next version and tells each watch.
-// Callers hold mu.
+// store saves an object at the next version and notifies each watch.
+// The caller must hold mu.
 func (a *fakeAPI) store(path, key string, object map[string]any, kind string) {
 	a.version++
 	object = clone(object)
@@ -187,7 +183,7 @@ func clone(object map[string]any) map[string]any {
 	return out
 }
 
-// requested answers the URL of each request to a collection, in order.
+// requested returns the URL of each request to a collection, in order.
 func (a *fakeAPI) requested(path string) []url.URL {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -201,7 +197,6 @@ func (a *fakeAPI) requested(path string) []url.URL {
 	return out
 }
 
-// requestCount answers how many requests the server received.
 func (a *fakeAPI) requestCount() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -229,7 +224,7 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// selects answers whether an object matches the request's label and
+// selects reports whether an object matches the request's label and
 // field selectors, each of the form key=value. A field selector's key
 // is a path of the object, such as spec.holder.
 func selects(query url.Values, object map[string]any) bool {
@@ -240,12 +235,12 @@ func selects(query url.Values, object map[string]any) bool {
 		}
 	}
 	if key, value, found := strings.Cut(query.Get("fieldSelector"), "="); found {
-		var held any = object
+		var field any = object
 		for step := range strings.SplitSeq(key, ".") {
-			fields, _ := held.(map[string]any)
-			held = fields[step]
+			fields, _ := field.(map[string]any)
+			field = fields[step]
 		}
-		if held != value {
+		if field != value {
 			return false
 		}
 	}
@@ -269,7 +264,7 @@ func (a *fakeAPI) list(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// watch answers a streaming list the way the API server does: an ADDED
+// watch serves a streaming list as the API server does: an ADDED
 // event for each object, a bookmark that ends the initial events, and
 // then every later change. A watch from a version sends each change
 // after that version.

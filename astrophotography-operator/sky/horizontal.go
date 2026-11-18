@@ -1,37 +1,38 @@
 package sky
 
-// The local sky. The operator images a target only while the target
-// stands above the telescope's horizon, so it needs the target's
-// altitude and azimuth at the site: chapter 12 for the sidereal time,
-// and chapter 13 for the conversion. The altitude is geometric, with
-// no refraction: refraction lifts a star at the horizon by about half
-// a degree, so a target counts as below its horizon a little before it
-// disappears behind it.
+// The position of a target in the local sky. The operator images a
+// target only while it is above the telescope's horizon, so it needs
+// the target's altitude and azimuth at the site. The equations are from
+// Meeus, Astronomical Algorithms: chapter 12 for the sidereal time and
+// chapter 13 for the conversion. The altitude is geometric and has no
+// correction for refraction. Refraction raises a star at the horizon
+// by about half a degree, so a target counts as below the horizon a
+// little before it disappears.
 
 import (
 	"math"
 	"time"
 )
 
-// Site is a place on the Earth, in degrees: the latitude north, and
-// the longitude east, as an Observatory's spec.location gives them.
+// Site is a place on the Earth, in degrees: latitude north and
+// longitude east, the same as an Observatory's spec.location.
 type Site struct {
 	Latitude  float64
 	Longitude float64
 }
 
 // Horizontal is a position in the local sky, in degrees: the altitude
-// above the mathematical horizon, and the azimuth from north through
-// east, the way a horizon file measures it. Meeus measures the azimuth
-// from the south.
+// above the mathematical horizon, and the azimuth measured from north
+// through east, as a horizon file measures it. Meeus measures the
+// azimuth from the south.
 type Horizontal struct {
 	Altitude float64
 	Azimuth  float64
 }
 
-// SiderealTime answers the apparent sidereal time at Greenwich, in
-// degrees from 0 up to 360: the mean sidereal time of equation 12.4,
-// plus the nutation in right ascension, Δψ cos ε.
+// SiderealTime returns the apparent sidereal time at Greenwich, in
+// degrees from 0 up to 360. It is the mean sidereal time of equation
+// 12.4 plus the nutation in right ascension, Δψ cos ε.
 func SiderealTime(t time.Time) float64 {
 	jd := JulianDay(t)
 	c := (jd - J2000) / 36525
@@ -41,15 +42,15 @@ func SiderealTime(t time.Time) float64 {
 }
 
 // ToHorizontal converts a position at the equinox of the date, as
-// ToDate answers it, to the local sky of a site at a time, with
-// equations 13.5 and 13.6.
+// ToDate returns it, to the position in the sky of a site at a time,
+// with equations 13.5 and 13.6.
 func ToHorizontal(jnow Position, site Site, t time.Time) Horizontal {
 	return horizontalAt(jnow, site, SiderealTime(t))
 }
 
-// horizontalAt converts with a sidereal time already computed, so a
-// search through a night computes the position's precession and
-// nutation once.
+// horizontalAt takes the sidereal time as an argument, so NextAbove
+// computes it, with its nutation, once and then advances it by
+// siderealRate for each step.
 func horizontalAt(jnow Position, site Site, sidereal float64) Horizontal {
 	hourAngle := radians(sidereal + site.Longitude - jnow.RA)
 	latitude, dec := radians(site.Latitude), radians(jnow.Dec)
@@ -58,18 +59,18 @@ func horizontalAt(jnow Position, site Site, sidereal float64) Horizontal {
 	return Horizontal{Altitude: degrees(altitude), Azimuth: normalize(degrees(south) + 180)}
 }
 
-// siderealRate is the turn of the sidereal time in one day of UT, in
-// degrees, from equation 12.4.
+// siderealRate is how far the sidereal time advances in one day of UT,
+// in degrees, from equation 12.4.
 const siderealRate = 360.98564736629
 
-// NextAbove answers the first minute after from at which a J2000
-// position stands above a horizon at the site, and false when it does
-// not within a day, such as a star that never rises there. horizon
-// answers the horizon's altitude at an azimuth. A horizon can hide and
-// show a target more than once in a night, so the search steps through
-// the day instead of solving for one crossing. In one day, precession
-// and nutation move a star by less than 0.2″, so the search converts
-// the position to the equinox of the date once.
+// NextAbove returns the first whole minute after from at which a J2000
+// position is above horizon, which returns the horizon's altitude at an
+// azimuth. It returns false when the position stays below for a day,
+// as a star that never rises at the site does. A horizon file can hide
+// and show a target more than once in a night, so NextAbove checks
+// each minute and does not solve for one crossing. Precession and
+// nutation move a star by less than 0.2″ in a day, so NextAbove
+// converts the position to the equinox of the date only once.
 func NextAbove(p Position, site Site, from time.Time, horizon func(azimuth float64) float64) (time.Time, bool) {
 	jnow := ToDate(p, from)
 	sidereal := SiderealTime(from)
@@ -82,7 +83,7 @@ func NextAbove(p Position, site Site, from time.Time, horizon func(azimuth float
 	return time.Time{}, false
 }
 
-// normalize answers an angle in degrees from 0 up to 360.
+// normalize returns an angle in degrees from 0 up to 360.
 func normalize(angle float64) float64 {
 	angle = math.Mod(angle, 360)
 	if angle < 0 {

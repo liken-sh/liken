@@ -10,23 +10,23 @@ import (
 	"testing"
 )
 
-// The fixtures in testdata come from the astrometry image and a frame
-// of the CCD simulator: catalog.fits is SourceExtractor's catalog of
-// the worker's six columns, axy.fits is the .axy that solve-field
-// --just-augment made of it, and wcs.fits is the solution that
-// astrometry-engine wrote.
+// open opens a fixture from testdata. The fixtures were made with the
+// astrometry programs from a frame of the CCD simulator: catalog.fits is
+// SourceExtractor's catalog with the worker's six columns, axy.fits is
+// the .axy file that solve-field --just-augment made from it, and
+// wcs.fits is the solution that astrometry-engine wrote.
 func open(t *testing.T, name string) *os.File {
 	t.Helper()
 	f, err := os.Open("testdata/" + name)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening testdata/%s: %v", name, err)
 	}
 	t.Cleanup(func() { _ = f.Close() })
 	return f
 }
 
-// headerOf builds a header block from cards written as they appear in
-// a file, each padded to 80 characters, then END.
+// headerOf builds a header from card text, with the END card and the
+// padding.
 func headerOf(cards ...string) []byte {
 	var b bytes.Buffer
 	for _, c := range append(cards, "END") {
@@ -39,7 +39,7 @@ func headerOf(cards ...string) []byte {
 func TestReadHeaderReadsTheValuesOfARealSolution(t *testing.T) {
 	h, err := ReadHeader(open(t, "wcs.fits"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the header of wcs.fits: %v", err)
 	}
 	ra, _ := h.Float("CRVAL1")
 	width, _ := h.Int("IMAGEW")
@@ -70,7 +70,7 @@ func TestValueReadsEachFormOfCard(t *testing.T) {
 		"NOVALUE   text with no equals sign",
 	)))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the header: %v", err)
 	}
 	number, _ := h.Float("NUMBER")
 	cases := []struct {
@@ -89,14 +89,14 @@ func TestValueReadsEachFormOfCard(t *testing.T) {
 		t.Errorf("NUMBER = %v, want 400", number)
 	}
 	if got := h.Comments(); !slices.Equal(got, []string{"some words"}) {
-		t.Errorf("comments = %q", got)
+		t.Errorf("the comments are %q, want [some words]", got)
 	}
 }
 
 func TestAKeywordThatIsMissingOrMalformedIsAnError(t *testing.T) {
 	h, err := ReadHeader(bytes.NewReader(headerOf("WORD    = 'text'", "HALF    = 1.5")))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the header: %v", err)
 	}
 	_, missingInt := h.Int("NAXIS")
 	_, missingFloat := h.Float("CRVAL1")
@@ -114,7 +114,7 @@ func TestAKeywordThatIsMissingOrMalformedIsAnError(t *testing.T) {
 	}
 	for _, c := range cases {
 		if c.err == nil || errors.Is(c.err, ErrMissing) != c.missing {
-			t.Errorf("%s: %v", c.name, c.err)
+			t.Errorf("%s: the error is %v, want an error with errors.Is(err, ErrMissing) = %v", c.name, c.err, c.missing)
 		}
 	}
 }
@@ -129,13 +129,12 @@ func TestReadHeaderRefusesWhatIsNotAHeader(t *testing.T) {
 	}
 	for _, c := range cases {
 		if _, err := ReadHeader(bytes.NewReader(c.data)); err == nil {
-			t.Errorf("%s: no error", c.name)
+			t.Errorf("%s: ReadHeader returned no error, want one", c.name)
 		}
 	}
 }
 
-// A header spans as many blocks as its cards need, and the reader stops
-// after the block that holds END, at the start of the data.
+// 40 cards make a header of two blocks.
 func TestReadHeaderStopsAtTheEndOfItsBlock(t *testing.T) {
 	var cards []string
 	for range 40 {
@@ -144,7 +143,7 @@ func TestReadHeaderStopsAtTheEndOfItsBlock(t *testing.T) {
 	file := append(headerOf(cards...), []byte("DATA")...)
 	r := bytes.NewReader(file)
 	if _, err := ReadHeader(r); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the header: %v", err)
 	}
 	rest, _ := io.ReadAll(r)
 	if string(rest) != "DATA" {

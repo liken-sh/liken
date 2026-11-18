@@ -1,15 +1,11 @@
 package main
 
-// The reads and the status writes of a Target. The runner reads each
-// target from the watch's store, and writes its status with the
-// resourceVersion it read, so a write from a copy that another writer
-// changed gets a 409. informer.SettleStatus then reads the target again
-// and composes the change once more from the fresh copy, so a claim
-// that another runner took first, or a promotion report that landed
-// between the read and the write, is never overwritten.
-//
-// Each condition transition posts one Event on the target, after the
-// write lands, so a refused write posts nothing (root plan 78).
+// The runner reads each Target from the watch's store and writes its
+// status with the resourceVersion it read. When that copy is stale,
+// the API server returns 409, and informer.SettleStatus reads the
+// Target again and applies the change to the new copy. So a status
+// write never overwrites another runner's claim of the Target, or a
+// promotion report written after the read.
 
 import (
 	"bytes"
@@ -29,16 +25,17 @@ func targetRef(t *astrophotography.Target) events.ObjectReference {
 	}
 }
 
-// targets is the store of the Targets and the memo of the operator's
-// writes to them. The watch takes every target, so the store is whole.
+// targets returns the store of Targets and the resourceVersions of the
+// operator's own writes. The watch covers every Target, so the store
+// is complete and a list reads from it.
 func (o *operator) targets() informer.Held {
 	view := o.stores.collections[astrophotography.TargetKind.Name].View()
 	view.Whole = true
 	return informer.Held{View: view, Versions: o.targetVersions}
 }
 
-// listTargets answers every target in a namespace, or in every
-// namespace for "", in the order of their keys.
+// listTargets returns every target in a namespace, or in all
+// namespaces when namespace is "", in the order of their keys.
 func (o *operator) listTargets(namespace string) ([]astrophotography.Target, error) {
 	all, err := informer.List[astrophotography.Target](o.client, o.targets(),
 		"/apis/"+astrophotography.APIVersion+"/"+astrophotography.TargetKind.Plural,
@@ -58,30 +55,32 @@ func (o *operator) listTargets(namespace string) ([]astrophotography.Target, err
 	return out, nil
 }
 
-// cutKey splits a store's key into its namespace and its name.
+// cutKey splits a store key into namespace and name.
 func cutKey(key string) (namespace, name string, namespaced bool) {
 	return strings.Cut(key, "/")
 }
 
-// readTarget answers one target, and apiclient.ErrNotFound when it is
-// gone.
+// readTarget returns one target, or apiclient.ErrNotFound when it does
+// not exist.
 func (o *operator) readTarget(namespace, name string) (*astrophotography.Target, error) {
 	return informer.ReadOne[astrophotography.Target](o.client, o.targets(), namespace+"/"+name, targetPath(namespace, name))
 }
 
-// statusChange collects the condition transitions of one composed
-// status, to post once the write lands.
+// statusChange collects the condition transitions of one status
+// update, so the Events can be posted after the write succeeds.
 type statusChange struct {
 	transitions []transition
 }
 
 type transition struct {
 	condition conditions.Condition
-	bad       conditions.Status
+	// bad is the status for which the Event is a Warning instead of
+	// Normal. When it is empty, the Event is always Normal.
+	bad conditions.Status
 }
 
-// set puts a condition in the target's list, and records the
-// transition when there is one.
+// set sets a condition on the target and records the transition when
+// the condition changed.
 func (s *statusChange) set(t *astrophotography.Target, next conditions.Condition, bad conditions.Status) {
 	next.ObservedGeneration = t.Metadata.Generation
 	if conditions.Set(&t.Status.Conditions, next) {
@@ -89,15 +88,16 @@ func (s *statusChange) set(t *astrophotography.Target, next conditions.Condition
 	}
 }
 
-// writeTarget composes a target's status with apply on the copy held,
-// and writes it when it changed. apply answers false to leave the
-// target alone, such as when a fresh copy shows that another runner
-// claimed it. writeTarget answers whether a write landed, and posts the
-// Event of each transition of the status that landed.
-func (o *operator) writeTarget(held *astrophotography.Target, apply func(*astrophotography.Target, *statusChange) bool) (bool, error) {
-	held.APIVersion, held.Kind = astrophotography.APIVersion, astrophotography.TargetKind.Name
+// writeTarget calls apply on the Target and writes the status when
+// apply changed it. apply returns false to leave the Target unchanged,
+// for example when a fresh copy shows that another runner claimed it.
+// writeTarget returns whether it wrote. Only after a write succeeds
+// does it post one Event for each condition transition, so a failed
+// write posts no Event.
+func (o *operator) writeTarget(stored *astrophotography.Target, apply func(*astrophotography.Target, *statusChange) bool) (bool, error) {
+	stored.APIVersion, stored.Kind = astrophotography.APIVersion, astrophotography.TargetKind.Name
 	var change statusChange
-	wrote, err := informer.SettleStatus(o.client, o.targetVersions, targetPath(held.Metadata.Namespace, held.Metadata.Name), held,
+	wrote, err := informer.SettleStatus(o.client, o.targetVersions, targetPath(stored.Metadata.Namespace, stored.Metadata.Name), stored,
 		func(t *astrophotography.Target) bool {
 			change = statusChange{}
 			before, _ := json.Marshal(t.Status)
@@ -109,14 +109,14 @@ func (o *operator) writeTarget(held *astrophotography.Target, apply func(*astrop
 		})
 	if wrote {
 		for _, tr := range change.transitions {
-			o.recorder.Transition(targetRef(held), tr.condition, tr.bad)
+			o.recorder.Transition(targetRef(stored), tr.condition, tr.bad)
 		}
 	}
 	return wrote, err
 }
 
-// failures are the reasons of an Imaging that is False because a person
-// may need to act. Their transitions are Warnings.
+// failures are the reasons for an Imaging condition that is False
+// because a person may need to act. Their Events are Warnings.
 var failures = map[string]bool{
 	astrophotography.ReasonNoTrain:         true,
 	astrophotography.ReasonNoFilter:        true,
@@ -127,9 +127,9 @@ var failures = map[string]bool{
 	astrophotography.ReasonExposureFailed:  true,
 }
 
-// setImaging sets the Imaging condition: True with the step as its
-// reason while a reservation images the target, and False with the
-// reason it does not.
+// setImaging sets the Imaging condition: True while a reservation
+// images the target, with the current step as the reason, and False
+// otherwise.
 func (s *statusChange) setImaging(t *astrophotography.Target, imaging bool, reason, message string) {
 	status, bad := conditions.False, conditions.Status("")
 	if imaging {

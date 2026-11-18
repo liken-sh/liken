@@ -1,9 +1,5 @@
 package main
 
-// The series of centering (plan 08): how many rounds each centering
-// took, and the last error of each target. The runner sets them when a
-// round ends, so a scrape reads them from memory.
-
 import "github.com/prometheus/client_golang/prometheus"
 
 type centeringMetrics struct {
@@ -13,8 +9,7 @@ type centeringMetrics struct {
 
 func newCenteringMetrics(registry *prometheus.Registry) *centeringMetrics {
 	m := &centeringMetrics{
-		// spec.centering.attempts is at most 20, and plan 02 expects two
-		// or three rounds.
+		// The Target CRD limits spec.centering.attempts to 20.
 		rounds: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    metricsPrefix + "centering_rounds",
 			Help:    "Rounds of solving and slewing that one centering took, whether it ended within the tolerance, gave up, or failed after a round solved.",

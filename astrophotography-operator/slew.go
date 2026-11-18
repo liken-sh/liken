@@ -1,11 +1,9 @@
 package main
 
-// The slew (plan 01, steps 3 and 4). An INDI mount takes
-// EQUATORIAL_EOD_COORD at the equinox of the date, JNow, and a Target
-// states J2000, the equinox of every catalog, so the runner converts
-// the coordinates with sky before each slew. It reads the mount first,
-// so a write goes out only when it is still needed: a mount that is
-// unparked and tracking gets only the coordinates.
+// An INDI mount takes EQUATORIAL_EOD_COORD at the equinox of the date
+// (JNow), but a Target gives J2000, the equinox that catalogs use. So
+// the runner converts the coordinates with the sky package before each
+// slew.
 
 import (
 	"context"
@@ -18,17 +16,18 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
-// slewTimeout bounds a slew, an unpark, and the wait for a slew that a
-// run before a restart started. A mount crosses the sky in a few
-// minutes at its fastest rate.
+// slewTimeout is how long the runner waits for a slew, for an unpark,
+// and for a slew that was already running when the runner started, such
+// as one from before an operator restart. A mount crosses the sky in a
+// few minutes at its fastest rate.
 const slewTimeout = 10 * time.Minute
 
-// mountSettleTime is the wait after a slew before the first frame. A
-// mount reports Ok when it reaches the coordinates, and the tube and
-// the pier still shake for a few seconds after a fast stop.
+// mountSettleTime is how long the runner waits after a slew before it
+// exposes. The mount reports Ok as soon as it reaches the coordinates,
+// but the telescope can still vibrate for a few seconds after a fast
+// stop.
 const mountSettleTime = 5 * time.Second
 
-// targetPosition reads a target's J2000 coordinates.
 func targetPosition(t *astrophotography.Target) (sky.Position, error) {
 	ra, err := sky.ParseRA(t.Spec.Coordinates.RA)
 	if err != nil {
@@ -41,14 +40,13 @@ func targetPosition(t *astrophotography.Target) (sky.Position, error) {
 	return sky.Position{RA: ra, Dec: dec}, nil
 }
 
-// slew points the mount at the target and waits for it to settle.
 func (w *work) slew(ctx context.Context) error {
 	position, err := targetPosition(w.target)
 	if err != nil {
 		return fail(astrophotography.ReasonSlewFailed, "%w", err)
 	}
 	if err := w.setImaging(true, astrophotography.ReasonSlewing,
-		fmt.Sprintf("Reservation %s slews to %s.", w.r.name, w.target.Spec.Object)); err != nil {
+		fmt.Sprintf("Reservation %s slews to %s", w.r.name, w.target.Spec.Object)); err != nil {
 		return err
 	}
 	if err := w.readyMount(ctx); err != nil {
@@ -61,9 +59,9 @@ func (w *work) slew(ctx context.Context) error {
 	return nil
 }
 
-// goTo slews the mount to a J2000 position, converted to the equinox
-// of the date, and waits for the tube to settle. The mount must track
-// after a slew, which readyMount sets.
+// goTo slews the mount to a J2000 position, converted to the equinox of
+// the date, and waits mountSettleTime. readyMount has already set the
+// mount to track after the slew.
 func (w *work) goTo(ctx context.Context, position sky.Position) error {
 	jnow := sky.ToDate(position, time.Now())
 	if _, err := w.r.settle(ctx, slewTimeout, func() (indi.Sent, error) {
@@ -77,9 +75,11 @@ func (w *work) goTo(ctx context.Context, position sky.Position) error {
 	return nil
 }
 
-// readyMount waits for a slew in progress to end, then unparks the
-// mount, turns tracking on, and sets the mount to track after a slew,
-// each only when the mount needs it.
+// readyMount waits for a slew in progress to end. Then it unparks the
+// mount, turns tracking on, and sets the mount to track after a slew.
+// It writes each property only when the mount is not already in that
+// state, so a mount that is unparked and tracking receives only the
+// coordinates.
 func (w *work) readyMount(ctx context.Context) error {
 	c, mount := w.r.client, w.mountDevice
 	if _, err := w.r.property(ctx, mount, "EQUATORIAL_EOD_COORD"); err != nil {
@@ -100,12 +100,12 @@ func (w *work) readyMount(ctx context.Context) error {
 			return err
 		}
 		w.r.o.recorder.Normal(reservationRef(w.res), reasonUnparked,
-			fmt.Sprintf("astrophotography-operator unparked %s to slew to %s for target %s.", mount, w.target.Spec.Object, w.target.Metadata.Name))
+			fmt.Sprintf("Unparked mount %s to slew to %s for target %s", mount, w.target.Spec.Object, w.target.Metadata.Name))
 	}
-	// INDI's telescope base answers TRACK_ON with TELESCOPE_TRACK_STATE
-	// Busy, and keeps it Busy for as long as the mount tracks, so the
-	// runner takes the Busy answer as tracking. Settle would wait for a
-	// state that is not Busy until its limit.
+	// INDI's telescope base sets TELESCOPE_TRACK_STATE to Busy when it
+	// accepts TRACK_ON, and keeps it Busy for as long as the mount
+	// tracks. Settle waits for a state other than Busy and would time
+	// out, so for that property the runner waits only for Accepted.
 	for _, s := range []struct {
 		property, member string
 		busyIsOn         bool
@@ -135,9 +135,10 @@ func (w *work) readyMount(ctx context.Context) error {
 	return nil
 }
 
-// slewFailure fails the target with SlewFailed, unless the connection
-// ended or the runner stops, which end the work without a verdict on
-// the target.
+// slewFailure fails the target with the reason SlewFailed. It returns
+// the error unchanged when the INDI connection ended or the runner is
+// stopping, because those say nothing about whether the target can be
+// reached.
 func slewFailure(err error) error {
 	if lostConnection(err) || errors.Is(err, context.Canceled) {
 		return err

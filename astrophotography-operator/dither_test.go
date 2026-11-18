@@ -1,9 +1,5 @@
 package main
 
-// Dithering (plan 01, step 7.9): after every dither.every frames, PHD2
-// moves its lock position and the runner waits for SettleDone before the
-// next frame. A dither changes no condition, so it posts no Event.
-
 import (
 	"encoding/json"
 	"slices"
@@ -15,8 +11,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// dithered is a target of five frames that dithers every two by up to
-// five pixels in right ascension alone.
+// dithered returns a target of five frames that dithers after every
+// `every` frames, by up to 5 pixels in right ascension only.
 func dithered(every int32) *astrophotography.Target {
 	m42 := target("m42", lights(5))
 	m42.Spec.Dither = &astrophotography.Dither{Every: every, Pixels: 5, RAOnly: true}
@@ -30,18 +26,18 @@ func TestTheRunnerDithersEveryNFrames(t *testing.T) {
 		waitUntil(t, w.inFlight(t, "m42"))
 		imaging, _ := conditions.Find(w.targetNow(t, "m42").Status.Conditions, astrophotography.ConditionImaging)
 		if !strings.Contains(imaging.Message, "guided by Guider east, dithered every 2 frames, not centered") {
-			t.Errorf("Imaging says %q", imaging.Message)
+			t.Errorf("the Imaging message is %q, want it to contain \"guided by Guider east, dithered every 2 frames, not centered\"", imaging.Message)
 		}
 		w.done(t, "m42")
 
-		phd2 := w.phd2.now()
-		if got := guidingCalls(phd2); got != "loop find_star guide dither dither" {
-			t.Errorf("PHD2 received %q", got)
+		phd2 := w.phd2.current()
+		if got, want := guidingCalls(phd2), "loop find_star guide dither dither"; got != want {
+			t.Errorf("PHD2 received %q, want %q", got, want)
 		}
 		var params map[string]any
 		_ = json.Unmarshal(phd2.Params("dither"), &params)
 		if params["amount"] != 5.0 || params["raOnly"] != true {
-			t.Errorf("dither params %v", params)
+			t.Errorf("the dither params are %v, want amount 5 and raOnly true", params)
 		}
 		body := scrape(t, w.o.metrics)
 		requireSample(t, body, `astrophotography_dithers_total{namespace="observatory",target="m42"} 2`)
@@ -53,8 +49,8 @@ func TestTheRunnerDithersEveryNFrames(t *testing.T) {
 	})
 }
 
-// The frame that completes the target's work gets no dither, because no
-// frame of the target follows it to use the new lock position.
+// The frame that completes the Target's work gets no dither, because
+// no later frame of the Target would use the new lock position.
 func TestNoDitherAfterTheLastFrame(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		m42 := dithered(2)
@@ -63,14 +59,14 @@ func TestNoDitherAfterTheLastFrame(t *testing.T) {
 		w.start(t)
 		w.done(t, "m42")
 
-		if got := guidingCalls(w.phd2.now()); got != "loop find_star guide dither" {
-			t.Errorf("PHD2 received %q", got)
+		if got, want := guidingCalls(w.phd2.current()), "loop find_star guide dither"; got != want {
+			t.Errorf("PHD2 received %q, want %q", got, want)
 		}
 		requireSample(t, scrape(t, w.o.metrics), `astrophotography_dithers_total{namespace="observatory",target="m42"} 1`)
 	})
 }
 
-// A dither of every frame says so in words.
+// The Imaging message says "dithered after each frame" when every is 1.
 func TestADitherAfterEachFrame(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := guidedNight(t, dithered(1))
@@ -78,7 +74,7 @@ func TestADitherAfterEachFrame(t *testing.T) {
 		waitUntil(t, w.inFlight(t, "m42"))
 		imaging, _ := conditions.Find(w.targetNow(t, "m42").Status.Conditions, astrophotography.ConditionImaging)
 		if !strings.Contains(imaging.Message, "guided by Guider east, dithered after each frame,") {
-			t.Errorf("Imaging says %q", imaging.Message)
+			t.Errorf("the Imaging message is %q, want it to contain \"guided by Guider east, dithered after each frame,\"", imaging.Message)
 		}
 	})
 }

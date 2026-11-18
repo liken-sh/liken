@@ -1,9 +1,10 @@
 package astrophotography
 
 // The Target's spec.fitsKeywords is a copy of observatory-operator's
-// field with a longer list of refused names. These tests hold the copy
-// equal to the field in observatory-operator's CRDs, and its list to
-// RefusedFITSKeywords, so a change on either side fails here.
+// field with a longer list of refused names. These tests check that the
+// copy matches the field in observatory-operator's CRDs and that its
+// refused names match RefusedFITSKeywords. A change on either side
+// fails a test.
 
 import (
 	"maps"
@@ -16,8 +17,9 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
-// observatoryFITSKeywords is spec.fitsKeywords of observatory-operator's
-// Observatory, the field that its other levels hold copies of.
+// observatoryFITSKeywords returns spec.fitsKeywords of
+// observatory-operator's Observatory CRD. Its other CRDs have the same
+// field.
 func observatoryFITSKeywords(t *testing.T) apiextensionsv1.JSONSchemaProps {
 	t.Helper()
 	crd := loadCRDFile(t, filepath.Join("..", "..", "observatory-operator", "deploy", "observatories-crd.yaml"))
@@ -29,10 +31,10 @@ func targetFITSKeywords(t *testing.T) apiextensionsv1.JSONSchemaProps {
 	return schemaOf(t, TargetKind).Properties["spec"].Properties["fitsKeywords"]
 }
 
-// withoutTheLevelsOwnParts answers a copy of the field with the two
-// parts that differ between levels cleared: the field's description,
-// which names the level, and the rule that refuses names.
-func withoutTheLevelsOwnParts(field apiextensionsv1.JSONSchemaProps) apiextensionsv1.JSONSchemaProps {
+// withoutDescriptionAndRefusedNames returns a copy of the field without
+// the parts that differ between levels: the description, and the rule
+// that refuses names.
+func withoutDescriptionAndRefusedNames(field apiextensionsv1.JSONSchemaProps) apiextensionsv1.JSONSchemaProps {
 	field.Description = ""
 	item := *field.Items.Schema
 	item.Properties = maps.Clone(item.Properties)
@@ -44,14 +46,14 @@ func withoutTheLevelsOwnParts(field apiextensionsv1.JSONSchemaProps) apiextensio
 }
 
 func TestTheTargetsFITSKeywordsMatchObservatoryOperators(t *testing.T) {
-	got := withoutTheLevelsOwnParts(targetFITSKeywords(t))
-	want := withoutTheLevelsOwnParts(observatoryFITSKeywords(t))
+	got := withoutDescriptionAndRefusedNames(targetFITSKeywords(t))
+	want := withoutDescriptionAndRefusedNames(observatoryFITSKeywords(t))
 	if !reflect.DeepEqual(got, want) {
-		t.Error("spec.fitsKeywords of the Target differs from observatory-operator's beyond its description and its refused names")
+		t.Error("spec.fitsKeywords of the Target differs from observatory-operator's in more than its description and its refused names, want no other difference")
 	}
 }
 
-// refusedIn reads the names from the rule `!(self in [...])`.
+// refusedIn returns the names in the rule `!(self in [...])`.
 func refusedIn(t *testing.T, field apiextensionsv1.JSONSchemaProps) []string {
 	t.Helper()
 	rules := field.Items.Schema.Properties["name"].XValidations
@@ -71,11 +73,11 @@ func TestTheTargetRefusesTheKeywordsThatTheOperatorWrites(t *testing.T) {
 	}
 }
 
-func TestRefusedFITSKeywordsHoldsEachKeywordOnce(t *testing.T) {
+func TestRefusedFITSKeywordsListsEachKeywordOnce(t *testing.T) {
 	refused := RefusedFITSKeywords()
 	for _, name := range append([]string{"EXPTIME", "COMMENT"}, OperatorFITSKeywords...) {
 		if count := len(slices.DeleteFunc(slices.Clone(refused), func(n string) bool { return n != name })); count != 1 {
-			t.Errorf("%s appears %d times", name, count)
+			t.Errorf("the refused keywords list %s %d times, want once", name, count)
 		}
 	}
 }

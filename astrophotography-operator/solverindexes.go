@@ -1,18 +1,16 @@
 package main
 
-// The index list of each solver pod. The solver's pod watches the
-// directory of its index files and changes its list when a file
-// arrives or leaves (solver/indexwatch.go). So the operator holds one
-// request open to each ready pod, GET /indexes?watch=true, which
-// answers the list at once and again after each change, and each list
-// wakes the Solver loop. When the request ends, the operator opens it
-// again, and the first line of the new request gives the whole list.
+// Each solver pod watches the directory of its index files and keeps a
+// list of them (solver/indexwatch.go). The operator keeps one request,
+// GET /indexes?watch=true, open to each ready pod. The pod sends the
+// whole list when the request starts and again after each change, and
+// each list wakes the Solver loop. When the request ends, the operator
+// opens a new one, and its first list replaces the old one.
 //
-// The request goes to the pod's own address, not the Service: the
-// list belongs to one pod, and the Service routes to a new pod only
-// after the endpoints controller adds it, some time after the pod turns
-// Ready. Until then a request through the Service is refused, or times
-// out.
+// The request goes to the pod's IP address, not to the Service, because
+// the list is about one pod. The Service also routes to a new pod only
+// after the endpoints controller adds it, some time after the pod
+// becomes Ready, and until then a request through the Service fails.
 
 import (
 	"context"
@@ -28,25 +26,25 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/solver"
 )
 
-// indexFollow is what the operator knows of one pod's list.
+// indexFollow is the state of the request that reads one pod's list.
 type indexFollow struct {
-	// indexes is the last list the pod answered, and nil until the
-	// first one.
+	// indexes is the last list the pod sent. It is nil until the first
+	// list arrives.
 	indexes solver.Indexes
-	// failure is the error of the last request, while the pod has
-	// answered no list.
+	// failure is the error of the last request. It is set only while the
+	// pod has sent no list.
 	failure error
 	stop    context.CancelFunc
 }
 
-// indexes answers the last list of a ready pod, and starts to follow
-// the pod's list on the first call for it. Before the first list
-// arrives, it answers nil, or the error of the request that failed.
+// indexes returns the last list that a ready pod sent. The first call
+// for a pod starts the request. Until the first list arrives, it
+// returns nil, or the error of the last request.
 func (loop *solverLoop) indexes(ctx context.Context, o *operator, p *podObject) (solver.Indexes, error) {
 	loop.mu.Lock()
 	defer loop.mu.Unlock()
-	follow, held := loop.follows[p.Metadata.UID]
-	if !held {
+	follow, exists := loop.follows[p.Metadata.UID]
+	if !exists {
 		following, stop := context.WithCancel(ctx)
 		follow = &indexFollow{stop: stop}
 		loop.follows[p.Metadata.UID] = follow
@@ -56,13 +54,14 @@ func (loop *solverLoop) indexes(ctx context.Context, o *operator, p *podObject) 
 	return follow.indexes, follow.failure
 }
 
-// longEnough is the life of a request after which its end is no
-// failure. A request that ends sooner waits retryAfter before the
-// next, so a pod that closes each request at once is not asked again
-// and again.
-const longEnough = time.Second
+// minRequestLife is how long a request must have been open for the
+// loop to open the next one at once. A request that ends sooner is
+// followed by a wait of retryAfter, so a pod that closes every request
+// immediately does not receive a stream of new requests.
+const minRequestLife = time.Second
 
-// follow reads one pod's list until ctx ends.
+// follow reads one pod's lists until ctx ends, and opens a new request
+// each time the previous one ends.
 func (loop *solverLoop) follow(ctx context.Context, o *operator, follow *indexFollow, pod, url string) {
 	for {
 		opened := time.Now()
@@ -73,11 +72,11 @@ func (loop *solverLoop) follow(ctx context.Context, o *operator, follow *indexFo
 		if ctx.Err() != nil {
 			return
 		}
-		fmt.Fprintf(o.logs, "%s: following the index list of pod %s: %v\n", managedBy, pod, err)
+		fmt.Fprintf(o.logs, "%s: the request for the index list of pod %s ended: %v\n", managedBy, pod, err)
 		if loop.record(follow, nil, fmt.Errorf("reading the index list of pod %s: %w", pod, err)) {
 			o.changed.notify()
 		}
-		if time.Since(opened) >= longEnough {
+		if time.Since(opened) >= minRequestLife {
 			continue
 		}
 		select {
@@ -88,11 +87,11 @@ func (loop *solverLoop) follow(ctx context.Context, o *operator, follow *indexFo
 	}
 }
 
-// record keeps a pod's new list, or the failure of a request while the
-// pod has answered no list. A pod that answered a list keeps it through
-// a failed request, because the list changes only with the pod's
-// directory, and the next request answers it again. It answers whether
-// the failure changed what the loop reports.
+// record stores a pod's new list, or the failure of a request while the
+// pod has sent no list. It returns whether the stored state changed. A
+// failed request does not clear a list, because the list changes only
+// when the pod's directory changes, and the next request sends it
+// again.
 func (loop *solverLoop) record(follow *indexFollow, indexes solver.Indexes, failure error) bool {
 	loop.mu.Lock()
 	defer loop.mu.Unlock()
@@ -107,7 +106,7 @@ func (loop *solverLoop) record(follow *indexFollow, indexes solver.Indexes, fail
 	return false
 }
 
-// forget stops following each pod that no Solver reports any more.
+// forget stops following each pod that no Solver reports.
 func (loop *solverLoop) forget(current map[string]bool) {
 	loop.mu.Lock()
 	defer loop.mu.Unlock()
@@ -122,21 +121,22 @@ func (loop *solverLoop) forget(current map[string]bool) {
 // wait returns when every goroutine that follows a pod has stopped.
 func (loop *solverLoop) wait() { loop.running.Wait() }
 
-// followIndexes sends one request that follows a pod's list, and hands
-// each list to each. It answers why the request ended.
+// followIndexes sends one watch request to a pod and calls each with
+// every list the pod sends. It returns the error that ended the
+// request.
 func (o *operator) followIndexes(ctx context.Context, url string, each func(solver.Indexes)) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
-	response, err := o.workerClient.Do(request)
+	response, err := o.peerClient.Do(request)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode/100 != 2 {
 		text, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
-		return fmt.Errorf("GET %s: %s: %s", url, response.Status, strings.TrimSpace(string(text)))
+		return fmt.Errorf("GET %s returned %s: %s", url, response.Status, strings.TrimSpace(string(text)))
 	}
 	lines := json.NewDecoder(response.Body)
 	for {

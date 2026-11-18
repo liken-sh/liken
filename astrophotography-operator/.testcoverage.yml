@@ -1,40 +1,40 @@
-# This is the coverage gate, enforced in CI (see
-# .github/workflows/ci.yaml).
+# The coverage gate that CI enforces (.github/workflows/ci.yaml).
 #
-# The threshold only rises over time. It is set just under what the
-# tests measure today. So a change that loses coverage fails the
-# check, and a change that gains coverage should raise the number
-# here to keep the gain.
+# The threshold is just under the coverage the tests reach, so a change
+# that loses coverage fails. Raise it when a change adds coverage.
 #
-# The numbers are measured with Go 1.27.2 and later, which count each basic
-# block once. Go 1.27.1 and earlier count a block once for each row
-# that comments split it into (golang/go#80974), and measure higher.
+# Go 1.27.2 and later count each basic block once. Go 1.27.1 and
+# earlier count a block once for each line that comments split it into
+# (golang/go#80974), so they report higher coverage than the threshold
+# here assumes.
 
 profile: coverage.out
 
-# go test never calls main(), so the statements in main.go never run
-# under the gate. main.go holds only the wiring of the in-cluster
-# clients, and the gate measures every other file.
+# main.go only creates the in-cluster clients, and go test never calls
+# main().
 exclude:
   paths:
     - ^main\.go$
 
 threshold:
-  # The total covers every package. The operator's package leaves out
-  # the return of an error from the election and from the Event
-  # recorder's shutdown, a list of the Targets and a Job create that the
-  # API server refuses, a status write that fails twice, the runner's
-  # checks of a claim that another writer took between a read and a
-  # write, and a few failed writes of the solver and worker loops after
-  # another write of the same pass failed, and a PHD2 that refuses
-  # stop_capture, sends no guide frame after loop, or closes the
-  # connection between loop and find_star. promote/ and catalog/ leave
-  # out the errors of a file system that fails a sync, a stat, or a read
-  # after an open, and the fallback of a share that refuses
-  # RENAME_NOREPLACE, which tmpfs never does. solver/ and worker/ leave
-  # out a write into a job's directory that fails after the directory
-  # was made, a centering frame that matches and then cannot be
-  # removed, an inotify instance that the kernel refuses, and an index
-  # directory that appears or leaves between its watch and its read.
-  # The tests measure 98.0%.
+  # The total covers every package. The code the tests leave out:
+  #
+  # The operator's package: errors returned from the election and from
+  # the Event recorder's shutdown, a Target list or a Job create that
+  # the API server refuses, a status write that fails twice, the
+  # runner's checks for a claim that another writer took between a read
+  # and a write, a few failed writes in the solver and worker loops
+  # after another write in the same pass failed, and a PHD2 that
+  # refuses stop_capture, sends no guide frame after loop, or closes the
+  # connection between loop and find_star.
+  #
+  # promote/ and catalog/: file system errors from a sync, a stat, or a
+  # read after an open, and the fallback for a share that refuses
+  # RENAME_NOREPLACE, which tmpfs never does.
+  #
+  # solver/ and worker/: a write into a job's directory that fails after
+  # the directory was made, a centering frame that matches and then
+  # cannot be removed, an inotify instance that the kernel refuses, and
+  # an index directory that appears or is removed between its watch and
+  # its read.
   total: 97

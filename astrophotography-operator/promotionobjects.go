@@ -1,18 +1,15 @@
 package main
 
-// The parts of a Job, a pod, and a PersistentVolumeClaim that the
-// promotion loop reads and writes, and the parts of a pod that the
-// solvers' and workers' Deployments write (kube.go). Each is decoded from a watch's store
-// with runtime.DefaultUnstructuredConverter, so a field that is not
-// here costs nothing.
+// The fields of a Job, a pod, and a PersistentVolumeClaim that the
+// operator reads and writes. informer.Convert decodes these types from
+// the watch caches and drops every field not declared here without an
+// error, so a field that the operator reads must be added here first.
 
 import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// objectMeta is the metadata the loop reads and writes, with the owner
-// that ties a promotion Job to its Target.
 type objectMeta struct {
 	observatory.ObjectMeta `json:",inline"`
 	OwnerReferences        []ownerReference `json:"ownerReferences,omitempty"`
@@ -26,7 +23,7 @@ type ownerReference struct {
 	Controller bool   `json:"controller,omitempty"`
 }
 
-// ownedBy reports whether an object's owner is the object of a UID.
+// ownedBy reports whether the object has an owner reference with this UID.
 func (m objectMeta) ownedBy(uid string) bool {
 	for _, owner := range m.OwnerReferences {
 		if owner.UID == uid {
@@ -44,8 +41,8 @@ type jobObject struct {
 	Status     jobStatus  `json:"status,omitzero"`
 }
 
-// GetObjectMeta answers the metadata, for the memo of the loop's
-// creates (promotion.go).
+// GetObjectMeta lets memo record the promotion Jobs that the loop
+// creates.
 func (j *jobObject) GetObjectMeta() memo.Meta { return &j.Metadata.ObjectMeta }
 
 type jobSpec struct {
@@ -67,8 +64,8 @@ type objectCondition struct {
 	Message string `json:"message,omitempty"`
 }
 
-// condition answers the condition of a type that is True, and false
-// when none is.
+// condition returns the condition with this type and status, and false
+// when the list has none.
 func condition(list []objectCondition, conditionType, status string) (objectCondition, bool) {
 	for _, c := range list {
 		if c.Type == conditionType && c.Status == status {

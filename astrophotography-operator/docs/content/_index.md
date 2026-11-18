@@ -13,7 +13,8 @@ operator, it slews to the target, centers it with a plate solve,
 guides with PHD2, and takes the frames. It moves each frame to the
 archive you chose, names it the way you asked, and records it in a
 catalog beside the frames. A target can take many nights, and its
-status keeps the count.
+status counts the frames of each sequence that are archived and still
+to move.
 
 Things you can do with it:
 

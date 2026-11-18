@@ -1,19 +1,15 @@
 package main
 
-// The operator's side of a plate solve, which the runner's centering
-// calls with a frame in the outbox (plan 02). The operator asks the
-// reservation's worker for the frame's star list with a hint, and
-// carries the list to the target's solver, so the worker and the
-// solver never talk to each other and only kilobytes cross the
-// network.
+// The operator's side of a plate solve of a centering frame in the
+// outbox. The reservation's worker extracts the frame's stars into an
+// .axy file, and the operator sends that file to the target's solver.
+// So only the star list crosses the network, not the frame.
 //
-// A frame that does not solve within the first radius is tried again
-// with each wider radius of the Solver's spec.search, and then with no
-// position at all when spec.search.blind is true. Plan 02's default
-// radius of 5° missed a frame of the CCD simulator whose header pointed
-// 6.8° from the stars it drew, and 10° solved it. Each attempt asks the
-// worker for a new star list, because the hint is in the .axy, and an
-// extraction took 0.26 s.
+// A frame that does not solve at the first radius of the Solver's
+// spec.search.radii is tried at each next radius, and then with no
+// position hint when spec.search.blind is true. Each attempt extracts
+// the stars again, because the worker writes the hint into the .axy
+// file.
 
 import (
 	"context"
@@ -30,67 +26,65 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// The bounds of each request of a solve. An extraction took 0.26 s in
-// plan 02. A solve waits its turn behind other telescopes' solves, each
-// bounded by the solver's wall time of two minutes.
+// A solve request has a longer timeout than an extraction because the
+// solver runs one solve at a time. A request can wait behind the solves
+// of other telescopes, and each of those can run for the solver's
+// --timeout, two minutes by default.
 const (
 	extractTimeout = 2 * time.Minute
 	solveTimeout   = 10 * time.Minute
 )
 
-// scaleTolerance is the width of the scale hint around the expected
-// plate scale, ±10% (plan 02).
+// scaleTolerance is the width of the scale hint on each side of the
+// expected plate scale, as a fraction of it.
 const scaleTolerance = 0.1
 
-// solveRequest is one frame to solve.
 type solveRequest struct {
-	// Namespace holds the Reservation, the Target, and the Solver.
+	// Namespace is the namespace of the Reservation, the Target, and the
+	// Solver.
 	Namespace string
-	// Reservation names the reservation whose worker reads the frame.
+	// Reservation is the Reservation whose worker extracts the stars.
 	Reservation string
-	// Solver names the Target's spec.centering.solver.
+	// Solver is the Target's spec.centering.solver.
 	Solver string
-	// Frame is the frame's path relative to the outbox's root
-	// (outbox.Frame.Path).
+	// Frame is outbox.Frame.Path.
 	Frame string
-	// Center is where the operator expects the frame to point, J2000.
+	// Center is where the frame should point, in J2000.
 	Center sky.Position
-	// Scale is the expected plate scale, in arcseconds per pixel: 206.265
-	// × the pixel size in µm × the binning / the focal length in mm.
+	// Scale is the expected plate scale in arcseconds per pixel:
+	// 206.265 × pixel size in µm × binning / focal length in mm.
 	Scale float64
 }
 
-// solveAttempt is one attempt of a solve, for the log and the status.
+// solveAttempt is one try at one search radius.
 type solveAttempt struct {
 	// Radius is the search radius in degrees, and 0 for a blind solve.
 	Radius float64
-	// Stars counts the stars the worker found.
-	Stars int32
-	// Solved is true for the attempt that solved.
+	// Stars is the number of stars the worker found.
+	Stars  int32
 	Solved bool
-	// Took is the attempt's time, from the request to the worker to the
-	// solver's answer.
+	// Took runs from the request to the worker until the last response,
+	// which is the worker's when it found no stars.
 	Took time.Duration
 }
 
-// solveResult is the outcome of a solve: the solution of the attempt
-// that solved, or an answer with Solved false when none did.
+// solveResult is the outcome of a solve. Response is the solver's
+// response to the last attempt that reached the solver.
 type solveResult struct {
-	Answer     solver.SolveAnswer
+	Response   solver.SolveResponse
 	Stars      int32
 	MedianFWHM float64
 	Attempts   []solveAttempt
 }
 
-// errSolverNotReady is the error of a solve whose Solver does not
-// exist or is not Ready. The runner images the target without
-// centering it (centering.go).
+// errSolverNotReady is returned when the Solver does not exist or is
+// not Ready. centering.go then images the target without centering it.
 var errSolverNotReady = errors.New("the Solver is not Ready")
 
-// plateSolve solves one frame. It answers an error when the Solver is
-// not Ready or a request fails, and a result whose answer has Solved
-// false when no attempt solved. A frame with no star ends the attempts
-// at once, because every attempt reads the same stars.
+// plateSolve solves one frame. It returns an error when the Solver is
+// not Ready or a request fails, and a result with Response.Solved false
+// when no attempt solved. A frame with no stars ends the attempts at
+// once, because a wider radius cannot find stars that are not there.
 func (o *operator) plateSolve(ctx context.Context, request solveRequest) (solveResult, error) {
 	s, err := o.readySolver(request.Namespace, request.Solver)
 	if err != nil {
@@ -119,11 +113,10 @@ func (o *operator) plateSolve(ctx context.Context, request solveRequest) (solveR
 	return result, nil
 }
 
-// attempt runs one extraction and, when the frame has stars, one solve.
 func (o *operator) attempt(ctx context.Context, result *solveResult, workerURL, solverURL string, request worker.ExtractRequest) (solveAttempt, error) {
 	started := time.Now()
 	attempt := solveAttempt{Radius: request.Hint.Radius}
-	var extracted worker.ExtractAnswer
+	var extracted worker.ExtractResponse
 	extractCtx, cancel := context.WithTimeout(ctx, extractTimeout)
 	defer cancel()
 	if err := o.peer(extractCtx, http.MethodPost, workerURL, jsonBody(request), &extracted); err != nil {
@@ -139,25 +132,24 @@ func (o *operator) attempt(ctx context.Context, result *solveResult, workerURL, 
 	solveStarted := time.Now()
 	solveCtx, cancelSolve := context.WithTimeout(ctx, solveTimeout)
 	defer cancelSolve()
-	var answer solver.SolveAnswer
-	err := o.peer(solveCtx, http.MethodPost, solverURL, starList(extracted.AXY), &answer)
+	var response solver.SolveResponse
+	err := o.peer(solveCtx, http.MethodPost, solverURL, starList(extracted.AXY), &response)
 	attempt.Took = time.Since(started)
 	if err != nil {
 		return attempt, fmt.Errorf("solving the stars of %s: %w", request.Frame, err)
 	}
-	attempt.Solved = answer.Solved
-	result.Answer = answer
+	attempt.Solved = response.Solved
+	result.Response = response
 	outcome := solveUnsolved
-	if answer.Solved {
+	if response.Solved {
 		outcome = solveSolved
 	}
 	o.metrics.observeSolve(outcome, time.Since(solveStarted))
 	return attempt, nil
 }
 
-// searchRadii answers the radius of each attempt in order, and 0 for
-// the blind one. The CRD fills in the Solver's search, so the stored
-// Solver always names at least one radius.
+// searchRadii returns the radius of each attempt in order, with 0 for
+// the blind attempt. The CRD requires at least one radius.
 func searchRadii(search astrophotography.Search) []float64 {
 	radii := search.Radii
 	if search.Blind {
@@ -166,15 +158,14 @@ func searchRadii(search astrophotography.Search) []float64 {
 	return radii
 }
 
-// readySolver answers a Solver whose Ready is True, from the store.
 func (o *operator) readySolver(namespace, name string) (*astrophotography.Solver, error) {
-	s, held := informer.Cached[astrophotography.Solver](o.stores.collections[astrophotography.SolverKind.Name].View(), namespace+"/"+name)
-	if !held {
-		return nil, fmt.Errorf("%w: no Solver %s in %s", errSolverNotReady, name, namespace)
+	s, found := informer.Cached[astrophotography.Solver](o.stores.collections[astrophotography.SolverKind.Name].View(), namespace+"/"+name)
+	if !found {
+		return nil, fmt.Errorf("%w: no Solver %s in namespace %s", errSolverNotReady, name, namespace)
 	}
 	ready, _ := conditions.Find(s.Status.Conditions, astrophotography.ConditionReady)
 	if ready.Status != conditions.True || s.Status.Endpoint == nil {
-		return nil, fmt.Errorf("%w: Solver %s/%s has no Ready True, and its reason is %q: %s", errSolverNotReady, namespace, name, ready.Reason, ready.Message)
+		return nil, fmt.Errorf("%w: Solver %s/%s is not Ready True or has no status.endpoint, reason %q: %s", errSolverNotReady, namespace, name, ready.Reason, ready.Message)
 	}
 	return s, nil
 }

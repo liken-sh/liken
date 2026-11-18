@@ -1,8 +1,7 @@
-// Package promote is the binary's promote mode: the container of a
-// promotion Job, which moves a target's frames from an outbox to the
-// target's archive, records each one in the catalog, and reports
-// (plan 03). This file holds the report, the contract between the Job
-// and the operator.
+// Package promote is the promote mode of the binary. It runs in the
+// container of a promotion Job, which moves a target's frames from an
+// outbox to the target's archive, records each one in the catalog, and
+// reports the result to the operator.
 package promote
 
 import (
@@ -11,86 +10,85 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/catalog"
 )
 
-// The Job's container writes its report to the termination message,
+// The Job's container writes its report as its termination message,
 // and the operator reads it from the pod's status when the Job ends.
-// The kubelet keeps at most MaxReportBytes of the message.
+// The kubelet truncates a termination message to MaxReportBytes.
 const (
 	TerminationLog = "/dev/termination-log"
 	MaxReportBytes = 4096
 )
 
-// MaxTotals is how many totals a report holds. 25 totals of a long
-// filter name take about 2,500 bytes, so they fit in MaxReportBytes
-// beside a few frames that wait or failed. A target with more
-// combinations of settings reports the first MaxTotals and sets
-// Truncated.
+// MaxTotals is the most totals that a report lists. 25 totals with long
+// filter names encode to about 2,500 bytes, so MaxReportBytes still has
+// room for a few waiting or failed frames.
 const MaxTotals = 25
 
-// Report is what one promotion Job tells the operator.
+// Report is what one promotion Job sends the operator.
 type Report struct {
-	// Totals are the catalog's counts of frames, by their settings, from
-	// a read of the whole catalog and not from this run alone. So a
-	// report that the operator never reads is corrected by the next one.
-	Totals    []Total `json:"totals"`
-	Truncated bool    `json:"truncated,omitempty"`
-	// Promoted and Bytes count the frames that this run moved out of the
-	// outbox and the bytes that it copied.
+	// Totals are the catalog's counts of frames by their settings. They
+	// come from reading the whole catalog, not from this run alone, so
+	// the next report corrects one that the operator never read.
+	Totals []Total `json:"totals"`
+	// Truncated is true when Fit cut Totals to MaxTotals.
+	Truncated bool `json:"truncated,omitempty"`
+	// Promoted is the number of frames that this run moved out of the
+	// outbox, and Bytes is the number of bytes it copied.
 	Promoted int32 `json:"promoted"`
 	Bytes    int64 `json:"bytes"`
-	// Left counts the frames of the target that this run left in the
-	// outbox: each frame that waits as incomplete, and each failure. A
-	// file with no FRAMEID is not this operator's frame, and Left does
-	// not count it. Waiting and Failures can list fewer, to fit the
-	// termination message.
+	// Left counts the frames that this run left in the outbox, the
+	// incomplete ones and the failures. It does not count a file with no
+	// FRAMEID, because this operator did not write it. Fit keeps Left
+	// when it removes frames from Waiting and Failures.
 	Left int32 `json:"left"`
-	// Waiting lists the frames that this run left in the outbox with no
-	// fault, and Failures each frame that this run failed to promote.
+	// Waiting lists the files that this run left in the outbox without
+	// a fault, including the files with no FRAMEID. Failures lists the
+	// frames that this run failed to promote.
 	Waiting  []Frame `json:"waiting,omitempty"`
 	Failures []Frame `json:"failures,omitempty"`
 }
 
-// Total counts the catalog's frames of one combination of settings.
+// Total is the catalog's count of frames for one combination of settings.
 type Total = catalog.Total
 
-// Frame is a frame that stayed in the outbox, and why.
+// Frame is a file that stayed in the outbox, with the reason.
 type Frame struct {
 	// File is the frame's path relative to the outbox's root
 	// (outbox.Frame.Path).
 	File string `json:"file"`
-	// Reason is ReasonIncomplete or ReasonNoFrameID for a frame that
-	// waits, and one of the False reasons of the Target's
-	// ArchiveAvailable for a failure: ReasonCopyFailed,
-	// ReasonVerifyFailed, or ReasonNameConflict.
+	// Reason is ReasonIncomplete or ReasonNoFrameID for a waiting frame.
+	// For a failure it is ReasonCopyFailed, ReasonVerifyFailed, or
+	// ReasonNameConflict, which are also False reasons of the Target's
+	// ArchiveAvailable condition.
 	Reason  string `json:"reason"`
 	Message string `json:"message,omitempty"`
 }
 
-// The reasons a frame waits.
+// The reasons a frame waits in the outbox.
 const (
-	// ReasonIncomplete is a frame shorter than its header and data
-	// padded to 2,880 bytes: the driver is still writing it, or never
-	// finished.
+	// ReasonIncomplete is a file shorter than its FITS header and data,
+	// each padded to a multiple of 2,880 bytes. The camera driver is
+	// still writing it, or stopped before it finished.
 	ReasonIncomplete = "Incomplete"
-	// ReasonNoFrameID is a file with no FRAMEID, which this operator did
-	// not write, so it stays where it is.
+	// ReasonNoFrameID is a file with no FRAMEID. This operator did not
+	// write it, so promotion leaves it in the outbox.
 	ReasonNoFrameID = "NoFrameID"
 )
 
-// The reasons a frame fails, which are reasons of the Target's
-// ArchiveAvailable condition too.
+// The reasons a frame fails. They are also reasons of the Target's
+// ArchiveAvailable condition.
 const (
-	// ReasonCopyFailed is a read, a write, or a rename that failed.
+	// ReasonCopyFailed means a read, a write, or a rename failed.
 	ReasonCopyFailed = "CopyFailed"
-	// ReasonVerifyFailed is a copy that read back with another hash.
+	// ReasonVerifyFailed means the copy read back with a different hash.
 	ReasonVerifyFailed = "VerifyFailed"
-	// ReasonNameConflict is another file under the frame's name in the
-	// archive.
+	// ReasonNameConflict means the archive already has a different file
+	// under the frame's name.
 	ReasonNameConflict = "NameConflict"
 )
 
-// Fit cuts a report to what the termination message holds: the first
-// MaxTotals totals, and then as many frames that wait or failed as fit
-// in MaxReportBytes. Left still counts every frame.
+// Fit cuts a report to fit the termination message. It keeps the first
+// MaxTotals totals, then removes waiting frames, and then failures, from
+// the end of each list until the report fits in MaxReportBytes.
 func (r Report) Fit() Report {
 	if len(r.Totals) > MaxTotals {
 		r.Totals, r.Truncated = r.Totals[:MaxTotals], true

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Solves a synthetic star field through the worker image's two HTTP
-# servers before the image ships.
+# servers, to check the image before it ships.
 #
 # Usage: astrophotography-operator-worker.sh <image>
 #
@@ -8,22 +8,21 @@
 #            ghcr.io/liken-sh/astrophotography-operator-worker:2026.10.12-001.
 #            The image must be in the local Docker daemon.
 #
-# The check runs a solve the way the operator does in a cluster: the
-# worker mode reads a frame from an outbox and answers its star list,
-# and the solver mode solves that list against its index files. Each
-# container runs as the caller on a read-only root, with the emptyDirs
-# of its pod as tmpfs mounts, as the operator's Deployments run them.
-# The frame and its index file are the astrometry image's synthetic
-# field, whose center is 150°, 30° at 2.235 arcseconds per pixel.
+# In worker mode the image reads a frame from an outbox and returns its
+# star list. In solver mode it solves that list against its index
+# files. Each container runs as the calling user on a read-only root
+# filesystem, with tmpfs where the pods have emptyDir volumes, as in a
+# cluster. The frame and the index file are the astrometry image's
+# synthetic field, centered at RA 150°, Dec 30°, at 2.235 arcseconds
+# per pixel.
 set -euo pipefail
 
 image=$1
 here=$(cd "$(dirname "$0")" && pwd)
 field="$here/../../astrometry/smoke"
 
-# The image must hold the notices of the third-party software in it,
-# as notices/check.sh describes: the astrometry image's and the Go
-# binary's.
+# The image must contain the license notices of the astrometry image
+# and of the Go binary.
 "$here/../../notices/check.sh" "$image" usr/share/doc/go/LICENSE
 
 work=$(mktemp -d)
@@ -42,14 +41,13 @@ cp "$field/field.fits" "$work/outbox/$frame"
 cp "$field/index.fits" "$work/indexes/index-synthetic.fits"
 chmod -R a+rwX "$work"
 
-# start runs one mode and records its container, so the cleanup
-# removes it. It runs in this shell, not in a command substitution,
-# because a subshell's record would be lost.
+# Starts one mode and records its container for cleanup. Call it
+# directly, not in a command substitution, or the record is lost with
+# the subshell.
 start() {
   containers+=("$(docker run -d --read-only --user "$(id -u):$(id -g)" \
     --tmpfs /work:mode=1777 --tmpfs /tmp:mode=1777 -p 127.0.0.1::8080 "$@")")
 }
-# address answers the loopback address of a container's port 8080.
 address() {
   docker port "$1" 8080/tcp | head -n 1
 }
@@ -58,16 +56,15 @@ start -v "$work/outbox:/outbox" "$image" worker
 solver=$(address "${containers[0]}")
 worker=$(address "${containers[1]}")
 
-# Each server listens only when it is ready. The solver reads the
-# headers of its index files first. Thirty tries a second apart bound
-# the wait.
+# Each server listens only when it is ready, and the solver first reads
+# its index files.
 for address in "$solver/indexes" "$worker/outbox"; do
   for try in $(seq 30); do
     if curl -sf "http://$address" > /dev/null; then
       break
     fi
     if [ "$try" = 30 ]; then
-      echo "http://$address did not answer in 30 s" >&2
+      echo "http://$address did not respond within 30 s" >&2
       docker logs "${containers[0]}" >&2
       exit 1
     fi
@@ -88,8 +85,8 @@ jq -r .axy "$work/extract.json" | base64 -d > "$work/field.axy"
 curl -sf -X POST -H 'Content-Type: application/octet-stream' \
   --data-binary "@$work/field.axy" "http://$solver/solve" | tee "$work/solve.json"
 echo
-# The center must be the field's within one arcsecond, and the scale
-# within 1%, as the astrometry image's own smoke check requires.
+# The solved center must be within one arcsecond of the field's and the
+# scale within 1%, as in the astrometry image's own smoke check.
 jq -e '.solved and ((.center.ra - 150) | fabs) < 1/3600 and ((.center.dec - 30) | fabs) < 1/3600
   and ((.scale - 2.235) | fabs) < 0.02235' "$work/solve.json" > /dev/null
 

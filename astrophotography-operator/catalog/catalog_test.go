@@ -1,8 +1,7 @@
 package catalog
 
-// The catalog outlives every version of the operator, so these tests
-// fix its wire form: a line that a later version writes differently is
-// a change to the format of every archive, and it fails here first.
+// Archives keep catalog files that older versions of the operator
+// wrote, so these tests fail on any change to the JSON of a line.
 
 import (
 	"encoding/json"
@@ -17,7 +16,7 @@ func TestTheWireFormOfALine(t *testing.T) {
 		line Line
 		want string
 	}{
-		{"a frame of plan 01's drill",
+		{"a frame with every field",
 			Line{
 				Record: RecordFrame, FrameID: "0199d3a0-0000-7000-8000-000000000001",
 				Target: "m42", Reservation: "east-tonight", Telescope: "east", Camera: "east-main", Train: "east-imaging",

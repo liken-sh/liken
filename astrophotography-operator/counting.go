@@ -1,11 +1,9 @@
 package main
 
-// Counting a frame, and the frame that does not come (plan 01, step 7.8).
-// A frame the driver saved counts as pending: it waits in the outbox
-// claim that status.outboxes names, and the promotion of plan 03 moves
-// it to the archive. That status is the whole hand-off to promotion:
-// promotion's loop wakes on the target's change, finds frames pending
-// in an outbox, and starts its Job. The runner launches nothing itself.
+// The runner counts each frame that the camera driver saved as pending
+// in the Target's status. A frame is pending until a promotion Job moves
+// it from the outbox claim to the archive. The runner only writes the
+// count, and the promotion loop in promotion.go starts the Job.
 
 import (
 	"context"
@@ -17,17 +15,20 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// failedExposureWait is the wait after an exposure that gave no frame,
-// before the next one. A driver that fails once often fails again at
-// once, and the wait keeps a broken camera from cycling all night.
+// failedExposureWait is how long the runner waits after an exposure
+// that produced no frame. A driver that fails once often fails again
+// immediately, so without the wait a broken camera would retry in a
+// tight loop all night.
 const failedExposureWait = time.Minute
 
-// count clears status.exposure and, when counted, adds the frame to the
-// pending count of its sequence and of its outbox claim. A target whose
-// status.exposure names another frame was counted already, by a runner
-// before a restart, and count leaves it alone. imaging is the message of
-// an Imaging that turns True with the reason Exposing, or empty to
-// leave the condition alone. count answers whether its write landed.
+// count clears status.exposure and, when counted is true, adds the
+// frame to the pending count of its sequence and of its outbox claim.
+// When status.exposure is not this frame, a runner before a restart
+// already counted it, and count writes nothing. When imaging is not
+// empty and status.reservation is still this runner's, count also sets
+// the Imaging condition to True with the reason Exposing and imaging as
+// the message. count returns whether it wrote the Target, and returns
+// false with no error when the Target is gone.
 func (r *runner) count(t *astrophotography.Target, e *astrophotography.Exposure, counted bool, claim, imaging string) (bool, error) {
 	wrote, err := r.o.writeTarget(t, func(fresh *astrophotography.Target, change *statusChange) bool {
 		if fresh.Status.Exposure == nil || fresh.Status.Exposure.FrameID != e.FrameID {
@@ -48,10 +49,10 @@ func (r *runner) count(t *astrophotography.Target, e *astrophotography.Exposure,
 	return wrote, err
 }
 
-// addPending counts one frame of the sequence at index as pending in
-// the outbox claim. A sequence that an edit removed since the exposure
-// started gets no count; the promotion report counts the frame by its
-// header.
+// addPending adds one pending frame to the sequence at index and to
+// the outbox claim. When an edit of the spec removed that sequence after
+// the exposure started, only the claim's count goes up. The promotion
+// Job later reads the frame's FITS header to find its sequence.
 func addPending(t *astrophotography.Target, index int, claim string) {
 	alignSequences(t)
 	if index < len(t.Status.Sequences) {
@@ -66,10 +67,10 @@ func addPending(t *astrophotography.Target, index int, claim string) {
 	t.Status.Outboxes = append(t.Status.Outboxes, astrophotography.OutboxFrames{ClaimName: claim, Pending: 1})
 }
 
-// exposureFailed records an exposure that gave no frame: it clears
-// status.exposure, sets Imaging False with ExposureFailed, and waits
-// before the next frame. The target stays claimed, because the failure
-// is the camera's, and the next target would meet the same camera.
+// exposureFailed records an exposure that produced no frame: it clears
+// status.exposure, sets Imaging to False with the reason
+// ExposureFailed, and waits failedExposureWait. The runner keeps the
+// target, because the next target would use the same failed camera.
 func (w *work) exposureFailed(ctx context.Context, cause error) error {
 	t := w.target
 	w.r.logf("target %s: %v", targetName(t), cause)
@@ -80,7 +81,7 @@ func (w *work) exposureFailed(ctx context.Context, cause error) error {
 		}
 		fresh.Status.Exposure = nil
 		change.setImaging(fresh, false, astrophotography.ReasonExposureFailed,
-			fmt.Sprintf("Reservation %s: the last exposure gave no frame: %v. The next one starts in %s.", w.r.name, cause, failedExposureWait))
+			fmt.Sprintf("Reservation %s took no frame from the last exposure, and starts the next one in %s: %v", w.r.name, failedExposureWait, cause))
 		return true
 	})
 	if err != nil {

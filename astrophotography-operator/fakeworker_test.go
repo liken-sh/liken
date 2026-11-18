@@ -1,11 +1,12 @@
 package main
 
-// A fake of a reservation's worker (plan 02): it answers GET /outbox
-// with the free bytes a test sets and the frames the fake camera saved,
-// deletes a centering frame on DELETE /centering/<FRAMEID>, and records
-// the host of each request, which names the worker's Service. Every
-// other request, an extraction or a solver's, goes to the fake peers,
-// because the operator sends all of them through one client.
+// A fake of a reservation's worker. It responds to GET /outbox with the
+// free bytes a test sets and the frames the fake camera saved, deletes
+// a centering frame on DELETE /centering/<FRAMEID>, and records the
+// host of each request, which is the worker's Service name. It passes
+// every other request, such as a star extraction or a solve, on to the
+// fake peers, because the operator sends all requests through one
+// client.
 
 import (
 	"encoding/json"
@@ -29,14 +30,14 @@ type fakeWorker struct {
 	free   int64
 	frames []string
 	hosts  []string
-	// deleted holds the FRAMEID of each centering frame the operator
+	// deleted lists the FRAMEID of each centering frame the operator
 	// deleted, in order.
 	deleted []string
-	// refuseDeletes answers each delete of a centering frame with 500,
+	// refuseDeletes makes each delete of a centering frame return 500,
 	// as a worker that cannot write the outbox does.
 	refuseDeletes bool
-	// down answers 503, as a worker whose pod is not ready does, and
-	// garbled answers a body that is no JSON.
+	// down makes requests return 503, as a worker whose pod is not ready
+	// does. garbled makes them return a body that is not JSON.
 	down, garbled bool
 }
 
@@ -67,32 +68,33 @@ func (f *fakeWorker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case f.garbled:
 		_, _ = w.Write([]byte("<html>"))
 	default:
-		// The worker lists the frames of the targets' directories, and
-		// leaves out the centering frames.
+		// The worker lists the frames in the targets' directories and
+		// omits the centering frames.
 		frames := slices.DeleteFunc(slices.Clone(f.frames), func(p string) bool { return strings.Contains(p, "/"+outbox.Centering+"/") })
-		_ = json.NewEncoder(w).Encode(worker.OutboxAnswer{FreeBytes: f.free, Frames: slices.Sorted(slices.Values(frames))})
+		_ = json.NewEncoder(w).Encode(worker.OutboxResponse{FreeBytes: f.free, Frames: slices.Sorted(slices.Values(frames))})
 	}
 }
 
-// set changes the fake under its lock.
+// set applies a change to the fake while holding its lock.
 func (f *fakeWorker) set(change func()) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	change()
 }
 
-// save adds a frame to the outbox, by its path relative to the root.
+// save adds a frame to the outbox, by its path relative to the outbox
+// root.
 func (f *fakeWorker) save(path string) { f.set(func() { f.frames = append(f.frames, path) }) }
 
 func (f *fakeWorker) setFree(free int64) { f.set(func() { f.free = free }) }
 
-func (f *fakeWorker) held() []string {
+func (f *fakeWorker) outboxFrames() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.frames)
 }
 
-func (f *fakeWorker) asked() []string {
+func (f *fakeWorker) requestHosts() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.hosts)

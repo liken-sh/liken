@@ -1,27 +1,29 @@
 package promote
 
-// One run of a promotion Job: every frame of one target in one outbox
-// moves to the target's archive, with one catalog line each (plan 03).
+// One run of a promotion Job moves every frame of one target from an
+// outbox to the target's archive and appends one catalog line for each.
 //
-// Each frame goes through the same steps: copy it to a hidden .part
-// file beside its name in the archive, read the copy back and compare
-// the hashes, give the copy the frame's name with a rename that never
-// replaces a file, append its catalog line, and delete it from the
-// outbox. Each step syncs what it wrote before the next starts. So a
-// crash at any point leaves the frame in at least one verified place,
-// and the next run reads what the crash left and finishes the work
-// without a second copy or a second line:
+// For each frame, the run copies it to a hidden .part file next to its
+// final name in the archive, reads the copy back and compares the
+// hashes, renames the copy to the frame's name without replacing an
+// existing file, appends the catalog line, and deletes the frame from
+// the outbox. Each step syncs what it wrote before the next step
+// starts, so after a crash the frame is whole in the outbox, the
+// archive, or both. The next run finishes the frame without a second
+// copy or a second catalog line:
 //
-//   - a .part file is deleted and the copy starts again;
-//   - a file under the frame's name with no catalog line is hashed with
-//     the frame, and when the two match, the run records and deletes;
-//   - a catalog line with the frame still in the outbox checks the
-//     archive's file against the recorded hash, and deletes the frame.
+//   - It deletes a .part file and copies again.
+//   - When a file has the frame's name but no catalog line, it hashes
+//     the file and compares it with the frame. When they match, it
+//     appends the line and deletes the frame.
+//   - When the catalog has a line and the frame is still in the outbox,
+//     it compares the archive's file with the recorded hash and with
+//     the frame, then deletes the frame.
 //
-// When the archive is the outbox's own claim, a frame moves by one
-// rename and no byte is copied. Its line is recorded first, because the
-// rename takes the frame out of the outbox, and a run after a crash
-// finds only the frames that are still there.
+// When the archive and the outbox are the same claim, the frame moves
+// with one rename and no copy. The run appends the line before the
+// rename, because a run after a crash finds only the frames that are
+// still in the outbox.
 
 import (
 	"crypto/sha256"
@@ -39,36 +41,33 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/outbox"
 )
 
-// Camera is what the catalog line records of the camera that took a
-// frame: its telescope and its optical train. A frame's place in the
-// outbox names the camera and the reservation, and the operator passes
-// the rest.
+// Camera is the telescope and optical train that the run writes into
+// the catalog line of each frame from a camera. The frame's path gives
+// only the camera's name.
 type Camera struct {
 	Telescope string `json:"telescope"`
 	Train     string `json:"train,omitempty"`
 }
 
-// Options are what one run needs.
+// Options are the inputs of one run.
 type Options struct {
-	// Outbox and Archive are where the two claims are mounted. With
+	// Outbox and Archive are the mount paths of the two claims. With
 	// SameClaim they are the same directory.
 	Outbox    string
 	Archive   string
 	SameClaim bool
-	// Path is the target's archive.path, and Target its name.
-	Path   string
-	Target string
-	// Cameras holds each camera's telescope and train, by the camera's
-	// name.
+	// Path is the target's spec.archive.path, and Target is its name.
+	Path    string
+	Target  string
 	Cameras map[string]Camera
 
-	// after runs when a frame finishes a step, with the step and the
-	// file it wrote. A test returns an error from it to stop the run the
-	// way a killed pod stops, or changes the file.
+	// after, when set, is called each time a frame finishes a step, with
+	// the step and the file the step wrote. A test returns an error from
+	// it to stop the run as a killed pod would, or changes the file.
 	after func(step, file string) error
 }
 
-// The steps of a frame, in order.
+// The steps that after receives.
 const (
 	stepCopied   = "copied"
 	stepVerified = "verified"
@@ -77,7 +76,8 @@ const (
 	stepDeleted  = "deleted"
 )
 
-// run is the state of one run.
+// run is the state of one call to Run: the target's catalog, the file
+// that holds it, and the report that Run returns.
 type run struct {
 	Options
 	catalog     *catalog.Catalog
@@ -85,10 +85,10 @@ type run struct {
 	report      Report
 }
 
-// Run promotes every frame of the target in the outbox, and answers the
-// report. An error means the run stopped before it reached every frame,
-// such as a catalog that cannot be read. A frame that fails is reported
-// and does not stop the run.
+// Run promotes every frame of the target in the outbox. A frame that
+// fails is listed in the report and does not stop the run. Run returns
+// an error only when it cannot read the catalog or list the outbox, or
+// when the after hook returns one.
 func Run(o Options) (Report, error) {
 	r := &run{Options: o, catalogFile: filepath.Join(o.Archive, catalog.Path(o.Path, o.Target))}
 	var err error
@@ -108,12 +108,12 @@ func Run(o Options) (Report, error) {
 	return r.report, nil
 }
 
-// frames answers each .fits file in the target's directories of the
-// outbox, relative to the outbox's root, sorted by name. A hidden file
-// is not a frame.
+// frames returns the sorted path, relative to the outbox, of each .fits
+// file under the target's directories. It skips names that start with
+// ".", which are not frames.
 func (r *run) frames() ([]string, error) {
-	// A Target's name is a DNS subdomain, which holds no character of
-	// a pattern, so the pattern is valid.
+	// A Target name is a DNS subdomain, so it contains no glob
+	// metacharacter and the pattern is always valid.
 	dirs, _ := filepath.Glob(filepath.Join(r.Outbox, "*", "*", r.Target))
 	var frames []string
 	for _, dir := range dirs {
@@ -133,10 +133,10 @@ func (r *run) frames() ([]string, error) {
 	return frames, nil
 }
 
-// frame promotes one frame. It answers an error only to stop the run.
+// frame promotes one frame. It returns an error only to stop the run.
 func (r *run) frame(rel string) error {
-	// The walk finds only files below a target's directory, so the
-	// path parses.
+	// frames returns only files below a target's directory, so the path
+	// always parses.
 	place, _ := outbox.Parse(rel)
 	source := filepath.Join(r.Outbox, rel)
 	line, err := readFrame(source)
@@ -164,7 +164,7 @@ func (r *run) frame(rel string) error {
 	return nil
 }
 
-// frameRun is one frame's way through the steps.
+// frameRun is the state of one frame as it goes through the steps.
 type frameRun struct {
 	*run
 	rel    string
@@ -191,9 +191,10 @@ func (f *frameRun) promote() error {
 	}
 }
 
-// finishPlaced finishes a frame whose name in the archive holds a file:
-// a crash came after the rename. When the file is the frame, the run
-// records it if the crash came before the line, and deletes the frame.
+// finishPlaced handles a frame whose name in the archive already has a
+// file. When the file has the frame's hash, an earlier run crashed after
+// the rename, so finishPlaced appends the catalog line if it is missing
+// and deletes the frame. Otherwise it reports a name conflict.
 func (f *frameRun) finishPlaced(archived string, inCatalog bool) error {
 	sum, size, err := hashFile(f.source)
 	if err != nil {
@@ -210,9 +211,6 @@ func (f *frameRun) finishPlaced(archived string, inCatalog bool) error {
 	return f.delete()
 }
 
-// copy copies the frame to a .part file, reads the copy back, gives it
-// the frame's name, records it unless the catalog holds it, and
-// deletes the frame.
 func (f *frameRun) copy(recorded catalog.Line, inCatalog bool) error {
 	part := filepath.Join(filepath.Dir(f.target), "."+filepath.Base(f.target)+".part")
 	sum, size, err := copyFile(f.source, part)
@@ -246,20 +244,18 @@ func (f *frameRun) copy(recorded catalog.Line, inCatalog bool) error {
 	return f.delete()
 }
 
-// verifyError says why a frame failed to verify: the read-back failed,
-// the copy differs from the frame, or the frame differs from its line.
 func verifyError(err error, back, sum string, recorded catalog.Line) error {
 	switch {
 	case err != nil:
 		return err
 	case back != sum:
-		return fmt.Errorf("the copy read back as SHA-256 %s, and the frame read as %s", back, sum)
+		return fmt.Errorf("the copy has SHA-256 %s, and the frame has %s", back, sum)
 	}
-	return fmt.Errorf("the frame reads as SHA-256 %s, and its catalog line records %s", sum, recorded.SHA256)
+	return fmt.Errorf("the frame has SHA-256 %s, and its catalog line records %s", sum, recorded.SHA256)
 }
 
-// rename moves the frame within one claim. The line comes first,
-// because the rename takes the frame out of the outbox.
+// rename moves the frame within one claim. The package comment gives
+// the reason that it appends the catalog line first.
 func (f *frameRun) rename(recorded catalog.Line, inCatalog bool) error {
 	sum, size, err := hashFile(f.source)
 	if err != nil {
@@ -280,8 +276,8 @@ func (f *frameRun) rename(recorded catalog.Line, inCatalog bool) error {
 	return f.step(stepPlaced, f.target)
 }
 
-// place gives a file the frame's name in the archive and syncs both
-// directories.
+// place renames from to the frame's name in the archive. It returns
+// errNameTaken instead of replacing an existing file.
 func (f *frameRun) place(from string) error {
 	if err := os.MkdirAll(filepath.Dir(f.target), 0o755); err != nil {
 		return err
@@ -299,7 +295,6 @@ func (f *frameRun) placeFailed(err error) error {
 	return f.fail(f.rel, ReasonCopyFailed, err)
 }
 
-// record appends the frame's line to the catalog.
 func (f *frameRun) record(sum string, size int64) error {
 	f.line.SHA256, f.line.SizeBytes = sum, size
 	if err := catalog.Append(f.catalogFile, f.line); err != nil {
@@ -309,7 +304,6 @@ func (f *frameRun) record(sum string, size int64) error {
 	return f.step(stepRecorded, f.catalogFile)
 }
 
-// delete removes the frame from the outbox.
 func (f *frameRun) delete() error {
 	if err := os.Remove(f.source); err != nil {
 		return f.fail(f.rel, ReasonCopyFailed, err)
@@ -323,10 +317,9 @@ func (f *frameRun) delete() error {
 
 func (f *frameRun) conflict() error {
 	name := filepath.ToSlash(filepath.Join(f.Path, f.line.Path))
-	return f.fail(f.rel, ReasonNameConflict, fmt.Errorf("%s in the archive is another file", name))
+	return f.fail(f.rel, ReasonNameConflict, fmt.Errorf("the archive already has a different file at %s", name))
 }
 
-// step runs the test's after, if any.
 func (r *run) step(name, file string) error {
 	if r.after == nil {
 		return nil
@@ -334,28 +327,27 @@ func (r *run) step(name, file string) error {
 	return r.after(name, file)
 }
 
-// wait reports a frame that stays in the outbox with no fault.
+// wait lists a frame that stays in the outbox without a fault.
 func (r *run) wait(rel, reason, message string) {
 	r.report.Waiting = append(r.report.Waiting, Frame{File: rel, Reason: reason, Message: message})
 }
 
-// errFrameFailed ends the steps of one frame that failed, so no later
-// step runs: a frame whose line failed to append is not deleted. The
-// run goes on with the next frame (run.frame).
-var errFrameFailed = errors.New("the frame failed")
+// errFrameFailed stops the steps of a frame after fail has listed it, so
+// that, for example, a frame whose catalog line failed to append is not
+// deleted. run.frame turns it into nil and the run goes on to the next
+// frame.
+var errFrameFailed = errors.New("the frame is listed as failed in the report")
 
-// fail reports a frame that the run failed to promote, and answers
-// errFrameFailed.
 func (r *run) fail(rel, reason string, err error) error {
 	r.report.Failures = append(r.report.Failures, Frame{File: rel, Reason: reason, Message: err.Error()})
 	r.report.Left++
 	return errFrameFailed
 }
 
-// copyFile copies a file to a new file, hashing the bytes as it reads
-// them, and syncs the copy. The copy is created with O_EXCL after any
-// earlier copy of the same name is removed, so a .part file that a
-// crash left never mixes with this one.
+// copyFile copies from to to, syncs the copy, and returns the SHA-256 of
+// the bytes it read and the size. It removes any earlier file at to and
+// creates the new one with O_EXCL, so a .part file that a crash left
+// never mixes with this copy.
 func copyFile(from, to string) (string, int64, error) {
 	source, err := os.Open(from)
 	if err != nil {
@@ -387,7 +379,6 @@ func copyFile(from, to string) (string, int64, error) {
 	return hex.EncodeToString(hash.Sum(nil)), size, nil
 }
 
-// hashFile answers a file's SHA-256 and size.
 func hashFile(name string) (string, int64, error) {
 	file, err := os.Open(name)
 	if err != nil {
@@ -402,8 +393,8 @@ func hashFile(name string) (string, int64, error) {
 	return hex.EncodeToString(hash.Sum(nil)), size, nil
 }
 
-// hashIfExists answers a file's SHA-256, and "" when no file holds the
-// name.
+// hashIfExists returns a file's SHA-256, or "" when the file does not
+// exist.
 func hashIfExists(name string) (string, error) {
 	sum, _, err := hashFile(name)
 	if errors.Is(err, fs.ErrNotExist) {

@@ -1,11 +1,11 @@
 package main
 
 // The Deployments and Services that the operator creates for the
-// solvers and the workers, and what it reads of their pods. The pod's
-// parts are the promotion Jobs' types of promotionobjects.go, so a pod
-// template has one shape in the operator. Each type holds only the
-// fields the operator writes or reads, in the wire format of the
-// Kubernetes API.
+// solvers and the workers, and the pod status that it reads. The pod
+// template types are the ones that promotionobjects.go defines for the
+// promotion Jobs, so the operator has one pod template type. Each type
+// has only the fields that the operator writes or reads, in the JSON
+// form of the Kubernetes API.
 
 import (
 	"github.com/liken-sh/liken/astrophotography-operator/astrophotography"
@@ -29,7 +29,7 @@ type deployment struct {
 	Spec       deploymentSpec `json:"spec"`
 }
 
-// GetObjectMeta answers the metadata, for the memo of the operator's
+// GetObjectMeta returns the metadata, for the memo of the operator's
 // writes (workload.go).
 func (d *deployment) GetObjectMeta() memo.Meta { return &d.Metadata.ObjectMeta }
 
@@ -74,7 +74,7 @@ type service struct {
 	Spec       serviceSpec `json:"spec"`
 }
 
-// GetObjectMeta answers the metadata, for the memo of the operator's
+// GetObjectMeta returns the metadata, for the memo of the operator's
 // writes (workload.go).
 func (s *service) GetObjectMeta() memo.Meta { return &s.Metadata.ObjectMeta }
 
@@ -86,13 +86,14 @@ type serviceSpec struct {
 type servicePort struct {
 	Name string `json:"name"`
 	Port int32  `json:"port"`
-	// TargetPort names the container's port. The operator always names
-	// it, so the text form is enough.
+	// TargetPort is the container port's name. The operator always uses
+	// a name, never a number, so a string is enough.
 	TargetPort string `json:"targetPort"`
 }
 
-// ready reports whether the kubelet reports the pod Ready: every
-// container runs and passes its readiness probe.
+// ready reports whether the pod has the condition Ready=True, which
+// means every container runs and passes its readiness probe. A pod that
+// is being deleted is not ready.
 func (p *podObject) ready() bool {
 	if p.Metadata.DeletionTimestamp != nil {
 		return false
@@ -101,45 +102,45 @@ func (p *podObject) ready() bool {
 	return ready
 }
 
-// waiting answers the scheduler's message while no node fits the pod,
-// such as when its claim is bound on another node or missing, and ""
-// otherwise.
+// waiting returns the scheduler's message when no node fits the pod,
+// such as when its claim is bound on another node or does not exist.
+// It returns "" when the pod is scheduled.
 func (p *podObject) waiting() string {
 	scheduled, _ := condition(p.Status.Conditions, "PodScheduled", "False")
 	return scheduled.Message
 }
 
-// The labels of every object the operator creates for a resource: the
-// operator's own label, which its watches select, and the resource
-// that the object serves, which the Deployment's selector and the
-// Service select.
+// workloadLabels returns the labels of every object that the operator
+// creates for a resource. The managed-by label is what the operator's
+// watches select. The label for the resource's role and name is what
+// the Deployment's selector and the Service select.
 func workloadLabels(role, name string) map[string]string {
 	return map[string]string{labelManagedBy: managedBy, astrophotography.Group + "/" + role: name}
 }
 
-// The user and group of every pod the operator runs as a workload:
-// 1000, the user of observatory-operator's drivers, so the worker can
-// delete a centering frame that a driver wrote. The kubelet gives a
-// volume to the group, as it does for the camera's pod.
-const driverGroup = 1000
+// driverID is the user and group ID of every workload pod. It matches
+// the user of observatory-operator's drivers, so the worker can delete a
+// centering frame that a driver wrote. The kubelet makes each volume
+// writable by this group, as it does for the camera's pod.
+const driverID = 1000
 
 func workloadSecurity() *podSecurity {
 	return &podSecurity{
-		RunAsUser: driverGroup, RunAsGroup: driverGroup, RunAsNonRoot: true,
-		FSGroup: driverGroup, FSGroupChangePolicy: "OnRootMismatch",
+		RunAsUser: driverID, RunAsGroup: driverID, RunAsNonRoot: true,
+		FSGroup: driverID, FSGroupChangePolicy: "OnRootMismatch",
 		SeccompProfile: &seccompProfile{Type: "RuntimeDefault"},
 	}
 }
 
-// solverSecurity is workloadSecurity with no fsGroup.
+// solverSecurity is workloadSecurity without fsGroup.
 func solverSecurity() *podSecurity {
 	security := workloadSecurity()
 	security.FSGroup, security.FSGroupChangePolicy = 0, ""
 	return security
 }
 
-// restricted is the security context of every workload container: a
-// read-only root and no capability.
+// restricted is the security context of every workload container. It
+// has a read-only root filesystem and drops all capabilities.
 func restricted() *containerSecurity {
 	return &containerSecurity{ReadOnlyRootFilesystem: true, Capabilities: &capabilities{Drop: []string{"ALL"}}}
 }

@@ -1,8 +1,8 @@
 package promote
 
-// The promote mode against an outbox and an archive in t.TempDir(). A
-// frame must end in exactly one verified place in the archive, with
-// exactly one catalog line, whatever step a crash interrupts.
+// These tests run Run against an outbox and an archive in t.TempDir().
+// After a crash at any step and a second run, the frame must be in the
+// archive once, with one catalog line.
 
 import (
 	"crypto/sha256"
@@ -31,14 +31,14 @@ func TestAFrameMovesToTheArchiveWithItsLine(t *testing.T) {
 	report, err := Run(w.options())
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the promotion: %v", err)
 	}
 	wantFiles := map[string]string{"astro/M42/2026-10-12/Luminance/M42_Luminance_300s_4f2a9c01d3e7.fits": string(frame)}
 	if got := w.files(filepath.Join(w.archive)); !reflect.DeepEqual(withoutCatalog(got), wantFiles) {
-		t.Errorf("the archive holds %v", keys(got))
+		t.Errorf("the archive holds %v, want only the frame", keys(got))
 	}
 	if got := w.files(w.outbox); len(got) != 0 {
-		t.Errorf("the outbox still holds %v", keys(got))
+		t.Errorf("the outbox holds %v, want no files", keys(got))
 	}
 	lines, _ := w.catalogLines()
 	want := catalog.Line{
@@ -77,8 +77,8 @@ func keys(files map[string]string) []string {
 
 var errCrash = errors.New("the pod was killed")
 
-// crashAt answers options whose run stops after one step, the way a
-// pod that the kubelet kills stops.
+// crashAt returns options whose run stops after step, as it would when
+// the pod is killed.
 func crashAt(o Options, step string) Options {
 	o.after = func(done string, _ string) error {
 		if done == step {
@@ -119,23 +119,23 @@ func TestACrashAtEachStepThenARerunLosesNothingAndRecordsOnce(t *testing.T) {
 			w.expose("M42_0001", frame)
 
 			if _, err := Run(crashAt(options, c.step)); !errors.Is(err, errCrash) {
-				t.Fatalf("the first run answered %v, want the crash", err)
+				t.Fatalf("the first run returned %v, want the crash", err)
 			}
 			report, err := Run(options)
 
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("running the promotion again: %v", err)
 			}
 			archived := w.files(filepath.Join(w.archive, "astro"))
 			_, counts := w.catalogLines()
 			if archived["M42_0001.fits"] != string(frame) || counts[frameID] != 1 || len(withoutCatalogDir(archived)) != 1 {
-				t.Errorf("the archive holds %v and %d lines of the frame", keys(archived), counts[frameID])
+				t.Errorf("the archive holds %v and %d catalog lines of the frame, want the frame once and one line", keys(archived), counts[frameID])
 			}
 			if _, err := os.Stat(filepath.Join(w.outbox, "east-main", "east-tonight", "m42", "M42_0001.fits")); !os.IsNotExist(err) {
-				t.Errorf("the frame is still in the outbox: %v", err)
+				t.Errorf("the frame is in the outbox, want it deleted: %v", err)
 			}
 			if report.Left != 0 || len(report.Totals) != 1 || report.Totals[0].Frames != 1 {
-				t.Errorf("the report is %+v", report)
+				t.Errorf("the report is %+v, want no frames left and one in the totals", report)
 			}
 		})
 	}
@@ -151,8 +151,6 @@ func withoutCatalogDir(files map[string]string) map[string]string {
 	return out
 }
 
-// On the same claim the frame moves by a rename: no byte is copied, and
-// the outbox's directory no longer holds it.
 func TestTheSameClaimRenames(t *testing.T) {
 	w := newWorld(t)
 	w.archive = w.outbox
@@ -162,26 +160,26 @@ func TestTheSameClaimRenames(t *testing.T) {
 	rel := w.expose("M42_0001", frame)
 	before, err := os.Stat(filepath.Join(w.outbox, rel))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the outbox file: %v", err)
 	}
 
 	report, err := Run(options)
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the promotion: %v", err)
 	}
 	after, err := os.Stat(filepath.Join(w.outbox, "astro", "M42_0001.fits"))
 	if err != nil || !os.SameFile(before, after) {
-		t.Errorf("the archive's file is not the outbox's file renamed: %v", err)
+		t.Errorf("the archive's file is not the outbox file renamed, want the same file: %v", err)
 	}
 	if report.Promoted != 1 || report.Bytes != 0 {
 		t.Errorf("the report is %+v, want one frame and no bytes copied", report)
 	}
 }
 
-// A name never replaces a file. Another file under the frame's name
-// stays, the frame stays, and the report names the conflict.
-func TestANameThatAnotherFileHoldsIsAConflict(t *testing.T) {
+// When another file already has the frame's name in the archive, both
+// files stay where they are, and the report lists a name conflict.
+func TestAnArchiveNameInUseByAnotherFileIsAConflict(t *testing.T) {
 	cases := []struct {
 		name      string
 		sameClaim bool
@@ -203,26 +201,26 @@ func TestANameThatAnotherFileHoldsIsAConflict(t *testing.T) {
 			report, err := Run(options)
 
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("running the promotion: %v", err)
 			}
 			wantFailures := []Frame{{File: rel, Reason: ReasonNameConflict,
-				Message: "astro/M42_0001.fits in the archive is another file"}}
+				Message: "the archive already has a different file at astro/M42_0001.fits"}}
 			if !reflect.DeepEqual(report.Failures, wantFailures) || report.Left != 1 {
-				t.Errorf("the report is %+v", report)
+				t.Errorf("the report is %+v, want one name conflict and one frame left", report)
 			}
 			if w.files(filepath.Join(w.archive, "astro"))["M42_0001.fits"] != string(other) {
-				t.Error("the archive's file changed")
+				t.Error("the archive's file changed, want it unchanged")
 			}
 			if w.files(w.outbox)[rel] != string(frame) {
-				t.Error("the frame left the outbox")
+				t.Error("the frame left the outbox, want it kept")
 			}
 		})
 	}
 }
 
-// A file that takes the frame's name while the frame copies is not
-// replaced: the rename refuses, the copy goes, and the frame stays.
-func TestAFileThatTakesTheNameDuringTheCopyIsAConflict(t *testing.T) {
+// When another file takes the frame's name during the copy, the rename
+// does not replace it, and the frame stays in the outbox.
+func TestAFileCreatedAtTheNameDuringTheCopyIsAConflict(t *testing.T) {
 	w := newWorld(t)
 	options := w.options()
 	other := []byte("a file another writer put there")
@@ -237,40 +235,39 @@ func TestAFileThatTakesTheNameDuringTheCopyIsAConflict(t *testing.T) {
 	report, err := Run(options)
 
 	if err != nil || len(report.Failures) != 1 || report.Failures[0].Reason != ReasonNameConflict {
-		t.Errorf("the report is %+v, %v", report, err)
+		t.Errorf("the report is %+v, %v, want one name conflict and no error", report, err)
 	}
 	if archived := w.files(filepath.Join(w.archive, "astro")); len(archived) != 1 || archived["M42_0001.fits"] != string(other) {
-		t.Errorf("the archive holds %v", keys(archived))
+		t.Errorf("the archive holds %v, want only the other writer's file", keys(archived))
 	}
 	if _, err := os.Stat(filepath.Join(w.outbox, rel)); err != nil {
-		t.Errorf("the frame left the outbox: %v", err)
+		t.Errorf("the frame left the outbox, want it kept: %v", err)
 	}
 }
 
-// A file in the archive that a person changed after its line was
-// recorded is not the frame, so the frame stays in the outbox.
+// When the archived file changes after its catalog line is appended,
+// its hash differs from the line, so the frame stays in the outbox.
 func TestAnArchivedFileThatDiffersFromItsLineIsAConflict(t *testing.T) {
 	w := newWorld(t)
 	frame := lightFrame(frameID)
 	rel := w.expose("M42_0001", frame)
 	if _, err := Run(crashAt(w.options(), stepRecorded)); !errors.Is(err, errCrash) {
-		t.Fatal(err)
+		t.Fatalf("running the first promotion: %v", err)
 	}
 	w.write(filepath.Join(w.archive, "astro", "M42_0001.fits"), []byte("edited"))
 
 	report, err := Run(w.options())
 
 	if err != nil || len(report.Failures) != 1 || report.Failures[0].Reason != ReasonNameConflict {
-		t.Errorf("the report is %+v, %v", report, err)
+		t.Errorf("the report is %+v, %v, want one name conflict and no error", report, err)
 	}
 	if w.files(w.outbox)[rel] != string(frame) {
-		t.Error("the frame left the outbox")
+		t.Error("the frame left the outbox, want it kept")
 	}
 }
 
-// The copy is read back and hashed before it takes the frame's name.
-// A copy whose bytes changed on the way is removed, and the frame
-// stays.
+// A copy whose bytes change before it is read back is removed, and the
+// frame stays in the outbox.
 func TestACopyThatReadsBackDifferentlyFails(t *testing.T) {
 	w := newWorld(t)
 	options := w.options()
@@ -286,20 +283,19 @@ func TestACopyThatReadsBackDifferentlyFails(t *testing.T) {
 	report, err := Run(options)
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the promotion: %v", err)
 	}
 	if len(report.Failures) != 1 || report.Failures[0].Reason != ReasonVerifyFailed || report.Left != 1 {
-		t.Errorf("the report is %+v", report)
+		t.Errorf("the report is %+v, want one verification failure and one frame left", report)
 	}
 	if archived := w.files(w.archive); len(archived) != 0 {
-		t.Errorf("the archive holds %v", keys(archived))
+		t.Errorf("the archive holds %v, want no files", keys(archived))
 	}
 	if w.files(w.outbox)[rel] != string(frame) {
-		t.Error("the frame left the outbox")
+		t.Error("the frame left the outbox, want it kept")
 	}
 }
 
-// A copy that cannot be read back is not verified, so the frame stays.
 func TestACopyThatCannotBeReadBackFails(t *testing.T) {
 	w := newWorld(t)
 	options := w.options()
@@ -314,16 +310,17 @@ func TestACopyThatCannotBeReadBackFails(t *testing.T) {
 	report, err := Run(options)
 
 	if err != nil || len(report.Failures) != 1 || report.Failures[0].Reason != ReasonVerifyFailed {
-		t.Errorf("the report is %+v, %v", report, err)
+		t.Errorf("the report is %+v, %v, want one verification failure and no error", report, err)
 	}
 	if _, err := os.Stat(filepath.Join(w.outbox, rel)); err != nil {
-		t.Errorf("the frame left the outbox: %v", err)
+		t.Errorf("the frame left the outbox, want it kept: %v", err)
 	}
 }
 
-// A frame that the driver still writes, or never finished, waits. A
-// file with no FRAMEID is not this operator's frame, and waits outside
-// the count of frames left.
+// A frame that is still being written, or was never finished, stays in
+// the outbox and is listed as waiting. A file with no FRAMEID was not
+// written by this operator. It waits too, but report.Left does not
+// count it.
 func TestFramesThatCannotMoveYetWait(t *testing.T) {
 	w := newWorld(t)
 	cut := w.expose("M42_0001", lightFrame(frameID)[:3000])
@@ -335,7 +332,7 @@ func TestFramesThatCannotMoveYetWait(t *testing.T) {
 	report, err := Run(w.options())
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the promotion: %v", err)
 	}
 	want := []Frame{
 		{File: cut, Reason: ReasonIncomplete, Message: "the file holds 3000 of 5760 bytes"},
@@ -343,33 +340,32 @@ func TestFramesThatCannotMoveYetWait(t *testing.T) {
 		{File: headerCut, Reason: ReasonIncomplete, Message: "the file ends inside its header"},
 	}
 	if !reflect.DeepEqual(report.Waiting, want) || report.Left != 2 {
-		t.Errorf("the report is %+v", report)
+		t.Errorf("the report is %+v, want the waiting frames and two left", report)
 	}
 }
 
-// The totals count the whole catalog, not only what this run moved.
 func TestTheTotalsCountTheWholeCatalog(t *testing.T) {
 	w := newWorld(t)
 	earlier := catalog.Line{Record: catalog.RecordFrame, FrameID: "earlier",
 		Settings: catalog.Settings{Filter: "Luminance", ExposureSeconds: 300, Binning: 1, Gain: number(100), Offset: number(10)}}
 	if err := catalog.Append(filepath.Join(w.archive, "astro", "catalog", "m42.jsonl"), earlier); err != nil {
-		t.Fatal(err)
+		t.Fatalf("appending the earlier catalog line: %v", err)
 	}
 	w.expose("M42_0001", lightFrame(frameID))
 
 	report, err := Run(w.options())
 
 	if err != nil || len(report.Totals) != 1 || report.Totals[0].Frames != 2 || report.Promoted != 1 {
-		t.Errorf("the report is %+v, %v", report, err)
+		t.Errorf("the report is %+v, %v, want two frames in the totals and one promoted", report, err)
 	}
 }
 
 func TestACatalogThatCannotBeReadStopsTheRun(t *testing.T) {
 	w := newWorld(t)
 	if err := os.MkdirAll(filepath.Join(w.archive, "astro", "catalog", "m42.jsonl"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the catalog path a directory: %v", err)
 	}
 	if _, err := Run(w.options()); err == nil {
-		t.Error("the run answered no error")
+		t.Error("the run returned no error, want one for the unreadable catalog")
 	}
 }

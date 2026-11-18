@@ -1,10 +1,5 @@
 package main
 
-// The runner's series of layer 3 (root plan 65): the frames it counted,
-// the exposures that gave no frame, and the time it spends on the
-// settings before each exposure. A scrape reads them from memory; the
-// runner sets each one when the fact happens.
-
 import "github.com/prometheus/client_golang/prometheus"
 
 type runnerMetrics struct {
@@ -13,7 +8,6 @@ type runnerMetrics struct {
 	preparation      prometheus.Histogram
 }
 
-// newRunnerMetrics builds the runner's series and registers them.
 func newRunnerMetrics(registry *prometheus.Registry) *runnerMetrics {
 	m := &runnerMetrics{
 		framesExposed: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -22,11 +16,10 @@ func newRunnerMetrics(registry *prometheus.Registry) *runnerMetrics {
 		}, []string{"namespace", "target"}),
 		exposureFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: metricsPrefix + "exposure_failures_total",
-			Help: "Exposures that gave no frame: the driver answered Alert, did not finish in time, or saved the frame elsewhere, by target.",
+			Help: "Exposures that saved no frame because the driver reported Alert, did not finish in time, or saved the frame elsewhere, by target.",
 		}, []string{"namespace", "target"}),
-		// Plan 20's drill measured 2 to 43 ms for each settled keyword,
-		// so a frame's settings take tens of milliseconds, and a turn of
-		// the filter wheel takes seconds.
+		// Writing the keywords takes milliseconds and turning the filter
+		// wheel takes seconds, so the buckets run from 10 ms to 164 s.
 		preparation: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    metricsPrefix + "frame_preparation_seconds",
 			Help:    "How long the settings before one exposure take: the upload, the frame type, the filter, and the keywords.",

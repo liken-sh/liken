@@ -1,8 +1,7 @@
 package main
 
-// The end of a reservation's claim of a target: the reservation ends,
-// a person suspends or deletes the target, or the target cannot be
-// imaged on this reservation.
+// Releasing a claimed target: the reservation ends, a person suspends
+// or deletes the target, or the target cannot be imaged.
 
 import (
 	"slices"
@@ -14,18 +13,17 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The reservation ends during an exposure: observatory-operator's StopWork
-// step stops the devices. The runner stops, and the target's claim and
-// its frame in flight are cleared, with Imaging False and Waiting. The
-// frame does not count, even when the driver wrote it: the promotion
-// finds it in the outbox. A release that the API server refuses is
-// tried again.
+// The reservation ends during an exposure. The runner stops, clears the
+// target's claim and frame in flight, and sets Imaging to False with
+// Waiting. The frame does not count even when the driver wrote it,
+// because promotion finds it in the outbox. A release that the API
+// server refuses is retried.
 func TestAReservationThatEndsReleasesItsTarget(t *testing.T) {
 	cases := []struct {
 		name    string
 		refused int
 	}{
-		{"the release lands", 0},
+		{"the release is written", 0},
 		{"the API server refuses the release once", 1},
 	}
 	for _, c := range cases {
@@ -33,16 +31,16 @@ func TestAReservationThatEndsReleasesItsTarget(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				w := newWorld(t)
 				w.put(targetsPath, target("m42", lights(3)))
-				w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+				w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 				w.playCamera(t, saves)
 				w.start(t)
 				waitUntil(t, w.inFlight(t, "m42"))
 				w.api.mu.Lock()
 				w.api.failStatus = c.refused
 				w.api.mu.Unlock()
-				w.put(reservationsPath, readyOrNot(observatory.ReservationDeactivating))
+				w.put(reservationsPath, reservationIn(observatory.ReservationDeactivating))
 				waitUntil(t, func() bool { return w.imaging(t, "m42") == "False Waiting" })
-				waitUntil(t, func() bool { return len(w.worker.held()) == 1 })
+				waitUntil(t, func() bool { return len(w.worker.outboxFrames()) == 1 })
 
 				status := w.targetNow(t, "m42").Status
 				if status.Reservation != "" || status.Exposure != nil {
@@ -66,7 +64,7 @@ func TestASuspendedTargetIsReleasedAfterItsFrame(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		w.put(targetsPath, target("m42", lights(3)))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.playCamera(t, saves)
 		w.start(t)
 		waitUntil(t, w.inFlight(t, "m42"))
@@ -82,34 +80,34 @@ func TestASuspendedTargetIsReleasedAfterItsFrame(t *testing.T) {
 	})
 }
 
-// A person deletes a target during an exposure, and the runner ends
-// its work on it with no write.
+// A target with no finalizer is removed during an exposure, and the
+// runner exposes no further frame of it.
 func TestADeletedTargetEndsTheWork(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		w.put(targetsPath, target("m42", lights(3)))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.playCamera(t, saves)
 		w.start(t)
 		waitUntil(t, w.inFlight(t, "m42"))
 		w.api.remove(targetsPath, ns, "m42")
 		time.Sleep(time.Hour)
 		synctest.Wait()
-		if got := len(w.worker.held()); got != 1 {
+		if got := len(w.worker.outboxFrames()); got != 1 {
 			t.Errorf("%d frames, want the one in flight", got)
 		}
 	})
 }
 
-// A person deletes a target during an exposure, and its finalizer holds
-// the delete. The runner counts the frame in flight, releases the
-// target with Deleting, and exposes no more of it. The target goes when
-// promotion has moved the frame.
+// A person deletes a target during an exposure, and its finalizer
+// delays the delete. The runner counts the frame in flight, releases
+// the target with Deleting, and exposes no more of it. The delete
+// finishes after promotion has moved the frame.
 func TestADeletedTargetIsReleasedAfterItsFrame(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		w.put(targetsPath, target("m42", lights(3)))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.playCamera(t, saves)
 		w.start(t)
 		waitUntil(t, w.inFlight(t, "m42"))
@@ -120,19 +118,20 @@ func TestADeletedTargetIsReleasedAfterItsFrame(t *testing.T) {
 			t.Errorf("reservation %q, pending %v; want none and [1]", status.Reservation, pendingOf(status))
 		}
 
-		// Promotion moves the frame, the way a report empties the outbox.
+		// Clear status.outboxes, as promotion does when it has moved the
+		// frame.
 		promoted := w.targetNow(t, "m42")
 		promoted.Status.Outboxes = nil
 		w.put(targetsPath, promoted)
 		waitUntil(t, func() bool { return w.api.get(targetsPath, ns, "m42") == nil })
-		if got := len(w.worker.held()); got != 1 {
+		if got := len(w.worker.outboxFrames()); got != 1 {
 			t.Errorf("%d frames, want the one in flight", got)
 		}
 	})
 }
 
-// A target that the runner cannot image leaves the reservation with a
-// reason, and the runner takes the next target.
+// A target that the runner cannot image is released with a reason,
+// and the runner claims the next target.
 func TestATargetThatCannotBeImagedIsReleased(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -153,7 +152,7 @@ func TestATargetThatCannotBeImagedIsReleased(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				w := newWorld(t)
-				first, res := target("a-broken", lights(1)), readyOrNot(observatory.ReservationReady)
+				first, res := target("a-broken", lights(1)), reservationIn(observatory.ReservationReady)
 				c.change(first, res)
 				w.put(targetsPath, first)
 				w.put(targetsPath, target("b-next", astrophotography.Sequence{Exposure: "10s", Count: 1}))
@@ -176,10 +175,10 @@ func TestATargetThatCannotBeImagedIsReleased(t *testing.T) {
 // claimsOf counts the claims of a target in the API server's history:
 // each change of status.reservation from none to this night's
 // reservation.
-func (w *night) claimsOf(name string) int {
+func (w *runnerWorld) claimsOf(name string) int {
 	w.api.mu.Lock()
 	defer w.api.mu.Unlock()
-	claims, held := 0, ""
+	claims, claimedBy := 0, ""
 	for _, e := range w.api.events {
 		metadata, _ := e.object["metadata"].(map[string]any)
 		if e.collection != targetsPath || metadata["namespace"] != ns || metadata["name"] != name {
@@ -187,10 +186,10 @@ func (w *night) claimsOf(name string) int {
 		}
 		status, _ := e.object["status"].(map[string]any)
 		reservation, _ := status["reservation"].(string)
-		if held == "" && reservation == tonight {
+		if claimedBy == "" && reservation == tonight {
 			claims++
 		}
-		held = reservation
+		claimedBy = reservation
 	}
 	return claims
 }
@@ -201,17 +200,17 @@ func (w *night) claimsOf(name string) int {
 func TestAFailedTargetStaysReleased(t *testing.T) {
 	cases := []struct {
 		name   string
-		after  func(*testing.T, *night)
+		after  func(*testing.T, *runnerWorld)
 		claims int
 		want   string
-		// failed is the reservation that status.failed names after.
+		// failed is the reservation that status.failed names at the end.
 		failed string
 	}{
-		{"after a restart", func(t *testing.T, w *night) {
+		{"after a restart", func(t *testing.T, w *runnerWorld) {
 			w.stop()
 			w.start(t)
 		}, 1, "False " + astrophotography.ReasonNoFilter, tonight},
-		{"until an edit of the spec", func(t *testing.T, w *night) {
+		{"until an edit of the spec", func(t *testing.T, w *runnerWorld) {
 			fixed := w.targetNow(t, "m42")
 			fixed.Spec.Sequences[0].Filter = "Luminance"
 			fixed.Metadata.Generation = 2
@@ -225,7 +224,7 @@ func TestAFailedTargetStaysReleased(t *testing.T) {
 				broken := target("m42", lights(1))
 				broken.Spec.Sequences[0].Filter = "H_Beta"
 				w.put(targetsPath, broken)
-				w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+				w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 				w.playCamera(t, saves)
 				w.start(t)
 				waitUntil(t, func() bool { return w.imaging(t, "m42") == "False "+astrophotography.ReasonNoFilter })
@@ -256,19 +255,19 @@ func failedReservation(t *astrophotography.Target) string {
 }
 
 // The end of the reservation clears its failures, so a new reservation
-// of the same name claims the target again.
+// with the same name can claim the target again.
 func TestTheEndOfAReservationClearsItsFailures(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		broken := target("m42", lights(1))
 		broken.Spec.Sequences[0].Filter = "H_Beta"
 		w.put(targetsPath, broken)
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.playCamera(t, saves)
 		w.start(t)
 		waitUntil(t, func() bool { return failedReservation(w.targetNow(t, "m42")) == tonight })
 
-		w.put(reservationsPath, readyOrNot(observatory.ReservationDeactivating))
+		w.put(reservationsPath, reservationIn(observatory.ReservationDeactivating))
 		waitUntil(t, func() bool { return failedReservation(w.targetNow(t, "m42")) == "" })
 	})
 }
@@ -276,7 +275,7 @@ func TestTheEndOfAReservationClearsItsFailures(t *testing.T) {
 // A session with no imaging camera for the target fails it with
 // NoTrain, before the runner reads a device.
 func TestASessionWithNoCameraForTheTarget(t *testing.T) {
-	res := readyOrNot(observatory.ReservationReady)
+	res := reservationIn(observatory.ReservationReady)
 	res.Status.Session.Devices = nil
 	_, err := (&runner{res: res}).prepare(target("m42", lights(1)))
 	if failure, ok := err.(*imagingFailure); !ok || failure.reason != astrophotography.ReasonNoTrain {
@@ -285,17 +284,17 @@ func TestASessionWithNoCameraForTheTarget(t *testing.T) {
 }
 
 // Another writer gives the target to another reservation during an
-// exposure. The runner counts its frame, and then ends its work on the
-// target, because the claim is no longer its own.
-func TestATargetThatAnotherWriterTakesEndsTheWork(t *testing.T) {
+// exposure. The runner counts its frame and then stops work on the
+// target.
+func TestATargetThatAnotherWriterClaimsEndsTheWork(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
-		west := readyOrNot(observatory.ReservationReady)
+		west := reservationIn(observatory.ReservationReady)
 		west.Metadata = meta("west-tonight")
 		west.Status.Session.Devices = nil
 		w.put(reservationsPath, west)
 		w.put(targetsPath, target("m42", lights(3)))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.playCamera(t, saves)
 		w.start(t)
 		waitUntil(t, w.inFlight(t, "m42"))
@@ -311,18 +310,19 @@ func TestATargetThatAnotherWriterTakesEndsTheWork(t *testing.T) {
 	})
 }
 
-// Another writer takes the target between the runner's read and its
-// record of the next frame: the record meets a 409, finds the claim
-// gone, and the runner exposes nothing more of the target.
+// Another writer claims the target after the runner reads it and
+// before the runner writes status.exposure for the next frame. That
+// write gets a 409, the runner reads the target again and finds the
+// claim gone, and it exposes no frame.
 func TestAClaimLostBeforeTheRecordExposesNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
-		west := readyOrNot(observatory.ReservationReady)
+		west := reservationIn(observatory.ReservationReady)
 		west.Metadata = meta("west-tonight")
 		west.Status.Session.Devices = nil
 		w.put(reservationsPath, west)
 		w.put(targetsPath, target("m42", lights(1)))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.playCamera(t, saves)
 		taken := false
 		w.api.beforeStatus = func(_, key string, body map[string]any) bool {
@@ -339,8 +339,8 @@ func TestAClaimLostBeforeTheRecordExposesNothing(t *testing.T) {
 		w.start(t)
 		time.Sleep(time.Hour)
 		synctest.Wait()
-		if !taken || len(w.worker.held()) != 0 {
-			t.Errorf("taken %v, %d frames; want the record refused and no frame", taken, len(w.worker.held()))
+		if !taken || len(w.worker.outboxFrames()) != 0 {
+			t.Errorf("taken %v, %d frames; want the record refused and no frame", taken, len(w.worker.outboxFrames()))
 		}
 	})
 }

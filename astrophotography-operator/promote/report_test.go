@@ -27,9 +27,8 @@ func TestTheWireFormOfAReport(t *testing.T) {
 	}
 }
 
-// Plan 03 states that the termination message's 4,096 bytes fit about
-// 25 sequences. The largest totals that MaxTotals allows, with room for
-// a few frames that wait, must fit.
+// The largest set of totals that MaxTotals allows, with a few waiting
+// frames, must fit in the termination message.
 func TestMaxTotalsFitInTheTerminationMessage(t *testing.T) {
 	total := Total{Settings: catalog.Settings{
 		Filter: strings.Repeat("H", 24), ExposureSeconds: 1234.5, Binning: 16, Gain: number(65535), Offset: number(65535),
@@ -47,8 +46,8 @@ func TestMaxTotalsFitInTheTerminationMessage(t *testing.T) {
 	}
 }
 
-// A night of many frames that wait, or of many combinations of
-// settings, still fits: Fit keeps the first totals and as many frames
+// A report with many waiting frames or many combinations of settings
+// still fits after Fit. Fit keeps the first totals and as many frames
 // as fit, and Left still counts every frame.
 func TestFitCutsAReportToTheTerminationMessage(t *testing.T) {
 	report := Report{Left: 100}

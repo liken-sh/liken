@@ -13,8 +13,8 @@ recorded when the frame reached the archive.
 
 You need:
 
-* A `Target` with frames in its archive. `kubectl get target` shows
-  them in `PROGRESS`, and `status.sequences` counts them as
+* A `Target` with frames in its archive. `kubectl get target` counts
+  them in the `PROGRESS` column, and `status.sequences` counts them as
   `archived`.
 * `kubectl` access to the target's namespace. This guide uses the
   target `m42` in `observatory`.
@@ -48,19 +48,19 @@ astro/
         M42_Red_300s_20261014T034412Z_c0a17e2f9b44.fits
 ```
 
-A frame reaches the archive only after the promotion `Job` has
-checked it. Until then it waits in the reservation's outbox, at
+A frame is in the archive only after a promotion `Job` has copied it
+and checked the copy. Until then it is in the reservation's outbox, at
 `/outbox/<Camera>/<Reservation>/<Target>/<name>.fits`, and the target
 counts it as `pending`.
 
 ## Choose the file names
 
-`spec.archive.format` is each frame's file name, relative to
-`archive.path`, with no extension. Each `/` makes a directory. The
-operator renders the name before each exposure, the camera writes the
-frame under that name, and the frame keeps it in the archive. A new
-format names the next frames, and the frames already taken keep their
-names.
+`spec.archive.format` is the template for each frame's file name,
+relative to `archive.path` and without the extension. Each `/` starts
+a directory. The operator fills in the tokens before each exposure,
+the camera writes the frame under that name, and promotion never
+renames it. When you change the format, only the frames taken after
+the change get the new names.
 
 | Token | Value |
 |---|---|
@@ -77,26 +77,26 @@ names.
 | `{n}` | the frame's number in its sequence, with four digits |
 | `{frameid}` | the frame's `FRAMEID`, a UUIDv7 |
 
-The rest of the format can hold letters, digits, `.`, `_`, `+`, `-`,
-and `/`. Each other character in a token's value becomes `_`, so an
-object named `M 42` gives `M_42`.
+Outside the tokens, the format can contain letters, digits, `.`, `_`,
+`+`, `-`, and `/`. In a token's value, every other character becomes
+`_`, so an object named `M 42` gives `M_42`.
 
-`{night}` gives one date to every frame of a night, even after
-midnight. It is the local mean solar date at the observatory's
-longitude, from `spec.location.longitude` of the `Observatory`, 12
-hours before the exposure. So every frame from noon to the next noon
-at the observatory has the same date. The frames of the night of
-13 October 2026 all go into `2026-10-13/`.
+`{night}` gives every frame of a night the same date, including the
+frames after midnight. It is the date 12 hours before the exposure, in
+local mean solar time at the longitude in the `Observatory`'s
+`spec.location.longitude`. So every frame from one local noon to the
+next has the same date, and the frames of the night of 13 October 2026
+all go into `2026-10-13/`.
 
 ## Why a name ends with 12 digits
 
-The camera's driver replaces a file of the same name with no warning.
-So unless the format holds `{frameid}`, the operator adds `_` and the
-last 12 hexadecimal digits of the frame's `FRAMEID` to the name, as in
+The camera's driver overwrites a file of the same name without an
+error. So unless the format contains `{frameid}`, the operator appends
+`_` and the last 12 hexadecimal digits of the frame's `FRAMEID`, as in
 `M42_Luminance_300s_20261014T021506Z_4f2a9c01d3e7`. Those digits are
-random, and two frames of one target share them with a chance near 2
-in a billion at 1,000 frames. `{n}` alone does not make a name unique,
-because a restart of the operator can count one frame twice.
+random, and among 1,000 frames the chance that two share them is about
+2 in a billion. `{n}` does not make a name unique, because a restart
+of the operator can count one frame twice.
 
 The whole `FRAMEID` is in the frame's header and in its catalog line
 as `frameID`, so you can find the line of a file that someone renamed.
@@ -104,9 +104,9 @@ as `frameID`, so you can find the line of a file that someone renamed.
 ## Read the catalog
 
 Each target has one catalog, a JSON Lines file at
-`<archive.path>/catalog/<Target>.jsonl` in the archive. The promotion
-`Job` appends one line for each frame after it checks the frame in the
-archive, and never changes a line:
+`<archive.path>/catalog/<Target>.jsonl` in the archive. A promotion
+`Job` appends one line for each frame after it checks the frame's copy
+in the archive, and never changes a line:
 
 ```json
 {"record":"frame","frameID":"0199e1c2-5b40-7000-8000-4f2a9c01d3e7","target":"m42","reservation":"east-tonight","telescope":"east","camera":"east-main","train":"east-imaging","path":"M42/2026-10-13/Luminance/M42_Luminance_300s_20261014T021506Z_4f2a9c01d3e7.fits","sizeBytes":2108160,"sha256":"9f86d0...","startTime":"2026-10-14T02:15:06.864Z","filter":"Luminance","exposureSeconds":300,"binning":1,"gain":100,"offset":10}
@@ -119,7 +119,7 @@ frame's file from the archive does not lower `archived`.
 
 ## Copy the frames to your computer
 
-Start a pod that mounts the archive claim read-only. It runs `sleep`,
+Start a pod that mounts the archive claim read-only and runs `sleep`,
 so you can read from it with `kubectl exec`:
 
 ```sh
@@ -130,9 +130,9 @@ kubectl run -n observatory frames-out --image=busybox:1.38.0 --restart=Never \
 kubectl wait -n observatory --for=condition=Ready pod/frames-out
 ```
 
-A `local-path` claim is bound to one node, and the scheduler starts
-the pod on that node. Copy the whole archive path, with the catalog,
-through `tar`:
+If the claim is a `local-path` volume, the scheduler starts the pod
+on the node that has it. Copy the whole archive path, with the
+catalog, through `tar`:
 
 ```sh
 mkdir -p ~/frames
@@ -150,7 +150,7 @@ kubectl delete -n observatory pod frames-out
 
 ## Check the frames
 
-`sha256sum` checks each file against its line in the catalog. Run it
+`jq` turns the catalog into the input of `sha256sum --check`. Run it
 from the archive path, because each `path` is relative to it:
 
 ```sh
@@ -169,14 +169,14 @@ jq -r 'select(.record == "frame" and (.path | startswith("M42/2026-10-13/"))) | 
   catalog/m42.jsonl | sha256sum --check --quiet
 ```
 
-`jq` answers other questions about the frames. The frames of one
-reservation:
+You can query the catalog for other facts about the frames. This
+lists the frames of one reservation:
 
 ```sh
 jq -r 'select(.reservation == "east-tonight") | .path' catalog/m42.jsonl
 ```
 
-The total exposure in hours, by filter:
+This prints the total exposure in hours for each filter:
 
 ```sh
 jq -s 'map(select(.record == "frame")) | group_by(.filter)

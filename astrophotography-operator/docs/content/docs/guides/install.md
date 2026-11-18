@@ -9,8 +9,8 @@ description: "Install astrophotography-operator beside observatory-operator on a
 This guide installs `astrophotography-operator` on a
 [`liken`](https://liken.sh/docs/) cluster that runs
 `observatory-operator`, and checks that the operator runs and holds
-its `Lease`. No telescope moves until you reserve one for the
-operator, which [Image a target](/docs/guides/image-a-target/) does.
+its `Lease`. The operator moves no telescope until you reserve one for
+it, as [Image a target](/docs/guides/image-a-target/) shows.
 
 You need:
 
@@ -54,17 +54,16 @@ The base creates:
 * the operator, a `Deployment` with one replica in `liken-system`, the
   namespace of every `liken` operator
 
-The operator then creates a `Deployment` and a `Service` for each
-`Solver`, and for each reservation it holds, in the namespace of that
-resource. Their pods run the image
-`ghcr.io/liken-sh/astrophotography-operator-worker` at the tag of the
-operator's own image, so the pin above moves both images. For an
-operator image named by digest, which has no tag, set the variable
-`ASTROPHOTOGRAPHY_WORKER_IMAGE` of the operator's `Deployment` to the
-worker image.
+Later, the operator creates a `Deployment` and a `Service` for each
+`Solver` and for each reservation it holds, in that resource's
+namespace. Their pods run `ghcr.io/liken-sh/astrophotography-operator-worker`
+with the same tag as the operator's image, so the `newTag` above sets
+both images. If you pin the operator's image by digest, which has no
+tag, set the environment variable `ASTROPHOTOGRAPHY_WORKER_IMAGE` on
+the operator's `Deployment` to the full worker image reference.
 
 This site also serves the [manifests](/deploy/kustomization.yaml) as
-raw YAML, if you want to read them first or write your own.
+raw YAML, so you can read them first or write your own.
 
 Check that the operator runs, and that it holds the `Lease`:
 
@@ -73,10 +72,10 @@ kubectl -n liken-system rollout status deployment/astrophotography-operator
 kubectl -n liken-system get lease astrophotography-operator
 ```
 
-The `Lease`'s holder is the operator's pod and a random suffix.
+The `HOLDER` column starts with the operator's pod name.
 
 Check that the API server serves both kinds. They are in the category
-`astro` with `observatory-operator`'s kinds, so one command lists the
+`astro`, with `observatory-operator`'s kinds, so one command lists the
 observatory and its targets:
 
 ```sh
@@ -90,22 +89,22 @@ your observatory.
 
 ## Rollouts and failover
 
-Only one copy of the operator acts at a time: the copy that holds the
-`Lease` `astrophotography-operator` in `liken-system`. Every other
-copy only reads the `Lease`, and opens no watch. A rollout starts the
-new pod beside the old one, and the new pod waits for the `Lease`.
-When the old pod stops, it closes its watches, waits until its last
-write to the API server returns, and releases the `Lease`, and the new
-pod takes it within about 11 seconds. When the leading pod cannot
-renew the `Lease`, a waiting copy takes it 30 to 41 seconds after the
-last renewal.
+Only the operator pod that holds the `Lease`
+`astrophotography-operator` in `liken-system` does any work. Every
+other operator pod waits for the `Lease` and opens no watch. During a rollout,
+the new pod starts beside the old one and waits. When the old pod
+stops, it waits for its last write to the API server to return and
+then releases the `Lease`, and the new pod takes it within about 11
+seconds. When the leader stops renewing the `Lease` without releasing
+it, for example because its node fails, a waiting pod takes it 30 to
+41 seconds after the last renewal.
 
 ## Collect metrics
 
 The operator serves Prometheus metrics on port `9200`. If you run the
-prometheus-operator, add the monitoring component beside the base in
-your `kustomization.yaml`. It adds a `PodMonitor` in `liken-system`
-and a Grafana dashboard in the `monitoring` namespace:
+prometheus-operator, add the `deploy/monitoring` component to your
+`kustomization.yaml`. It adds a `PodMonitor` in `liken-system` and a
+Grafana dashboard in the `monitoring` namespace:
 
 ```yaml
 resources:
@@ -118,8 +117,8 @@ components:
 
 ## Run a development build
 
-A push to `main` that changes the operator publishes a development
-build of it. Its version is the most recent release tag plus a suffix:
+Each push to `main` that changes the operator publishes a development
+build. Its version is the most recent release tag plus a suffix:
 `2026.10.13-003-dev-012-93f85ef4` is 12 commits past release
 `2026.10.13-003`, at commit `93f85ef4`. The summary of the CI run for
 that commit gives the version, and `:latest` still names the most
@@ -136,19 +135,19 @@ images:
     newTag: <version>
 ```
 
-A git fetch by sha needs all forty characters. The eight in the
-version are not enough.
+Use the full sha, because git cannot fetch a commit by the eight
+characters in the version.
 
 The same build publishes the manifests as the OCI artifact
-`oci://ghcr.io/liken-sh/astrophotography-operator-deploy:<version>`, with the image set
-to that version. A Flux `OCIRepository` can pull that artifact by the
-version, with no sha.
+`oci://ghcr.io/liken-sh/astrophotography-operator-deploy:<version>`,
+with the image already set to that version. A Flux `OCIRepository` can
+pull that artifact by its version, with no sha.
 
 ## Remove the operator
 
-Delete the targets first, while the operator runs. Each target's
-finalizer holds its delete until promotion has moved its pending
-frames, and only the operator removes it:
+Delete the targets first, while the operator still runs. Each target
+has a finalizer that only the operator removes, after it has moved the
+target's pending frames to the archive:
 
 ```sh
 kubectl delete targets --all --all-namespaces --wait=false
@@ -162,7 +161,7 @@ kubectl delete -k .
 ```
 
 This deletes the CRDs, and with them every `Solver` in the cluster.
-A `Target` that still has its finalizer holds the delete of its CRD
+If a `Target` still has its finalizer, the `Target` CRD is not deleted
 until you remove the finalizer
 ([A target does not delete](/docs/guides/troubleshoot/#a-target-does-not-delete)).
 `observatory-operator` and its resources stay.

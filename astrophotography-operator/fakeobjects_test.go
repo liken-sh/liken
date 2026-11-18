@@ -1,13 +1,13 @@
 package main
 
-// The fake API server's answers about one namespaced object: a read, a
-// create, an update of the object or of its status, a merge patch, and
-// a delete. A delete of an object with finalizers marks it with
-// deletionTimestamp, and the object goes when a write leaves it no
-// finalizer, the way the API server does. An update or a patch that states a resourceVersion other
-// than the stored one answers 409, the way the API server does, so a
-// test sees the operator's optimistic concurrency at work. Each write
-// tells every watch, like a change from put.
+// The fake API server's handling of one namespaced object: read,
+// create, update of the object or of its status, merge patch, and
+// delete. Like the real API server, a delete of an object with
+// finalizers sets deletionTimestamp, and the object is removed when a
+// write leaves it with no finalizers. An update or a patch with a
+// resourceVersion other than the stored one gets a 409, so a test
+// exercises the operator's optimistic concurrency. Each write notifies
+// every watch, like a change made with put.
 
 import (
 	"encoding/json"
@@ -18,13 +18,13 @@ import (
 	"time"
 )
 
-// objectPath matches a namespaced collection or one object in it, with
-// its status subresource: the prefix of the group and version, the
-// namespace, the resource, the name, and /status.
+// objectPath matches the path of a namespaced collection, or of one
+// object in it with an optional /status subresource. Its groups are the
+// group and version prefix, the namespace, the resource, and the name.
 var objectPath = regexp.MustCompile(`^(/api/v1|/apis/[^/]+/[^/]+)/namespaces/([^/]+)/([^/]+)(?:/([^/]+))?(/status)?$`)
 
-// serveObject answers a request about one namespaced object of a held
-// collection, and answers false for any other request.
+// serveObject handles a request about one namespaced object of a
+// collection the fake holds. It returns false for any other request.
 func (a *fakeAPI) serveObject(w http.ResponseWriter, r *http.Request) bool {
 	m := objectPath.FindStringSubmatch(r.URL.Path)
 	if m == nil {
@@ -36,17 +36,17 @@ func (a *fakeAPI) serveObject(w http.ResponseWriter, r *http.Request) bool {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if _, held := a.collections[path]; !held || (name == "") != (r.Method == http.MethodPost) {
+	if _, known := a.collections[path]; !known || (name == "") != (r.Method == http.MethodPost) {
 		return false
 	}
 	if (a.refusing && r.Method != http.MethodGet) || (a.refusingReads && r.Method == http.MethodGet) {
-		answerStatus(w, http.StatusInternalServerError, "InternalError")
+		writeStatus(w, http.StatusInternalServerError, "InternalError")
 		return true
 	}
 	body, _ := io.ReadAll(r.Body)
 	var sent map[string]any
 	if len(body) > 0 && json.Unmarshal(body, &sent) != nil {
-		answerStatus(w, http.StatusBadRequest, "BadRequest")
+		writeStatus(w, http.StatusBadRequest, "BadRequest")
 		return true
 	}
 	if r.Method == http.MethodPost {
@@ -57,21 +57,21 @@ func (a *fakeAPI) serveObject(w http.ResponseWriter, r *http.Request) bool {
 	stored, exists := a.objects[path][key]
 	switch {
 	case r.Method == http.MethodPost && exists:
-		answerStatus(w, http.StatusConflict, "AlreadyExists")
+		writeStatus(w, http.StatusConflict, "AlreadyExists")
 	case r.Method == http.MethodPost:
 		metadata := sent["metadata"].(map[string]any)
 		metadata["namespace"], metadata["uid"] = namespace, key
 		metadata["creationTimestamp"] = time.Now().UTC().Format(time.RFC3339)
 		a.write(w, path, key, sent, "ADDED", http.StatusCreated)
 	case !exists:
-		answerStatus(w, http.StatusNotFound, "NotFound")
+		writeStatus(w, http.StatusNotFound, "NotFound")
 	case r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, stored)
 	case r.Method == http.MethodDelete:
-		a.deleteHeld(path, key)
+		a.deleteLocked(path, key)
 		writeJSON(w, http.StatusOK, stored)
 	case stale(sent, stored):
-		answerStatus(w, http.StatusConflict, "Conflict")
+		writeStatus(w, http.StatusConflict, "Conflict")
 	case r.Method == http.MethodPut && status:
 		next := clone(stored)
 		next["status"] = sent["status"]
@@ -82,13 +82,14 @@ func (a *fakeAPI) serveObject(w http.ResponseWriter, r *http.Request) bool {
 	case r.Method == http.MethodPatch:
 		a.write(w, path, key, mergePatch(clone(stored), sent), "MODIFIED", http.StatusOK)
 	default:
-		answerStatus(w, http.StatusMethodNotAllowed, "MethodNotAllowed")
+		writeStatus(w, http.StatusMethodNotAllowed, "MethodNotAllowed")
 	}
 	return true
 }
 
-// write stores an object and answers the stored copy. An object that
-// is being deleted goes with its last finalizer. Callers hold mu.
+// write stores an object and responds with the stored copy. An object
+// that is being deleted is removed when its last finalizer is removed.
+// Callers hold mu.
 func (a *fakeAPI) write(w http.ResponseWriter, path, key string, object map[string]any, kind string, code int) {
 	c := a.collections[path]
 	object["apiVersion"], object["kind"] = c.apiVersion, c.kind
@@ -102,9 +103,9 @@ func (a *fakeAPI) write(w http.ResponseWriter, path, key string, object map[stri
 	writeJSON(w, code, a.objects[path][key])
 }
 
-// deleteHeld deletes a stored object, or marks it with
-// deletionTimestamp while it has a finalizer. Callers hold mu.
-func (a *fakeAPI) deleteHeld(path, key string) {
+// deleteLocked deletes a stored object, or sets deletionTimestamp on it
+// while it has a finalizer. Callers hold mu.
+func (a *fakeAPI) deleteLocked(path, key string) {
 	stored := a.objects[path][key]
 	metadata := stored["metadata"].(map[string]any)
 	if finalizers, _ := metadata["finalizers"].([]any); len(finalizers) == 0 {
@@ -122,11 +123,11 @@ func (a *fakeAPI) deleteHeld(path, key string) {
 func (a *fakeAPI) delete(path, namespace, name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.deleteHeld(path, namespace+"/"+name)
+	a.deleteLocked(path, namespace+"/"+name)
 }
 
-// stale reports whether a write states a resourceVersion that is not
-// the stored one. A write that states none is not stale.
+// stale reports whether a write carries a resourceVersion that differs
+// from the stored one. A write with no resourceVersion is not stale.
 func stale(sent, stored map[string]any) bool {
 	metadata, _ := sent["metadata"].(map[string]any)
 	version, stated := metadata["resourceVersion"].(string)
@@ -140,11 +141,11 @@ func mergePatch(target, patch map[string]any) map[string]any {
 		case nil:
 			delete(target, key)
 		case map[string]any:
-			held, _ := target[key].(map[string]any)
-			if held == nil {
-				held = map[string]any{}
+			nested, _ := target[key].(map[string]any)
+			if nested == nil {
+				nested = map[string]any{}
 			}
-			target[key] = mergePatch(held, value)
+			target[key] = mergePatch(nested, value)
 		default:
 			target[key] = value
 		}
@@ -157,23 +158,23 @@ func writeJSON(w http.ResponseWriter, code int, object any) {
 	_ = json.NewEncoder(w).Encode(object)
 }
 
-func answerStatus(w http.ResponseWriter, code int, reason string) {
+func writeStatus(w http.ResponseWriter, code int, reason string) {
 	w.WriteHeader(code)
 	_, _ = fmt.Fprintf(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":%q,"code":%d}`, reason, code)
 }
 
-// get answers the stored copy of one object, or nil.
+// get returns the stored copy of one object, or nil.
 func (a *fakeAPI) get(path, namespace, name string) map[string]any {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	held, exists := a.objects[path][namespace+"/"+name]
+	stored, exists := a.objects[path][namespace+"/"+name]
 	if !exists {
 		return nil
 	}
-	return clone(held)
+	return clone(stored)
 }
 
-// decode answers the stored copy of one object as a Go value.
+// decode returns the stored copy of one object as a Go value.
 func decode[T any](a *fakeAPI, path, namespace, name string) T {
 	var out T
 	body, _ := json.Marshal(a.get(path, namespace, name))
@@ -181,7 +182,7 @@ func decode[T any](a *fakeAPI, path, namespace, name string) T {
 	return out
 }
 
-// names answers the names of every object of a collection in a
+// names returns the names of every object of a collection in a
 // namespace.
 func (a *fakeAPI) names(path, namespace string) []string {
 	a.mu.Lock()

@@ -1,9 +1,9 @@
 package main
 
-// The hooks of the fake API server's status writes, which the runner's
-// tests use to play another writer and a refused write. A hook runs
-// before the fake reads the write, under no lock, so it can change the
-// stored object with put, and the write then meets a 409.
+// Hooks on the fake API server's status writes, for tests of a failed
+// write and of a second writer. beforeStatus runs before the fake takes
+// its lock, so it can change the stored object with put. The write then
+// carries a stale resourceVersion and gets a 409.
 
 import (
 	"bytes"
@@ -14,16 +14,16 @@ import (
 
 type objectHooks struct {
 	// beforeStatus runs before each status write, with the collection's
-	// path, the object's key, and the body. It answers true to refuse
-	// the write with 500.
+	// path, the object's key, and the body. Returning true fails the
+	// write with 500.
 	beforeStatus func(collection, key string, body map[string]any) bool
-	// failStatus answers the next status writes with 500, the way an
-	// API server that cannot reach etcd does.
+	// failStatus is the number of upcoming status writes to fail with
+	// 500, as an API server does when it cannot reach etcd.
 	failStatus int
 }
 
-// refuseStatus runs the hooks of one status write, and answers true
-// when it refused the write.
+// refuseStatus runs the hooks for one status write. It returns true when
+// it has already responded to the write with 500.
 func (a *fakeAPI) refuseStatus(w http.ResponseWriter, r *http.Request, collection, key string) bool {
 	body, _ := io.ReadAll(r.Body)
 	r.Body = io.NopCloser(bytes.NewReader(body))
@@ -38,7 +38,7 @@ func (a *fakeAPI) refuseStatus(w http.ResponseWriter, r *http.Request, collectio
 		refused = true
 	}
 	if refused {
-		answerStatus(w, http.StatusInternalServerError, "InternalError")
+		writeStatus(w, http.StatusInternalServerError, "InternalError")
 	}
 	return refused
 }

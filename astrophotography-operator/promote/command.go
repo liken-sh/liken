@@ -1,8 +1,7 @@
 package promote
 
-// The command line of the promote mode. The operator writes it into the
-// promotion Job's container: `astrophotography-operator promote` and
-// the flags below.
+// The command line of the promote mode, which the operator writes as
+// the arguments of the promotion Job's container.
 
 import (
 	"encoding/json"
@@ -14,27 +13,28 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/outbox"
 )
 
-// ArchiveRoot is where the Job mounts the archive claim. With one claim
-// for both, the Job mounts it once, at outbox.Root.
+// ArchiveRoot is where the Job mounts the archive claim. When the
+// archive and the outbox are one claim, the Job mounts it once, at
+// outbox.Root.
 const ArchiveRoot = "/archive"
 
 // Main runs the promote mode with the arguments after the mode's name,
-// writes the report to the termination message, and answers the exit
-// code. A run that reached every frame exits 0, even when frames
-// failed, because the report holds each failure and the Job must not
-// run again for them. A run that stopped exits 1, and the Job's next
-// pod runs it again.
+// writes the report to the termination message, and returns the exit
+// code. A run that processed every frame exits 0 even when some frames
+// failed, because the report lists each failure and the Job must not
+// retry for them. A run that stopped early, or could not write its
+// report, exits 1, so the Job starts another pod. Bad flags exit 2.
 func Main(args []string, log io.Writer) int {
 	flags := flag.NewFlagSet("promote", flag.ContinueOnError)
 	flags.SetOutput(log)
 	var o Options
 	var cameras, report string
-	flags.StringVar(&o.Outbox, "outbox", outbox.Root, "where the outbox claim is mounted")
+	flags.StringVar(&o.Outbox, "outbox", outbox.Root, "the directory where the outbox claim is mounted")
 	flags.StringVar(&o.Archive, "archive", ArchiveRoot, "where the archive claim is mounted")
 	flags.BoolVar(&o.SameClaim, "same-claim", false, "the archive is the outbox's claim, so frames move by rename")
 	flags.StringVar(&o.Path, "path", "", "the target's archive.path")
 	flags.StringVar(&o.Target, "target", "", "the Target's name")
-	flags.StringVar(&cameras, "cameras", "{}", "each camera's telescope and train, as JSON by the camera's name")
+	flags.StringVar(&cameras, "cameras", "{}", "a JSON object that maps each camera's name to its telescope and train")
 	flags.StringVar(&report, "report", TerminationLog, "where to write the report")
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -47,7 +47,7 @@ func Main(args []string, log io.Writer) int {
 	for _, frame := range append(result.Waiting, result.Failures...) {
 		fmt.Fprintf(log, "promote: %s: %s %s\n", frame.File, frame.Reason, frame.Message)
 	}
-	fmt.Fprintf(log, "promote: %d frames, %d bytes, %d left in the outbox\n", result.Promoted, result.Bytes, result.Left)
+	fmt.Fprintf(log, "promote: promoted %d frames and %d bytes, and left %d frames in the outbox\n", result.Promoted, result.Bytes, result.Left)
 	if err != nil {
 		fmt.Fprintf(log, "promote: %v\n", err)
 		return 1

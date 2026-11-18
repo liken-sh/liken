@@ -1,7 +1,5 @@
 package main
 
-// The manifests in deploy/ against what the operator reads and writes.
-
 import (
 	"bytes"
 	"maps"
@@ -18,25 +16,25 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The base runs the operator in liken-system and creates no namespace
-// of its own, and it applies every manifest in deploy/, so a file that
-// a person downloads by URL is the file that kustomize applies.
+// The base sets the namespace liken-system on the operator's objects.
+// It lists every manifest in deploy/, so each file that a person
+// downloads by URL is also part of what kustomize applies.
 func TestTheBaseAppliesEveryManifestInLikenSystem(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("deploy/kustomization.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading deploy/kustomization.yaml: %v", err)
 	}
 	var base struct {
 		Transformers []string `json:"transformers"`
 		Resources    []string `json:"resources"`
 	}
 	if err := yaml.Unmarshal(raw, &base); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding deploy/kustomization.yaml: %v", err)
 	}
 	files, err := filepath.Glob("deploy/*.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing deploy/*.yaml: %v", err)
 	}
 	var want []string
 	for _, file := range files {
@@ -50,7 +48,8 @@ func TestTheBaseAppliesEveryManifestInLikenSystem(t *testing.T) {
 	}
 }
 
-// operatorDeployment reads the operator's Deployment from deploy/operator.yaml.
+// operatorDeployment holds the fields of the operator's Deployment in
+// deploy/operator.yaml that the tests check.
 type operatorDeployment struct {
 	Spec struct {
 		Replicas int `json:"replicas"`
@@ -79,20 +78,20 @@ type operatorDeployment struct {
 	} `json:"spec"`
 }
 
-// manifest reads the one document of a kind from a file in deploy/.
-// The kind is the one at the top of the document, so a RoleBinding's
-// roleRef does not read as a Role.
+// manifest decodes the first document of deploy/<file> whose top-level
+// kind is kind. The pattern matches only an unindented kind line, so
+// the indented kind in a RoleBinding's roleRef does not match Role.
 func manifest(t *testing.T, file, kind string, into any) {
 	t.Helper()
 	raw, err := os.ReadFile("deploy/" + file)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading deploy/%s: %v", file, err)
 	}
 	top := regexp.MustCompile(`(?m)^kind: ` + kind + `$`)
 	for _, document := range bytes.Split(raw, []byte("\n---\n")) {
 		if top.Match(document) {
 			if err := yaml.Unmarshal(document, into); err != nil {
-				t.Fatal(err)
+				t.Fatalf("decoding the %s in deploy/%s: %v", kind, file, err)
 			}
 			return
 		}
@@ -100,11 +99,12 @@ func manifest(t *testing.T, file, kind string, into any) {
 	t.Fatalf("deploy/%s holds no %s", file, kind)
 }
 
-// A rollout starts the new copy before it stops the old one, because
-// the election keeps the new copy waiting until the old one releases
-// the Lease. The downward API gives the pod's name and namespace, which
-// name the Lease and its holder.
-func TestTheDeploymentRollsOverToACopyThatWaits(t *testing.T) {
+// A rollout starts the new pod before it stops the old one. The new
+// pod waits in the leader election until the old pod releases the
+// Lease, so only one operator is active at a time. The downward API
+// supplies the pod's name and namespace, which the election uses for
+// the Lease and its holder.
+func TestTheDeploymentRollsOverToAPodThatWaits(t *testing.T) {
 	t.Parallel()
 	var d operatorDeployment
 	manifest(t, "operator.yaml", "Deployment", &d)
@@ -121,8 +121,9 @@ func TestTheDeploymentRollsOverToACopyThatWaits(t *testing.T) {
 		t.Fatalf("containers = %+v, want one", containers)
 	}
 	env := map[string]string{}
-	// The downward API's variables. The metrics address is a plain
-	// value, which monitoring_test.go holds.
+	// Only the variables that come from the downward API are compared.
+	// The metrics address is a plain value, which monitoring_test.go
+	// checks.
 	for _, v := range containers[0].Env {
 		if v.ValueFrom.FieldRef.FieldPath != "" {
 			env[v.Name] = v.ValueFrom.FieldRef.FieldPath
@@ -141,9 +142,9 @@ type rule struct {
 	Verbs         []string `json:"verbs"`
 }
 
-// The Role grants the election every request it sends of the Lease:
-// get and update of the Lease by its name, and create, which RBAC
-// cannot limit by name. The RoleBinding gives the Role to the
+// The Role allows every request that the leader election sends for the
+// Lease: get and update on the Lease by name, and create, which RBAC
+// cannot restrict by name. The RoleBinding binds the Role to the
 // operator's ServiceAccount.
 func TestTheRoleGrantsTheLease(t *testing.T) {
 	t.Parallel()
@@ -177,7 +178,7 @@ func TestTheRoleGrantsTheLease(t *testing.T) {
 	}
 }
 
-// clusterRole reads the ClusterRole's rules from deploy/rbac.yaml.
+// clusterRole returns the rules of the ClusterRole in deploy/rbac.yaml.
 func clusterRole(t *testing.T) []rule {
 	t.Helper()
 	var role struct {
@@ -193,8 +194,9 @@ func grants(rules []rule, group, resource, verb string) bool {
 	})
 }
 
-// Each watch lists and then watches its collection, and the operator
-// writes each status of its own group.
+// Each watch needs get, list, and watch on its resource, and the
+// operator needs update on the status of each kind in its own API
+// group.
 func TestTheClusterRoleGrantsEachWatchAndStatus(t *testing.T) {
 	t.Parallel()
 	rules := clusterRole(t)
@@ -212,7 +214,8 @@ func TestTheClusterRoleGrantsEachWatchAndStatus(t *testing.T) {
 	}
 }
 
-// A merge patch adds and removes the finalizer on each Target.
+// The operator adds and removes the finalizer on each Target with a
+// merge patch.
 func TestTheClusterRoleGrantsTheTargetFinalizer(t *testing.T) {
 	t.Parallel()
 	if !grants(clusterRole(t), astrophotography.Group, astrophotography.TargetKind.Plural, "patch") {
@@ -220,9 +223,11 @@ func TestTheClusterRoleGrantsTheTargetFinalizer(t *testing.T) {
 	}
 }
 
-// Plan 08 gives the ClusterRole's table, and the operator writes no
-// spec and no status of observatory-operator's resources.
-func TestTheClusterRoleIsPlan08sTable(t *testing.T) {
+// The ClusterRole grants the verbs that the operator uses on
+// Deployments, Services, Jobs, pods, PersistentVolumeClaims, and
+// Events, and it grants no write access to the resources of
+// observatory-operator.
+func TestTheClusterRoleGrantsTheVerbsTheOperatorUses(t *testing.T) {
 	t.Parallel()
 	rules := clusterRole(t)
 	type need struct{ group, resource, verb string }
@@ -257,9 +262,9 @@ func TestTheClusterRoleIsPlan08sTable(t *testing.T) {
 	}
 }
 
-// setsLikenSystem answers whether one of a base's transformers sets the
-// namespace liken-system on every object that states none, the way every
-// base of the repository sets it.
+// setsLikenSystem reports whether one of the base's transformers sets
+// the namespace liken-system on every object that has no namespace of
+// its own.
 func setsLikenSystem(t *testing.T, transformers []string) bool {
 	t.Helper()
 	for _, raw := range transformers {
@@ -271,7 +276,7 @@ func setsLikenSystem(t *testing.T, transformers []string) bool {
 			UnsetOnly bool `json:"unsetOnly"`
 		}
 		if err := yaml.Unmarshal([]byte(raw), &transformer); err != nil {
-			t.Fatal(err)
+			t.Fatalf("decoding a transformer of deploy/kustomization.yaml: %v", err)
 		}
 		if transformer.Kind == "NamespaceTransformer" && transformer.Metadata.Namespace == "liken-system" && transformer.UnsetOnly {
 			return true

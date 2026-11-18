@@ -1,11 +1,11 @@
 package main
 
-// A fake camera behind the fake INDI server. The CCD simulator's driver
-// of inditest answers CCD_EXPOSURE with Busy and keeps it Busy, and the
-// fake camera plays the rest of an exposure the way the pinned
-// simulator does: after the exposure's length it sends the message
-// "[INFO] Image saved to <path>" and then sets CCD_EXPOSURE Ok. It also
-// puts the file in the fake worker's outbox.
+// A fake camera on the fake INDI server. playCamera makes the server
+// keep CCD_EXPOSURE Busy until the test sets its state. The fake camera
+// then ends each exposure the way the pinned CCD simulator does: after
+// the exposure's length, it sends the message "[INFO] Image saved to
+// <path>" and sets CCD_EXPOSURE to Ok. It also puts the file in the
+// fake worker's outbox.
 
 import (
 	"context"
@@ -19,17 +19,16 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
-// cameraPlay is how the fake camera answers each exposure.
 type cameraPlay int
 
 const (
-	// saves writes the frame where the upload settings name it.
+	// saves writes the frame to the path in the upload settings.
 	saves cameraPlay = iota
-	// hangs never finishes the exposure, as a driver whose hardware
-	// stopped answering does.
+	// hangs never finishes the exposure, like a driver whose hardware
+	// stopped responding.
 	hangs
-	// savesElsewhere writes the frame under another name, as a driver
-	// does after a person in KStars changed its upload settings.
+	// savesElsewhere writes the frame under a different name, like a
+	// driver after someone changed its upload settings in KStars.
 	savesElsewhere
 	// savesSilently writes the frame and sends no message.
 	savesSilently
@@ -37,8 +36,9 @@ const (
 	loses
 )
 
-// playCamera answers the CCD's exposures until the test ends.
-func (w *night) playCamera(t *testing.T, play cameraPlay) {
+// playCamera ends every exposure of the CCD as play describes, until
+// the test ends.
+func (w *runnerWorld) playCamera(t *testing.T, play cameraPlay) {
 	w.indi.Move(ccdINDI, "CCD_EXPOSURE")
 	ctx := t.Context()
 	client := indi.NewClient("indiserver", indi.WithDialer(w.indi))
@@ -56,8 +56,8 @@ func (w *night) playCamera(t *testing.T, play cameraPlay) {
 	}()
 }
 
-// keepConnected opens the client's connection again each time it ends,
-// as a driver's client does after a network cut.
+// keepConnected reconnects the client each time its connection ends,
+// like a driver's client after a network interruption.
 func keepConnected(ctx context.Context, client *indi.Client) {
 	for ctx.Err() == nil {
 		_ = client.Run(ctx)
@@ -68,8 +68,8 @@ func keepConnected(ctx context.Context, client *indi.Client) {
 	}
 }
 
-// exposureState answers a condition that holds when CCD_EXPOSURE's
-// state is, or is not, the state given.
+// exposureState returns a condition that is true when CCD_EXPOSURE's
+// state equals state, or, when is is false, when it differs.
 func exposureState(state indi.State, is bool) func(*indi.Store) bool {
 	return func(s *indi.Store) bool {
 		p, ok := s.Property(ccdINDI, "CCD_EXPOSURE")
@@ -77,8 +77,7 @@ func exposureState(state indi.State, is bool) func(*indi.Store) bool {
 	}
 }
 
-// finishExposure plays the end of one exposure.
-func (w *night) finishExposure(ctx context.Context, play cameraPlay) {
+func (w *runnerWorld) finishExposure(ctx context.Context, play cameraPlay) {
 	exposure := w.indi.Property(ccdINDI, "CCD_EXPOSURE")
 	seconds, _ := exposure.Value("CCD_EXPOSURE_VALUE")
 	length, _ := strconv.ParseFloat(seconds, 64)

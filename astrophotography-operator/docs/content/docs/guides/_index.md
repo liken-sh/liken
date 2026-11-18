@@ -10,5 +10,5 @@ Each guide is a task. For a first night, follow them in this order:
 [Set up a solver](set-up-a-solver/) if the target should be centered,
 [Image a target](image-a-target/), and
 [Find and verify your frames](find-your-frames/).
-[Troubleshoot](troubleshoot/) starts from a condition's reason or an
-`Event`.
+[Troubleshoot](troubleshoot/) lists each condition reason and `Event`
+with what to fix.

@@ -1,15 +1,14 @@
 package main
 
-// A runner's connection to its telescope's PHD2. observatory-operator
-// runs PHD2 for each Guider of a reservation's telescope, connects it
-// to the guide camera and the mount, and leaves it idle, because
-// calibration and guiding belong to the holder (observatory-operator
-// plan 09). The Guider's status.endpoint is PHD2's event server, and
-// the runner drives PHD2 there with the phd2 client, as KStars does.
+// observatory-operator runs PHD2 for each Guider of a reservation's
+// telescope and connects it to the guide camera and the mount, but never
+// calibrates or guides. That is the job of the reservation's
+// holder, so the runner drives PHD2 through its event server at
+// the Guider's status.endpoint, as KStars does.
 //
-// The runner keeps one connection open for the whole reservation, so
-// the client's state follows PHD2's events: a star lost during an
-// exposure is in the state when the frame ends, with no request.
+// The runner keeps one connection open for the whole reservation, and
+// the phd2 client updates its state from PHD2's events. So a star lost
+// during an exposure is already in the state when the frame ends.
 
 import (
 	"context"
@@ -26,22 +25,19 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/phd2"
 )
 
-// guiderWait bounds the wait for the connection to PHD2 before a step
-// that needs it. PHD2's pod starts again in a few seconds after a
-// delete (plan 09's drill measured 7 seconds), and the client dials
-// again after a backoff of one second.
+// guiderWait is how long a step waits for the connection to PHD2. It
+// covers a restart of PHD2's pod, which takes a few seconds, and the
+// redials of keepOpen, whose backoff starts at one second.
 const guiderWait = 30 * time.Second
 
-// guiderLink is one runner's connection to its Guider's PHD2.
 type guiderLink struct {
-	// name is the Guider's name.
 	name   string
 	client *phd2.Client
 
 	mu sync.Mutex
 	// unsettled is true after a guide or a dither that did not settle.
-	// PHD2 can report Guiding then, with the star off the lock
-	// position, so the next frame guides again first.
+	// PHD2 can report Guiding while the star is off the lock position,
+	// so the next frame starts guiding again first.
 	unsettled bool
 }
 
@@ -57,8 +53,6 @@ func (l *guiderLink) isUnsettled() bool {
 	return l.unsettled
 }
 
-// waitOpen waits until the connection to PHD2 is open, for at most
-// guiderWait.
 func (l *guiderLink) waitOpen(ctx context.Context) error {
 	waiting, cancel := context.WithTimeout(ctx, guiderWait)
 	defer cancel()
@@ -66,14 +60,13 @@ func (l *guiderLink) waitOpen(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("PHD2 of Guider %s does not answer within %s", l.name, guiderWait)
+		return fmt.Errorf("PHD2 of Guider %s does not respond within %s", l.name, guiderWait)
 	}
 	return nil
 }
 
-// phd2Guiding guides each runner's frames with the PHD2 of its
-// session's Guider. It holds the connection of each runner whose
-// session has a Guider.
+// phd2Guiding keeps one guiderLink for each runner whose session has a
+// Guider.
 type phd2Guiding struct {
 	mu    sync.Mutex
 	links map[*runner]*guiderLink
@@ -83,9 +76,10 @@ func newPHD2Guiding() *phd2Guiding {
 	return &phd2Guiding{links: map[*runner]*guiderLink{}}
 }
 
-// open makes the runner's link before its first step, so no step finds
-// a session with a Guider and no link. A session with no Guider gets no
-// link, and its frames are unguided.
+// open creates the runner's link before its first step, so no step
+// finds a session with a Guider and no link. It returns the function
+// that keeps the connection open until ctx ends. A session with no
+// Guider gets no link, and its frames are not guided.
 func (g *phd2Guiding) open(r *runner) func(context.Context) {
 	name, ok := sessionGuider(r.res.Status.Session)
 	if !ok {
@@ -106,17 +100,16 @@ func (g *phd2Guiding) open(r *runner) func(context.Context) {
 	}
 }
 
-// link answers a runner's link, and nil when its session has no Guider.
+// link returns a runner's link, or nil when its session has no Guider.
 func (g *phd2Guiding) link(r *runner) *guiderLink {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.links[r]
 }
 
-// sessionGuider answers the Guider of a session, the first by name,
-// and false when the session has none. A telescope has one Guider in
-// every example, and the first by name keeps the choice stable when it
-// has more.
+// sessionGuider returns the name of the session's Guider, and false
+// when the session has none. When there is more than one, it takes the
+// first by name, because map iteration order is random.
 func sessionGuider(session *observatory.Session) (string, bool) {
 	if len(session.Guiders) == 0 {
 		return "", false
@@ -129,13 +122,12 @@ func sessionGuider(session *observatory.Session) (string, bool) {
 	return names[0], true
 }
 
-// errNoEndpoint is the error of a dial while the Guider's status names
-// no event server, such as while its pod starts.
+// errNoEndpoint is the error of a dial while the Guider's status has no
+// endpoint, for example while its pod starts.
 var errNoEndpoint = errors.New("has no status.endpoint")
 
-// guiderDialer dials the event server that the Guider's status names
-// at the moment of each dial, so a connection that ends follows the
-// Guider to a new endpoint.
+// guiderDialer reads the Guider's status.endpoint at each dial, so a
+// redial after PHD2's pod restarts reaches the new endpoint.
 type guiderDialer struct {
 	o               *operator
 	namespace, name string

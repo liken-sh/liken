@@ -14,7 +14,7 @@ that does not connect, are `observatory-operator`'s:
 [its troubleshoot guide](https://liken.sh/observatory/docs/guides/troubleshoot/)
 covers them.
 
-Four commands show nearly everything. The examples use the target
+These commands show most of what you need. The examples use the target
 `m42` and the reservation `east-tonight` in the namespace
 `observatory`:
 
@@ -25,9 +25,9 @@ kubectl describe reservation east-tonight -n observatory
 kubectl logs -n liken-system deployment/astrophotography-operator
 ```
 
-The target's `Event`s are the transitions of its conditions, with the
+The target's `Event`s record each change of its conditions, with the
 reason and the message. The reservation's `Event`s with the prefix
-`Astrophotography` are what the operator did with the telescope. The
+`Astrophotography` record what the operator did with the telescope. The
 API server deletes an `Event` an hour after its last write, and the
 log keeps every attempt.
 
@@ -54,17 +54,14 @@ The target's `RESERVATION` column is empty while a reservation is
 * The target is above the telescope's horizon. A target below it has
   `Imaging` `False` with the reason `BelowHorizon`, and the message
   gives its altitude, the horizon's altitude there, and when it rises.
-* No other `Ready` reservation holds the target. A target's
-  `RESERVATION` names the one that holds it.
-* The target did not fail earlier on this reservation. A target that
-  failed with `NoFilter`, `NoTrain`, `SlewFailed`, or `CenteringFailed`,
-  or because PHD2 did not stop, is not taken again by the same
-  reservation until you edit its `spec`. The target's `status.failed`
-  names that reservation.
+* No other `Ready` reservation has claimed the target. A target's
+  `RESERVATION` column shows the reservation that claimed it.
+* The target did not fail earlier on this reservation. See
+  [Run a released target again](#run-a-released-target-again).
 
 When no target is eligible, the reservation gets the `Event`
 `AstrophotographyIdle`. When another target has a higher `priority`,
-it goes first. [Declare a target](https://liken.sh/astrophotography/docs/guides/declare-a-target/#choose-which-target-goes-first)
+the operator images it first. [Declare a target](https://liken.sh/astrophotography/docs/guides/declare-a-target/#choose-which-target-goes-first)
 explains the order.
 
 ## Imaging is False
@@ -81,19 +78,19 @@ kubectl get target m42 -n observatory \
 |---|---|---|
 | `Waiting` | The reservation that imaged the target ended. | Reserve the telescope again. The target keeps its progress. |
 | `Suspended` | `spec.suspend` is `true`. | Set it to `false`. |
-| `Deleting` | A person deleted the target while frames of it are pending in an outbox. The finalizer holds the delete until promotion moves them. | Nothing, or see [A target does not delete](#a-target-does-not-delete). |
-| `BelowHorizon` | The target stands below the horizon of the reservation's telescope: the `Horizon` that the `Telescope`'s `spec.horizon` names, or 0° when it names none or the `Horizon` does not exist. The operator does not claim it, or released it before the next frame when it set. The message gives the altitude, the azimuth, the horizon's altitude there, and when the target rises. | Nothing. The reservation claims the target when it rises, if no other target holds the telescope. The condition keeps the message of the moment the target went below the horizon until a reservation claims it. If the horizon is wrong, edit the `Horizon`. |
+| `Deleting` | A person deleted the target while frames of it are pending in an outbox. The finalizer blocks the delete until promotion moves them. | Nothing, or see [A target does not delete](#a-target-does-not-delete). |
+| `BelowHorizon` | The target is at or below the horizon of the reservation's telescope: the `Horizon` that the `Telescope`'s `spec.horizon` refers to, or 0° when it refers to none or the `Horizon` does not exist. A target that sets during imaging is released before its next frame. The message gives the target's altitude and azimuth at the time it went below, the horizon's altitude there, and when the target rises. | Nothing. A reservation claims the target when it rises, if no other target has the telescope. If the horizon is wrong, edit the `Horizon`. |
 | `SequencesDone` | Every frame the sequences want is pending or archived. | Nothing. `Complete` turns `True` when the last frame reaches the archive. If it stays `False`, see [A frame does not reach the archive](#a-frame-does-not-reach-the-archive). |
 | `OutboxFull` | The outbox has less than three frames' size free. The reservation gets the `Warning` `AstrophotographyOutboxFull`. The operator keeps the target and exposes again when space is free. | With `promotion: Continuous`, check that promotion moves frames out. With `AfterReservation`, nothing frees space before the reservation ends, so give the outbox more space. |
-| `ExposureFailed` | The last exposure gave no frame: the driver answered `Alert`, did not finish within the exposure plus 2 minutes, saved the frame under another name, or the worker did not answer. The operator keeps the target and starts the next frame a minute later. | Read the message. A frame under another name means a client, such as Ekos, changed the camera's upload settings. A worker that does not answer is often still starting; see `AstrophotographyWorkerPending` below. |
-| `GuidingFailed` | PHD2 did not answer, found no star, refused a guide or a dither, or did not settle. The message gives PHD2's reason. The operator keeps the target and guides again a minute later. | Clouds hide the star most often. Check PHD2 in KStars, as [Guide with PHD2](https://liken.sh/observatory/docs/guides/guide-with-phd2/) describes. When PHD2 did not stop for a slew, the operator released the target: edit the target to make it eligible again. |
-| `NoFilter` | A sequence with work left, or the centering, names a filter that the wheel does not have, or the train has no `FilterWheel`. The operator reads the wheel's filter names before the slew, so a missing name releases the target before the mount moves. With no `FilterWheel`, the target fails at the first frame that names a filter, after the slew. The operator released the target. | Fix the filter's name in the target. The names are in the `FilterWheel`'s `spec.filters`. |
+| `ExposureFailed` | The last exposure produced no frame. The driver reported `Alert`, did not finish within the exposure plus 2 minutes, or saved the frame under another name, or the worker did not respond. The operator keeps the target and starts the next frame a minute later. | Read the message. A frame under another name means a client, such as Ekos, changed the camera's upload settings. A worker that does not respond is often still starting. See `AstrophotographyWorkerPending` below. |
+| `GuidingFailed` | PHD2 did not respond, found no star, refused a guide or a dither command, or did not settle. The message gives PHD2's reason. The operator keeps the target and guides again a minute later. | Clouds hide the star most often. Check PHD2 in KStars, as [Guide with PHD2](https://liken.sh/observatory/docs/guides/guide-with-phd2/) describes. When PHD2 did not stop for a slew, the operator released the target: edit the target to make it eligible again. |
+| `NoFilter` | The target uses a filter that the train's `FilterWheel` does not have, or the train has no `FilterWheel`. Before the slew, the operator checks the filters of the centering and of each sequence that has frames left, so a wrong name releases the target before the mount moves. A train with no `FilterWheel` fails at the first frame that needs a filter, after the slew. The operator released the target. | Fix the filter's name in the target. The names are in the `FilterWheel`'s `spec.filters`. |
 | `NoTrain` | The session has no imaging camera on the target's `opticalTrain`. The operator released the target. | Fix `opticalTrain` in the target, or reserve the telescope that has the train. |
-| `SlewFailed` | The mount refused to unpark, to track, or to slew, did not stop within 10 minutes, or the session has no `Mount`. The operator released the target. | Check the mount in KStars or in its resource's status, then edit the target or reserve again. |
+| `SlewFailed` | The mount refused to unpark, to track, or to slew, did not finish slewing within 10 minutes, or the session has no `Mount`. The operator released the target. | Check the mount in KStars or in its resource's status, then edit the target or reserve again. |
 | `CenteringFailed` | No centering frame solved, the rounds ran out outside the tolerance, or the worker, the solver, the camera, or the mount failed. The message says which. The operator released the target. | Read the message and `status.centering`. A frame that does not solve can need a longer `centering.exposure`, or index files that fit the field ([Set up a solver](https://liken.sh/astrophotography/docs/guides/set-up-a-solver/#choose-the-index-files)). A tolerance smaller than the mount can reach needs a larger `centering.tolerance` or more `centering.attempts`. |
 
-The frames of a target that the operator released stay counted. The
-next target of the namespace takes the telescope.
+A target that the operator released keeps its counts, and the operator
+moves on to the next eligible target of the namespace.
 
 ## Run a released target again
 
@@ -101,8 +98,7 @@ A target that failed with `NoFilter`, `NoTrain`, `SlewFailed`,
 `CenteringFailed`, or a PHD2 that did not stop is not taken again by
 the same reservation until its `spec` changes. The target's
 `status.failed` records the reservation and the `metadata.generation`
-of the spec that failed, so a restart of the operator does not change
-this:
+of the spec that failed, so a restart of the operator does not clear it:
 
 ```sh
 kubectl get target m42 -n observatory -o jsonpath='{.status.failed}'
@@ -112,7 +108,7 @@ The fix is often an edit of the target, which makes it eligible at
 once. When the cause was elsewhere, such as a mount you fixed by hand,
 a new reservation takes the target again. To run it on the same
 reservation, suspend the target and resume it. Each patch changes the
-spec, so the failure no longer holds:
+spec, so the recorded failure no longer applies:
 
 ```sh
 kubectl patch target m42 -n observatory --type merge -p '{"spec":{"suspend":true}}'
@@ -131,7 +127,7 @@ or when that reservation claims the target again after an edit.
 | `AstrophotographyUnparked` | `Normal` | The operator unparked the mount before a slew. | Nothing. |
 | `AstrophotographyWorkerPending` | `Warning` | The worker's pod cannot start. The message gives the scheduler's reason. | An outbox claim with the access mode `ReadWriteOncePod` cannot work, because the camera's pod already mounts it. Use `ReadWriteOnce`. Otherwise check that the worker image `ghcr.io/liken-sh/astrophotography-operator-worker` can be pulled. |
 | `AstrophotographyOutboxFull` | `Warning` | A target found the outbox full. | See `OutboxFull` above. |
-| `AstrophotographyNotCentered` | `Warning` | The target names a `Solver` that is missing or not `Ready`, so the operator images it without centering. | See [A Solver is not Ready](#a-solver-is-not-ready). A `Solver` that turns `Ready` centers the next claim of the target. |
+| `AstrophotographyNotCentered` | `Warning` | The target refers to a `Solver` that is missing or not `Ready`, so the operator images it without centering. | See [A Solver is not Ready](#a-solver-is-not-ready). A `Solver` that turns `Ready` centers the next claim of the target. |
 
 ## A frame does not reach the archive
 
@@ -154,9 +150,9 @@ kubectl get jobs -n observatory -l app.kubernetes.io/managed-by=astrophotography
 | `NameConflict` | Another file has the frame's name in the archive. | Move the other file away. The operator never replaces a file. |
 
 A frame that failed stays in the outbox, and the operator does not
-start a `Job` again for that frame alone, because most failures need a
-person to fix the archive first. `left` in `status.outboxes` counts the
-frames that the last `Job` left. The next `Job` starts after the next
+start a `Job` for that frame alone, because most failures need a
+person to fix the archive first. `left` in `status.outboxes` is the
+number of frames that the last `Job` did not move. The next `Job` starts after the next
 exposure of the target, or when you ask for a retry after the fix:
 
 ```sh
@@ -164,19 +160,21 @@ kubectl annotate target m42 -n observatory astrophotography.liken.sh/retry=1
 ```
 
 When no `Job` of the target runs, the operator sets `left` to 0, removes
-the annotation, posts the `Normal` `Event` `PromotionRetry` on the
-target, and starts the next `Job`. An annotation that arrives while a
-`Job` runs waits until that `Job` ends. The annotation asks once, so a
-frame that fails again waits for the next exposure or the next
-annotation. A restart of the operator does not retry, because the
-count is in the target's status. With `promotion: AfterReservation`,
+the annotation, and starts the next `Job`. When an outbox entry had
+frames in `left`, it also posts the `Normal` `Event` `PromotionRetry`
+on the target. An annotation that arrives while a
+`Job` runs takes effect when that `Job` ends. The annotation requests
+one retry, so a frame that fails again waits for the next exposure or the next
+annotation. A restart of the operator does not retry the frames,
+because the count of frames left is stored in the target's status. With `promotion: AfterReservation`,
 no `Job` starts while the reservation that writes to the outbox is
 activating, ready, or deactivating.
 
 The `Normal` `Event` `PromotionReportLost` on the target means that the
 pod of a `Job` that succeeded was deleted before the operator read its
-report. The operator runs the `Job` again. The new `Job` finds the
-frames in the catalog, moves nothing, and reports the counts again.
+report. The operator deletes the `Job` and starts it again. The new
+`Job` finds the frames in the catalog, moves nothing, and reports the
+counts again.
 
 ## A Solver is not Ready
 
@@ -185,7 +183,7 @@ frames in the catalog, moves nothing, and reports the counts again.
 gives the fix for `ClaimMissing`, `NoIndexFiles`, and `PodNotReady`.
 
 A `Solver` that is `Ready` but lists fewer series or files than the
-claim holds has left out a file. The solver loads a file only when
+claim contains has left out a file. The solver loads a file only when
 its writer closes it, so a copy that is still running is not loaded
 yet. A file that does not read is left out, and the solver's log names
 it:
@@ -195,16 +193,16 @@ kubectl logs -n observatory deployment/lab-solver | grep 'left out'
 ```
 
 A file that a pod on another node wrote to a network file system, such
-as NFS, does not reach the solver's watch. Restart the solver's
+as NFS, does not trigger the solver's file watch. Restart the solver's
 `Deployment` to read it.
 
 ## A target does not delete
 
 A target that you deleted stays, with `Imaging` `False` and the
 reason `Deleting`. The finalizer `astrophotography.liken.sh/frames`
-holds the delete while frames of the target are pending in an outbox
-claim, so promotion can still move them to the archive. The target
-goes when `status.outboxes` shows no `pending` frame:
+blocks the delete while frames of the target are pending in an outbox
+claim, so promotion can still move them to the archive. The delete
+completes when `status.outboxes` shows no `pending` frame:
 
 ```sh
 kubectl get target m42 -n observatory -o jsonpath='{.status.outboxes}'
@@ -214,12 +212,13 @@ When the frames do not move, the reason is in `ArchiveAvailable`, and
 [A frame does not reach the archive](#a-frame-does-not-reach-the-archive)
 gives the fix. With `promotion: AfterReservation`, the frames move only
 after the reservation that writes to the outbox ends. An outbox claim
-that no longer exists holds no delete, because its frames went with
-it.
+that no longer exists does not block the delete, because its frames
+were deleted with it.
 
 To delete the target now and leave its frames in the outbox, remove
-the finalizer. Nothing moves those frames after that. Check its place
-in the list first, because the patch removes the first entry:
+the finalizer. Nothing moves those frames after that. The patch below
+removes the first entry of the list, so check the finalizer's position
+first:
 
 ```sh
 kubectl -n observatory get target m42 -o jsonpath='{.metadata.finalizers}'
@@ -227,8 +226,8 @@ kubectl -n observatory patch target m42 --type=json \
   -p='[{"op":"remove","path":"/metadata/finalizers/0"}]'
 ```
 
-While the operator is not running, nobody removes the finalizer for
-you.
+While the operator is not running, the delete waits until the operator
+runs again or you remove the finalizer.
 
 ## An outbox claim does not delete
 
@@ -239,8 +238,9 @@ no new pod on a claim that is being deleted, so no promotion `Job` can
 move the frames after the delete starts. To keep the frames, let
 promotion move them before you delete the claim: check that
 `status.outboxes` of each target shows no `pending` frame on it. To
-delete the claim and its frames, remove the finalizer. Check its
-place in the list first, because the patch removes the first entry:
+delete the claim and its frames, remove the finalizer. The patch below
+removes the first entry of the list, so check the finalizer's position
+first:
 
 ```sh
 kubectl -n observatory get pvc frames -o jsonpath='{.metadata.finalizers}'
@@ -248,5 +248,5 @@ kubectl -n observatory patch pvc frames --type=json \
   -p='[{"op":"remove","path":"/metadata/finalizers/0"}]'
 ```
 
-While the operator is not running, nobody removes the finalizer for
-you.
+While the operator is not running, the delete waits until the operator
+runs again or you remove the finalizer.

@@ -1,10 +1,9 @@
 package main
 
-// The operator's writes of a Solver's workload while the watches of the
-// Deployments and the Services run behind the API server. A watch
-// delivers each write some time after the API server answers it, and
-// every pass that runs in that time reads a store that does not hold
-// the write yet.
+// A watch delivers an object some time after the API server accepts
+// the write. A pass that runs in that time reads a store without the
+// operator's own write of a Solver's Deployment or Service, and must
+// not create or replace that object a second time.
 
 import (
 	"encoding/json"
@@ -17,16 +16,16 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/astrophotography"
 )
 
-// A pass that runs before the watches deliver the operator's own
-// writes reads the Deployment and the Service from the API server. So
-// it creates each one once, and replaces the Deployment once, from the
-// API server's copy and not from the store's older one.
+// A pass that runs before the watches deliver the operator's own writes
+// reads the Deployment and the Service from the API server. So it
+// creates each object once, and replaces the Deployment once, from the
+// API server's copy and not from the older copy in the store.
 func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	edited := map[string]any{"indexFiles": map[string]any{"claimName": "indexes-2"}}
 	cases := []struct {
 		name string
-		// before runs while the watches keep up, and during while they
-		// lag.
+		// before runs while the watches are current, and during runs
+		// while they lag.
 		before, during func(w *operatorWorld)
 	}{
 		{"the create and the replace", func(*operatorWorld) {}, func(w *operatorWorld) {
@@ -69,17 +68,17 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 					t.Errorf("Service writes %q, want %q", got, services)
 				}
 				if log := w.logs.String(); log != "" {
-					t.Errorf("log %q, want no failed pass", log)
+					t.Errorf("the log is %q, want no failed pass", log)
 				}
 			})
 		})
 	}
 }
 
-// A pass that must read the Deployment from the API server, because the
-// store does not hold the operator's create yet, fails while the API
-// server refuses the read, and creates nothing again. It runs again
-// after the backoff, reads the Deployment, and writes nothing.
+// When the store does not have the operator's create yet and the API
+// server refuses the read of the Deployment, the pass fails without
+// creating it again. After the backoff the next pass reads the
+// Deployment and writes nothing.
 func TestARefusedReadOfTheOperatorsOwnWriteFailsThePass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
@@ -100,17 +99,17 @@ func TestARefusedReadOfTheOperatorsOwnWriteFailsThePass(t *testing.T) {
 		if got := w.api.writes(deploymentsPath); !slices.Equal(got, want) {
 			t.Errorf("Deployment writes %q, want %q", got, want)
 		}
-		if !strings.Contains(failed, "a pass of the Solver loop: Solver observatory/lab") {
-			t.Errorf("log %q, want the failed pass", failed)
+		if !strings.Contains(failed, "the Solver loop: reconciling Solver observatory/lab") {
+			t.Errorf("the log is %q, want the failed pass", failed)
 		}
-		if ready := readyOf(w.solver(t, "lab")); ready.Message != "the solver's Deployment has no pod yet" {
-			t.Errorf("Ready %s: %s", ready.Reason, ready.Message)
+		if ready := readyOf(w.solver(t, "lab")); ready.Message != "The solver's Deployment has no pod yet" {
+			t.Errorf("Ready is %s: %s, want the message \"The solver's Deployment has no pod yet\"", ready.Reason, ready.Message)
 		}
 	})
 }
 
 // writtenWorkload builds the Deployment and the Service that the
-// operator writes for a Solver, as the API server stores them.
+// operator writes for a Solver, in the form the API server stores.
 func writtenWorkload(t *testing.T, solverObject map[string]any) (map[string]any, map[string]any) {
 	t.Helper()
 	var s astrophotography.Solver
@@ -123,23 +122,22 @@ func writtenWorkload(t *testing.T, solverObject map[string]any) (map[string]any,
 	return d, svc
 }
 
-// asJSON decodes the JSON of one value into another.
 func asJSON(t *testing.T, from, to any) {
 	t.Helper()
 	raw, err := json.Marshal(from)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the object as JSON: %v", err)
 	}
 	if err := json.Unmarshal(raw, to); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the object from JSON: %v", err)
 	}
 }
 
-// A Deployment and a Service that the lead before this one created,
-// and that the stores do not hold yet, answer the create with 409. The
-// pass takes them as created. The next pass reads them from the API
-// server, finds the same template, and writes nothing.
-func TestAWorkloadThatTheLastLeadCreatedIsNotCreatedAgain(t *testing.T) {
+// A Deployment and a Service that the previous leader created, and
+// that the stores do not have yet, make the create fail with 409. The
+// pass treats them as already created. The next pass reads them from
+// the API server, finds the same template, and writes nothing.
+func TestAWorkloadThatThePreviousLeaderCreatedIsNotCreatedAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
 		settle()
@@ -169,7 +167,7 @@ func TestAWorkloadThatTheLastLeadCreatedIsNotCreatedAgain(t *testing.T) {
 			}
 		}
 		if log := w.logs.String(); log != "" {
-			t.Errorf("log %q, want no failed pass", log)
+			t.Errorf("the log is %q, want no failed pass", log)
 		}
 	})
 }

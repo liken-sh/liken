@@ -11,18 +11,17 @@ import (
 	"time"
 )
 
-// maxRequest bounds the body of an extraction request, which names a
-// frame and four numbers.
+// maxRequest limits the size of an extraction request body, which is a
+// frame path and a search hint of a few numbers.
 const maxRequest = 64 << 10
 
-// Server answers the worker's paths for one Extractor.
+// Server serves the worker's HTTP paths.
 type Server struct {
 	extractor Extractor
-	// logs receives one line for each extraction.
-	logs io.Writer
+	logs      io.Writer
 }
 
-// NewServer serves an Extractor, and logs each extraction to logs.
+// NewServer returns a Server for e that logs each extraction to logs.
 func NewServer(e Extractor, logs io.Writer) *Server {
 	return &Server{extractor: e, logs: logs}
 }
@@ -32,8 +31,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == PathExtract && r.Method == http.MethodPost:
 		s.serveExtract(w, r)
 	case r.URL.Path == PathOutbox && r.Method == http.MethodGet:
-		answer, err := s.extractor.State()
-		reply(w, answer, err)
+		state, err := s.extractor.State()
+		reply(w, state, err)
 	case strings.HasPrefix(r.URL.Path, PathCentering) && r.Method == http.MethodDelete:
 		err := s.extractor.RemoveCentering(strings.TrimPrefix(r.URL.Path, PathCentering))
 		if err == nil {
@@ -55,19 +54,20 @@ func (s *Server) serveExtract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started := time.Now()
-	answer, err := s.extractor.Extract(r.Context(), request)
+	result, err := s.extractor.Extract(r.Context(), request)
 	took := time.Since(started).Round(time.Millisecond)
 	if err != nil {
-		fmt.Fprintf(s.logs, "extracting %s failed after %s: %v\n", request.Frame, took, err)
+		fmt.Fprintf(s.logs, "extracting the stars of %s stopped after %s: %v\n", request.Frame, took, err)
 	} else {
 		fmt.Fprintf(s.logs, "extracted %d stars of median FWHM %.2f pixels from %s in %s, with a radius of %g degrees\n",
-			answer.Stars, answer.MedianFWHM, request.Frame, took, request.Hint.Radius)
+			result.Stars, result.MedianFWHM, request.Frame, took, request.Hint.Radius)
 	}
-	reply(w, answer, err)
+	reply(w, result, err)
 }
 
-// reply writes an answer, or the status of an error with its text.
-func reply(w http.ResponseWriter, answer any, err error) {
+// reply writes body as JSON, or, when err is not nil, an HTTP error with
+// the status that err maps to.
+func reply(w http.ResponseWriter, body any, err error) {
 	switch {
 	case errors.Is(err, ErrBadRequest):
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -77,8 +77,7 @@ func reply(w http.ResponseWriter, answer any, err error) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	default:
 		w.Header().Set("Content-Type", "application/json")
-		// A client that went away gets nothing, and the error of the
-		// write tells the worker nothing it can act on.
-		_ = json.NewEncoder(w).Encode(answer)
+		// The handler has no way to report a failed write to the client.
+		_ = json.NewEncoder(w).Encode(body)
 	}
 }

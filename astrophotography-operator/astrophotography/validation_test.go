@@ -1,9 +1,8 @@
 package astrophotography
 
-// Each case is a resource that a person could write, and the verdict
-// that the API server gives it. The tests run the structural schema
-// validator and then the CEL rules, the two passes the API server runs
-// on a create or an update.
+// Each case is a resource that a person could write. The tests run the
+// structural schema validator and then the CEL rules, as the API server
+// does on a create or an update.
 
 import (
 	"maps"
@@ -18,20 +17,20 @@ import (
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
 )
 
-// validateWith answers the errors that the API server would give an
-// object under a CRD. With an old object, it is an update, and the
-// rules that compare with oldSelf run too.
+// validateWith returns the errors that the API server would return for
+// an object under a CRD. When old is not nil, the validation is an
+// update, and the rules that use oldSelf run too.
 func validateWith(t *testing.T, crd *apiextensionsv1.CustomResourceDefinition, object, old map[string]any) field.ErrorList {
 	t.Helper()
 	internal := internalSchema(t, crd)
 	schemaValidator, _, err := validation.NewSchemaValidator(internal)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the schema validator: %v", err)
 	}
 	errs := validation.ValidateCustomResource(field.NewPath(""), object, schemaValidator)
 	structural, err := structuralschema.NewStructural(internal)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the structural schema: %v", err)
 	}
 	celErrs, _ := celschema.NewValidator(structural, true, celconfig.PerCallLimit).Validate(
 		t.Context(), field.NewPath(""), structural, object, old, celconfig.RuntimeCELCostBudget)
@@ -43,7 +42,6 @@ func validate(t *testing.T, kind Kind, object, old map[string]any) field.ErrorLi
 	return validateWith(t, loadCRD(t, kind), object, old)
 }
 
-// resource builds an object of a kind with the spec given.
 func resource(kind Kind, spec map[string]any) map[string]any {
 	return map[string]any{
 		"apiVersion": APIVersion,
@@ -53,8 +51,8 @@ func resource(kind Kind, spec map[string]any) map[string]any {
 	}
 }
 
-// m42 builds the spec of a target that images M42 into the claim
-// archive, with more fields.
+// m42 builds the spec of a Target that images M42 into the claim
+// archive, with the fields of more added or replaced.
 func m42(more map[string]any) map[string]any {
 	spec := map[string]any{
 		"object":      "M42",
@@ -66,7 +64,7 @@ func m42(more map[string]any) map[string]any {
 	return spec
 }
 
-// without answers the spec with one field removed.
+// without deletes field from spec and returns spec.
 func without(spec map[string]any, field string) map[string]any {
 	delete(spec, field)
 	return spec
@@ -94,11 +92,11 @@ func TestTheAPIServerAcceptsAndRefusesATarget(t *testing.T) {
 	cases := []struct {
 		name string
 		spec map[string]any
-		// refusal is part of the error, or empty when the resource is
-		// accepted.
+		// refusal is text that the error must contain, or empty when the
+		// API server accepts the resource.
 		refusal string
 	}{
-		{"the example of plan 01", m42(map[string]any{
+		{"a target with every field", m42(map[string]any{
 			"priority": int64(0), "suspend": false, "opticalTrain": "east-imaging",
 			"sequences": []any{
 				map[string]any{"filter": "Luminance", "exposure": "300s", "count": int64(60)},
@@ -157,22 +155,22 @@ func TestTheAPIServerAcceptsAndRefusesATarget(t *testing.T) {
 	}
 }
 
-// verdict checks that a resource was accepted, or refused with an
-// error that holds the refusal.
+// verdict checks that validation accepted the resource when refusal is
+// empty, and otherwise that an error contains refusal.
 func verdict(t *testing.T, errs field.ErrorList, refusal string) {
 	t.Helper()
 	switch {
 	case refusal == "" && len(errs) > 0:
-		t.Errorf("refused: %v", errs.ToAggregate())
+		t.Errorf("validation refused the resource with %v, want it accepted", errs.ToAggregate())
 	case refusal != "" && len(errs) == 0:
-		t.Errorf("accepted, want a refusal with %q", refusal)
+		t.Errorf("validation accepted the resource, want a refusal that contains %q", refusal)
 	case refusal != "" && !strings.Contains(errs.ToAggregate().Error(), refusal):
-		t.Errorf("refused with %v, want %q", errs.ToAggregate(), refusal)
+		t.Errorf("validation refused the resource with %v, want a refusal that contains %q", errs.ToAggregate(), refusal)
 	}
 }
 
-// The counts come from the archive's catalog, so a target keeps its
-// claim for life.
+// The counts come from the archive's catalog, so a Target keeps the
+// same archive claim for its whole life.
 func TestTheArchiveClaimCannotChange(t *testing.T) {
 	cases := []struct {
 		name    string

@@ -1,9 +1,8 @@
 package main
 
-// The operator's loops against the fake API server and the fake pods.
-// Each test runs in a synctest bubble, plays the Deployment controller
-// and the kubelet by putting pods into the fake, and reads what the
-// operator wrote.
+// These tests run the operator's loops against the fake API server in
+// a synctest bubble. No Deployment controller or kubelet runs, so a
+// test creates the pods itself and then reads what the operator wrote.
 
 import (
 	"io"
@@ -33,7 +32,7 @@ type operatorWorld struct {
 }
 
 // startWorkloads runs the operator's loops until the test ends. change
-// edits the operator before its loops start.
+// modifies the operator before the loops start.
 func startWorkloads(t *testing.T, change func(o *operator)) *operatorWorld {
 	t.Helper()
 	api := startFakeAPI(t)
@@ -43,7 +42,7 @@ func startWorkloads(t *testing.T, change func(o *operator)) *operatorWorld {
 	o := newOperator(client, recorder, newMetrics("dev"), logs)
 	o.workerImage = testWorkerImage
 	peers := newFakePeers()
-	o.workerClient = apiservertest.Start(t, peers).Client()
+	o.peerClient = apiservertest.Start(t, peers).Client()
 	if change != nil {
 		change(o)
 	}
@@ -56,16 +55,16 @@ func startWorkloads(t *testing.T, change func(o *operator)) *operatorWorld {
 	return &operatorWorld{api: api, peers: peers, o: o, logs: logs}
 }
 
-// settle lets every loop run its passes, and the Event recorder post.
-// The Wait at the end orders every write of the loops before the
-// test's reads.
+// settle lets every loop run its pending passes and the Event recorder
+// post, then waits until every goroutine in the bubble is blocked, so
+// the test reads after the loops' writes.
 func settle() {
 	time.Sleep(2 * time.Second)
 	synctest.Wait()
 }
 
-// solverObject builds the lab's Solver as the API server stores it,
-// with the CRD's default search, and a spec to merge in.
+// solverObject builds a Solver as the API server stores it, with the
+// CRD's default search settings, and merges spec into its spec.
 func solverObject(name string, spec map[string]any) map[string]any {
 	full := map[string]any{
 		"indexFiles": map[string]any{"claimName": "astrometry-indexes"},
@@ -79,14 +78,15 @@ func solverObject(name string, spec map[string]any) map[string]any {
 	return o
 }
 
-// podFixture builds a pod of a workload, with its readiness and the
-// scheduler's message, if any.
+// podFixture builds a pod of a workload, with its readiness and, when
+// unschedulable is not empty, a scheduler message that says why it
+// cannot be scheduled.
 func podFixture(name, uid string, labels map[string]string, ready bool, unschedulable string) map[string]any {
-	held := map[string]any{}
+	podLabels := map[string]any{}
 	for key, value := range labels {
-		held[key] = value
+		podLabels[key] = value
 	}
-	o := object("observatory", name, held, map[string]any{})
+	o := object("observatory", name, podLabels, map[string]any{})
 	o["metadata"].(map[string]any)["uid"] = uid
 	status := "False"
 	if ready {
@@ -104,20 +104,20 @@ func podFixture(name, uid string, labels map[string]string, ready bool, unschedu
 	return o
 }
 
-// podIPs holds the address the fake cluster gives each ready pod, by
-// its UID, in k3s's default pod network.
+// podIPs maps a pod's UID to its address when it is ready. The
+// addresses are in k3s's default pod network.
 var podIPs = map[string]string{"pod-0": "10.42.0.10", "pod-1": "10.42.0.11", "worker-0": "10.42.0.20"}
 
-// readyPod puts a ready pod of one Solver.
+// readySolverPod creates a ready pod of the Solver's workload.
 func (w *operatorWorld) readySolverPod(name, uid string) {
 	w.api.put(podsPath, podFixture(name, uid, workloadLabels(roleSolver, "lab"), true, ""))
 }
 
 func (w *operatorWorld) solver(t *testing.T, name string) astrophotography.Solver {
 	t.Helper()
-	s, held := objectOf[astrophotography.Solver](t, w.api, solversPath, "observatory", name)
-	if !held {
-		t.Fatalf("no Solver %s", name)
+	s, ok := objectOf[astrophotography.Solver](t, w.api, solversPath, "observatory", name)
+	if !ok {
+		t.Fatalf("the Solver %s does not exist", name)
 	}
 	return s
 }
@@ -131,8 +131,8 @@ func readyOf(s astrophotography.Solver) observatory.Condition {
 	return observatory.Condition{}
 }
 
-// lockedLog lets the loops log from their goroutines while a test
-// reads the log.
+// lockedLog is a log buffer that is safe for the loops' goroutines to
+// write while the test reads it.
 type lockedLog struct {
 	mu sync.Mutex
 	b  strings.Builder

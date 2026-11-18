@@ -1,9 +1,8 @@
 package main
 
-// The series of promotion that plan 08 names: the frames archived, and
-// the bytes and the failures of promotion. Each counts from the reports
-// that the loop applies, once for each report, because a report is
-// applied once (promotionstatus.go).
+// The promotion counters add up the reports of the promotion Jobs. The
+// promotion loop applies each report once (promotionstatus.go), so no
+// report is counted twice.
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
@@ -17,8 +16,8 @@ type promotionMetrics struct {
 	failures       *prometheus.CounterVec
 }
 
-// promotionFailureReasons are the reasons a frame fails, which label
-// the failures from the first scrape.
+// newPromotionMetrics creates a failures series at zero for each of
+// these reasons, so each series exists from the first scrape.
 var promotionFailureReasons = []string{promote.ReasonCopyFailed, promote.ReasonVerifyFailed, promote.ReasonNameConflict}
 
 func newPromotionMetrics(m *metrics) *promotionMetrics {
@@ -43,7 +42,6 @@ func newPromotionMetrics(m *metrics) *promotionMetrics {
 	return p
 }
 
-// observe counts one report.
 func (p *promotionMetrics) observe(r promote.Report) {
 	p.framesArchived.Add(float64(r.Promoted))
 	p.bytes.Add(float64(r.Bytes))

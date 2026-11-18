@@ -1,7 +1,7 @@
 package main
 
-// One frame from the runner to the driver: every change the runner
-// sends the INDI server, in order, for a target of one frame.
+// The changes that the runner sends the INDI server to take one frame,
+// and what happens when a frame fails.
 
 import (
 	"regexp"
@@ -15,9 +15,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// changes answers the changes the INDI server received after the first
-// n, as "<device>.<property>", with the keyword's name for a write to
-// FITS_HEADER.
+// changes returns sent[from:] as "<device>.<property>", with the
+// keyword's name added to each write to FITS_HEADER.
 func changes(sent []string, from int) []string {
 	var out []string
 	for _, change := range sent[from:] {
@@ -33,7 +32,7 @@ func changes(sent []string, from int) []string {
 	return out
 }
 
-// member answers one member's value in the last change of a property.
+// member returns one member's value in the last change to a property.
 func member(sent []string, property, name string) string {
 	for _, change := range slices.Backward(sent) {
 		if !strings.HasPrefix(change, property+" ") {
@@ -48,16 +47,15 @@ func member(sent []string, property, name string) string {
 	return ""
 }
 
-// The runner unparks nothing, turns tracking on, slews, and then writes
-// the frame's settings in plan 01's order before the exposure: the
-// upload, the frame type, the binning and gain the sequence states, the
-// filter, and the keywords, INDI_CLEAR first and FRAMEID last.
+// For a mount that is not parked, the runner turns tracking on and
+// slews. Then it writes the frame's settings in the order of
+// writeFrame, and starts the exposure.
 func TestAFrameWritesItsSettingsInOrder(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		two, hundred := int32(2), int32(100)
 		w.put(targetsPath, target("m42", astrophotography.Sequence{Filter: "Luminance", Exposure: "10s", Count: 1, Binning: &two, Gain: &hundred}))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		connected := len(w.indi.Changes())
 		w.playCamera(t, saves)
 		w.start(t)
@@ -83,7 +81,7 @@ func TestAFrameWritesItsSettingsInOrder(t *testing.T) {
 			ccdINDI + ".CCD_EXPOSURE",
 		}
 		if got := changes(sent, connected); !slices.Equal(got, want) {
-			t.Errorf("changes:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+			t.Errorf("the runner sent these changes:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 		}
 		frameID := member(sent, ccdINDI+".FITS_HEADER", "KEYWORD_VALUE")
 		cases := []struct{ property, member, want string }{
@@ -103,25 +101,24 @@ func TestAFrameWritesItsSettingsInOrder(t *testing.T) {
 			}
 		}
 		if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(frameID) {
-			t.Errorf("FRAMEID %q is no UUIDv7", frameID)
+			t.Errorf("FRAMEID is %q, want a UUIDv7", frameID)
 		}
 		prefix := member(sent, ccdINDI+".UPLOAD_SETTINGS", "UPLOAD_PREFIX")
 		if !regexp.MustCompile(`^M42_Luminance_10s_20000101T\d{6}Z_` + frameID[len(frameID)-12:] + `$`).MatchString(prefix) {
-			t.Errorf("UPLOAD_PREFIX %q, want the format's name and the end of FRAMEID %s", prefix, frameID)
+			t.Errorf("UPLOAD_PREFIX is %q, want the frame name format ending in the last 12 characters of FRAMEID %s", prefix, frameID)
 		}
 	})
 }
 
-// A frame that the driver never finishes: the runner waits for the
-// exposure and the readout, does not count the frame, and sets Imaging
-// False with ExposureFailed. A frame saved under another name, or not
-// saved at all, does not count either. The target stays claimed, and the
-// runner tries the next frame after a wait.
-func TestAnExposureThatGivesNoFrameDoesNotCount(t *testing.T) {
+// A frame does not count when the driver never finishes the exposure,
+// saves the frame under another name, or neither reports nor saves it.
+// Imaging turns False with ExposureFailed, and the target stays claimed
+// with no frame in flight.
+func TestAnExposureThatSavesNoFrameDoesNotCount(t *testing.T) {
 	cases := []struct {
 		name string
 		play cameraPlay
-		// after is how long the failure takes to show.
+		// after is how long after the frame starts Imaging turns False.
 		after time.Duration
 	}{
 		{"the driver never finishes", hangs, 10*time.Second + readoutAllowance},
@@ -133,18 +130,18 @@ func TestAnExposureThatGivesNoFrameDoesNotCount(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				w := newWorld(t)
 				w.put(targetsPath, target("m42", lights(1)))
-				w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+				w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 				w.playCamera(t, c.play)
 				w.start(t)
 				waitUntil(t, w.inFlight(t, "m42"))
 				started := time.Now()
 				waitUntil(t, func() bool { return w.imaging(t, "m42") == "False ExposureFailed" })
 				if took := time.Since(started); took < c.after || took > c.after+2*time.Second {
-					t.Errorf("the failure showed after %s, want %s", took, c.after)
+					t.Errorf("the failure appeared after %s, want %s", took, c.after)
 				}
 				status := w.targetNow(t, "m42").Status
 				if status.Exposure != nil || status.Reservation != tonight || !slices.Equal(pendingOf(status), []int32{0}) {
-					t.Errorf("exposure %+v, reservation %q, pending %v; want none, %s, [0]", status.Exposure, status.Reservation, pendingOf(status), tonight)
+					t.Errorf("status.exposure is %+v, status.reservation %q, pending %v, want no exposure, reservation %s, pending [0]", status.Exposure, status.Reservation, pendingOf(status), tonight)
 				}
 				requireSample(t, scrape(t, w.o.metrics), `astrophotography_exposure_failures_total{namespace="observatory",target="m42"} 1`)
 				events := w.runnerEvents("Target", "m42")
@@ -156,29 +153,30 @@ func TestAnExposureThatGivesNoFrameDoesNotCount(t *testing.T) {
 	}
 }
 
-// The runner aborts an exposure the driver never finished, so the next
-// frame's settings do not meet an exposure that still runs.
+// The runner aborts an exposure that the driver never finished, so the
+// next frame's settings do not reach a camera that is still exposing.
 func TestAnExposureThatNeverEndsIsAborted(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		w.put(targetsPath, target("m42", lights(1)))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.playCamera(t, hangs)
 		w.start(t)
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False ExposureFailed" })
 		if !slices.ContainsFunc(w.indi.Changes(), func(c string) bool { return strings.HasPrefix(c, ccdINDI+".CCD_ABORT_EXPOSURE ABORT=On") }) {
-			t.Errorf("no abort among %q", w.indi.Changes())
+			t.Errorf("the changes %q have no CCD_ABORT_EXPOSURE, want one", w.indi.Changes())
 		}
 	})
 }
 
-// A driver that saves the frame with no message: the worker's list of
-// the outbox shows the file, and the frame counts.
+// When the driver saves the frame but sends no message, the runner
+// finds the file in the outbox list that the worker returns, and counts
+// the frame.
 func TestAFrameSavedWithNoMessageCounts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		w.put(targetsPath, target("m42", lights(1)))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.playCamera(t, savesSilently)
 		w.start(t)
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False SequencesDone" })
@@ -188,8 +186,8 @@ func TestAFrameSavedWithNoMessageCounts(t *testing.T) {
 	})
 }
 
-// A sequence that states an offset writes CCD_OFFSET, and a driver that
-// refuses a setting gives no frame.
+// A sequence that sets an offset writes CCD_OFFSET. When the driver
+// refuses a setting, the runner takes no frame.
 func TestTheSettingsOfASequence(t *testing.T) {
 	ten := int32(10)
 	cases := []struct {
@@ -214,33 +212,33 @@ func TestTheSettingsOfASequence(t *testing.T) {
 					w.indi.Refuse(ccdINDI, c.refuse)
 				}
 				w.put(targetsPath, target("m42", astrophotography.Sequence{Filter: "Luminance", Exposure: "10s", Count: 1, Offset: &ten}))
-				w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+				w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 				w.playCamera(t, saves)
 				w.start(t)
 				waitUntil(t, func() bool { return w.imaging(t, "m42") == c.imaging })
 				if c.refuse == "" && member(w.indi.Changes(), ccdINDI+".CCD_OFFSET", "OFFSET") != "10" {
-					t.Error("no CCD_OFFSET of 10")
+					t.Error("the runner did not set CCD_OFFSET to 10, want it set")
 				}
 			})
 		})
 	}
 }
 
-// The faults around one frame that are not the camera's: the API server
-// refuses to record the frame in flight, or the worker stops answering
-// before the runner can find a frame the driver saved with no message.
-// Neither counts a frame, and the night goes on.
+// When the API server refuses to record the frame in flight, or the
+// worker stops responding when the runner needs it to find a frame that
+// the driver saved with no message, the frame does not count and
+// Imaging turns False with ExposureFailed.
 func TestAFrameTheRunnerCannotConfirmDoesNotCount(t *testing.T) {
 	cases := []struct {
 		name  string
 		play  cameraPlay
-		fault func(*night)
+		fault func(*runnerWorld)
 	}{
-		{"the API server refuses the record of the frame", saves, func(w *night) {
+		{"the API server refuses the record of the frame", saves, func(w *runnerWorld) {
 			waitUntil(t, func() bool { return w.imaging(t, "m42") == "True Slewing" })
 			w.failStatusWrites(1)
 		}},
-		{"the worker stops answering during the exposure", savesSilently, func(w *night) {
+		{"the worker stops responding during the exposure", savesSilently, func(w *runnerWorld) {
 			waitUntil(t, w.inFlight(t, "m42"))
 			w.worker.set(func() { w.worker.down = true })
 		}},
@@ -250,7 +248,7 @@ func TestAFrameTheRunnerCannotConfirmDoesNotCount(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				w := newWorld(t)
 				w.put(targetsPath, target("m42", lights(1)))
-				w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+				w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 				w.playCamera(t, c.play)
 				w.start(t)
 				c.fault(w)
@@ -263,14 +261,16 @@ func TestAFrameTheRunnerCannotConfirmDoesNotCount(t *testing.T) {
 	}
 }
 
-// A failed exposure whose record the API server refuses too ends the
-// pass, and the next pass claims the target again and goes on.
+// With the worker down, the outbox space check fails the frame, and the
+// API server refuses to write that failure to the target. The pass ends
+// with an error, and a later pass takes the frame once the worker
+// responds.
 func TestAFailureThatCannotBeRecordedIsTriedAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		w.worker.set(func() { w.worker.down = true })
 		w.put(targetsPath, target("m42", lights(1)))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.playCamera(t, saves)
 		w.start(t)
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "True Slewing" })
@@ -281,17 +281,18 @@ func TestAFailureThatCannotBeRecordedIsTriedAgain(t *testing.T) {
 	})
 }
 
-// The reservation ends while the runner waits for the driver's message
-// about the frame's file.
+// When the reservation ends while the runner waits for the driver's
+// message about the frame's file, the runner stops and sets Imaging to
+// False with Waiting.
 func TestAReservationThatEndsWhileTheRunnerChecksTheFile(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		w.put(targetsPath, target("m42", lights(1)))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.playCamera(t, savesElsewhere)
 		w.start(t)
-		waitUntil(t, func() bool { return len(w.worker.held()) == 1 })
-		w.put(reservationsPath, readyOrNot(observatory.ReservationDeactivating))
+		waitUntil(t, func() bool { return len(w.worker.outboxFrames()) == 1 })
+		w.put(reservationsPath, reservationIn(observatory.ReservationDeactivating))
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False Waiting" })
 	})
 }

@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Table is the header of a binary table extension and its rows.
+// Table is a binary table extension: its header and its rows.
 type Table struct {
 	Header Header
 	rows   []byte
@@ -17,10 +17,10 @@ type Table struct {
 	count  int64
 }
 
-// ReadTable reads the first binary table of a file: it skips the
-// primary HDU and reads the next HDU, which must be a BINTABLE.
-// SourceExtractor's FITS_1.0 catalog and solve-field's .axy both hold
-// their stars there.
+// ReadTable reads the first binary table of a file. It skips the
+// primary HDU and reads the next HDU, which must be a BINTABLE. Both
+// SourceExtractor's FITS_1.0 catalog and solve-field's .axy file store
+// their star lists in that table.
 func ReadTable(r io.Reader) (Table, error) {
 	primary, err := ReadHeader(r)
 	if err != nil {
@@ -46,7 +46,7 @@ func ReadTable(r io.Reader) (Table, error) {
 	}
 	rows := make([]byte, width*count)
 	if _, err := io.ReadFull(r, rows); err != nil {
-		return Table{}, fmt.Errorf("reading %d rows of %d bytes: %w", count, width, err)
+		return Table{}, fmt.Errorf("reading %d rows of %d bytes each: %w", count, width, err)
 	}
 	return Table{Header: h, rows: rows, width: width, count: count}, nil
 }
@@ -57,17 +57,16 @@ func skipData(r io.Reader, h Header) error {
 		return err
 	}
 	if _, err := io.CopyN(io.Discard, r, padded(size)); err != nil {
-		return fmt.Errorf("skipping %d bytes of data: %w", padded(size), err)
+		return fmt.Errorf("skipping %d bytes of the primary HDU data: %w", padded(size), err)
 	}
 	return nil
 }
 
-// Rows counts the table's rows.
 func (t Table) Rows() int { return int(t.count) }
 
-// Column answers each row's value of one column, by its TTYPE. The
-// column must hold one number in each row, of the TFORM types L, B, I,
-// J, K, E, or D.
+// Column returns the value of one column in each row, found by its
+// TTYPE. Each row must hold one number in the column, with a TFORM type
+// of L, B, I, J, K, E, or D.
 func (t Table) Column(name string) ([]float64, error) {
 	fields, err := t.Header.Int("TFIELDS")
 	if err != nil {
@@ -95,18 +94,19 @@ func (t Table) Column(name string) ([]float64, error) {
 	return nil, fmt.Errorf("column %s: %w", name, ErrMissing)
 }
 
-// sizes holds the bytes of one value of each TFORM type the package
-// reads, and of the types it only steps over (A, X).
+// sizes is the size in bytes of one value of each TFORM type. It covers
+// the types the package reads and the types it only skips over (A, X).
 var sizes = map[byte]int64{'L': 1, 'X': 1, 'B': 1, 'A': 1, 'I': 2, 'J': 4, 'K': 8, 'E': 4, 'D': 8}
 
-// parseForm reads a TFORM such as 1E or 16A: a repeat count, which is
-// 1 when absent, and a type. A bit column (X) takes a byte for each
-// eight bits, which the package treats as whole bytes.
+// parseForm parses a TFORM such as 1E or 16A into a repeat count, which
+// is 1 when absent, and a type code. For a bit column (X) it returns
+// the number of bytes, one for each eight bits rounded up, as the
+// repeat count.
 func parseForm(form string) (int64, byte, error) {
 	form = strings.TrimSpace(form)
 	digits := strings.IndexFunc(form, func(r rune) bool { return r < '0' || r > '9' })
 	if digits < 0 {
-		return 0, 0, fmt.Errorf("TFORM %q names no type", form)
+		return 0, 0, fmt.Errorf("TFORM %q has no type letter", form)
 	}
 	repeat := int64(1)
 	if digits > 0 {
@@ -114,7 +114,7 @@ func parseForm(form string) (int64, byte, error) {
 	}
 	code := form[digits]
 	if _, known := sizes[code]; !known {
-		return 0, 0, fmt.Errorf("TFORM %q has a type the package does not read", form)
+		return 0, 0, fmt.Errorf("TFORM %q has the type %q, which Column does not read", form, code)
 	}
 	if code == 'X' {
 		repeat = (repeat + 7) / 8
@@ -122,8 +122,8 @@ func parseForm(form string) (int64, byte, error) {
 	return repeat, code, nil
 }
 
-// read answers the value at one offset of each row. FITS stores every
-// number big-endian.
+// read returns the value at one byte offset in each row. FITS stores
+// numbers big-endian.
 func (t Table) read(offset int64, code byte) []float64 {
 	out := make([]float64, t.count)
 	for row := range t.count {

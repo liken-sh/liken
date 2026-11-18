@@ -1,18 +1,17 @@
 package main
 
-// The supervisor of the runners. On each change it starts a runner for
-// each Reservation of this operator that is Ready, and stops the runner
-// of each one that is not. A reservation leaves Ready when it ends:
-// observatory-operator's StopWork step stops the devices, and the runner
-// stops with them. Then the supervisor ends the claims of every target
-// whose status.reservation names a reservation that is not Ready: it
-// clears status.reservation and status.exposure, and does not count the
-// frame in flight. If the driver wrote that frame anyway, the promotion
-// finds it in the outbox, and the catalog counts it. It also clears
-// each status.failed that names a reservation that is not Ready.
+// The supervisor runs one runner for each Ready Reservation held by
+// this operator, and stops the runner when the Reservation leaves
+// Ready. The runner does not stop the devices, because
+// observatory-operator stops them in the Reservation's StopWork step.
 //
-// A runner that the operator's own stop ends keeps its claim and its
-// status.exposure, so the next leader finishes the frame in flight.
+// When a Reservation ends, the supervisor releases its Targets and does
+// not count the frame that was in flight. If the driver wrote that
+// frame anyway, promotion finds it in the outbox and the catalog counts
+// it.
+//
+// When the operator itself stops, the Targets stay claimed and keep
+// status.exposure, so the next leader can finish the frame in flight.
 
 import (
 	"context"
@@ -24,7 +23,6 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// running is one runner and the way to stop it.
 type running struct {
 	stop context.CancelFunc
 	done chan struct{}
@@ -48,9 +46,9 @@ func (o *operator) superviseRunners(ctx context.Context) {
 			err := o.superviseOnce(ctx, runners)
 			o.metrics.observePass(observatory.ReservationKind.Name, time.Since(started), err != nil)
 			if err != nil {
-				// A refused write changes nothing that a watch delivers,
-				// so a timer brings the next try.
-				fmt.Fprintf(o.logs, "%s: releasing the targets of ended reservations: %v\n", managedBy, err)
+				// A failed write produces no watch event, so only a timer
+				// retries it.
+				fmt.Fprintf(o.logs, "%s: releasing the Targets of ended Reservations: %v\n", managedBy, err)
 				wait = retryWait
 			}
 		}
@@ -60,9 +58,6 @@ func (o *operator) superviseRunners(ctx context.Context) {
 	}
 }
 
-// superviseOnce starts and stops the runners for the reservations as
-// they are now, and then releases the targets of the reservations that
-// ended.
 func (o *operator) superviseOnce(ctx context.Context, runners map[string]*running) error {
 	view := o.stores.collections[observatory.ReservationKind.Name].View()
 	ready := map[string]*observatory.Reservation{}
@@ -93,10 +88,11 @@ func (o *operator) superviseOnce(ctx context.Context, runners map[string]*runnin
 	return o.releaseEnded()
 }
 
-// releaseEnded ends the claim of each target whose status.reservation
-// names a reservation that is not Ready, and clears each status.failed
-// that names one. A failure holds only for the reservation it names, so
-// a later reservation of the same name claims the target again.
+// releaseEnded clears status.reservation and status.exposure on each
+// Target claimed by a Reservation that is not Ready. It also clears
+// each status.failed that names such a Reservation, because a failure
+// keeps only that Reservation off the Target, and a later Reservation
+// with the same name may claim it.
 func (o *operator) releaseEnded() error {
 	targets, err := o.listTargets("")
 	if err != nil {
@@ -110,8 +106,8 @@ func (o *operator) releaseEnded() error {
 			ready = o.readyIn(t.Metadata.Namespace)
 			readyByNamespace[t.Metadata.Namespace] = ready
 		}
-		held, failed := t.Status.Reservation, t.Status.Failed
-		claimEnded := held != "" && !ready[held]
+		claimedBy, failed := t.Status.Reservation, t.Status.Failed
+		claimEnded := claimedBy != "" && !ready[claimedBy]
 		failureEnded := failed != nil && !ready[failed.Reservation]
 		if !claimEnded && !failureEnded {
 			continue
@@ -120,15 +116,15 @@ func (o *operator) releaseEnded() error {
 			if failureEnded && fresh.Status.Failed != nil && *fresh.Status.Failed == *failed {
 				fresh.Status.Failed = nil
 			}
-			if !claimEnded || fresh.Status.Reservation != held {
+			if !claimEnded || fresh.Status.Reservation != claimedBy {
 				return true
 			}
 			fresh.Status.Reservation, fresh.Status.Exposure = "", nil
 			change.setImaging(fresh, false, astrophotography.ReasonWaiting,
-				fmt.Sprintf("Reservation %s ended. The target waits for the next reservation.", held))
+				fmt.Sprintf("Reservation %s ended, and the target waits for the next reservation", claimedBy))
 			return true
 		}); err != nil {
-			return fmt.Errorf("target %s: %w", targetName(t), err)
+			return fmt.Errorf("writing the status of Target %s: %w", targetName(t), err)
 		}
 	}
 	return nil

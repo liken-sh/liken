@@ -1,25 +1,25 @@
 package main
 
-// A workload is a Deployment of one pod and the Service in front of
-// it, which the operator runs for a Solver and for each reservation's
-// worker. The operator creates each one that is missing and replaces a
-// Deployment whose template it would now write differently, such as
-// after an upgrade that changes the image's tag. It compares a hash of
-// its own template, stamped on the Deployment, and not the API
-// server's copy, which holds every default the API server filled in.
+// A workload is a Deployment with one pod and the Service in front of
+// it. The operator runs one for each Solver and one for each
+// Reservation's worker. It creates the objects that are missing, and
+// replaces a Deployment when the spec it would write differs from the
+// one it wrote before, for example after an upgrade changes the image
+// tag. It compares a hash of its own spec, stored in an annotation,
+// because the API server's copy of the spec also has every default
+// that the API server filled in.
 //
-// A watch delivers each of the operator's writes some time after the
-// API server answers it, and a pass that runs in that time reads a
-// store without the write. A pass that acted on that copy would create
-// the Deployment again, or replace it again at the older copy's
-// resourceVersion, which the API server refuses with 409, and the
-// failed pass would turn the Solver's Ready False. So every write and
-// read of a workload goes through the memo of the operator's versions
-// (informer.ReadSelected), and a store's copy that is older than the
-// operator's last write is read from the API server. The watch selects
-// every object with the operator's label, and each object the operator
-// creates has it, so a ready store's absence of an object the memo has
-// not noted answers that it does not exist.
+// The watch delivers the operator's own writes after a delay. A pass
+// that read the store during that delay would create the Deployment a
+// second time, or replace it with an old resourceVersion and get a 409,
+// and the failed pass would set the Solver's Ready condition to False.
+// So every read goes through informer.ReadSelected with the memo of the
+// resourceVersions the operator wrote. When the store's copy is older
+// than the memo's version, ReadSelected reads the object from the API
+// server. The watch selects every object with the
+// operator's label, and the operator labels every object it creates, so
+// an object that is missing from a synced store and from the memo does
+// not exist.
 
 import (
 	"crypto/sha256"
@@ -43,7 +43,8 @@ type workload struct {
 	service    *service
 }
 
-// stamp records the hash of the Deployment's spec on the Deployment.
+// stamp returns the hash of the Deployment's spec, which the operator
+// stores in templateAnnotation.
 func (w workload) stamp() string {
 	spec, _ := json.Marshal(w.deployment.Spec)
 	sum := sha256.Sum256(spec)
@@ -51,14 +52,14 @@ func (w workload) stamp() string {
 }
 
 // ensure creates the workload's objects that are missing, and replaces
-// a Deployment whose stamp differs.
+// the Deployment when its stored hash differs from the current one.
 func (o *operator) ensure(w workload) error {
 	d := w.deployment
 	stamp := w.stamp()
 	d.Metadata.Annotations = map[string]string{templateAnnotation: stamp}
 	key := memo.Key(&d.Metadata.ObjectMeta)
-	deployments := o.held("Deployment", o.deploymentVersions)
-	held, err := informer.ReadSelected[deployment](o.client, deployments, key, deploymentPath(d.Metadata.Namespace, d.Metadata.Name))
+	deployments := o.storeOf("Deployment", o.deploymentVersions)
+	existing, err := informer.ReadSelected[deployment](o.client, deployments, key, deploymentPath(d.Metadata.Namespace, d.Metadata.Name))
 	switch {
 	case errors.Is(err, apiclient.ErrNotFound):
 		if err := create(o.client, deployments.Versions, "/apis/apps/v1/namespaces/"+d.Metadata.Namespace+"/deployments", d); err != nil {
@@ -66,8 +67,8 @@ func (o *operator) ensure(w workload) error {
 		}
 	case err != nil:
 		return err
-	case held.Metadata.Annotations[templateAnnotation] != stamp:
-		d.Metadata.ResourceVersion = held.Metadata.ResourceVersion
+	case existing.Metadata.Annotations[templateAnnotation] != stamp:
+		d.Metadata.ResourceVersion = existing.Metadata.ResourceVersion
 		body, _ := json.Marshal(d)
 		if _, err := memo.Written(deployments.Versions, key, func() (*deployment, error) {
 			var replaced deployment
@@ -78,7 +79,7 @@ func (o *operator) ensure(w workload) error {
 		}
 	}
 	s := w.service
-	services := o.held("Service", o.serviceVersions)
+	services := o.storeOf("Service", o.serviceVersions)
 	_, err = informer.ReadSelected[service](o.client, services, memo.Key(&s.Metadata.ObjectMeta), servicePath(s.Metadata.Namespace, s.Metadata.Name))
 	if !errors.Is(err, apiclient.ErrNotFound) {
 		return err
@@ -86,16 +87,17 @@ func (o *operator) ensure(w workload) error {
 	return create(o.client, services.Versions, "/api/v1/namespaces/"+s.Metadata.Namespace+"/services", s)
 }
 
-// held answers the store of one kind the operator creates, and the
-// memo of its writes.
-func (o *operator) held(kind string, versions *memo.Versions) informer.Held {
+// storeOf returns the store of one kind of object that the operator
+// creates, with the memo of the resourceVersions it wrote for that kind.
+func (o *operator) storeOf(kind string, versions *memo.Versions) informer.Held {
 	return informer.Held{View: o.stores.collections[kind].View(), Versions: versions}
 }
 
-// create posts an object and notes the version the API server answered.
-// An object that exists already is no error: a write whose answer was
-// lost, or the lead before this one, created it. The memo then holds no
-// current copy, so the next read asks the API server.
+// create sends a POST for an object and records the version that the
+// API server returns. An object that already exists is not an error,
+// because an earlier request whose response was lost, or the previous
+// leader, may have created it. The memo then has no current copy, so
+// the next read goes to the API server.
 func create[T any, P informer.Object[T]](c *apiclient.Client, versions *memo.Versions, collection string, object P) error {
 	body, _ := json.Marshal(object)
 	_, err := memo.Written[T, P](versions, memo.Key(object.GetObjectMeta()), func() (*T, error) {
@@ -110,10 +112,10 @@ func create[T any, P informer.Object[T]](c *apiclient.Client, versions *memo.Ver
 }
 
 // remove deletes a workload's Deployment and Service when the stores
-// hold them. An object that is gone already is no error. The memo then
-// forgets each one, so it keeps no record of a removed worker. The
-// store holds the deleted copy until the watch delivers the delete, and
-// that delete wakes the next pass.
+// contain them, and drops the memo's record of each. An object that is
+// already gone is not an error. The store keeps the deleted copy until
+// the watch delivers the delete event, and that event triggers the next
+// pass.
 func (o *operator) remove(namespace, name string) error {
 	key := namespace + "/" + name
 	if _, found := informer.Cached[deployment](o.stores.collections["Deployment"].View(), key); found {
@@ -131,8 +133,8 @@ func (o *operator) remove(namespace, name string) error {
 	return nil
 }
 
-// podsOf answers the pods in the store that carry one label, in one
-// namespace.
+// podsOf returns the pods in the store that have the given label value
+// in the given namespace.
 func (o *operator) podsOf(namespace, key, value string) []podObject {
 	var out []podObject
 	for _, p := range informer.CachedList[podObject](o.stores.collections["Pod"].View()) {
@@ -143,10 +145,10 @@ func (o *operator) podsOf(namespace, key, value string) []podObject {
 	return out
 }
 
-// reportedPod answers the pod of a workload to report: a ready one when
-// one is, or else the first, and nil for none. A Deployment with the
-// Recreate strategy runs one pod, and a second only while the first is
-// being deleted.
+// reportedPod picks the pod to report on for a workload. It returns the
+// first ready pod, or the first pod when none is ready, or nil when
+// there are no pods. A Deployment with the Recreate strategy runs one
+// pod, and a second only while the first is being deleted.
 func reportedPod(pods []podObject) *podObject {
 	for i := range pods {
 		if pods[i].ready() {

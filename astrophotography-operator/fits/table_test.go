@@ -7,12 +7,13 @@ import (
 	"testing"
 )
 
-// astropy read the same catalog: 1,675 rows, the first with X_IMAGE
-// 675.21466, FWHM_IMAGE 7.0659075, and FLAGS 3.
+// The expected values are what astropy reads from the same catalog:
+// 1,675 rows, the first with X_IMAGE 675.21466, FWHM_IMAGE 7.0659075,
+// and FLAGS 3.
 func TestReadTableReadsSourceExtractorsCatalog(t *testing.T) {
 	table, err := ReadTable(open(t, "catalog.fits"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading catalog.fits: %v", err)
 	}
 	x, _ := table.Column("X_IMAGE")
 	fwhm, _ := table.Column("FWHM_IMAGE")
@@ -33,8 +34,8 @@ func TestReadTableReadsSourceExtractorsCatalog(t *testing.T) {
 	}
 }
 
-// tableOf builds a file of an empty primary HDU and one binary table
-// with one row, whose bytes are given.
+// tableOf builds a FITS file with an empty primary HDU and a binary
+// table that has one row, with the given bytes.
 func tableOf(row []byte, cards ...string) []byte {
 	file := headerOf("SIMPLE  = T", "BITPIX  = 8", "NAXIS   = 0")
 	table := append([]string{"XTENSION= 'BINTABLE'", "BITPIX  = 8", "NAXIS   = 2", "NAXIS2  = 1"}, cards...)
@@ -50,8 +51,8 @@ func bigEndian(values ...any) []byte {
 	return b.Bytes()
 }
 
-// Each numeric type reads at its offset, after the columns before it,
-// including a string and bits that the reader steps over.
+// Each numeric type reads at its own offset, after the columns before
+// it, including a string column and a bit column that the reader skips.
 func TestColumnReadsEachNumericType(t *testing.T) {
 	row := append([]byte("ab"), 0xff)
 	row = append(row, bigEndian(int16(-2), int32(-3), int64(4), float64(5.5), uint8(6))...)
@@ -67,7 +68,7 @@ func TestColumnReadsEachNumericType(t *testing.T) {
 	)
 	table, err := ReadTable(bytes.NewReader(file))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the table: %v", err)
 	}
 	cases := []struct {
 		column string
@@ -78,7 +79,7 @@ func TestColumnReadsEachNumericType(t *testing.T) {
 	for _, c := range cases {
 		got, err := table.Column(c.column)
 		if err != nil || got[0] != c.want {
-			t.Errorf("%s = %v (%v), want %v", c.column, got, err, c.want)
+			t.Errorf("column %s = %v, error %v, want %v", c.column, got, err, c.want)
 		}
 	}
 }
@@ -99,10 +100,10 @@ func TestColumnRefusesWhatItCannotRead(t *testing.T) {
 	for _, c := range cases {
 		table, err := ReadTable(bytes.NewReader(tableOf(make([]byte, 4), c.cards...)))
 		if err != nil {
-			t.Fatalf("%s: %v", c.name, err)
+			t.Fatalf("reading the table of %s: %v", c.name, err)
 		}
 		if _, err := table.Column(c.column); err == nil {
-			t.Errorf("%s: no error", c.name)
+			t.Errorf("Column(%q) of %s returned no error, want one", c.column, c.name)
 		}
 	}
 }
@@ -122,18 +123,19 @@ func TestReadTableRefusesAFileWithNoTable(t *testing.T) {
 		{"a primary HDU with no NAXIS1", headerOf("SIMPLE  = T", "BITPIX  = 8", "NAXIS   = 1")},
 		{"data cut short", primary},
 		{"a table with no NAXIS1", append(headerOf("SIMPLE  = T", "BITPIX  = 8", "NAXIS   = 0"), headerOf("XTENSION= 'BINTABLE'")...)},
-		{"a table with no NAXIS2", tableOfRows("NAXIS1  = 4")},
+		{"a table with no NAXIS2", bareTable("NAXIS1  = 4")},
 		{"rows cut short", tableOf(nil, "NAXIS1  = 4")},
 	}
 	for _, c := range cases {
 		if _, err := ReadTable(bytes.NewReader(c.file)); err == nil {
-			t.Errorf("%s: no error", c.name)
+			t.Errorf("ReadTable of %s returned no error, want one", c.name)
 		}
 	}
 }
 
-// tableOfRows builds a table header with no NAXIS2.
-func tableOfRows(cards ...string) []byte {
+// bareTable builds a file whose table header has only XTENSION and the
+// given cards.
+func bareTable(cards ...string) []byte {
 	file := headerOf("SIMPLE  = T", "BITPIX  = 8", "NAXIS   = 0")
 	return append(file, headerOf(append([]string{"XTENSION= 'BINTABLE'"}, cards...)...)...)
 }

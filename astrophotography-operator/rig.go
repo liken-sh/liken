@@ -1,13 +1,12 @@
 package main
 
-// What the runner reads from observatory-operator (plan 01). It reads
-// only what a Reservation and its devices publish: the reservation's
-// status.endpoint is the telescope's INDI server, status.session names
-// each device of the session and marks the guide camera, and each
-// device's status.indiDevice is its name on that server. The session is
-// a record that does not change while the reservation is Ready, so a
-// person's edit of a device during the night reaches the next session,
-// not this one.
+// The runner reads only what observatory-operator publishes on a
+// Reservation and its devices. The Reservation's status.endpoint is the
+// telescope's INDI server, its status.session lists the devices of the
+// session and marks the guide camera, and each device's
+// status.indiDevice is the device's name on the INDI server. The
+// session does not change while the Reservation is Ready, so an edit of
+// a device during the night takes effect in the next session.
 
 import (
 	"errors"
@@ -22,9 +21,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// errNotServed is the error of a device whose driver does not define
-// it on the server yet: its status.indiDevice is empty. The runner
-// waits for the device's next change.
+// errNotServed is the error for a device whose status.indiDevice is
+// empty, because the INDI server does not list the device yet.
 var errNotServed = errors.New("not served on the INDI server yet")
 
 // camera is the imaging camera of one optical train.
@@ -38,9 +36,10 @@ type camera struct {
 	train string
 }
 
-// imagingCameras answers the cameras of a session that do not guide,
-// sorted by key. A target with a train is imaged by its train's camera,
-// and a target with no train only when the session has exactly one.
+// imagingCameras returns the cameras of a session that do not guide,
+// sorted by key. A target with an optical train is imaged by that
+// train's camera. A target with no train can be imaged only when the
+// session has exactly one imaging camera.
 func imagingCameras(session *observatory.Session) []camera {
 	var out []camera
 	for key, d := range session.Devices {
@@ -53,7 +52,7 @@ func imagingCameras(session *observatory.Session) []camera {
 	return out
 }
 
-// cameraFor answers the camera that images a target in a session, and
+// cameraFor returns the camera that images a target in a session, and
 // false when the session cannot image it.
 func cameraFor(session *observatory.Session, t *astrophotography.Target) (camera, bool) {
 	cameras := imagingCameras(session)
@@ -71,9 +70,10 @@ func cameraFor(session *observatory.Session, t *astrophotography.Target) (camera
 	return camera{}, false
 }
 
-// sessionDevice answers the name of a session's device of one kind,
-// on one train or on none, sorted first by name, and false when the
-// session has none.
+// sessionDevice returns the name of the session's device of one kind
+// on the given optical train, or on no train when train is "". When
+// there are several, it returns the first by name, and when there are
+// none, it returns false.
 func sessionDevice(session *observatory.Session, kind observatory.Kind, train string) (string, bool) {
 	var names []string
 	for key, d := range session.Devices {
@@ -88,8 +88,8 @@ func sessionDevice(session *observatory.Session, kind observatory.Kind, train st
 	return names[0], true
 }
 
-// indiAddress answers the INDI server of a Ready reservation, as
-// host:port.
+// indiAddress returns the address of a Ready reservation's INDI server
+// as host:port.
 func indiAddress(r *observatory.Reservation) (string, error) {
 	e := r.Status.Endpoint
 	if e == nil || e.Host == "" {
@@ -98,7 +98,8 @@ func indiAddress(r *observatory.Reservation) (string, error) {
 	return net.JoinHostPort(e.Host, strconv.Itoa(int(e.Port))), nil
 }
 
-// indiDevice reads a device's name on the INDI server from its status.
+// indiDevice reads a device's name on the INDI server from the status
+// of the device's object. served selects the status field.
 func indiDevice[T any, P informer.Object[T]](o *operator, kind observatory.Kind, namespace, name string, served func(*T) string) (string, error) {
 	key := namespace + "/" + name
 	view := o.stores.collections[kind.Name].View()
@@ -127,9 +128,10 @@ func mountDevice(o *operator, namespace, name string) (string, error) {
 		func(m *observatory.Mount) string { return m.Status.IndiDevice })
 }
 
-// longitudeOf answers the longitude of the session's observatory, in
-// degrees east, for the {night} of a frame's name. An observatory the
-// store does not hold gives 0, Greenwich, so a name still renders.
+// longitudeOf returns the longitude of the session's observatory in
+// degrees east, which sets the date of {night} in a frame's name. When
+// the store has no such Observatory it returns 0, so the name still
+// renders.
 func longitudeOf(o *operator, r *observatory.Reservation) float64 {
 	view := o.stores.collections[observatory.ObservatoryKind.Name].View()
 	site, ok := informer.Cached[observatory.Observatory](view, r.Metadata.Namespace+"/"+r.Status.Session.Observatory)

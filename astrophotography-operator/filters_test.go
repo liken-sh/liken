@@ -1,8 +1,5 @@
 package main
 
-// The filters a target names, checked against the filter wheel's
-// FILTER_NAME before the mount moves.
-
 import (
 	"slices"
 	"testing"
@@ -12,27 +9,26 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// imageBoth images a target that change edits, and then the target
-// b-next, and answers the night when b-next is done.
-func imageBoth(t *testing.T, change func(*astrophotography.Target)) *night {
+// imageBoth applies change to the target a-first, adds a second target
+// b-next, and runs the night until b-next is done.
+func imageBoth(t *testing.T, change func(*astrophotography.Target)) *runnerWorld {
 	t.Helper()
 	w := newWorld(t)
 	first := target("a-first", lights(1))
 	change(first)
 	w.put(targetsPath, first)
 	w.put(targetsPath, target("b-next", lights(1)))
-	w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+	w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 	w.playCamera(t, saves)
 	w.start(t)
 	waitUntil(t, func() bool { return w.imaging(t, "b-next") == "False SequencesDone" })
 	return w
 }
 
-// A target that names a filter the wheel does not hold fails with
-// NoFilter before the slew: no Slewing Event, no write to the mount,
-// and status.failed names the reservation. The runner goes on to the
-// next target, which slews once.
-func TestAFilterTheWheelDoesNotHoldFailsBeforeTheSlew(t *testing.T) {
+// A target with a filter that the wheel does not have fails with
+// NoFilter before the slew, and status.failed records the reservation.
+// The runner moves on to the next target, so the mount slews only once.
+func TestAFilterTheWheelDoesNotHaveFailsBeforeTheSlew(t *testing.T) {
 	cases := []struct {
 		name   string
 		change func(*astrophotography.Target)
@@ -67,8 +63,8 @@ func TestAFilterTheWheelDoesNotHoldFailsBeforeTheSlew(t *testing.T) {
 	}
 }
 
-// A sequence with no work left needs no filter, so a filter that left
-// the wheel after its frames does not fail the target.
+// A filter removed from the wheel after its sequence finished does not
+// fail the target.
 func TestADoneSequenceNeedsNoFilter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := imageBoth(t, func(x *astrophotography.Target) {

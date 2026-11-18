@@ -1,19 +1,19 @@
-# The kustomize base for astrophotography-operator: the resource
-# definitions of the astrophotography.liken.sh group, and the operator
-# with its RBAC, in liken-system. The base creates no namespace for the
-# resources. Apply your Targets and Solvers in the namespace of your
-# observatory, beside observatory-operator's resources, whose base this
-# operator needs.
+# The kustomize base for astrophotography-operator. It holds the CRDs of
+# the astrophotography.liken.sh group, and the operator with its RBAC in
+# liken-system. It creates no namespace for the resources: apply your
+# `Target`s and `Solver`s in the namespace of your observatory, next to
+# observatory-operator's resources. The operator needs that operator's
+# base too.
 #
-# This base is for the cluster owner to take. `liken` does not apply it
-# and does not name it. Take it through your own GitOps with patches of
-# your own, or read it and write your own manifests.
+# `liken` does not apply this base. You apply it yourself, for example
+# through your own GitOps with your own patches, or you read it and write
+# your own manifests.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# The namespace is set with a transformer, not with the top-level
-# namespace field, because unsetOnly keeps an object that states its
-# own namespace where it belongs. Every base sets it the same way.
+# The top-level namespace field would overwrite the namespace of an
+# object that sets its own. This NamespaceTransformer with unsetOnly
+# sets liken-system only on objects that have no namespace.
 transformers:
   - |-
     apiVersion: builtin

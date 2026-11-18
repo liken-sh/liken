@@ -1,14 +1,14 @@
 package main
 
-// The frame in flight after a restart (plan 01, "Restarts"). Every
-// setting of an exposure goes out before the exposure begins, so the
-// driver keeps exposing and writes the frame while the operator
-// restarts or its connection is down. Before it writes anything, a
-// runner finishes each frame that a target's status.exposure names for
-// its reservation: it reads CCD_EXPOSURE, waits while it is Busy, and
-// then asks the worker whether the file is in the outbox. It counts the
-// frame if it is, and clears status.exposure either way, so the frame
-// counts once.
+// Finishing a frame that was in flight when the operator restarted or
+// lost its INDI connection. The runner sends every setting of an
+// exposure before it starts the exposure, so the INDI driver finishes
+// the exposure and writes the frame without the operator. Before a
+// runner sends anything else, it waits until the camera's CCD_EXPOSURE
+// is no longer Busy for each target whose status.exposure belongs to
+// its reservation, and asks the worker whether the frame's file is in
+// the outbox. It counts the frame only if the file is there, and it
+// clears status.exposure either way, so no frame counts twice.
 
 import (
 	"context"
@@ -21,7 +21,6 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
-// resume finishes every frame in flight of the runner's reservation.
 func (r *runner) resume(ctx context.Context) error {
 	targets, err := r.o.listTargets(r.namespace)
 	if err != nil {
@@ -38,8 +37,6 @@ func (r *runner) resume(ctx context.Context) error {
 	return nil
 }
 
-// finish waits for one frame in flight to end, and counts it when the
-// outbox holds its file.
 func (r *runner) finish(ctx context.Context, t *astrophotography.Target) error {
 	e := t.Status.Exposure
 	frame, err := outbox.Parse(e.File)
@@ -48,8 +45,8 @@ func (r *runner) finish(ctx context.Context, t *astrophotography.Target) error {
 		_, err := r.count(t, e, false, "", "")
 		return err
 	}
-	// A camera that its driver does not serve holds no exposure, so the
-	// runner waits only on a camera it can name on the server.
+	// When the Camera object is gone or has no status.indiDevice, the
+	// runner has no device to read CCD_EXPOSURE from, so it does not wait.
 	if device, err := cameraDevice(r.o, r.namespace, frame.Camera); err == nil {
 		if err := r.waitForExposure(ctx, device, exposureEnd(t, e)); err != nil {
 			return err
@@ -62,19 +59,19 @@ func (r *runner) finish(ctx context.Context, t *astrophotography.Target) error {
 	counted := slices.Contains(box.Frames, e.File)
 	r.logf("target %s: the frame %s in flight before the restart is %s", targetName(t), e.FrameID, map[bool]string{true: "in the outbox", false: "not in the outbox"}[counted])
 	wrote, err := r.count(t, e, counted, r.res.Status.Session.Outbox.ClaimName, "")
-	// The process that started the exposure did not count the frame in
-	// the series, because it stopped or lost the connection before the
-	// frame was saved, so the write that counts it in status counts it
-	// in the series too.
+	// The work that started this exposure ended before it counted the
+	// frame, so it did not increment framesExposed either. Only the write
+	// that counts the frame increments it, so it counts once.
 	if wrote && counted {
 		r.o.metrics.runner.framesExposed.WithLabelValues(t.Metadata.Namespace, t.Metadata.Name).Inc()
 	}
 	return err
 }
 
-// exposureEnd answers when a frame in flight ends at the latest: its
-// start, its exposure, and the readout. A sequence that an edit removed
-// gives the start alone.
+// exposureEnd returns the latest time a frame in flight can finish: its
+// start time plus the exposure duration plus readoutAllowance. When an
+// edit removed the frame's sequence, the duration is unknown and is
+// left out.
 func exposureEnd(t *astrophotography.Target, e *astrophotography.Exposure) time.Time {
 	end := e.StartTime.Add(readoutAllowance)
 	if i := int(e.Sequence); i < len(t.Spec.Sequences) {
@@ -85,12 +82,12 @@ func exposureEnd(t *astrophotography.Target, e *astrophotography.Exposure) time.
 	return end
 }
 
-// waitForExposure waits until the client reads the camera's
-// CCD_EXPOSURE and it is not Busy, until the frame's end at the latest,
-// and for at least the readout. A camera still Busy after that holds an
-// exposure that is not the runner's, such as one a person started in
-// KStars, and a camera the server does not reach in that time holds
-// none.
+// waitForExposure waits until the camera defines CCD_EXPOSURE and the
+// property is not Busy, until end or readoutAllowance from now,
+// whichever is later. At that deadline it returns nil: a camera that is
+// still Busy is running an exposure that the runner did not start, such
+// as one a person started in KStars, and a camera that never defines the
+// property has no exposure to finish.
 func (r *runner) waitForExposure(ctx context.Context, device string, end time.Time) error {
 	ctx, cancel := context.WithDeadline(ctx, later(end, time.Now().Add(readoutAllowance)))
 	defer cancel()

@@ -1,10 +1,9 @@
 package astrophotography
 
-// Each CRD and each Go type is written by hand, so this test holds
-// each CRD equal to its Go type. A field that one side has and the
-// other does not, or a field with another type, fails here. Without
-// it, the API server prunes a status field that the CRD lacks, and the
-// operator's next write of that field does nothing.
+// Each CRD and each Go type is written by hand, so this test fails on
+// a field that only one side has and on a field whose types differ.
+// Without it, the API server prunes a status field that the CRD lacks,
+// and the operator's write of that field has no effect.
 
 import (
 	"encoding/json"
@@ -17,7 +16,6 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
-// kindTypes pairs each kind with its Go type.
 var kindTypes = map[string]any{"Target": Target{}, "Solver": Solver{}}
 
 func TestEachGoTypeMatchesItsCRD(t *testing.T) {
@@ -41,8 +39,8 @@ var (
 	timeType = reflect.TypeFor[time.Time]()
 )
 
-// compare answers each difference between a Go type and a schema, by
-// the path of the field.
+// compare returns each difference between a Go type and a schema,
+// prefixed with the path of the field.
 func compare(goType reflect.Type, schema *apiextensionsv1.JSONSchemaProps, path string) []string {
 	for goType.Kind() == reflect.Pointer {
 		goType = goType.Elem()
@@ -69,15 +67,15 @@ func compare(goType reflect.Type, schema *apiextensionsv1.JSONSchemaProps, path 
 	case goType.Kind() == reflect.Struct && goType != timeType:
 		fields := jsonFields(goType)
 		for _, name := range sortedKeys(fields) {
-			property, held := schema.Properties[name]
-			if !held {
+			property, found := schema.Properties[name]
+			if !found {
 				problems = append(problems, path+"."+name+": in Go, not in the CRD")
 				continue
 			}
 			problems = append(problems, compare(fields[name], &property, path+"."+name)...)
 		}
 		for name := range schema.Properties {
-			if _, held := fields[name]; !held {
+			if _, found := fields[name]; !found {
 				problems = append(problems, path+"."+name+": in the CRD, not in Go")
 			}
 		}
@@ -85,7 +83,7 @@ func compare(goType reflect.Type, schema *apiextensionsv1.JSONSchemaProps, path 
 	return problems
 }
 
-// schemaType answers the OpenAPI type and format of a Go type.
+// schemaType returns the OpenAPI type and format of a Go type.
 func schemaType(goType reflect.Type) (string, string) {
 	switch {
 	case goType == rawJSON:
@@ -112,9 +110,9 @@ func schemaType(goType reflect.Type) (string, string) {
 	return goType.Kind().String(), ""
 }
 
-// jsonFields answers the fields that encoding/json writes for a struct,
-// by their JSON names, with the fields of an embedded struct at the
-// level of the struct that embeds it.
+// jsonFields returns the fields that encoding/json writes for a struct,
+// by JSON name. The fields of an embedded struct appear at the same
+// level as the fields of the struct that embeds it.
 func jsonFields(goType reflect.Type) map[string]reflect.Type {
 	fields := map[string]reflect.Type{}
 	for field := range goType.Fields() {
@@ -139,8 +137,8 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// The walk above must see a difference, or a passing test proves
-// nothing. Each case changes one thing in a schema that matches.
+// Each case changes one thing in a schema that matches the type, and
+// compare must report it.
 func TestCompareFindsEachKindOfDifference(t *testing.T) {
 	type inner struct {
 		Count int32 `json:"count"`
@@ -202,7 +200,7 @@ func TestCompareFindsEachKindOfDifference(t *testing.T) {
 			c.change(schema)
 			got := strings.Join(compare(reflect.TypeFor[sample](), schema, "x"), "; ")
 			if got != c.want {
-				t.Errorf("compare = %q, want %q", got, c.want)
+				t.Errorf("the differences are %q, want %q", got, c.want)
 			}
 		})
 	}

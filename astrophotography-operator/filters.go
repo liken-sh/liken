@@ -1,14 +1,13 @@
 package main
 
-// The filter wheel. A sequence and a centering name a filter by its
-// name in the wheel's FILTER_NAME, the name that the driver writes into
-// each frame's FILTER keyword. The runner reads FILTER_NAME before the
-// slew, so a target that names a filter the wheel does not hold fails
-// with NoFilter before the mount moves, and the runner goes on to the
-// next target instead of spending a slew and a centering on one that
-// cannot take a frame. Each frame selects its filter by name again, so
-// a person who renames the wheel's filters during the night fails the
-// target at the next frame that needs a missing name.
+// A sequence or a centering refers to a filter by its name in the
+// wheel's FILTER_NAME property, which is also the name that the driver
+// writes into each frame's FILTER keyword. The runner checks the names
+// before it slews, so a target with a filter that the wheel does not
+// have fails with NoFilter before the mount moves, not after the slew
+// and the centering. selectFilter looks the name up again before each
+// frame, so a filter renamed during the night fails the target at the
+// next frame that uses the old name.
 
 import (
 	"cmp"
@@ -19,14 +18,13 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
-// checkFilters fails the target with NoFilter when the wheel holds no
-// filter of a name that the target's remaining work needs: the filter
-// of each sequence with work left, and the filter of the centering
-// frames. A sequence with no work left needs no filter, so a person can
-// take a filter out of the wheel after its frames are done.
-//
-// A train with no filter wheel is left to selectFilter, which fails the
-// target at the first frame that names a filter.
+// checkFilters fails the target with NoFilter when the wheel has no
+// filter for the work that remains: the filter of each sequence that
+// still has frames to take, and the centering filter. A finished
+// sequence is not checked, so a person can remove its filter from the
+// wheel once its frames are done. With no filter wheel the check
+// passes, and selectFilter fails the target at the first frame that
+// names a filter.
 func (w *work) checkFilters() error {
 	if w.wheelDevice == "" {
 		return nil
@@ -34,8 +32,8 @@ func (w *work) checkFilters() error {
 	t := aligned(w.target)
 	var needed []string
 	if c := t.Spec.Centering; c != nil {
-		// centeringRun takes the first sequence's filter when the
-		// centering names none.
+		// centeringRun uses the first sequence's filter when the
+		// centering has none.
 		needed = append(needed, cmp.Or(c.Filter, t.Spec.Sequences[0].Filter))
 	}
 	for _, p := range t.Status.Sequences {
@@ -54,8 +52,8 @@ func (w *work) checkFilters() error {
 	return nil
 }
 
-// filterSlot answers the wheel's slot of a filter, counted from 1, or a
-// NoFilter failure when FILTER_NAME does not name the filter.
+// filterSlot returns the wheel's slot number for a filter, counting from
+// 1, or a NoFilter failure when FILTER_NAME has no such name.
 func (w *work) filterSlot(filter string) (int, error) {
 	names, _ := w.r.client.Property(w.wheelDevice, "FILTER_NAME")
 	var known []string
@@ -65,11 +63,11 @@ func (w *work) filterSlot(filter string) (int, error) {
 	if i := slices.Index(known, filter); i >= 0 {
 		return i + 1, nil
 	}
-	return 0, fail(astrophotography.ReasonNoFilter, "filter wheel %s has no filter named %q; its FILTER_NAME holds %q", w.wheelDevice, filter, known)
+	return 0, fail(astrophotography.ReasonNoFilter, "filter wheel %s has no filter named %q, and its FILTER_NAME lists %q", w.wheelDevice, filter, known)
 }
 
 // selectFilter turns the filter wheel to a frame's filter. A frame with
-// no filter takes the light path as it is.
+// no filter leaves the wheel where it is.
 func (w *work) selectFilter(ctx context.Context, filter string) error {
 	if filter == "" {
 		return nil

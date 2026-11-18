@@ -13,8 +13,8 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/fits"
 )
 
-// The scales of the lab's series in radians, as the headers of the
-// 2MASS index files on the laptop give them.
+// The scales of the series in radians, as the headers of 2MASS index
+// files give them.
 const (
 	arcmin22 = "0.00639954059064"
 	arcmin30 = "0.00872664625997"
@@ -42,16 +42,15 @@ func writeFiles(t *testing.T, files map[string][]byte) string {
 	dir := t.TempDir()
 	for name, data := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing %s: %v", name, err)
 		}
 	}
 	return dir
 }
 
-// The lab's claim holds 12 files of 4207 and one of 4208, by Debian's
-// names. The engine reads each file's series from its header, so the
-// names do not matter, and a file that is not named index-*.fits is
-// not an index file.
+// The files are named as Debian names them. ScanIndexes reads the
+// series from each header, so only the index-*.fits pattern of a name
+// matters.
 func TestTheSolverListsEachSeriesOfItsClaim(t *testing.T) {
 	files := map[string][]byte{
 		"index-2mass-08.fits": indexOfSeries(4208, arcmin30, arcmin42),
@@ -62,7 +61,7 @@ func TestTheSolverListsEachSeriesOfItsClaim(t *testing.T) {
 	}
 	found, skipped, err := ScanIndexes(writeFiles(t, files))
 	if err != nil || skipped != nil {
-		t.Fatal(err)
+		t.Fatalf("scanning the indexes returned %v and left out %v, want neither", err, skipped)
 	}
 	want := Indexes{
 		{ID: 4207, Files: 12, ScaleArcmin: astrophotography.ScaleRange{Low: 22, High: 30}},
@@ -73,9 +72,7 @@ func TestTheSolverListsEachSeriesOfItsClaim(t *testing.T) {
 	}
 }
 
-// The engine opens each file by the path its configuration gives, and
-// stops a field at the configuration's CPU limit.
-func TestTheEngineConfigNamesEachFileAndTheLimit(t *testing.T) {
+func TestTheEngineConfigListsEachFileAndTheLimit(t *testing.T) {
 	files := []IndexFile{{Path: "/indexes/index-2mass-07-00.fits"}, {Path: "/indexes/index-2mass-08.fits"}}
 	want := "index /indexes/index-2mass-07-00.fits\nindex /indexes/index-2mass-08.fits\ncpulimit 60\n"
 	if got := EngineConfig(files, 60); got != want {
@@ -83,10 +80,8 @@ func TestTheEngineConfigNamesEachFileAndTheLimit(t *testing.T) {
 	}
 }
 
-// A file that the engine could not read is left out, with the file's
-// name, so the pod's log says which file to replace, and the solver
-// serves the rest. A file that a Job still writes ends in the middle of
-// its data.
+// A file that a Job is still writing ends in the middle of its data,
+// as the "cut in its data" case does.
 func TestAnIndexFileThatDoesNotReadIsLeftOut(t *testing.T) {
 	cases := []struct {
 		name string
@@ -112,20 +107,20 @@ func TestAnIndexFileThatDoesNotReadIsLeftOut(t *testing.T) {
 	}
 }
 
-// A link whose file is gone, such as one into a claim that a person
-// emptied, does not open, and is left out.
+// A symbolic link whose target is gone, such as one into a claim that
+// a person emptied, is left out.
 func TestAnIndexFileThatDoesNotOpenIsLeftOut(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Symlink(filepath.Join(dir, "gone"), filepath.Join(dir, "index-gone.fits")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("linking index-gone.fits to a missing target: %v", err)
 	}
 	if found, skipped, err := ScanIndexes(dir); err != nil || len(found) != 0 || len(skipped) != 1 {
-		t.Errorf("found %d files and left out %v, %v", len(found), skipped, err)
+		t.Errorf("found %d files and left out %v with error %v, want none found and one left out", len(found), skipped, err)
 	}
 }
 
 func TestADirectoryThatDoesNotReadIsAnError(t *testing.T) {
 	if _, _, err := ScanIndexes(filepath.Join(t.TempDir(), "gone")); err == nil {
-		t.Error("no error")
+		t.Error("scanning a directory that does not exist returned no error")
 	}
 }

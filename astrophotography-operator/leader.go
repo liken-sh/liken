@@ -1,15 +1,13 @@
 package main
 
-// The operator is a cluster singleton. Two copies that act at once
-// would both claim the same Target for a reservation, both send the
-// same exposure to one camera, and both start a promotion Job that
-// appends to one catalog, which must have one writer. A rollout, a
-// node partition, and a replica count above one each run a second copy,
-// so only the copy that holds the Lease astrophotography-operator acts,
-// through kubernetes/election. Every other copy waits for the Lease and
-// does nothing else. The client asks the election before each write
-// (Lead.MayWrite), so a leader that cannot renew stops writing before
-// another copy can take the Lease.
+// Two operator pods acting at once could claim one Target for two
+// reservations, send the same exposure to one camera, or start two
+// promotion Jobs that append to one catalog. A rollout, a node
+// partition, or more than one replica can run a second pod. So only the
+// pod that holds the Lease astrophotography-operator acts, and the
+// others wait for it through kubernetes/election. The API client checks
+// Lead.MayWrite before each write, so a leader that cannot renew the
+// Lease stops writing before another pod can take it.
 
 import (
 	"context"
@@ -25,47 +23,46 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// leaseName names the Lease that the copies compete for, in the
-// operator's own namespace. deploy/rbac.yaml grants it by this name.
+// leaseName is the name of the Lease that the copies compete for, in
+// the operator's own namespace. deploy/rbac.yaml grants access to the
+// Lease by this name.
 const leaseName = managedBy
 
-// process is what one process of the operator reaches: the API server
-// and the Lease.
+// process holds the clients and settings of one operator process.
 type process struct {
-	// client sends every request of the operator.
-	client *apiclient.Client
-	// watcher is the client of the watches, which only read.
+	// client sends every request of the operator except the watches.
+	client  *apiclient.Client
 	watcher dynamic.Interface
-	// lease is the configuration of the election's client.
+	// lease is the client configuration for the election.
 	lease *rest.Config
 
-	// pod and namespace name the operator's own pod. The pod's name is
-	// the start of the identity the Lease names, and the namespace holds
-	// the Lease.
+	// pod and namespace are the operator's own pod name and namespace.
+	// The Lease holder identity starts with the pod name.
 	pod       string
 	namespace string
 
-	// metricsAddress is where /metrics listens. Empty turns it off.
+	// metricsAddress is where /metrics listens. When it is empty, the
+	// process serves no metrics.
 	metricsAddress string
 
-	// report receives each line the election logs, and logs each line
-	// of the operator and its Event recorder. exit ends the process
-	// after a lost Lease. A test sets all three.
+	// report receives each line that the election logs. logs receives
+	// the log lines of the operator and its Event recorder. exit ends
+	// the process after the Lease is lost. A test sets all three.
 	report func(line string)
 	logs   io.Writer
 	exit   func(code int)
 }
 
-// operate waits for the Lease, then runs the operator until stop ends,
-// and releases the Lease after the last write. A copy that stop ends
-// before it leads holds nothing and answers nil.
+// operate waits for the Lease, runs the operator until stop ends, and
+// then releases the Lease. When stop ends before this copy becomes the
+// leader, operate returns nil.
 //
-// run returns only after every goroutine that writes has returned. The
-// Event recorder writes from its own goroutine, and Shutdown returns
-// after its last request has returned. So no write is in flight when
-// the Lease is free. When the recorder's last write does not return in
-// time, operate answers the error and keeps the Lease: the process
-// exits holding it, and a waiting copy takes it when it expires.
+// No write may be in flight when the Lease is released. o.run returns
+// only after every goroutine that writes has returned, and
+// recorder.Shutdown returns after the recorder's last request. When
+// Shutdown does not finish within events.ShutdownTimeout, operate
+// returns the error and does not release the Lease, so a waiting pod
+// takes it only when it expires.
 func (p process) operate(stop context.Context) error {
 	lead, err := election.Start(stop, p.lease, election.Options{
 		Name:      leaseName,
@@ -78,30 +75,30 @@ func (p process) operate(stop context.Context) error {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("leader election: %w", err)
+		return fmt.Errorf("electing a leader: %w", err)
 	}
 	client := p.client.WithWriteGuard(lead.MayWrite)
-	// The recorder outlives the stop, so the Events of the last pass
-	// are written before the release.
+	// The recorder uses a context that stop does not cancel, so the
+	// Events of the last pass are written before the Lease is released.
 	recorder := events.New(context.Background(), client, managedBy, events.Options{Instance: p.pod, Log: p.logs})
 	o := newOperator(client, recorder, newMetrics(version), p.logs)
 	o.pod, o.namespace = p.pod, p.namespace
-	// A lead that cannot name the worker image still runs, and each
-	// Solver's Ready condition says why its pod does not start.
+	// When workerImage fails, the leader still runs, and each Solver's
+	// Ready condition reports that its pod cannot start.
 	if o.workerImage, err = workerImage(client, p.namespace, p.pod); err != nil {
-		fmt.Fprintf(p.logs, "%s: %v\n", managedBy, err)
+		fmt.Fprintf(p.logs, "%s: reading the worker image: %v\n", managedBy, err)
 	}
-	// Only the copy that holds the Lease serves metrics, because only
-	// that copy has series to serve. A listener that fails to open is
-	// logged and does not stop the operator's work.
+	// Only the leader serves metrics, because only the leader records
+	// them. When the listener fails to open, the operator logs it and
+	// continues.
 	if _, err := o.metrics.serve(stop, p.metricsAddress); err != nil {
-		fmt.Fprintf(p.logs, "%s: the metrics listener: %v\n", managedBy, err)
+		fmt.Fprintf(p.logs, "%s: opening the metrics listener: %v\n", managedBy, err)
 	}
 	o.run(stop, p.watcher)
 	ctx, cancel := context.WithTimeout(context.Background(), events.ShutdownTimeout)
 	defer cancel()
 	if err := recorder.Shutdown(ctx); err != nil {
-		return fmt.Errorf("%w; leaving the Lease to expire", err)
+		return fmt.Errorf("shutting down the Event recorder: %w, so the Lease is left to expire", err)
 	}
 	lead.StepDown()
 	return nil

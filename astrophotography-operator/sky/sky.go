@@ -1,21 +1,22 @@
-// Package sky converts a position on the sky between the two
-// equinoxes that the operator meets. A Target's coordinates and a
-// solver's answer are J2000, the equinox of every catalog. An INDI
-// mount takes and reports EQUATORIAL_EOD_COORD at the equinox of the
-// date, called JNow. The two differ by the precession of the Earth's
-// axis since 2000 and by its nutation, about 20 arcminutes for M42 in
-// 2026, so a slew to J2000 numbers misses by that much.
+// Package sky converts positions on the sky between J2000 and JNow.
+// A Target's coordinates and a plate solver's results are J2000, the
+// equinox that star catalogs use. An INDI mount takes and reports
+// EQUATORIAL_EOD_COORD at the equinox of the current date, which is
+// JNow. The Earth's axis has precessed and nutated since 2000, so the
+// two differ by about 20 arcminutes for M42 in 2026. A slew that sends
+// J2000 numbers to the mount misses by that much.
 //
 // The formulas are from Jean Meeus, Astronomical Algorithms, second
 // edition: chapter 7 for the Julian day, chapter 17 for the angle
 // between two points, chapter 21 for precession, and chapter 22 for
-// nutation. The tests hold the book's worked examples. Centering
-// converts with the same functions on both sides of a sync (plan 02),
-// so an error of the conversion cancels, and the abridged nutation of
-// chapter 22 is enough. For the same reason the conversion leaves out
-// aberration (chapter 23), a shift of up to 20.5 arcseconds that the
-// Earth's motion gives every star: the first slew can miss by that
-// much, and the first sync removes it.
+// nutation. The tests check the book's worked examples.
+//
+// The runner centers a target by syncing the mount and slewing again,
+// and both convert with ToDate, so a conversion error cancels out.
+// That is why the abridged nutation series of chapter 22 is accurate
+// enough, and why the conversion omits aberration (chapter 23). Aberration shifts a
+// star by up to 20.5 arcseconds, so the first slew can miss by that
+// much, and the first sync removes the error.
 package sky
 
 import (
@@ -27,45 +28,43 @@ import (
 const J2000 = 2451545.0
 
 // Position is a point on the sky in equatorial coordinates, in
-// degrees: the right ascension from 0 up to 360, and the declination
-// from -90 to 90. The worker's and the solver's answers carry it in
-// JSON.
+// degrees: right ascension from 0 up to 360, and declination from -90
+// to 90. The worker and the solver send it as JSON.
 type Position struct {
 	RA  float64 `json:"ra"`
 	Dec float64 `json:"dec"`
 }
 
-// RAHours answers the right ascension in hours, the unit of INDI's
+// RAHours returns the right ascension in hours, the unit of INDI's
 // EQUATORIAL_EOD_COORD.
 func (p Position) RAHours() float64 { return p.RA / 15 }
 
-// JulianDay answers the Julian day of a time (chapter 7). The formulas
-// of chapters 21 and 22 take Terrestrial Time, which runs about 69
-// seconds ahead of UTC in 2026. In 69 seconds the equinox moves by
-// less than 0.0002 arcseconds, so the operator passes UTC.
+// JulianDay returns the Julian day of a time (chapter 7). The formulas
+// of chapters 21 and 22 take Terrestrial Time, which is about 69
+// seconds ahead of UTC in 2026. The equinox moves less than 0.0002
+// arcseconds in 69 seconds, so the operator passes UTC.
 func JulianDay(t time.Time) float64 {
 	return float64(t.UnixNano())/float64(24*time.Hour) + 2440587.5
 }
 
-// ToDate converts a J2000 position to the equinox of the time: JNow,
-// the coordinates an INDI mount takes in EQUATORIAL_EOD_COORD.
+// ToDate converts a J2000 position to JNow at the given time, the
+// coordinates that an INDI mount takes in EQUATORIAL_EOD_COORD.
 func ToDate(p Position, t time.Time) Position {
 	jd := JulianDay(t)
 	return NutationAt(jd).matrix().times(precession(jd)).apply(p.vector()).position()
 }
 
-// FromDate converts a position at the equinox of the time back to
-// J2000. Precession and nutation are rotations, so the way back is
-// each rotation's transpose in the reverse order.
+// FromDate converts a JNow position at the given time back to J2000.
+// Precession and nutation are rotations, so the inverse is the
+// transpose of the combined rotation.
 func FromDate(p Position, t time.Time) Position {
 	jd := JulianDay(t)
 	return NutationAt(jd).matrix().times(precession(jd)).transpose().apply(p.vector()).position()
 }
 
-// Separation answers the angle between two positions, in degrees. It
-// takes the angle from the vectors' cross and dot products, which is
-// exact at every distance, where the cosine formula of equation 17.1
-// loses precision for two points close together, as Meeus warns.
+// Separation returns the angle between two positions, in degrees. It
+// takes the atan2 of the cross and dot products, because the cosine
+// formula of equation 17.1 loses precision for points close together.
 func Separation(a, b Position) float64 {
 	u, v := a.vector(), b.vector()
 	cross := vector{
@@ -78,8 +77,8 @@ func Separation(a, b Position) float64 {
 	return degrees(math.Atan2(sin, cos))
 }
 
-// vector is a unit vector toward a point on the sky: x toward the
-// equinox, z toward the celestial pole.
+// vector is a unit vector toward a point on the sky. The x axis points
+// at the equinox and the z axis at the celestial pole.
 type vector [3]float64
 
 func (p Position) vector() vector {
@@ -106,7 +105,8 @@ func (m matrix) apply(v vector) vector {
 	return out
 }
 
-// times answers the rotation m after n.
+// times returns the product m·n, the rotation that applies n first and
+// then m.
 func (m matrix) times(n matrix) matrix {
 	var out matrix
 	for i := range 3 {
@@ -127,9 +127,10 @@ func (m matrix) transpose() matrix {
 	return out
 }
 
-// The rotations of the axes about x, y, and z by an angle in degrees,
-// in the sense of the IAU's R1, R2, and R3: a positive angle turns the
-// axes counterclockwise as seen from the positive end of the axis.
+// aboutX, aboutY, and aboutZ rotate the coordinate axes about x, y, and
+// z by an angle in degrees, as the IAU's R1, R2, and R3 do. A positive
+// angle turns the axes counterclockwise as seen from the positive end
+// of the axis.
 func aboutX(angle float64) matrix {
 	s, c := math.Sincos(radians(angle))
 	return matrix{{1, 0, 0}, {0, c, s}, {0, -s, c}}

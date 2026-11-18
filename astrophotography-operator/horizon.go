@@ -1,16 +1,15 @@
 package main
 
-// The horizon filter of plan 04. A target is not eligible while it
-// stands below the horizon of the reservation's telescope: the
-// Horizon that the Telescope's spec.horizon names, or 0° when it names
-// none. The runner checks before it claims a target and before each
-// frame, so a target that sets during its sequences is released before
-// the next frame, the way plan 04 plans one exposure at a time.
+// A runner does not image a target whose altitude is at or below the
+// horizon of the reservation's telescope. That horizon is the Horizon
+// named by the Telescope's spec.horizon, or 0° at every azimuth when
+// spec.horizon is empty. The runner checks before it claims a target and
+// before each frame, so a target that sets is released before its next
+// frame.
 //
-// The rise of a target is a clock time, so when no target is eligible,
-// the runner waits until the first rise of a target below the horizon,
-// or until a change wakes it, and checks again. It computes no
-// altitude at any other time.
+// When no target can be imaged, the runner waits until the earliest
+// rise among the targets below the horizon, or until a watched object
+// changes, and then checks again.
 
 import (
 	"fmt"
@@ -23,25 +22,25 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// skyLimit is the part of the sky a reservation's telescope can image.
+// skyLimit is the site and the horizon profile of a reservation's
+// telescope.
 type skyLimit struct {
 	site sky.Site
-	// known is false when the stores hold no Observatory of the
-	// session, so no altitude can be computed, and the filter passes
+	// known is false when the cache has no Observatory for the session.
+	// Without a site the altitude cannot be computed, so check passes
 	// every target.
 	known bool
-	// profile is the Horizon's points, and nil for a flat horizon at 0°.
+	// profile is nil for a flat horizon at 0°.
 	profile observatory.Profile
-	// about names the horizon in a message, and note says why it is
-	// flat, when it is.
+	// about names the horizon in the Imaging message. note explains why
+	// the horizon is flat, and is empty when it is not.
 	about, note string
 }
 
 // skyLimit reads the site from the session's Observatory, and the
-// horizon from the Horizon that the telescope's spec.horizon names
-// now. The horizon is read from the Telescope and not from the
-// session, because a horizon blocks no device, and an edit of it
-// applies to the next check.
+// horizon from the Telescope's current spec.horizon. The reservation's
+// session records only what the running devices depend on. The horizon
+// changes no device, so an edit to it applies at the next check.
 func (r *runner) skyLimit() skyLimit {
 	stores := r.o.stores.collections
 	site, known := informer.Cached[observatory.Observatory](stores[observatory.ObservatoryKind.Name].View(),
@@ -50,12 +49,12 @@ func (r *runner) skyLimit() skyLimit {
 		return skyLimit{}
 	}
 	telescopeName := r.res.Spec.Telescope
-	const flat = "so the operator counts its horizon as 0° at every azimuth."
+	const flat = "so the operator uses a horizon of 0° at every azimuth"
 	limit := skyLimit{
 		site:  sky.Site{Latitude: site.Spec.Location.Latitude, Longitude: site.Spec.Location.Longitude},
 		known: true,
 		about: "the horizon of telescope " + telescopeName,
-		note:  fmt.Sprintf("Telescope %s names no Horizon, %s", telescopeName, flat),
+		note:  fmt.Sprintf("Telescope %s has no spec.horizon, %s", telescopeName, flat),
 	}
 	telescope, found := informer.Cached[observatory.Telescope](stores[observatory.TelescopeKind.Name].View(), r.namespace+"/"+telescopeName)
 	if !found || telescope.Spec.Horizon == "" {
@@ -64,14 +63,14 @@ func (r *runner) skyLimit() skyLimit {
 	name := telescope.Spec.Horizon
 	horizon, found := informer.Cached[observatory.Horizon](stores[observatory.HorizonKind.Name].View(), r.namespace+"/"+name)
 	if !found {
-		limit.note = fmt.Sprintf("The Horizon %s that telescope %s names does not exist, %s", name, telescopeName, flat)
+		limit.note = fmt.Sprintf("The Horizon %s that telescope %s refers to does not exist, %s", name, telescopeName, flat)
 		return limit
 	}
-	// The CRD's rules refuse a profile that does not parse, so an error
-	// here is a profile written before the rules, and it counts as flat.
+	// The CRD rejects a profile that does not parse, so this error means
+	// the Horizon was created before the CRD had that rule.
 	profile, err := observatory.ParseProfile(horizon.Spec.Profile)
 	if err != nil {
-		limit.note = fmt.Sprintf("The Horizon %s that telescope %s names does not read (%v), %s", name, telescopeName, err, flat)
+		limit.note = fmt.Sprintf("The Horizon %s that telescope %s refers to does not parse, %s: %v", name, telescopeName, flat, err)
 		return limit
 	}
 	limit.profile = profile
@@ -79,16 +78,18 @@ func (r *runner) skyLimit() skyLimit {
 	return limit
 }
 
-// below says that a target is below the horizon: why, for the Imaging
-// condition's message, and when it rises, zero when not within a day.
+// below is the result of a check that finds a target at or below the
+// horizon. message is for the Imaging condition. rises is when the
+// target next rises above the horizon, and is zero when it does not
+// rise within a day.
 type below struct {
 	message string
 	rises   time.Time
 }
 
-// check answers whether a target is below the horizon at now, and nil
-// when it can be imaged. A target whose coordinates do not read passes,
-// so that its slew fails and says why.
+// check returns nil when the target is above the horizon at now. A
+// target whose coordinates do not parse passes, so that its slew fails
+// and reports the parse error.
 func (l skyLimit) check(t *astrophotography.Target, now time.Time) *below {
 	position, err := targetPosition(t)
 	if !l.known || err != nil {
@@ -99,26 +100,26 @@ func (l skyLimit) check(t *astrophotography.Target, now time.Time) *below {
 	if at.Altitude > limit {
 		return nil
 	}
-	b := &below{message: fmt.Sprintf("%s is at %.1f° altitude and %.1f° azimuth, below %s, which is at %.1f° there.",
+	b := &below{message: fmt.Sprintf("%s is at %.1f° altitude and %.1f° azimuth, below %s, which is at %.1f° there",
 		t.Spec.Object, at.Altitude, at.Azimuth, l.about, limit)}
-	if l.note != "" {
-		b.message += " " + l.note
-	}
 	rises, ok := sky.NextAbove(position, l.site, now, l.profile.Altitude)
-	if !ok {
-		b.message += " It does not rise above it within a day."
-		return b
+	if ok {
+		b.rises = rises
+		b.message += ", and rises above it at " + rises.UTC().Format(time.RFC3339)
+	} else {
+		b.message += ", and does not rise above it within a day"
 	}
-	b.rises = rises
-	b.message += " It rises above it at " + rises.UTC().Format(time.RFC3339) + "."
+	if l.note != "" {
+		b.message += ". " + l.note
+	}
 	return b
 }
 
-// markBelow sets Imaging False with BelowHorizon on a target that no
-// other reservation images, and releases it when this reservation held
-// it. A target that already says BelowHorizon is left alone, so the
-// runner writes once for each time a target goes below the horizon,
-// and the message keeps the altitude of that moment.
+// markBelow sets Imaging to False with reason BelowHorizon on a target
+// that no other reservation has claimed, and releases the target when
+// this reservation claimed it. It skips a target whose reason is already
+// BelowHorizon, so the runner writes once each time a target goes below
+// the horizon, and the message keeps the altitude from that moment.
 func (r *runner) markBelow(t *astrophotography.Target, b *below) error {
 	_, err := r.o.writeTarget(t, func(fresh *astrophotography.Target, change *statusChange) bool {
 		c, _ := conditions.Find(fresh.Status.Conditions, astrophotography.ConditionImaging)
@@ -132,8 +133,9 @@ func (r *runner) markBelow(t *astrophotography.Target, b *below) error {
 	return err
 }
 
-// riseWait answers how long an idle runner waits with no change: until
-// the first rise of a target below the horizon, or forever.
+// riseWait returns how long an idle runner waits when nothing changes:
+// until the earliest rise that noteRise recorded, or forever when there
+// is none.
 func (r *runner) riseWait() time.Duration {
 	if r.nextRise.IsZero() {
 		return forever
@@ -141,7 +143,7 @@ func (r *runner) riseWait() time.Duration {
 	return max(time.Until(r.nextRise), 0)
 }
 
-// noteRise keeps the first rise of the targets below the horizon.
+// noteRise records b's rise time when it is the earliest so far.
 func (r *runner) noteRise(b *below) {
 	if !b.rises.IsZero() && (r.nextRise.IsZero() || b.rises.Before(r.nextRise)) {
 		r.nextRise = b.rises

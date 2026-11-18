@@ -1,9 +1,7 @@
 package main
 
-// What the tests of the solvers and the workers read of the fake API
-// server's writes (fakeobjects_test.go): each write to a collection,
-// one object as a Go value, and an API server that refuses every write,
-// or every read of one object, for a while.
+// Helpers that read what the fake API server (fakeobjects_test.go)
+// stores, and switches that make it fail requests.
 
 import (
 	"encoding/json"
@@ -11,24 +9,24 @@ import (
 	"strings"
 )
 
-// refuse makes the writes fail with 500, the way an API server that
-// cannot reach etcd answers, or succeed again.
+// refuse(true) makes every write of an object fail with 500, as an API
+// server does when it cannot reach etcd. refuse(false) ends it.
 func (a *fakeAPI) refuse(refusing bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.refusing = refusing
 }
 
-// refuseReads makes the reads of one object fail with 500, or succeed
-// again.
+// refuseReads(true) makes every GET of a single object fail with 500.
+// A list or a watch still succeeds. refuseReads(false) ends it.
 func (a *fakeAPI) refuseReads(refusing bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.refusingReads = refusing
 }
 
-// writes answers each request that wrote to a collection, as its
-// method and path, in order.
+// writes returns each non-GET request to a collection, as "METHOD
+// path", in the order the fake received them.
 func (a *fakeAPI) writes(path string) []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -43,15 +41,15 @@ func (a *fakeAPI) writes(path string) []string {
 	return out
 }
 
-// objectOf answers the collection's copy of one object, decoded into T,
-// and whether the collection holds it.
+// objectOf returns one stored object decoded into T, and whether the
+// fake has it.
 func objectOf[T any](t interface{ Fatalf(string, ...any) }, a *fakeAPI, path, namespace, name string) (T, bool) {
 	var out T
-	held := a.get(path, namespace, name)
-	if held == nil {
+	stored := a.get(path, namespace, name)
+	if stored == nil {
 		return out, false
 	}
-	raw, _ := json.Marshal(held)
+	raw, _ := json.Marshal(stored)
 	if err := json.Unmarshal(raw, &out); err != nil {
 		t.Fatalf("decoding %s %s/%s: %v", path, namespace, name, err)
 	}

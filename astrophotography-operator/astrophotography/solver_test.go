@@ -18,19 +18,19 @@ func labSolver(more map[string]any) map[string]any {
 	return spec
 }
 
-// A person who leaves out spec.search gets the attempts of plan 02 and
-// the 10° that the simulator's frame needed, then a blind solve.
+// When spec.search is omitted, the CRD defaults it to radii of 5° and
+// 10°, then a blind solve.
 func TestTheCRDFillsTheSolversSearch(t *testing.T) {
 	structural, err := structuralschema.NewStructural(internalSchema(t, loadCRD(t, SolverKind)))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Solver CRD schema: %v", err)
 	}
 	object := resource(SolverKind, labSolver(nil))
 	defaulting.Default(object, structural)
 	raw, _ := json.Marshal(object)
 	var solver Solver
 	if err := json.Unmarshal(raw, &solver); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the defaulted Solver: %v", err)
 	}
 	if !slices.Equal(solver.Spec.Search.Radii, []float64{5, 10}) || !solver.Spec.Search.Blind {
 		t.Errorf("search = %+v, want radii [5 10] and blind", solver.Spec.Search)
@@ -55,8 +55,8 @@ func TestTheAPIServerAcceptsAndRefusesASolversSearch(t *testing.T) {
 	}
 }
 
-// The solver's Service is named <name>-solver, and a Service's name is
-// at most 63 characters.
+// The solver's Service is named <name>-solver, and a Service name can
+// be at most 63 characters.
 func TestASolversNameFitsItsService(t *testing.T) {
 	cases := []struct {
 		name    string

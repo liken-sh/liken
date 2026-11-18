@@ -1,11 +1,11 @@
 package sky
 
-// precession answers the rotation from the equinox of J2000.0 to the
+// precession returns the rotation from the equinox of J2000.0 to the
 // equinox of the Julian day jd, by the rigorous method of chapter 21.
-// The three angles ζ, z, and θ are equations 21.3 with the starting
-// epoch at J2000.0, where T is zero and only t remains. The rotation
-// R3(-z)·R2(θ)·R3(-ζ) is the same transformation as equations 21.4,
-// written as a matrix so that its transpose converts back.
+// The angles ζ, z, and θ are equations 21.3 with the starting epoch at
+// J2000.0, so T is zero and only t remains. The rotation
+// R3(-z)·R2(θ)·R3(-ζ) is the transformation of equations 21.4 written
+// as a matrix, so its transpose converts back.
 func precession(jd float64) matrix {
 	t := (jd - J2000) / 36525
 	zeta := (2306.2181*t + 0.30188*t*t + 0.017998*t*t*t) / 3600

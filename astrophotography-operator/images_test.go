@@ -8,7 +8,7 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-func TestTheWorkerImageTakesTheOperatorsTag(t *testing.T) {
+func TestTheWorkerImageUsesTheOperatorsTag(t *testing.T) {
 	cases := []struct {
 		operator, want string
 	}{
@@ -17,14 +17,12 @@ func TestTheWorkerImageTakesTheOperatorsTag(t *testing.T) {
 	}
 	for _, c := range cases {
 		if got, err := deriveWorkerImage(c.operator); err != nil || got != c.want {
-			t.Errorf("%s: %q, %v, want %q", c.operator, got, err, c.want)
+			t.Errorf("deriveWorkerImage(%q) = %q, %v, want %q", c.operator, got, err, c.want)
 		}
 	}
 }
 
-// An image with no tag has no tag to share, and the error names the
-// variable to set.
-func TestAnImageWithNoTagNamesNoWorkerImage(t *testing.T) {
+func TestAnOperatorImageWithNoTagIsAnError(t *testing.T) {
 	cases := []string{
 		"ghcr.io/liken-sh/astrophotography-operator",
 		"registry.lab:5000/astrophotography-operator",
@@ -33,20 +31,19 @@ func TestAnImageWithNoTagNamesNoWorkerImage(t *testing.T) {
 	}
 	for _, reference := range cases {
 		if _, err := deriveWorkerImage(reference); err == nil {
-			t.Errorf("%s: no error", reference)
+			t.Errorf("deriveWorkerImage(%q) returned no error, want one because the reference has no tag", reference)
 		}
 	}
 }
 
-func TestTheVariableWinsOverTheOperatorsPod(t *testing.T) {
+func TestTheVariableOverridesTheOperatorsPod(t *testing.T) {
 	t.Setenv(workerImageVariable, "registry.lab/worker@sha256:0123")
 	if got, err := workerImage(nil, operatorNS, operatorPodName); err != nil || got != "registry.lab/worker@sha256:0123" {
-		t.Errorf("%q, %v", got, err)
+		t.Errorf("workerImage = %q, %v, want the image that the variable sets", got, err)
 	}
 }
 
-// The operator reads its own pod once, at the start of a lead, and
-// takes the image of its container.
+// The worker image comes from the image of the container named operator.
 func TestTheWorkerImageComesFromTheOperatorsPod(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -68,19 +65,19 @@ func TestTheWorkerImageComesFromTheOperatorsPod(t *testing.T) {
 				client := apiclient.New(apiservertest.Host, api.server.Client(), "")
 				got, err := workerImage(client, operatorNS, operatorPodName)
 				if got != c.want || (err != nil) != c.fails {
-					t.Errorf("%q, %v, want %q", got, err, c.want)
+					t.Errorf("workerImage = %q, %v, want %q error %v", got, err, c.want, c.fails)
 				}
 			})
 		})
 	}
 }
 
-func TestAnOperatorPodThatIsGoneNamesNoWorkerImage(t *testing.T) {
+func TestAnOperatorPodThatIsGoneIsAnError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
 		client := apiclient.New(apiservertest.Host, api.server.Client(), "")
 		if _, err := workerImage(client, operatorNS, operatorPodName); err == nil {
-			t.Error("no error")
+			t.Error("workerImage returned no error, want one because the operator pod does not exist")
 		}
 	})
 }

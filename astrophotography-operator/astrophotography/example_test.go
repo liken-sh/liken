@@ -1,9 +1,9 @@
 package astrophotography
 
-// examples/first-session.yaml is the drill of plan 08, which a reader
-// also copies. These tests hold it to the CRDs of both operators, to
-// the Go types, and to itself: every claim and Solver it names exists
-// in it.
+// examples/first-session.yaml is a complete first session that readers
+// copy. These tests check it against the CRDs of both operators and the
+// Go types, and check that the file defines every claim and Solver that
+// it refers to.
 
 import (
 	"bytes"
@@ -21,18 +21,18 @@ import (
 
 const example = "first-session.yaml"
 
-// documents answers the objects in one file of examples/, in order.
+// documents returns the objects in one file of examples/, in order.
 func documents(t *testing.T, name string) []map[string]any {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "examples", name))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading %s: %v", name, err)
 	}
 	var objects []map[string]any
 	for _, document := range strings.Split(string(raw), "\n---\n")[1:] {
 		object := map[string]any{}
 		if err := yaml.UnmarshalStrict([]byte(document), &object); err != nil {
-			t.Fatal(err)
+			t.Fatalf("decoding a document of %s: %v", name, err)
 		}
 		objects = append(objects, object)
 	}
@@ -43,8 +43,8 @@ func objectName(object map[string]any) string {
 	return object["metadata"].(map[string]any)["name"].(string)
 }
 
-// ofKind answers the example's objects of one kind, re-encoded as JSON
-// so a test decodes them into a Go type.
+// ofKind returns the example's objects of one kind, encoded as JSON so
+// that a test can decode them into a Go type.
 func ofKind(t *testing.T, kind string) [][]byte {
 	t.Helper()
 	var out [][]byte
@@ -52,7 +52,7 @@ func ofKind(t *testing.T, kind string) [][]byte {
 		if object["kind"] == kind {
 			raw, err := json.Marshal(object)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("encoding the %s %s as JSON: %v", kind, objectName(object), err)
 			}
 			out = append(out, raw)
 		}
@@ -60,8 +60,8 @@ func ofKind(t *testing.T, kind string) [][]byte {
 	return out
 }
 
-// decodeStrict decodes JSON into a Go type and refuses a field that the
-// type lacks, which the operator's decode would drop with no error.
+// decodeStrict fails on a field that the Go type lacks, which the
+// operator's own decode drops without an error.
 func decodeStrict(t *testing.T, raw []byte, into any) {
 	t.Helper()
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -71,8 +71,8 @@ func decodeStrict(t *testing.T, raw []byte, into any) {
 	}
 }
 
-// crdOf answers the CRD of each kind of the example that a CRD defines:
-// this operator's kinds, and the Reservation of observatory-operator.
+// crdOf returns the path of the CRD file for a kind in the example, or
+// "" for a kind whose CRD the test does not load.
 func crdOf(t *testing.T, kind string) string {
 	t.Helper()
 	switch kind {
@@ -95,7 +95,7 @@ func TestTheAPIServerAcceptsTheExample(t *testing.T) {
 		}
 		t.Run(kind+"/"+objectName(object), func(t *testing.T) {
 			if errs := validateWith(t, loadCRDFile(t, path), object, nil); len(errs) > 0 {
-				t.Error(errs.ToAggregate())
+				t.Errorf("the CRD of %s refuses the example: %v", kind, errs.ToAggregate())
 			}
 		})
 	}
@@ -113,9 +113,7 @@ func TestTheGoTypesReadTheExample(t *testing.T) {
 	}
 }
 
-// Each name that the example gives in a spec names an object of the
-// example, and the Reservation names this operator as its holder.
-func TestTheExampleNamesOnlyItsOwnObjects(t *testing.T) {
+func TestTheExampleRefersOnlyToItsOwnObjects(t *testing.T) {
 	names := map[string][]string{}
 	for _, object := range documents(t, example) {
 		kind := object["kind"].(string)
@@ -138,11 +136,11 @@ func TestTheExampleNamesOnlyItsOwnObjects(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.field, func(t *testing.T) {
 			if !slices.Contains(names[c.kind], c.name) {
-				t.Errorf("%s names the %s %q, which the example does not hold", c.field, c.kind, c.name)
+				t.Errorf("%s names the %s %q, which the example does not declare", c.field, c.kind, c.name)
 			}
 		})
 	}
 	if reservation.Spec.Holder != "astrophotography-operator" {
-		t.Errorf("the Reservation's holder is %q", reservation.Spec.Holder)
+		t.Errorf("the Reservation's holder is %q, want astrophotography-operator", reservation.Spec.Holder)
 	}
 }

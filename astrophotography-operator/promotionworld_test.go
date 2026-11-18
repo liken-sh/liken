@@ -1,8 +1,8 @@
 package main
 
-// The world of the promotion loop's tests: the operator running against
-// the fake API server, and builders for the Targets, claims, Jobs, and
-// pods that the loop reads.
+// The setup for the promotion loop's tests: the operator running
+// against the fake API server, and builders for the Targets, claims,
+// Jobs, and pods that the loop reads.
 
 import (
 	"context"
@@ -24,29 +24,28 @@ const (
 	operatorImage = "ghcr.io/liken-sh/astrophotography-operator:2026.10.12-001"
 )
 
-// startOperator runs the operator, with the fake API server holding its
-// own pod, until the test ends.
+// startOperator puts the operator's own pod in the fake API server and
+// runs the operator until the test ends.
 func startOperator(t *testing.T, api *fakeAPI) *operator {
 	t.Helper()
 	api.put(podsPath, operatorPod("operator"))
 	return runOperator(t, api)
 }
 
-// operatorPod is the operator's own pod, with one container of a name.
+// operatorPod returns the operator's own pod, with one container that
+// has the given name.
 func operatorPod(container string) map[string]any {
 	return object(operatorNS, operatorPodName, nil, map[string]any{
 		"containers": []any{map[string]any{"name": container, "image": operatorImage}},
 	})
 }
 
-// runOperator runs the operator until the test ends.
 func runOperator(t *testing.T, api *fakeAPI) *operator {
 	return runOperatorUntil(t.Context(), t, api)
 }
 
-// runOperatorUntil runs the operator until ctx ends, so a test can stop
-// one operator and start the next against the same API server, the way
-// a restart does.
+// runOperatorUntil runs the operator until ctx ends, so a test can
+// restart the operator against the same API server.
 func runOperatorUntil(ctx context.Context, t *testing.T, api *fakeAPI) *operator {
 	client := apiclient.New(apiservertest.Host, api.server.Client(), "").WithWaitContext(ctx)
 	recorder := events.New(t.Context(), client, managedBy, events.Options{Instance: operatorPodName, Log: io.Discard})
@@ -56,22 +55,23 @@ func runOperatorUntil(ctx context.Context, t *testing.T, api *fakeAPI) *operator
 	return o
 }
 
-// toMap answers a Go value as the fake API server holds an object.
+// toMap converts a Go value to the generic map form that the fake API
+// server stores.
 func toMap(t *testing.T, value any) map[string]any {
 	t.Helper()
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the value as JSON: %v", err)
 	}
 	var out map[string]any
 	if err := json.Unmarshal(encoded, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the JSON into a map: %v", err)
 	}
 	return out
 }
 
-// m42 is the drill's target: Luminance 300 s x 3 into the claim
-// archive, with its frames counted in the outbox claim frames.
+// m42 returns a Target that images 3 Luminance frames of 300 s and
+// archives them to the claim named archive.
 func m42() astrophotography.Target {
 	t := astrophotography.Target{}
 	t.Metadata.Name, t.Metadata.Namespace, t.Metadata.UID = "m42", observatoryNS, "uid-m42"
@@ -84,8 +84,8 @@ func m42() astrophotography.Target {
 	return t
 }
 
-// withPending is a target whose runner counted frames in the outbox
-// claim frames.
+// withPending returns t with status counts for the outbox claim named
+// frames: pending frames, and frames that a promotion Job left there.
 func withPending(t astrophotography.Target, pending, left int32) astrophotography.Target {
 	t.Status.Outboxes = []astrophotography.OutboxFrames{{ClaimName: "frames", Pending: pending, Left: left}}
 	t.Status.Sequences = []astrophotography.SequenceProgress{{Sequence: t.Spec.Sequences[0], Pending: pending}}
@@ -104,8 +104,8 @@ func putClaim(api *fakeAPI, name string, finalizers ...any) {
 	api.put(claimsPath, claim)
 }
 
-// targetEvents answers the type and the reason of each Event about the
-// target m42, in order.
+// targetEvents returns the type and reason of each Event about the
+// Target m42, in order.
 func targetEvents(api *fakeAPI) []string {
 	var out []string
 	for _, e := range api.recorded.About("Target", "m42") {
@@ -118,14 +118,14 @@ func readTarget(api *fakeAPI) astrophotography.Target {
 	return decode[astrophotography.Target](api, targetsPath, observatoryNS, "m42")
 }
 
-// finish ends a Job, the way the Job controller does after its pod
-// exits, with a pod that wrote the report as its termination message.
-// A nil report ends the Job as Failed, with no report.
+// finish ends a Job as the Job controller does when its pod exits. The
+// pod's termination message is the JSON of report. A nil report ends
+// the Job as Failed and the pod writes no report.
 func finish(t *testing.T, api *fakeAPI, job string, report *promote.Report) {
 	t.Helper()
-	held := api.get(jobsPath, observatoryNS, job)
-	if held == nil {
-		t.Fatalf("no Job %s", job)
+	stored := api.get(jobsPath, observatoryNS, job)
+	if stored == nil {
+		t.Fatalf("the fake API server has no Job %s", job)
 	}
 	status := map[string]any{"conditions": []any{map[string]any{"type": "Complete", "status": "True"}}}
 	terminated := map[string]any{"exitCode": 1}
@@ -135,8 +135,8 @@ func finish(t *testing.T, api *fakeAPI, job string, report *promote.Report) {
 		encoded, _ := json.Marshal(report)
 		terminated = map[string]any{"exitCode": 0, "message": string(encoded)}
 	}
-	held["status"] = status
-	api.put(jobsPath, held)
+	stored["status"] = status
+	api.put(jobsPath, stored)
 	pod := object(observatoryNS, job+"-x7k2p", map[string]any{labelManagedBy: managedBy, labelPromotionJob: job}, nil)
 	pod["status"] = map[string]any{"containerStatuses": []any{map[string]any{
 		"name": promoteContainer, "state": map[string]any{"terminated": terminated},
@@ -144,14 +144,14 @@ func finish(t *testing.T, api *fakeAPI, job string, report *promote.Report) {
 	api.put(podsPath, pod)
 }
 
-// complete ends a Job as Complete with no pod in the store, the way the
-// store holds it after something deleted the pod with its report.
+// complete ends a Job as Complete with no pod, as when the pod whose
+// termination message had the report is deleted.
 func complete(t *testing.T, api *fakeAPI, job string) {
 	t.Helper()
-	held := api.get(jobsPath, observatoryNS, job)
-	if held == nil {
-		t.Fatalf("no Job %s", job)
+	stored := api.get(jobsPath, observatoryNS, job)
+	if stored == nil {
+		t.Fatalf("the fake API server has no Job %s", job)
 	}
-	held["status"] = map[string]any{"conditions": []any{map[string]any{"type": "Complete", "status": "True"}}}
-	api.put(jobsPath, held)
+	stored["status"] = map[string]any{"conditions": []any{map[string]any{"type": "Complete", "status": "True"}}}
+	api.put(jobsPath, stored)
 }

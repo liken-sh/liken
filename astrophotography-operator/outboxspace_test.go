@@ -1,8 +1,5 @@
 package main
 
-// The outbox's space before each exposure, and the worker that answers
-// for it.
-
 import (
 	"slices"
 	"strings"
@@ -13,15 +10,15 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// A full outbox stops the exposures: Imaging turns False with
-// OutboxFull, and the reservation gets a Warning. When the outbox has
-// space again and a change wakes the runner, it exposes.
+// A full outbox stops the exposures with a Warning on the reservation.
+// When the outbox has free space again and a change wakes the runner,
+// it exposes.
 func TestAFullOutboxWaitsForSpace(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		w.worker.setFree(0)
 		w.put(targetsPath, target("m42", lights(1)))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.playCamera(t, saves)
 		w.start(t)
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False OutboxFull" })
@@ -38,8 +35,8 @@ func TestAFullOutboxWaitsForSpace(t *testing.T) {
 	})
 }
 
-// With promotion AfterReservation, nothing frees the outbox before the
-// reservation ends, and the condition says so.
+// With promotion AfterReservation, the Event says that nothing frees
+// the outbox before the reservation ends.
 func TestAFullOutboxWithPromotionAfterTheReservation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
@@ -47,20 +44,19 @@ func TestAFullOutboxWithPromotionAfterTheReservation(t *testing.T) {
 		x := target("m42", lights(1))
 		x.Spec.Archive.Promotion = astrophotography.PromotionAfterReservation
 		w.put(targetsPath, x)
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.start(t)
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False OutboxFull" })
 		events := w.runnerEvents("Target", "m42")
-		if last := events[len(events)-1]; !strings.Contains(last.Message, "nothing frees the space before the reservation ends") {
-			t.Errorf("the Event says %q", last.Message)
+		if last := events[len(events)-1]; !strings.Contains(last.Message, "AfterReservation") {
+			t.Errorf("the Event says %q, want the message that names AfterReservation", last.Message)
 		}
 	})
 }
 
-// A worker that cannot answer stops the exposures, because the runner
-// cannot tell whether the outbox has space. When it answers, the night
-// goes on, and Imaging posts its recovery.
-func TestAWorkerThatCannotAnswerHoldsTheExposures(t *testing.T) {
+// When the worker cannot report the outbox's free space, the runner
+// does not expose. When the worker responds again, the night continues.
+func TestAWorkerThatCannotReportTheSpaceStopsTheExposures(t *testing.T) {
 	cases := []struct {
 		name    string
 		fault   func(*fakeWorker, bool)
@@ -68,10 +64,10 @@ func TestAWorkerThatCannotAnswerHoldsTheExposures(t *testing.T) {
 	}{
 		{"a worker that is not ready", func(f *fakeWorker, on bool) { f.set(func() { f.down = on }) },
 			"503 Service Unavailable"},
-		{"a worker that answers no JSON", func(f *fakeWorker, on bool) { f.set(func() { f.garbled = on }) },
-			"reading the worker's answer"},
+		{"a worker that returns no JSON", func(f *fakeWorker, on bool) { f.set(func() { f.garbled = on }) },
+			"decoding the outbox response of the worker of east-tonight"},
 		{"a worker that is gone", func(f *fakeWorker, on bool) { f.server.SetDown(on) },
-			"asking the worker of east-tonight for its outbox"},
+			"requesting the outbox of the worker of east-tonight"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -79,7 +75,7 @@ func TestAWorkerThatCannotAnswerHoldsTheExposures(t *testing.T) {
 				w := newWorld(t)
 				c.fault(w.worker, true)
 				w.put(targetsPath, target("m42", lights(1)))
-				w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+				w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 				w.playCamera(t, saves)
 				w.start(t)
 				waitUntil(t, func() bool { return w.imaging(t, "m42") == "False ExposureFailed" })
@@ -99,14 +95,14 @@ func TestAWorkerThatCannotAnswerHoldsTheExposures(t *testing.T) {
 	}
 }
 
-// A full outbox whose condition the API server refuses to record ends
-// the pass, and the next pass finds the outbox full again.
-func TestAFullOutboxThatCannotBeRecordedIsFoundAgain(t *testing.T) {
+// When the API server rejects the write of the OutboxFull condition,
+// the next pass checks the space again and writes the condition.
+func TestAFullOutboxWhoseConditionWriteFailsIsCheckedAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
 		w.worker.setFree(0)
 		w.put(targetsPath, target("m42", lights(1)))
-		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.put(reservationsPath, reservationIn(observatory.ReservationReady))
 		w.start(t)
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "True Slewing" })
 		w.failStatusWrites(1)

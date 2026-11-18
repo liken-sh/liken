@@ -1,11 +1,10 @@
 package solver
 
-// One run of astrometry-engine for each request. The engine writes no
-// file for a field it does not solve, so a resident engine that reads
-// paths on its standard input gives no sign that a job ended without a
-// solution. A process for each job ends the job with its exit, whether
-// or not it solved, and plan 02 measured the cost of a start at 0.06 s
-// with the lab's 13 index files.
+// The solver starts one astrometry-engine process for each request,
+// because the exit of the process is the only sign that a job ended
+// without a solution. The engine writes no file for a field it does not
+// solve, so an engine that keeps running and reads jobs from its
+// standard input reports nothing for that job.
 
 import (
 	"bytes"
@@ -21,57 +20,57 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/fits"
 )
 
-// Engine runs astrometry-engine on one .axy at a time.
+// Engine runs astrometry-engine on one .axy file at a time.
 type Engine struct {
 	// Program is the path of astrometry-engine.
 	Program string
 	// Config is the path of the engine's configuration (EngineConfig).
 	Config string
-	// Work is the directory that holds a directory for each job, an
-	// emptyDir in the pod.
+	// Work is the directory in which each job gets its own directory. In
+	// the pod it is an emptyDir.
 	Work string
-	// Timeout bounds one run in wall time. The CPU limit of the
-	// configuration bounds the search, and this bounds an engine that
-	// hangs for any other reason.
+	// Timeout limits the wall-clock time of one run. The CPU limit in
+	// the engine's configuration ends a search that takes too long, and
+	// this timeout ends an engine that hangs for any other reason.
 	Timeout time.Duration
 }
 
-// ErrBadStarList is the error of an .axy that the solver refuses
-// before it runs the engine.
-var ErrBadStarList = errors.New("the star list is not one the solver runs")
+// ErrBadStarList means that Solve refused the .axy without running the
+// engine: it is not FITS, names no WCS file, or names an output file
+// outside the job's directory.
+var ErrBadStarList = errors.New("the solver does not accept the star list")
 
-// outputs are the keywords of an .axy that name a file the engine
-// writes. solve-field writes each one relative to its -D directory,
-// and the worker passes -D ., so the engine writes each one in the
-// job's directory. The solver refuses any other path, so the engine
-// never writes outside that directory.
+// outputs are the .axy header keywords that name a file the engine
+// writes. The worker runs solve-field with -D ., so each name is
+// relative, and the engine runs in the job's directory. Solve refuses a
+// name that is not local, so the engine cannot write anywhere else.
 var outputs = []string{"ANSOLVED", "ANSOLVIN", "ANMATCH", "ANRDLS", "ANWCS", "ANCORR"}
 
 // Solve writes the .axy into a new directory, runs the engine there,
-// and answers the solution in the WCS file the .axy names, or no
-// solution when the engine wrote none. It deletes the directory before
-// it answers.
-func (e Engine) Solve(ctx context.Context, axy []byte) (SolveAnswer, error) {
+// and returns the solution from the WCS file that the .axy names. It
+// returns an empty SolveResponse when the engine wrote no WCS file. It
+// deletes the directory before it returns.
+func (e Engine) Solve(ctx context.Context, axy []byte) (SolveResponse, error) {
 	header, err := fits.ReadHeader(bytes.NewReader(axy))
 	if err != nil {
-		return SolveAnswer{}, fmt.Errorf("%w: %v", ErrBadStarList, err)
+		return SolveResponse{}, fmt.Errorf("%w: %v", ErrBadStarList, err)
 	}
 	wcs, err := header.String("ANWCS")
 	if err != nil {
-		return SolveAnswer{}, fmt.Errorf("%w: it names no WCS file", ErrBadStarList)
+		return SolveResponse{}, fmt.Errorf("%w: the header has no ANWCS keyword with a file name", ErrBadStarList)
 	}
 	for _, key := range outputs {
-		if path, held := header.Get(key); held && !filepath.IsLocal(path) {
-			return SolveAnswer{}, fmt.Errorf("%w: %s = %q is outside the job's directory", ErrBadStarList, key, path)
+		if path, present := header.Get(key); present && !filepath.IsLocal(path) {
+			return SolveResponse{}, fmt.Errorf("%w: %s = %q is not a path inside the job's directory", ErrBadStarList, key, path)
 		}
 	}
 	dir, err := os.MkdirTemp(e.Work, "job-")
 	if err != nil {
-		return SolveAnswer{}, err
+		return SolveResponse{}, err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	if err := os.WriteFile(filepath.Join(dir, "job.axy"), axy, 0o600); err != nil {
-		return SolveAnswer{}, err
+		return SolveResponse{}, err
 	}
 	run, cancel := context.WithTimeout(ctx, e.Timeout)
 	defer cancel()
@@ -80,24 +79,24 @@ func (e Engine) Solve(ctx context.Context, axy []byte) (SolveAnswer, error) {
 	var log bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &log, &log
 	if err := cmd.Run(); err != nil {
-		return SolveAnswer{}, fmt.Errorf("astrometry-engine: %w: %s", err, tail(log.Bytes()))
+		return SolveResponse{}, fmt.Errorf("running astrometry-engine: %w: %s", err, tail(log.Bytes()))
 	}
 	solution, err := os.ReadFile(filepath.Join(dir, wcs))
 	if errors.Is(err, fs.ErrNotExist) {
-		return SolveAnswer{}, nil
+		return SolveResponse{}, nil
 	}
 	if err != nil {
-		return SolveAnswer{}, err
+		return SolveResponse{}, err
 	}
 	h, err := fits.ReadHeader(bytes.NewReader(solution))
 	if err != nil {
-		return SolveAnswer{}, fmt.Errorf("the WCS file: %w", err)
+		return SolveResponse{}, fmt.Errorf("reading the WCS file: %w", err)
 	}
-	return answerOf(h)
+	return solutionOf(h)
 }
 
-// tail answers the last part of the engine's log, which holds the
-// reason it failed.
+// tail returns the end of the engine's log, where the reason for a
+// failure is.
 func tail(log []byte) string {
 	const keep = 512
 	if len(log) > keep {

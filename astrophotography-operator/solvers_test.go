@@ -12,16 +12,13 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// A Solver gets a Deployment of one pod that runs the solver mode in
-// the worker image, with the claim read-only, and a Service in front of
-// it, both owned by the Solver.
 func TestASolverGetsItsDeploymentAndService(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
 		w.api.put(solversPath, solverObject("lab", map[string]any{"indexFiles": map[string]any{"claimName": "astrometry-indexes", "path": "2mass"}}))
 		settle()
-		d, held := objectOf[deployment](t, w.api, deploymentsPath, "observatory", "lab-solver")
-		if !held {
+		d, found := objectOf[deployment](t, w.api, deploymentsPath, "observatory", "lab-solver")
+		if !found {
 			t.Fatal("no Deployment lab-solver")
 		}
 		pod := d.Spec.Template.Spec
@@ -48,10 +45,9 @@ func TestASolverGetsItsDeploymentAndService(t *testing.T) {
 	})
 }
 
-// Ready follows the pod: no pod yet, then a pod whose claim does not
-// exist, then a ready pod whose list the operator reads, then the lab's
-// index files. Each transition posts one Event, a Warning for the
-// missing claim.
+// Ready goes from no pod, to a pod whose claim does not exist, to a
+// ready pod with the lab's index files. Each transition posts one Event,
+// and only the missing claim posts a Warning.
 func TestReadyFollowsTheSolversPod(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
@@ -68,7 +64,7 @@ func TestReadyFollowsTheSolversPod(t *testing.T) {
 		lab := w.solver(t, "lab")
 		cases := []struct {
 			name           string
-			got            astrophotographyCondition
+			got            conditions.Condition
 			status, reason string
 		}{
 			{"no pod", waiting, "False", astrophotography.ReasonPodNotReady},
@@ -84,7 +80,7 @@ func TestReadyFollowsTheSolversPod(t *testing.T) {
 			t.Errorf("status = %+v, want the endpoint and the lab's indexes", lab.Status)
 		}
 		if got := readyOf(lab).Message; got != "13 index files of the series 4207, 4208" {
-			t.Errorf("message %q", got)
+			t.Errorf("the Ready message is %q, want \"13 index files of the series 4207, 4208\"", got)
 		}
 		if lab.Status.Series != "4207,4208" {
 			t.Errorf("series %q, want 4207,4208", lab.Status.Series)
@@ -100,12 +96,7 @@ func TestReadyFollowsTheSolversPod(t *testing.T) {
 	})
 }
 
-type astrophotographyCondition = conditions.Condition
-
-// The operator holds one request open to each pod, which answers each
-// new list, and opens one to a new pod. It asks the pod's own address,
-// because the Service routes to a new pod only some time after the pod
-// turns Ready.
+// A new pod gets its own request, sent to the pod's IP address.
 func TestTheIndexListIsReadOnceFromEachPod(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
@@ -128,9 +119,8 @@ func TestTheIndexListIsReadOnceFromEachPod(t *testing.T) {
 	})
 }
 
-// A Job that downloads index files into the claim while the solver
-// runs reaches the status with no restart of the pod, through the one
-// request the operator holds open.
+// An index file added to the claim while the pod runs reaches the
+// status with no restart of the pod and no second request.
 func TestAnIndexFileAddedToTheClaimReachesTheStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
@@ -159,10 +149,8 @@ func TestAnIndexFileAddedToTheClaimReachesTheStatus(t *testing.T) {
 	})
 }
 
-// A request that ends after it ran a while opens again at once, and
-// one that ends at once waits retryAfter, so a pod that closes each
-// request is not asked again and again. The list stays in the status
-// meanwhile.
+// A request that ends right away is opened again after retryAfter.
+// The last list stays in the status meanwhile.
 func TestARequestForTheListThatEndsOpensAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
@@ -179,12 +167,11 @@ func TestARequestForTheListThatEndsOpensAgain(t *testing.T) {
 			t.Errorf("%d requests after the end and %d after the wait, want 2 and 3", ended, got)
 		}
 		if ready := readyOf(w.solver(t, "lab")); ready.Reason != astrophotography.ReasonLoaded {
-			t.Errorf("Ready %s: %s", ready.Reason, ready.Message)
+			t.Errorf("Ready reason is %s (%s), want Loaded", ready.Reason, ready.Message)
 		}
 	})
 }
 
-// A claim with no index file starts a pod that reports none.
 func TestASolverWithNoIndexFilesIsNotReady(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
@@ -198,8 +185,8 @@ func TestASolverWithNoIndexFilesIsNotReady(t *testing.T) {
 	})
 }
 
-// A pod that does not answer its index list yet is read again after
-// the backoff, with no change in the cluster to wake the loop.
+// A failed request for the index list is sent again after retryAfter,
+// with no change in the cluster to wake the loop.
 func TestAnIndexListThatFailsIsReadAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
@@ -218,9 +205,9 @@ func TestAnIndexListThatFailsIsReadAgain(t *testing.T) {
 	})
 }
 
-// A pod that no node fits, for a reason other than a missing claim,
-// says why in Ready's message.
-func TestAPodThatCannotStartSaysWhy(t *testing.T) {
+// When no node fits the pod for a reason other than a missing claim,
+// the scheduler's message is in the message of Ready.
+func TestAPodThatCannotBeScheduledPutsTheSchedulerMessageInReady(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
 		w.api.put(solversPath, solverObject("lab", nil))
@@ -228,14 +215,12 @@ func TestAPodThatCannotStartSaysWhy(t *testing.T) {
 		settle()
 		ready := readyOf(w.solver(t, "lab"))
 		if ready.Reason != astrophotography.ReasonPodNotReady || !strings.Contains(ready.Message, "Insufficient memory") {
-			t.Errorf("Ready %s: %s", ready.Reason, ready.Message)
+			t.Errorf("Ready reason is %s (%s), want PodNotReady with the scheduler's message", ready.Reason, ready.Message)
 		}
 	})
 }
 
-// A pod that goes away while the operator waits to ask it again is not
-// asked again.
-func TestAPodThatGoesIsNotAskedAgain(t *testing.T) {
+func TestADeletedPodIsNotRequestedAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
 		w.peers.set(func(f *fakePeers) { f.refuseIndexes = 1000 })
@@ -247,13 +232,11 @@ func TestAPodThatGoesIsNotAskedAgain(t *testing.T) {
 		time.Sleep(2 * retryAfter)
 		synctest.Wait()
 		if got := w.peers.count("GET 10.42.0.10:8080/indexes"); got != 1 {
-			t.Errorf("the pod that went was asked %d times, want once", got)
+			t.Errorf("the deleted pod received %d requests, want one", got)
 		}
 	})
 }
 
-// A pod that is scheduled and starts is not ready until its probe
-// passes.
 func TestAPodThatStartsIsNotReadyYet(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
@@ -262,13 +245,13 @@ func TestAPodThatStartsIsNotReadyYet(t *testing.T) {
 		settle()
 		ready := readyOf(w.solver(t, "lab"))
 		if ready.Reason != astrophotography.ReasonPodNotReady || !strings.Contains(ready.Message, "is not ready") {
-			t.Errorf("Ready %s: %s", ready.Reason, ready.Message)
+			t.Errorf("Ready reason is %s (%s), want PodNotReady with a message that the pod is not ready", ready.Reason, ready.Message)
 		}
 	})
 }
 
-// An edit of the spec changes the template, so the operator replaces
-// the Deployment, and the Deployment controller starts a new pod.
+// An edit of the spec changes the pod template, so the operator
+// replaces the Deployment.
 func TestAnEditOfTheIndexFilesReplacesTheDeployment(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
@@ -286,16 +269,14 @@ func TestAnEditOfTheIndexFilesReplacesTheDeployment(t *testing.T) {
 	})
 }
 
-// A lead that could not name the worker image starts no pod, and says
-// so in Ready.
-func TestASolverWithNoWorkerImageSaysWhy(t *testing.T) {
+func TestASolverWithNoWorkerImageIsNotReady(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, func(o *operator) { o.workerImage = "" })
 		w.api.put(solversPath, solverObject("lab", nil))
 		settle()
 		ready := readyOf(w.solver(t, "lab"))
 		if ready.Reason != astrophotography.ReasonPodNotReady || ready.Message != errNoWorkerImage.Error() {
-			t.Errorf("Ready %s: %s", ready.Reason, ready.Message)
+			t.Errorf("Ready reason is %s (%s), want PodNotReady with the message of errNoWorkerImage", ready.Reason, ready.Message)
 		}
 		if _, held := objectOf[deployment](t, w.api, deploymentsPath, "observatory", "lab-solver"); held {
 			t.Error("a Deployment with no image")
@@ -303,8 +284,8 @@ func TestASolverWithNoWorkerImageSaysWhy(t *testing.T) {
 	})
 }
 
-// A pass that finds nothing new writes nothing, so its own status write
-// does not wake it into another write.
+// A pass that finds nothing new writes nothing, so a status write does
+// not cause another pass that writes again.
 func TestASettledSolverIsNotWrittenAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)

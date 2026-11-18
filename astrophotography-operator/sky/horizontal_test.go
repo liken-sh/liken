@@ -21,8 +21,8 @@ func TestSiderealTime(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			// The abridged nutation holds Δψ to 0.5″, and the sidereal
-			// time takes Δψ cos ε, so the limit is 0.5″.
+			// The abridged nutation is accurate to 0.5″ in Δψ, and the
+			// sidereal time adds Δψ cos ε, so the tolerance is 0.5″.
 			if got := SiderealTime(c.at); !near(got, c.want, arcseconds(0.5)) {
 				t.Errorf("SiderealTime = %.7f°, want %.7f°", got, c.want)
 			}
@@ -88,13 +88,11 @@ func TestNextAboveFindsTheRise(t *testing.T) {
 	rises, ok := NextAbove(star, Site{}, from, func(float64) float64 { return 0 })
 	want := from.Add(time.Hour + 59*time.Minute + 40*time.Second)
 	if !ok || rises.Before(want) || rises.Sub(want) > time.Minute {
-		t.Errorf("rises at %s, %v; want the first minute after %s", rises, ok, want)
+		t.Errorf("NextAbove = %s, %v, want within a minute after %s", rises, ok, want)
 	}
 }
 
-// A star that never rises at the site, and a star behind a horizon
-// that hides the whole sky, answer no time.
-func TestNextAboveAnswersNoneForAStarThatNeverRises(t *testing.T) {
+func TestNextAboveReturnsNoneForAStarThatNeverRises(t *testing.T) {
 	cases := []struct {
 		name    string
 		star    Position
@@ -106,7 +104,7 @@ func TestNextAboveAnswersNoneForAStarThatNeverRises(t *testing.T) {
 	for _, c := range cases {
 		rises, ok := NextAbove(c.star, Site{Latitude: 51.5}, time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC), c.horizon)
 		if ok {
-			t.Errorf("%s: rises at %s", c.name, rises)
+			t.Errorf("%s: NextAbove = %s, true, want no rise", c.name, rises)
 		}
 	}
 }

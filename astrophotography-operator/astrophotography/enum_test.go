@@ -1,9 +1,9 @@
 package astrophotography
 
-// Each closed vocabulary is a named string type in Go, with one
-// constant for each value, and an enum in the CRD. The API server
-// refuses a value that the enum lacks, so the two lists must hold the
-// same values.
+// A field with a fixed set of values has a named string type in Go,
+// with one constant for each value, and an enum in the CRD. The API
+// server rejects a value outside the enum, so the enum must list the
+// same values as the constants.
 
 import (
 	"encoding/json"
@@ -26,7 +26,7 @@ func strs[T ~string](values ...T) []string {
 
 var conditionStatuses = strs(observatory.ConditionTrue, observatory.ConditionFalse, observatory.ConditionUnknown)
 
-func TestEachEnumHoldsTheGoConstants(t *testing.T) {
+func TestEachCRDEnumListsTheGoConstants(t *testing.T) {
 	cases := []struct {
 		kind Kind
 		path string
@@ -52,7 +52,7 @@ func enumOf(t *testing.T, field *apiextensionsv1.JSONSchemaProps) []string {
 	for _, raw := range field.Enum {
 		var value string
 		if err := json.Unmarshal(raw.Raw, &value); err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading an enum value of the CRD: %v", err)
 		}
 		values = append(values, value)
 	}

@@ -1,10 +1,10 @@
 package promote
 
-// The name of a frame, from the target's archive.format (plan 03). The
-// runner renders it before each exposure, because the driver takes the
-// name before it writes the file, and the frame keeps the name from the
-// outbox to the archive. So the promotion Job never renames a frame,
-// and a person finds each frame under the name they chose.
+// This file renders a frame's name from the Target's archive.format.
+// The runner renders the name before each exposure, because the INDI
+// driver needs it before it writes the file. The promotion Job never
+// renames a frame, so a frame has the same name in the outbox and in
+// the archive.
 
 import (
 	"fmt"
@@ -14,39 +14,42 @@ import (
 	"time"
 )
 
-// Values are what the tokens of a format name.
+// Values are the values of a format's tokens for one frame.
 type Values struct {
 	Target, Object, Filter string
 	Exposure               time.Duration
-	// Binning, Gain, and Offset are the sequence's values. An absent
-	// value leaves the camera's own, and renders as "default".
+	// Binning, Gain, and Offset are the values the sequence sets. A nil
+	// value means the sequence leaves the camera's own setting, and
+	// renders as "default".
 	Binning, Gain, Offset                 *int32
 	Camera, Telescope, Train, Reservation string
-	// Requested is when the runner requested the exposure.
+	// Requested is the time at which the runner requested the exposure.
 	Requested time.Time
-	// Longitude is the observatory's, in degrees east, for {night}.
+	// Longitude is the observatory's longitude in degrees east, for
+	// {night}.
 	Longitude float64
 	// Number is the frame's number in its sequence.
 	Number  int
 	FrameID string
 }
 
-// FrameIDToken is the token of the frame's identity. A format that
-// holds it names each frame uniquely, so the name takes no suffix.
+// FrameIDToken is the token that renders the frame's FRAMEID. A format
+// that contains it gives every frame a unique name, so Name adds no
+// suffix.
 const FrameIDToken = "{frameid}"
 
-// token matches one token of a format.
+// token matches one token, such as {filter}, in a format.
 var token = regexp.MustCompile(`\{[a-z]+\}`)
 
 // Name renders a format into a frame's name: a path relative to the
 // archive's path, with no extension.
 //
-// Unless the format holds {frameid}, the name ends with "_" and the
-// last 12 hexadecimal digits of the FRAMEID. Those digits are random,
-// so two frames of one target meet with a chance near 2 in a billion
-// at 1,000 frames. The driver replaces a frame of the same name with no
-// message, and {n} alone does not prevent that, because a restart can
-// count one frame twice.
+// When the format does not contain {frameid}, Name appends "_" and the
+// last 12 hexadecimal digits of the FRAMEID. The INDI driver overwrites
+// a file of the same name with no error, and {n} alone does not make
+// names unique, because a restart can count one frame twice. The last
+// 48 bits of a UUIDv7 are random, so with 1,000 frames the chance that
+// two share a suffix is about 2 in a billion.
 func Name(format string, v Values) string {
 	rendered := token.ReplaceAllStringFunc(format, func(t string) string { return safe(v.value(t)) })
 	if !strings.Contains(format, FrameIDToken) {
@@ -59,8 +62,9 @@ func Name(format string, v Values) string {
 	return strings.Join(segments, "/")
 }
 
-// value answers what a token names. The CRD refuses a format with any
-// other token.
+// value returns the text that replaces one token. It returns an unknown
+// token unchanged, because the CRD already refuses a format with any
+// token that is not listed here.
 func (v Values) value(t string) string {
 	switch t {
 	case "{target}":
@@ -114,29 +118,30 @@ func orDefault(v *int32) string {
 	return strconv.Itoa(int(*v))
 }
 
-// Night answers the date of the night of a time: the local mean solar
-// date at a longitude, in degrees east, 12 hours before the time. So
-// every exposure from noon to noon at the observatory has one date.
+// Night returns the date of the night that t belongs to: the date, in
+// local mean solar time at the longitude, of the time 12 hours before
+// t. Every exposure from one local noon to the next gets the same date.
 func Night(t time.Time, longitude float64) string {
 	offset := time.Duration(longitude / 15 * float64(time.Hour))
 	return t.UTC().Add(offset - 12*time.Hour).Format(time.DateOnly)
 }
 
-// unsafe matches each character that a token's value cannot hold.
+// unsafe matches each character that a token's value may not contain.
 var unsafe = regexp.MustCompile(`[^A-Za-z0-9._+-]`)
 
-// safe makes a token's value safe in a path: each other character
-// becomes "_", and the driver's patterns XXX and ISO8601, which it
-// replaces in a prefix, become lower case.
+// safe makes a token's value usable in a path. It replaces each
+// character that unsafe matches with "_". It also lowercases the
+// strings XXX and ISO8601, because the INDI driver replaces them in an
+// upload prefix.
 func safe(value string) string {
 	value = unsafe.ReplaceAllString(value, "_")
 	return strings.NewReplacer("XXX", "xxx", "ISO8601", "iso8601").Replace(value)
 }
 
-// safeSegment keeps a part of the path inside the archive and visible:
-// a part that starts with "." becomes one that starts with "_", so a
-// value cannot make "..", and no frame hides beside the .part files of
-// the promotion Job. An empty part, from an empty value, becomes "_".
+// safeSegment replaces the leading dots of a path segment with one "_".
+// Without it, a value could make "..", which leaves the archive, or a
+// hidden name like the promotion Job's .part files. It also turns an
+// empty segment, which an empty value makes, into "_".
 func safeSegment(segment string) string {
 	if segment == "" {
 		return "_"
@@ -147,7 +152,7 @@ func safeSegment(segment string) string {
 	return segment
 }
 
-// suffix answers the last 12 hexadecimal digits of a FRAMEID.
+// suffix returns the last 12 hexadecimal digits of a FRAMEID.
 func suffix(frameID string) string {
 	digits := strings.ReplaceAll(frameID, "-", "")
 	return digits[max(0, len(digits)-12):]

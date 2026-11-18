@@ -1,9 +1,8 @@
 package main
 
-// The promotion loop's creates of a Job while the watch of the Jobs
-// runs behind the API server. A watch delivers each create some time
-// after the API server answers it, and every pass that runs in that
-// time reads a store that does not hold the Job yet.
+// The watch delivers a created Job some time after the API server
+// accepts it. These tests run a pass in between, against a store that
+// does not have the Job yet.
 
 import (
 	"slices"
@@ -12,9 +11,8 @@ import (
 	"time"
 )
 
-// A pass that runs before the watch delivers the operator's own create
-// of a promotion Job lists that Job from the memo of the operator's
-// writes, so it creates the Job once.
+// A pass before the watch delivers the Job finds it in p.jobs, the memo
+// of the Jobs that the loop created, so the Job is created once.
 func TestAPassDoesNotCreateAPromotionJobTwice(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -37,11 +35,10 @@ func TestAPassDoesNotCreateAPromotionJobTwice(t *testing.T) {
 	})
 }
 
-// A pass that must read the operator's own Job from the API server,
-// because the store does not hold the create yet, fails while the API
-// server refuses the read. The memo then holds no version of the Job,
-// and the next pass still reads the Job from the API server, so the
-// loop creates it once.
+// When the store does not have the Job yet, a pass reads it from the
+// API server. If the API server refuses that read, the pass fails and
+// p.jobs notes the Job as unknown, so the next pass reads it again and
+// the loop still creates the Job once.
 func TestARefusedReadOfAPromotionJobDoesNotCreateItAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)

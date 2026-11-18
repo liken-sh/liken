@@ -1,9 +1,9 @@
 package solver
 
-// These tests run the real inotify on a directory in t.TempDir(), so
-// they run outside a synctest bubble: a goroutine that waits on a file
-// descriptor is not durably blocked, and a bubble would never settle.
-// Each wait for the index set is bounded, so a watch that misses an
+// These tests use the real inotify on a directory in t.TempDir(), so
+// they run outside a synctest bubble. A goroutine that waits on a file
+// descriptor is not durably blocked, so a bubble would never settle.
+// Each wait for the index set has a timeout, so a watch that misses an
 // event fails the test in seconds.
 
 import (
@@ -24,8 +24,8 @@ var (
 	series4208 = astrophotography.IndexSeries{ID: 4208, Files: 1, ScaleArcmin: astrophotography.ScaleRange{Low: 30, High: 42}}
 )
 
-// startWatching starts the solver mode on a directory of index files,
-// with its own work directory, until the test ends.
+// startWatching starts the solver on a directory of index files, with
+// its own work directory, and stops it when the test ends.
 func startWatching(t *testing.T, indexes string) (*Server, string) {
 	t.Helper()
 	work := t.TempDir()
@@ -33,7 +33,7 @@ func startWatching(t *testing.T, indexes string) (*Server, string) {
 }
 
 // waitForSeries waits until the server serves the series, and fails
-// the test when it does not within a few seconds.
+// the test when it does not within 5 seconds.
 func waitForSeries(t *testing.T, s *Server, want Indexes) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -54,13 +54,13 @@ func waitForSeries(t *testing.T, s *Server, want Indexes) {
 func write(t *testing.T, path string, data []byte) {
 	t.Helper()
 	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing %s: %v", path, err)
 	}
 }
 
-// A Job that downloads index files into the claim while the solver
-// runs adds each file to the set when it closes the file, and the
-// engine's configuration names it.
+// When a Job downloads an index file into the claim while the solver
+// runs, the file joins the set when the Job closes it, and the engine's
+// configuration lists it.
 func TestAFileClosedAfterItsWriteJoinsTheSet(t *testing.T) {
 	dir := writeFiles(t, map[string][]byte{"index-4207.fits": indexOfSeries(4207, arcmin22, arcmin30)})
 	s, work := startWatching(t, dir)
@@ -68,7 +68,7 @@ func TestAFileClosedAfterItsWriteJoinsTheSet(t *testing.T) {
 	waitForSeries(t, s, Indexes{series4207, series4208})
 	config, _ := os.ReadFile(filepath.Join(work, "engine.cfg"))
 	if !strings.Contains(string(config), "index "+filepath.Join(dir, "index-4208.fits")) {
-		t.Errorf("the engine's configuration is\n%s", config)
+		t.Errorf("the engine's configuration is\n%s\nwant a line for index-4208.fits", config)
 	}
 }
 
@@ -79,7 +79,7 @@ func TestAFileRenamedIntoPlaceJoinsTheSet(t *testing.T) {
 	s, _ := startWatching(t, dir)
 	write(t, filepath.Join(dir, "index-4208.fits.part"), indexOfSeries(4208, arcmin30, arcmin42))
 	if err := os.Rename(filepath.Join(dir, "index-4208.fits.part"), filepath.Join(dir, "index-4208.fits")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("renaming the index file into place: %v", err)
 	}
 	waitForSeries(t, s, Indexes{series4208})
 }
@@ -104,16 +104,16 @@ func TestAFileThatLeavesLeavesTheSet(t *testing.T) {
 			})
 			s, _ := startWatching(t, dir)
 			if err := c.leave(dir); err != nil {
-				t.Fatal(err)
+				t.Fatalf("making the index file leave the directory by %s: %v", c.name, err)
 			}
 			waitForSeries(t, s, Indexes{series4207})
 		})
 	}
 }
 
-// A file in the middle of its download when the solver starts is not
-// loaded, because it ends inside a header. It joins when the writer
-// closes it whole.
+// A file that is partway through its download when the solver starts is
+// not loaded, because it ends inside a header. It joins when the writer
+// closes it complete.
 func TestAFileThatIsStillWrittenJoinsWhenItIsClosed(t *testing.T) {
 	whole := indexOfSeries(4208, arcmin30, arcmin42)
 	dir := writeFiles(t, map[string][]byte{"index-4208.fits": whole[:1000]})
@@ -131,18 +131,18 @@ func TestAFileWrittenInPlaceLeavesUntilItIsClosed(t *testing.T) {
 	s, _ := startWatching(t, dir)
 	f, err := os.OpenFile(filepath.Join(dir, "index-4208.fits"), os.O_WRONLY|os.O_TRUNC, 0)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening the index file for writing: %v", err)
 	}
 	whole := indexOfSeries(4208, arcmin30, arcmin42)
 	if _, err := f.Write(whole[:1000]); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the first part of the index file: %v", err)
 	}
 	waitForSeries(t, s, Indexes{})
 	if _, err := f.Write(whole[1000:]); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the rest of the index file: %v", err)
 	}
 	if err := f.Close(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("closing the index file: %v", err)
 	}
 	waitForSeries(t, s, Indexes{series4208})
 }
@@ -166,7 +166,7 @@ func TestADirectoryThatAppearsLaterIsRead(t *testing.T) {
 	s, _ := startWatching(t, dir)
 	waitForSeries(t, s, Indexes{})
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the index directory: %v", err)
 	}
 	write(t, filepath.Join(dir, "index-4208.fits"), indexOfSeries(4208, arcmin30, arcmin42))
 	waitForSeries(t, s, Indexes{series4208})
@@ -178,65 +178,64 @@ func TestADirectoryRemovedAndMadeAgainIsReadAgain(t *testing.T) {
 	claim := t.TempDir()
 	dir := filepath.Join(claim, "2mass")
 	if err := os.Mkdir(dir, 0o700); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the index directory: %v", err)
 	}
 	write(t, filepath.Join(dir, "index-4207.fits"), indexOfSeries(4207, arcmin22, arcmin30))
 	s, _ := startWatching(t, dir)
 	waitForSeries(t, s, Indexes{series4207})
 	if err := os.RemoveAll(dir); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the index directory: %v", err)
 	}
 	waitForSeries(t, s, Indexes{})
 	if err := os.Mkdir(dir, 0o700); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the index directory: %v", err)
 	}
-	// The file arrives by a rename, in one event. The read of the new
-	// directory can find a file that is written in place before the
-	// watch delivers its IN_MODIFY and IN_CLOSE_WRITE, and the watch then
-	// writes the configuration again after the test ends, while the
-	// cleanup removes the work directory.
+	// The file arrives by a rename, which is one event. A file written
+	// in place could be loaded by the read of the new directory and then
+	// produce IN_MODIFY and IN_CLOSE_WRITE, and the watch would write the
+	// configuration again while the cleanup removes the work directory.
 	write(t, filepath.Join(claim, "index-4208.fits"), indexOfSeries(4208, arcmin30, arcmin42))
 	if err := os.Rename(filepath.Join(claim, "index-4208.fits"), filepath.Join(dir, "index-4208.fits")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("renaming the index file into place: %v", err)
 	}
 	waitForSeries(t, s, Indexes{series4208})
 }
 
 // A watch that the kernel refuses for a reason other than a missing
-// directory ends the solver mode, so the kubelet starts the pod's
-// container again and its restarts show the fault.
+// directory ends the solver, so the kubelet restarts the pod's
+// container and the restart count shows the fault.
 func TestAWatchTheKernelRefusesEndsTheSolver(t *testing.T) {
 	claim := t.TempDir()
 	dir := filepath.Join(claim, "2mass")
 	if err := os.Mkdir(dir, 0o700); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the index directory: %v", err)
 	}
 	s, _ := startWatching(t, dir)
 	if err := os.Remove(dir); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the index directory: %v", err)
 	}
 	if err := os.WriteFile(dir, nil, 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("replacing the index directory with a file: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	select {
 	case err := <-s.Failed():
 		if !strings.Contains(err.Error(), dir) {
-			t.Errorf("the failure %q does not name the directory", err)
+			t.Errorf("the failure is %q, want it to name the directory %s", err, dir)
 		}
 	case <-ctx.Done():
-		t.Error("the solver did not fail")
+		t.Error("the solver kept running for 5 seconds, want it to fail")
 	}
 }
 
-// A path that names a file, and a missing directory under one that the
-// solver cannot read, fail the start.
+// Start fails when the index path is a file, and when the index
+// directory is missing under a directory that the solver cannot read.
 func TestAStartTheKernelRefusesFails(t *testing.T) {
 	claim := t.TempDir()
 	write(t, filepath.Join(claim, "indexes"), nil)
 	if err := os.Mkdir(filepath.Join(claim, "locked"), 0o300); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the unreadable directory: %v", err)
 	}
 	cases := []struct{ name, dir string }{
 		{"a file", filepath.Join(claim, "indexes")},
@@ -245,7 +244,7 @@ func TestAStartTheKernelRefusesFails(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if _, err := Start(t.Context(), Options{Indexes: c.dir, Work: t.TempDir()}, io.Discard); err == nil {
-				t.Error("no error")
+				t.Error("Start returned no error, want one")
 			}
 		})
 	}

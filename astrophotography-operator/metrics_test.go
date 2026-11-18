@@ -1,7 +1,7 @@
 package main
 
-// The registry, the listener, and the reconcile layer, scraped through
-// the real promhttp handler.
+// These tests read the registry through the real promhttp handler, as
+// Prometheus does.
 
 import (
 	"context"
@@ -18,21 +18,20 @@ import (
 	"time"
 )
 
-// scrape reads a registry as Prometheus does: one GET that the real
-// handler answers. The handler writes to a recorder, so a test in a
-// synctest bubble scrapes with no socket.
+// scrape sends one GET to the handler and returns the body. The
+// handler writes to a recorder, so a test in a synctest bubble scrapes
+// with no socket.
 func scrape(t *testing.T, m *metrics) string {
 	t.Helper()
 	recorder := httptest.NewRecorder()
 	m.handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("the scrape answered %d", recorder.Code)
+		t.Fatalf("the scrape returned %d, want 200", recorder.Code)
 	}
 	return recorder.Body.String()
 }
 
-// samples answers each sample line of a scrape whose metric is name,
-// without the comment lines.
+// samples returns the sample lines of the metric name.
 func samples(body, name string) []string {
 	var out []string
 	for line := range strings.SplitSeq(body, "\n") {
@@ -43,7 +42,6 @@ func samples(body, name string) []string {
 	return out
 }
 
-// metricName answers the name of a sample line, before its labels.
 func metricName(line string) string {
 	name, _, _ := strings.Cut(line, " ")
 	name, _, _ = strings.Cut(name, "{")
@@ -53,7 +51,7 @@ func metricName(line string) string {
 func requireSample(t *testing.T, body, line string) {
 	t.Helper()
 	if !slices.Contains(samples(body, metricName(line)), line) {
-		t.Errorf("the scrape has no %q; it has %q", line, samples(body, metricName(line)))
+		t.Errorf("the scrape has no sample %q, want it; the scrape has %q", line, samples(body, metricName(line)))
 	}
 }
 
@@ -63,18 +61,16 @@ func TestBuildInfoNamesTheComponentAndItsRelease(t *testing.T) {
 		`liken_build_info{component="astrophotography-operator",version="2026.10.12-001"} 1`)
 }
 
-func TestTheRuntimeLayerReportsTheProcess(t *testing.T) {
+func TestTheRegistryHasTheGoAndProcessCollectors(t *testing.T) {
 	t.Parallel()
 	body := scrape(t, newMetrics("dev"))
 	for _, name := range []string{"go_goroutines", "go_memstats_alloc_bytes", "process_start_time_seconds"} {
 		if len(samples(body, name)) == 0 {
-			t.Errorf("the scrape has no %s", name)
+			t.Errorf("the scrape has no metric %s, want it", name)
 		}
 	}
 }
 
-// Every kind publishes its counters at zero from the first scrape, so
-// Prometheus has a reading to compute a rate from when one first moves.
 func TestEveryKindPublishesItsCountersAtZero(t *testing.T) {
 	t.Parallel()
 	body := scrape(t, newMetrics("dev"))
@@ -108,20 +104,19 @@ func TestAnEmptyAddressServesNoMetrics(t *testing.T) {
 	t.Parallel()
 	addr, err := newMetrics("dev").serve(t.Context(), "")
 	if err != nil || addr != nil {
-		t.Errorf("serve = %v, %v; want no listener", addr, err)
+		t.Errorf("serve(\"\") = %v, %v, want no listener and no error", addr, err)
 	}
 }
 
 func TestAnAddressTheKernelRefusesIsAnError(t *testing.T) {
 	t.Parallel()
 	if _, err := newMetrics("dev").serve(t.Context(), "127.0.0.1:-1"); err == nil {
-		t.Error("serve answered no error")
+		t.Error("serve(\"127.0.0.1:-1\") returned no error, want one for an invalid port")
 	}
 }
 
-// pipeListener hands each dial one end of a net.Pipe, whose reads and
-// writes wait on channels, so a scrape in a synctest bubble waits on
-// nothing outside the bubble.
+// pipeListener gives each dial one end of a net.Pipe, so a scrape in a
+// synctest bubble opens no socket.
 type pipeListener struct {
 	accepted chan net.Conn
 	closed   chan struct{}
@@ -154,9 +149,9 @@ func (l *pipeListener) dial(context.Context, string, string) (net.Conn, error) {
 	}
 }
 
-// listenInMemory makes serve open a pipeListener until the test ends,
-// and answers a client that dials it. listen is a variable that every
-// test shares, so a test that calls this does not run in parallel.
+// listenInMemory makes serve use a pipeListener until the test ends,
+// and returns a client that dials it. It replaces the package variable
+// listen, so a test that calls it cannot run in parallel.
 func listenInMemory(t *testing.T) *http.Client {
 	t.Helper()
 	listener := &pipeListener{accepted: make(chan net.Conn), closed: make(chan struct{})}
@@ -172,11 +167,11 @@ func TestTheListenerServesTheRegistryUntilItsContextEnds(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		addr, err := newMetrics("dev").serve(ctx, ":9200")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("starting the metrics listener: %v", err)
 		}
 		response, err := scraper.Get("http://" + addr.String() + "/metrics")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("scraping the listener: %v", err)
 		}
 		body, _ := io.ReadAll(response.Body)
 		response.Body.Close()
@@ -187,7 +182,7 @@ func TestTheListenerServesTheRegistryUntilItsContextEnds(t *testing.T) {
 		cancel()
 		synctest.Wait()
 		if _, err := scraper.Get("http://" + addr.String() + "/metrics"); !errors.Is(err, net.ErrClosed) {
-			t.Errorf("a scrape after the end answered %v", err)
+			t.Errorf("a scrape after the context ended returned %v, want net.ErrClosed", err)
 		}
 	})
 }

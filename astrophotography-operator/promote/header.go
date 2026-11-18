@@ -1,16 +1,16 @@
 package promote
 
-// A reader of a FITS file's primary header, for what the promotion Job
-// needs from a frame: its identity, the settings that decide which
-// sequence it counts toward, and its size, which tells a whole frame
-// from one that the driver is still writing.
+// The promotion Job reads a frame's FITS header for the frame's
+// identity and the settings that pick the sequence it counts toward. The
+// header also gives the size of the complete file, so the Job can tell
+// a whole frame from one that the driver is still writing.
 //
-// A FITS header is a run of 80-character cards in blocks of 2,880
-// bytes, ending with the card END. A card that holds a value has "= "
+// A FITS header is a series of 80-character cards, in blocks of 2,880
+// bytes, that ends with the card END. A card that has a value has "= "
 // in columns 9 and 10. A string value is in single quotes, with a
-// doubled quote for a quote, and anything after a "/" outside the
-// quotes is a comment. The data follow the header, in blocks of 2,880
-// bytes too.
+// doubled quote for a quote inside it, and anything after a "/" outside
+// the quotes is a comment. The data follow the header, also in blocks
+// of 2,880 bytes.
 
 import (
 	"bytes"
@@ -24,25 +24,25 @@ import (
 const (
 	blockSize = 2880
 	cardSize  = 80
-	// maxHeaderBlocks bounds the read of a file that has no END. The
-	// driver's header takes two blocks, and a header with every
-	// declared keyword takes a few more.
+	// maxHeaderBlocks limits how much readHeader reads from a file that
+	// has no END card.
 	maxHeaderBlocks = 64
 )
 
-// errNoEnd is a header with no END card in maxHeaderBlocks blocks: the
-// file is no FITS file, or the driver is still writing its header.
+// errNoEnd means that no END card appeared in the first maxHeaderBlocks
+// blocks. Either the file is not a FITS file, or the driver is still
+// writing its header.
 var errNoEnd = errors.New("the header has no END card")
 
 // header is the primary header of a FITS file.
 type header struct {
 	values map[string]string
-	// size is the header's length in bytes, whole blocks.
+	// size is the header's length in bytes, in whole blocks.
 	size int64
 }
 
-// readHeader reads the primary header from the start of a file. A file
-// that ends inside its header answers io.ErrUnexpectedEOF.
+// readHeader reads the primary header from the start of a file. It
+// returns io.ErrUnexpectedEOF when the file ends inside the header.
 func readHeader(r io.Reader) (header, error) {
 	h := header{values: map[string]string{}}
 	block := make([]byte, blockSize)
@@ -54,7 +54,7 @@ func readHeader(r io.Reader) (header, error) {
 			return header{}, err
 		}
 		h.size += blockSize
-		for card := range slicesOf(block, cardSize) {
+		for card := range chunks(block, cardSize) {
 			keyword := strings.TrimSpace(string(card[:8]))
 			if keyword == "END" {
 				return h, nil
@@ -67,8 +67,9 @@ func readHeader(r io.Reader) (header, error) {
 	return header{}, errNoEnd
 }
 
-// slicesOf yields a slice in pieces of a size.
-func slicesOf(b []byte, size int) func(func([]byte) bool) {
+// chunks returns an iterator over consecutive slices of b of length
+// size. A shorter remainder at the end is dropped.
+func chunks(b []byte, size int) func(func([]byte) bool) {
 	return func(yield func([]byte) bool) {
 		for start := 0; start+size <= len(b); start += size {
 			if !yield(b[start : start+size]) {
@@ -78,9 +79,9 @@ func slicesOf(b []byte, size int) func(func([]byte) bool) {
 	}
 }
 
-// cardValue answers the value of a card with its comment removed: the
-// text of a string without its quotes and trailing spaces, or the
-// number or logical value as written.
+// cardValue returns the value of a card without its comment. A string
+// value is returned without its quotes and trailing spaces, and a
+// number or logical value is returned as written.
 func cardValue(field string) string {
 	field = strings.TrimLeft(field, " ")
 	if !strings.HasPrefix(field, "'") {
@@ -103,16 +104,16 @@ func cardValue(field string) string {
 	return strings.TrimRight(text.String(), " ")
 }
 
-// text answers a value as text, and false when the header has no such
-// card.
+// text returns a card's value as a string, and false when the header has
+// no such card.
 func (h header) text(keyword string) (string, bool) {
 	value, found := h.values[keyword]
 	return value, found
 }
 
-// number answers a value as a number, and false when the header has no
-// such card or its value is not a number. A FITS number can write its
-// exponent with D, as Fortran does.
+// number returns a card's value as a number, and false when the header
+// has no such card or the value is not a number. FITS allows D in place
+// of E before the exponent, as Fortran does.
 func (h header) number(keyword string) (float64, bool) {
 	value, found := h.values[keyword]
 	if !found {
@@ -122,10 +123,9 @@ func (h header) number(keyword string) (float64, bool) {
 	return parsed, err == nil
 }
 
-// fileSize answers the length of a whole file with this header: the
-// header and the primary data, padded to whole blocks. The data take
-// |BITPIX| / 8 bytes for each element of the NAXIS axes. The driver
-// writes no extension, so the primary data end the frame.
+// fileSize returns the length of a complete file with this header: the
+// header plus the primary data, padded to whole blocks. It counts no
+// extensions, because the driver writes none.
 func (h header) fileSize() (int64, error) {
 	bitpix, okBitpix := h.number("BITPIX")
 	axes, okAxes := h.number("NAXIS")

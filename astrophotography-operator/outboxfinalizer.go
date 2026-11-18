@@ -1,11 +1,12 @@
 package main
 
-// The finalizer astrophotography.liken.sh/frames holds an outbox claim
-// while a Target's status.outboxes names it, so a delete of the claim
-// waits while frames of a target are in it and not yet in the archive.
-// The loop removes the finalizer when no target names the claim. While
-// the operator is down, a delete waits for it; a person can remove the
-// finalizer by hand, and the frames in the claim go with it.
+// The promotion loop puts the finalizer astrophotography.liken.sh/frames
+// on an outbox claim while a Target's status.outboxes lists the claim,
+// so that deleting the claim waits until its frames are promoted to the
+// archive. The loop removes the finalizer when no Target lists the
+// claim. While the operator is down, the deletion waits. A person who
+// removes the finalizer by hand loses the frames that are still in the
+// claim.
 
 import (
 	"encoding/json"
@@ -17,24 +18,23 @@ import (
 
 const framesFinalizer = astrophotography.Group + "/frames"
 
-// mergePatchType is the content type of a JSON merge patch.
 const mergePatchType = "application/merge-patch+json"
 
-// keepFinalizers adds the finalizer to each claim that a target names,
-// and removes it from every other claim. The API server refuses a new
-// finalizer on a claim that is being deleted, so the loop adds none to
-// one.
+// keepFinalizers adds the finalizer to each claim that a Target lists
+// and removes it from every other claim. The API server refuses to add
+// a finalizer to a claim that is being deleted, so the loop does not
+// try.
 func (p *promotions) keepFinalizers(targets []astrophotography.Target, claims map[string]claimObject) error {
-	named := map[string]bool{}
+	listed := map[string]bool{}
 	for _, t := range targets {
 		for _, entry := range t.Status.Outboxes {
-			named[t.Metadata.Namespace+"/"+entry.ClaimName] = true
+			listed[t.Metadata.Namespace+"/"+entry.ClaimName] = true
 		}
 	}
 	for key, claim := range claims {
-		holds := slices.Contains(claim.Metadata.Finalizers, framesFinalizer)
-		want := named[key]
-		if holds == want || (want && claim.Metadata.DeletionTimestamp != nil) {
+		has := slices.Contains(claim.Metadata.Finalizers, framesFinalizer)
+		want := listed[key]
+		if has == want || (want && claim.Metadata.DeletionTimestamp != nil) {
 			continue
 		}
 		if err := p.patchFinalizer(claim, want); err != nil {
@@ -44,10 +44,10 @@ func (p *promotions) keepFinalizers(targets []astrophotography.Target, claims ma
 	return nil
 }
 
-// patchFinalizer adds or removes the finalizer with a merge patch that
-// states the store's resourceVersion, so a write of another
-// controller's finalizer in between answers 409 and is not lost. The
-// next pass reads the claim's new copy and patches again.
+// patchFinalizer sends the whole finalizer list in a merge patch, with
+// the cached resourceVersion. When another controller changed the
+// finalizers since the cache read, the API server returns 409 instead of
+// overwriting that change, and the next pass patches the new copy.
 func (p *promotions) patchFinalizer(claim claimObject, present bool) error {
 	finalizers := slices.DeleteFunc(slices.Clone(claim.Metadata.Finalizers), func(f string) bool { return f == framesFinalizer })
 	if present {

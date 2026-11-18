@@ -1,21 +1,23 @@
 package main
 
-// The finalizer astrophotography.liken.sh/frames on a Target holds a
-// delete of the target while frames of it are pending in an outbox
-// claim. Promotion learns which frames wait, and where, only from the
-// target's status.outboxes, so a target that went with frames pending
-// would leave them in the outbox with nothing to move them, and with no
-// word to the person who deleted it.
+// The finalizer astrophotography.liken.sh/frames keeps a Target from
+// being deleted while frames of it are waiting in an outbox claim.
+// Promotion learns which frames are waiting, and in which claim, only
+// from the Target's status.outboxes. If the Target were deleted with
+// frames waiting, they would stay in the outbox with nothing to move
+// them to the archive, and the person who deleted the Target would get
+// no message about it.
 //
-// The promotion loop puts the finalizer on every target it reads.
-// While a delete waits, no reservation claims the target (selection.go),
-// a runner that holds it releases it after the frame in flight, and
-// promotion goes on moving its frames. The loop removes the finalizer
-// when no reservation holds the target and no frame of it is pending
-// in an outbox claim that exists. A claim that is gone took its frames
-// with it, so nothing could move them and the delete goes on. While
-// promotion cannot move a frame, ArchiveAvailable says why, and a
-// person can remove the finalizer by hand to delete the target and
+// The promotion loop adds the finalizer to every Target it reads. Once
+// a delete is requested, no runner selects the Target (selection.go),
+// the runner named in status.reservation releases it after the current
+// frame, and promotion keeps moving its frames. The loop removes the
+// finalizer when status.reservation is empty and no frame of the Target
+// is waiting in an outbox claim that still exists. Promotion cannot
+// read the frames of a deleted claim, so they do not hold up the
+// delete. While promotion
+// cannot move a frame, the ArchiveAvailable condition gives the reason.
+// A person can remove the finalizer by hand to delete the Target and
 // leave the frames in the outbox.
 
 import (
@@ -29,23 +31,25 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// deletingMessage is the message of Imaging False with Deleting.
-const deletingMessage = "The target is being deleted. Its finalizer " + framesFinalizer +
-	" keeps it until promotion moves the frames that status.outboxes lists to the archive."
+// deletingMessage is the message of the Imaging condition when its
+// status is False and its reason is Deleting.
+const deletingMessage = "The target is being deleted, and its finalizer " + framesFinalizer +
+	" keeps it until promotion moves the frames that status.outboxes lists to the archive"
 
-// keepTargetFinalizer adds the finalizer to a target that is not being
-// deleted, and for one that is, either reports why the delete waits or
-// removes the finalizer.
+// keepTargetFinalizer adds the finalizer to a Target that is not being
+// deleted. For a Target that is being deleted, it either sets the
+// Imaging condition to say why the delete waits, or removes the
+// finalizer.
 func (p *promotions) keepTargetFinalizer(t *astrophotography.Target, w world) error {
-	holds := slices.Contains(t.Metadata.Finalizers, framesFinalizer)
+	hasFinalizer := slices.Contains(t.Metadata.Finalizers, framesFinalizer)
 	switch {
-	case t.Metadata.DeletionTimestamp == nil && !holds:
+	case t.Metadata.DeletionTimestamp == nil && !hasFinalizer:
 		return p.patchTargetFinalizer(t, true)
-	case t.Metadata.DeletionTimestamp == nil || !holds:
+	case t.Metadata.DeletionTimestamp == nil || !hasFinalizer:
 		return nil
 	case t.Status.Reservation != "":
-		// The runner releases the target after the frame in flight, and
-		// that write wakes the loop again.
+		// The runner releases the Target after the current frame, and
+		// that write triggers another pass of the loop.
 		return nil
 	case framesWait(t, w):
 		return p.setCondition(t, conditions.Condition{Type: astrophotography.ConditionImaging, Status: conditions.False,
@@ -60,8 +64,8 @@ func (p *promotions) keepTargetFinalizer(t *astrophotography.Target, w world) er
 	return p.patchTargetFinalizer(t, false)
 }
 
-// framesWait reports whether a frame of the target is pending in an
-// outbox claim that exists.
+// framesWait reports whether a frame of the Target is waiting in an
+// outbox claim that still exists.
 func framesWait(t *astrophotography.Target, w world) bool {
 	return slices.ContainsFunc(t.Status.Outboxes, func(entry astrophotography.OutboxFrames) bool {
 		_, exists := w.claims[t.Metadata.Namespace+"/"+entry.ClaimName]
@@ -70,10 +74,11 @@ func framesWait(t *astrophotography.Target, w world) bool {
 }
 
 // patchTargetFinalizer adds or removes the finalizer with a merge patch
-// that states the resourceVersion of the copy held, so a write of
-// another controller's finalizer in between answers 409 and is not
-// lost. The memo notes the answer, so the next pass reads the target
-// at its new version.
+// that includes the resourceVersion of the Target it read. If another
+// controller changed the finalizers in the meantime, the API server
+// returns 409 and the other controller's finalizer is not overwritten.
+// The memo records the version in the response, so the next pass reads
+// the Target at its new version.
 func (p *promotions) patchTargetFinalizer(t *astrophotography.Target, present bool) error {
 	finalizers := slices.DeleteFunc(slices.Clone(t.Metadata.Finalizers), func(f string) bool { return f == framesFinalizer })
 	if present {
@@ -85,9 +90,9 @@ func (p *promotions) patchTargetFinalizer(t *astrophotography.Target, present bo
 	}})
 	path := targetPath(t.Metadata.Namespace, t.Metadata.Name)
 	_, err := memo.Written[astrophotography.Target](p.versions, memo.Key(&t.Metadata), func() (*astrophotography.Target, error) {
-		var answer astrophotography.Target
-		err := p.client.Request(http.MethodPatch, path, mergePatchType, body, &answer)
-		return &answer, err
+		var patched astrophotography.Target
+		err := p.client.Request(http.MethodPatch, path, mergePatchType, body, &patched)
+		return &patched, err
 	})
 	return err
 }

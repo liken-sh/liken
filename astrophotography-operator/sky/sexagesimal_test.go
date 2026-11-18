@@ -25,7 +25,7 @@ func TestParseRA(t *testing.T) {
 		t.Run(c.text, func(t *testing.T) {
 			got, err := ParseRA(c.text)
 			if (err != nil) != c.err || !near(got, c.want, 1e-6) {
-				t.Errorf("ParseRA = %f, %v; want %f, error %v", got, err, c.want, c.err)
+				t.Errorf("ParseRA(%q) = %f, %v, want %f error %v", c.text, got, err, c.want, c.err)
 			}
 		})
 	}
@@ -54,7 +54,7 @@ func TestParseDec(t *testing.T) {
 		t.Run(c.text, func(t *testing.T) {
 			got, err := ParseDec(c.text)
 			if (err != nil) != c.err || !near(got, c.want, 1e-6) {
-				t.Errorf("ParseDec = %f, %v; want %f, error %v", got, err, c.want, c.err)
+				t.Errorf("ParseDec(%q) = %f, %v, want %f error %v", c.text, got, err, c.want, c.err)
 			}
 		})
 	}
@@ -101,14 +101,13 @@ func TestFormatDec(t *testing.T) {
 	}
 }
 
-// What FormatRA and FormatDec write, ParseRA and ParseDec read back.
 func TestFormatReadsBack(t *testing.T) {
 	ra, err := ParseRA(FormatRA(83.822083))
 	if err != nil || !near(ra, 83.822083, 1.5/3600) {
-		t.Errorf("ParseRA(FormatRA) = %f, %v", ra, err)
+		t.Errorf("ParseRA(FormatRA(83.822083)) = %f, %v, want 83.822083 within 1.5 arcseconds", ra, err)
 	}
 	dec, err := ParseDec(FormatDec(-5.391111))
 	if err != nil || !near(dec, -5.391111, 0.05/3600) {
-		t.Errorf("ParseDec(FormatDec) = %f, %v", dec, err)
+		t.Errorf("ParseDec(FormatDec(-5.391111)) = %f, %v, want -5.391111 within 0.05 arcseconds", dec, err)
 	}
 }

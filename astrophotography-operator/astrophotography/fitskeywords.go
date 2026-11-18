@@ -1,10 +1,11 @@
 package astrophotography
 
-// A Target's spec.fitsKeywords is the last level of the declared
-// keywords, after the four of observatory-operator (plan 01). Its CRD
-// refuses what observatory-operator's levels refuse, and two more names
-// that this operator writes into every frame: OBJECT, from
-// spec.object, and FRAMEID, the frame's identity.
+// A Target's spec.fitsKeywords is the most specific level of declared
+// FITS keywords. The less specific levels are the same field on
+// observatory-operator's Observatory, Telescope, Camera, and
+// Reservation. The Target CRD refuses every name that those refuse, and
+// also OBJECT and FRAMEID, because the runner writes them into every
+// frame from spec.object and the frame's identity.
 
 import (
 	"slices"
@@ -13,12 +14,12 @@ import (
 )
 
 // OperatorFITSKeywords are the keywords that the runner writes into
-// every frame after the merged list.
+// every frame after the Target's keywords.
 var OperatorFITSKeywords = []string{"OBJECT", "FRAMEID"}
 
-// RefusedFITSKeywords answers the names that the Target's CRD refuses:
-// observatory-operator's list, then each of OperatorFITSKeywords that
-// the list does not hold already.
+// RefusedFITSKeywords returns the names that the Target CRD refuses:
+// observatory-operator's list, plus each of OperatorFITSKeywords that
+// the list lacks.
 func RefusedFITSKeywords() []string {
 	refused := observatory.RefusedFITSKeywords()
 	for _, name := range OperatorFITSKeywords {

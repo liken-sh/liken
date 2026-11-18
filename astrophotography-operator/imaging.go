@@ -1,12 +1,9 @@
 package main
 
-// The work on one claimed target (plan 01's order of operations). The
-// runner checks that the filter wheel holds the target's filters
-// (filters.go), stops guiding, slews, centers, and then guides and
-// exposes the first sequence with work left, one frame at a time, until
-// no sequence has any. Before each frame it reads the target again, so
-// a target that a person suspends, edits, or deletes changes the work
-// at the next frame, not in the middle of one.
+// The work on one claimed target. The runner reads the target again
+// before each frame, so when a person suspends, edits, or deletes the
+// target, the change takes effect at the next frame and never in the
+// middle of one.
 
 import (
 	"context"
@@ -25,31 +22,31 @@ type work struct {
 	res    *observatory.Reservation
 	target *astrophotography.Target
 	camera camera
-	// The names of the devices on the INDI server. wheel is empty when
-	// the train has no filter wheel.
+	// The names of the devices on the INDI server. wheelDevice is empty
+	// when the train has no filter wheel.
 	cameraDevice, wheelDevice, mountDevice string
-	// aimed is the target's coordinates at the last slew. A person who
-	// edits them during the night moves the mount at the next frame.
+	// aimed is the target's coordinates at the last slew. next slews
+	// again when the target's coordinates differ from it.
 	aimed astrophotography.Coordinates
-	// centered says how the mount was centered, and how says how the
-	// frames are guided and centered, for the Imaging condition's
-	// message.
+	// centered describes how the mount was centered, and how describes
+	// how the frames are guided and centered. Both go in the message of
+	// the Imaging condition.
 	centered, how string
-	// frames counts the frames this reservation took of the target, for
-	// a dither every dither.every frames.
+	// frames counts the frames exposed since the claim. guiding.afterFrame
+	// reads it to dither every dither.every frames.
 	frames int
-	// afterFrame says that guiding.afterFrame waits for the frame that
-	// follows a counted one. The runner calls it only when another
-	// frame of the target follows with no slew, because a dither moves
-	// the lock position for the next frame, and a settle after the last
-	// frame or before a slew is time that no frame uses.
+	// afterFrame is set after each counted frame. next calls
+	// guiding.afterFrame, which can dither, before the following frame,
+	// and skips the call when a slew comes first. A dither only helps the
+	// frame after it, so after the last frame or before a slew it would
+	// waste time.
 	afterFrame bool
 }
 
-// imagingFailure ends the work on a target with a reason of the
-// Imaging condition, such as NoFilter. The runner records the failure
-// in status.failed, and leaves the target for the rest of the
-// reservation, unless a person edits it.
+// imagingFailure is an error that ends the work on a target. reason is
+// the reason of the Imaging condition, such as NoFilter. image records
+// the failure in status.failed, and the runner does not claim the target
+// again on this reservation until a person edits it.
 type imagingFailure struct {
 	reason string
 	err    error
@@ -76,16 +73,18 @@ func (r *runner) image(ctx context.Context, t *astrophotography.Target) error {
 	case errors.As(err, &failure):
 		r.logf("target %s: %v", targetName(t), err)
 		failed := &astrophotography.Failure{Reservation: r.name, ObservedGeneration: t.Metadata.Generation}
-		return r.releaseAs(t, failed, failure.reason, fmt.Sprintf("Reservation %s: %v", r.name, failure.err))
+		return r.releaseAs(t, failed, failure.reason, fmt.Sprintf("Reservation %s released the target: %v", r.name, failure.err))
 	case errors.Is(err, apiclient.ErrNotFound):
 		return nil
 	}
 	return err
 }
 
-// prepare finds the devices that image a target. A device that the
-// server does not serve yet is an error that the runner retries; a
-// session that has no camera for the target fails the target.
+// prepare reads the INDI device name of the target's camera, mount, and
+// filter wheel from the status of their objects. When an object is
+// missing or has no status.indiDevice yet, prepare returns a plain
+// error and the runner retries. When the session has no camera for the
+// target's train or no mount, the target fails.
 func (r *runner) prepare(t *astrophotography.Target) (*work, error) {
 	res := r.res
 	session := res.Status.Session
@@ -119,7 +118,6 @@ func (r *runner) prepare(t *astrophotography.Target) (*work, error) {
 	return w, nil
 }
 
-// run is plan 01's order of operations for one target.
 func (w *work) run(ctx context.Context) error {
 	if err := w.r.syncDevices(ctx, w.mountDevice, w.cameraDevice, w.wheelDevice); err != nil {
 		return err
@@ -139,9 +137,8 @@ func (w *work) run(ctx context.Context) error {
 	return nil
 }
 
-// aim stops the guiding, slews to the target, and centers it. It runs
-// after each claim, and again when a person edits the coordinates
-// during the night, because a slew lands near the target, not on it.
+// aim stops guiding, slews to the target, and centers it. Centering
+// follows the slew because a slew only gets the mount near the target.
 func (w *work) aim(ctx context.Context) error {
 	if err := w.r.guiding.stop(ctx, w); err != nil {
 		return fail(astrophotography.ReasonGuidingFailed, "stopping the guiding: %w", err)
@@ -157,7 +154,7 @@ func (w *work) aim(ctx context.Context) error {
 	return nil
 }
 
-// next reads the target again and exposes one frame of it. It answers
+// next reads the target again and exposes one frame of it. It returns
 // true when the work on the target is over.
 func (w *work) next(ctx context.Context) (bool, error) {
 	t, err := w.r.o.readTarget(w.r.namespace, w.target.Metadata.Name)
@@ -204,9 +201,9 @@ func (w *work) next(ctx context.Context) (bool, error) {
 	case errors.Is(err, errClaimLost):
 		return true, nil
 	case lostConnection(err):
-		// The pass that follows finishes the frame in flight from
-		// status.exposure, the way a restart does, and claims the target
-		// again, which slews again: the server can have restarted.
+		// The next pass finishes the frame in flight (resume.go) and
+		// claims the target again. The new work slews again, because the
+		// INDI server may have restarted.
 		w.r.logf("target %s: %v; waiting for the INDI server", targetName(t), err)
 		return true, w.r.connected(ctx)
 	}
@@ -229,17 +226,15 @@ func (w *work) setImaging(imaging bool, reason, message string) error {
 	return err
 }
 
-// release ends a reservation's claim of a target: it clears
-// status.reservation and status.exposure, and sets Imaging False with
-// the reason. A target that another runner claimed since is left alone.
+// release clears status.reservation and status.exposure and sets
+// Imaging to False with the reason. It does not change a target that
+// another reservation has claimed since.
 func (r *runner) release(t *astrophotography.Target, reason, message string) error {
 	return r.releaseAs(t, nil, reason, message)
 }
 
-// releaseAs releases a target, and records a failure in status.failed
-// when failed is not nil. The record is in the API, not in the runner,
-// so a runner that starts again after a restart of the operator reads
-// it and does not claim the target again (claimNext).
+// releaseAs is release that also records failed in status.failed when
+// failed is not nil.
 func (r *runner) releaseAs(t *astrophotography.Target, failed *astrophotography.Failure, reason, message string) error {
 	_, err := r.o.writeTarget(t, func(fresh *astrophotography.Target, change *statusChange) bool {
 		if fresh.Status.Reservation != r.name {

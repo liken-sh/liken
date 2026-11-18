@@ -13,9 +13,9 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/worker"
 )
 
-// centeringFrame is the request of a centering frame of the CCD simulator:
-// the header's position, 6.8° from the stars it drew, and the plate
-// scale of a 400 mm tube with pixels of 5.2 µm.
+// centeringFrame is a centering frame of INDI's CCD simulator. Center
+// is the position in the frame's header, and Scale is the plate scale of
+// a 400 mm focal length with 5.2 µm pixels.
 var centeringFrame = solveRequest{
 	Namespace: "observatory", Reservation: "tonight", Solver: "lab",
 	Frame:  "east-main/tonight/_centering/0f3a.fits",
@@ -23,8 +23,8 @@ var centeringFrame = solveRequest{
 	Scale:  2.68,
 }
 
-// readySolver starts the operator with a Ready Solver lab, whose search
-// is given, and a reservation's worker behind the fake peers.
+// readySolverWorld starts the operator with a Ready Solver lab. A nil
+// search keeps the CRD's default.
 func readySolverWorld(t *testing.T, search map[string]any) *operatorWorld {
 	t.Helper()
 	w := startWorkloads(t, nil)
@@ -38,7 +38,6 @@ func readySolverWorld(t *testing.T, search map[string]any) *operatorWorld {
 	return w
 }
 
-// radiiOf answers the radius of each attempt.
 func radiiOf(result solveResult) []float64 {
 	var out []float64
 	for _, a := range result.Attempts {
@@ -47,9 +46,8 @@ func radiiOf(result solveResult) []float64 {
 	return out
 }
 
-// The ladder widens the search while the frame does not solve: the
-// header's position is 6.8° from the stars, so 5° misses and 10°
-// solves.
+// reach is the distance from the hint to the stars, and the fake solver
+// solves at any radius of at least reach. A reach of -1 never solves.
 func TestASolveWidensTheSearchUntilTheFrameSolves(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -71,51 +69,51 @@ func TestASolveWidensTheSearchUntilTheFrameSolves(t *testing.T) {
 				w := readySolverWorld(t, c.search)
 				w.peers.set(func(f *fakePeers) { f.reach = c.reach })
 				result, err := w.o.plateSolve(t.Context(), centeringFrame)
-				if err != nil || !slices.Equal(radiiOf(result), c.radii) || result.Answer.Solved != c.solved {
-					t.Errorf("attempts %v, solved %v, %v; want %v, solved %v", radiiOf(result), result.Answer.Solved, err, c.radii, c.solved)
+				if err != nil || !slices.Equal(radiiOf(result), c.radii) || result.Response.Solved != c.solved {
+					t.Errorf("the radii tried are %v, solved is %v, error is %v, want radii %v and solved %v", radiiOf(result), result.Response.Solved, err, c.radii, c.solved)
 				}
 			})
 		})
 	}
 }
 
-// The worker gets the frame, the expected center, the radius, and the
-// plate scale ±10%, and the answer carries the solution and what the
-// extraction measured.
-func TestASolveCarriesTheHintAndTheSolution(t *testing.T) {
+// The worker gets the expected center, the radius, and the plate scale
+// ±10%. The result has the solution and the stars that the worker
+// measured.
+func TestASolveSendsTheHintAndReturnsTheSolution(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := readySolverWorld(t, nil)
 		w.peers.set(func(f *fakePeers) { f.reach = 3 })
 		result, err := w.o.plateSolve(t.Context(), centeringFrame)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("solving the frame: %v", err)
 		}
 		var request worker.ExtractRequest
 		w.peers.set(func(f *fakePeers) { request = f.extracts[0] })
 		hint := request.Hint
 		if request.Frame != centeringFrame.Frame || hint.Center != centeringFrame.Center || hint.Radius != 5 ||
 			math.Abs(hint.ScaleLow-2.412) > 1e-9 || math.Abs(hint.ScaleHigh-2.948) > 1e-9 {
-			t.Errorf("the worker got %+v", request)
+			t.Errorf("the extract request is %+v, want the frame, the center, and the scale of centeringFrame", request)
 		}
-		if result.Answer.Center.RA != 29.6070 || result.Stars != 1675 || result.MedianFWHM != 4.93 || !result.Attempts[0].Solved {
-			t.Errorf("result %+v", result)
+		if result.Response.Center.RA != 29.6070 || result.Stars != 1675 || result.MedianFWHM != 4.93 || !result.Attempts[0].Solved {
+			t.Errorf("the result is %+v, want the response of the solver", result)
 		}
 		requireSample(t, scrape(t, w.o.metrics), `astrophotography_solves_total{result="solved"} 1`)
 		if !strings.Contains(w.logs.String(), "solving "+centeringFrame.Frame+" in observatory with a radius of 5 degrees: 1675 stars, solved true") {
-			t.Errorf("log %q", w.logs.String())
+			t.Errorf("the log is %q, want a line for the solved attempt with a radius of 5 degrees", w.logs.String())
 		}
 	})
 }
 
-// A frame with no star cannot solve at any radius, so the operator asks
-// the solver nothing.
+// A frame with no stars ends the solve after one extraction, and the
+// operator sends nothing to the solver.
 func TestAFrameWithNoStarIsNotSolved(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := readySolverWorld(t, nil)
 		w.peers.set(func(f *fakePeers) { f.stars = 0 })
 		result, err := w.o.plateSolve(t.Context(), centeringFrame)
-		if err != nil || len(result.Attempts) != 1 || result.Answer.Solved || w.peers.count("POST lab-solver.observatory.svc:8080/solve") != 0 {
-			t.Errorf("result %+v, %v", result, err)
+		if err != nil || len(result.Attempts) != 1 || result.Response.Solved || w.peers.count("POST lab-solver.observatory.svc:8080/solve") != 0 {
+			t.Errorf("the result is %+v and the error is %v, want one attempt, no response, no solver request, and no error", result, err)
 		}
 	})
 }
@@ -141,15 +139,15 @@ func TestASolveFails(t *testing.T) {
 				}
 				_, err := w.o.plateSolve(t.Context(), c.request)
 				if err == nil || !strings.Contains(err.Error(), c.want) || errors.Is(err, errSolverNotReady) != c.ready {
-					t.Errorf("answered %v, want an error with %q", err, c.want)
+					t.Errorf("the error is %v, want one with %q and errSolverNotReady %v", err, c.want, c.ready)
 				}
 			})
 		})
 	}
 }
 
-// A Solver that is not Ready answers errSolverNotReady with its reason,
-// so the runner's CenteringFailed says why.
+// The error of a Solver that is not Ready has its Ready reason, and
+// the runner's NotCentered Warning shows that error.
 func TestASolverThatIsNotReadyRefusesASolve(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
@@ -157,7 +155,7 @@ func TestASolverThatIsNotReadyRefusesASolve(t *testing.T) {
 		settle()
 		_, err := w.o.plateSolve(t.Context(), centeringFrame)
 		if !errors.Is(err, errSolverNotReady) || !strings.Contains(err.Error(), "PodNotReady") {
-			t.Errorf("answered %v", err)
+			t.Errorf("the error is %v, want errSolverNotReady with the reason PodNotReady", err)
 		}
 	})
 }

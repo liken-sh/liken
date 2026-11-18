@@ -1,8 +1,5 @@
 package main
 
-// The promotion loop against the fake API server: when it starts a
-// Job, and what the Job runs.
-
 import (
 	"reflect"
 	"slices"
@@ -16,8 +13,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// A frame that the runner counts in an outbox starts a Job, which runs
-// the operator's image in its promote mode with both claims mounted.
+// A pending frame in an outbox starts a Job that runs the operator's
+// image in promote mode, with the outbox and archive claims mounted.
 func TestAPendingFrameStartsAPromotionJob(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -53,13 +50,13 @@ func TestAPendingFrameStartsAPromotionJob(t *testing.T) {
 			t.Errorf("the Job's metadata is %+v", job.Metadata)
 		}
 		if job.Spec.Template.Metadata.Labels[labelManagedBy] != managedBy {
-			t.Errorf("the pod's labels are %v, so the pod watch does not hold it", job.Spec.Template.Metadata.Labels)
+			t.Errorf("the pod's labels are %v, so the pod watch does not select it", job.Spec.Template.Metadata.Labels)
 		}
 	})
 }
 
-// When the archive is the outbox's own claim, the Job mounts it once
-// and moves each frame by a rename.
+// When the archive is in the outbox's claim, the Job mounts the claim
+// once and moves each frame with a rename.
 func TestTheSameClaimIsMountedOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -77,8 +74,7 @@ func TestTheSameClaimIsMountedOnce(t *testing.T) {
 	})
 }
 
-// m43 is a second target that counts its frames in the same outbox
-// claim as m42.
+// m43 returns m42 with another name and UID.
 func m43() astrophotography.Target {
 	t := m42()
 	t.Metadata.Name, t.Metadata.UID = "m43", "uid-m43"
@@ -86,8 +82,8 @@ func m43() astrophotography.Target {
 }
 
 // Two targets with frames in one outbox claim start one Job, because
-// one Job copies from an outbox claim at a time. The second target's
-// Job starts when the first Job ends.
+// only one Job at a time copies from an outbox claim. The second
+// target's Job starts when the first Job ends.
 func TestTwoTargetsOnOneOutboxClaimStartOneJob(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -115,8 +111,8 @@ func TestTwoTargetsOnOneOutboxClaimStartOneJob(t *testing.T) {
 	})
 }
 
-// reservation is a Reservation held by this operator that writes to the
-// outbox claim frames.
+// reservation returns a Reservation that this operator manages, which
+// writes frames to the outbox claim.
 func reservation(phase observatory.ReservationPhase) map[string]any {
 	r := object(observatoryNS, "east-tonight", nil, map[string]any{
 		"telescope": "east", "holder": managedBy, "outbox": map[string]any{"claimName": "frames"},
@@ -125,7 +121,6 @@ func reservation(phase observatory.ReservationPhase) map[string]any {
 	return r
 }
 
-// The cases where the loop starts no Job yet.
 func TestNoJobStarts(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -188,8 +183,8 @@ func TestAfterReservationPromotesWhenTheReservationIsReleased(t *testing.T) {
 	})
 }
 
-// A target whose archive claim does not exist starts no Job, and says
-// why.
+// A target whose archive claim does not exist starts no Job, and the
+// target's status gives the reason.
 func TestAMissingArchiveClaimStartsNoJob(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -200,7 +195,7 @@ func TestAMissingArchiveClaimStartsNoJob(t *testing.T) {
 
 		got, _ := conditions.Find(readTarget(api).Status.Conditions, astrophotography.ConditionArchiveAvailable)
 		if got.Status != conditions.False || got.Reason != astrophotography.ReasonClaimMissing ||
-			got.Message != "the PersistentVolumeClaim archive does not exist in observatory" {
+			got.Message != "The PersistentVolumeClaim archive that spec.archive.claimName refers to does not exist in namespace observatory" {
 			t.Errorf("ArchiveAvailable is %+v", got)
 		}
 		if got, want := targetEvents(api), []string{"Normal WorkLeft", "Warning ClaimMissing"}; !slices.Equal(got, want) {
@@ -212,7 +207,8 @@ func TestAMissingArchiveClaimStartsNoJob(t *testing.T) {
 	})
 }
 
-// A Job whose pod no node can start reports the scheduler's message.
+// When no node can run a Job's pod, the target's status reports the
+// scheduler's message.
 func TestAPodThatCannotStartIsUnschedulable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -229,16 +225,16 @@ func TestAPodThatCannotStartIsUnschedulable(t *testing.T) {
 		synctest.Wait()
 
 		got, _ := conditions.Find(readTarget(api).Status.Conditions, astrophotography.ConditionArchiveAvailable)
-		want := "the pod of the promotion Job m42-promote-1 cannot start: 0/1 nodes are available: 1 node(s) had volume node affinity conflict."
+		want := "The pod of the promotion Job m42-promote-1 cannot start: 0/1 nodes are available: 1 node(s) had volume node affinity conflict."
 		if got.Reason != astrophotography.ReasonUnschedulable || got.Message != want {
 			t.Errorf("ArchiveAvailable is %+v", got)
 		}
 	})
 }
 
-// The Jobs run the operator's own image, read from its own pod. A pod
-// that cannot be read, or that has no operator container, starts no
-// Job, and the loop tries again after its backoff.
+// Jobs run the operator's own image, which the operator reads from its
+// own pod. When the pod cannot be read or has no operator container,
+// no Job starts, and the loop tries again after its backoff.
 func TestTheJobWaitsForTheOperatorsImage(t *testing.T) {
 	cases := []struct {
 		name string
@@ -277,7 +273,8 @@ func TestTheJobWaitsForTheOperatorsImage(t *testing.T) {
 }
 
 // A reservation's session records its outbox, and a spec edit during
-// the session does not move it, so the pacing reads the session's.
+// the session does not change it, so AfterReservation reads the
+// outbox from the session.
 func TestAfterReservationReadsTheSessionsOutbox(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)

@@ -1,22 +1,23 @@
-# The first imaging session, on observatory-operator's example
-# observatory of INDI simulators (plan 08). It holds the three claims of
-# the session, a Solver, a Target of M42 with short frames, and the
-# Reservation that gives the telescope east to astrophotography-operator.
+# A first imaging session on the INDI simulators of
+# observatory-operator's example observatory. It creates three volume
+# claims, a Solver, a Target of M42 with short exposures, and a
+# Reservation that gives the telescope `east` to
+# astrophotography-operator.
 #
 # Apply both operators' deploy bases, then observatory-operator's
-# examples/simulators.yaml with no Reservation, then this file, in the
-# same namespace:
+# examples/simulators.yaml without its Reservation, then this file, all
+# in the same namespace:
 #
 #   kubectl apply -n observatory -f examples/first-session.yaml
 #   kubectl get astro -n observatory
 #
-# The claim astrometry-indexes must hold index files before the Solver
-# is Ready. The 13 files of the 2MASS series 4207 and 4208, 236 MiB,
+# The Solver is not Ready until the astrometry-indexes claim contains
+# index files. The 13 files of the 2MASS series 4207 and 4208 (236 MiB)
 # solve the simulator's field of 47.7 by 38.1 arcminutes.
 ---
-# The outbox, where the camera writes each frame. A local-path claim is
-# bound to the node of its first pod, so the camera, the worker, and the
-# promotion Job all run on that node.
+# The outbox, where the camera writes each frame. A local-path volume
+# is bound to the node of the first pod that uses it, so the camera, the
+# worker, and the promotion Job all run on that node.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -28,7 +29,7 @@ spec:
     requests:
       storage: 1Gi
 ---
-# The archive, where the frames and the catalog stay.
+# The archive, which keeps the promoted frames and the catalog.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -59,9 +60,8 @@ spec:
   indexFiles:
     claimName: astrometry-indexes
 ---
-# Nine frames of 10 s, so the whole session runs in minutes. The
-# simulator's filter wheel names its slots Luminance, Red, Green, and
-# Blue.
+# Nine frames of 10 s, so the session takes minutes. The simulator's
+# filter wheel has the filters Luminance, Red, Green, and Blue.
 apiVersion: astrophotography.liken.sh/v1alpha1
 kind: Target
 metadata:
@@ -82,16 +82,16 @@ spec:
     path: astro
     promotion: Continuous
 ---
-# The Reservation has no end, because a fixed time in this file would be
-# past on most days that someone applies it. With no end, it lasts until
-# you delete it, and the operator does not end it: after the last frame
-# the mount stays unparked and tracking. So delete it when the session's
-# frames are in the archive:
+# This Reservation has no end time, because any fixed time in the file
+# would be in the past on most days that someone applies it. It lasts
+# until you delete it, and the operator does not delete it. After the
+# last frame, the mount stays unparked and tracking. Delete it when the
+# session's frames are in the archive:
 #
 #   kubectl delete reservation east-tonight -n observatory
 #
-# For a real night, give the reservation an end near dawn, as the
-# image-a-target guide does.
+# For a real night, set an end near dawn, as the image-a-target guide
+# does.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Reservation
 metadata:

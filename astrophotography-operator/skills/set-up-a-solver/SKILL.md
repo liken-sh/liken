@@ -7,19 +7,19 @@ This skill is the guide at https://liken.sh/astrophotography/docs/guides/set-up-
 
 # Set up a solver
 
-This guide gives your targets a plate solver. At the end, a `Solver`
-reports `Ready` with the index series it holds, and a target can name
-it in `spec.centering.solver`. [Solvers](https://liken.sh/astrophotography/docs/concepts/solvers/)
+This guide gives your targets a plate solver. At the end, a `Solver` is
+`Ready` and lists the index series it loaded, and a target can use it
+by setting `spec.centering.solver` to its name. [Solvers](https://liken.sh/astrophotography/docs/concepts/solvers/)
 explains how a solve works and why the index files stay on one claim.
 
 You need:
 
 * `astrophotography-operator` installed, as
   [the install guide](https://liken.sh/astrophotography/docs/guides/install/) describes. The solver's
-  pod runs in the image `astrophotography-operator-worker`, at the tag
-  of the operator's own image.
-* A `StorageClass` that gives a claim of a few hundred megabytes, such
-  as `local-path`.
+  pod runs the image `astrophotography-operator-worker`, with the same
+  tag as the operator's image.
+* A `StorageClass` that can provision a claim of a few hundred
+  megabytes, such as `local-path`.
 * The focal length of each optical tube you image with, and the pixel
   size of each camera.
 * `kubectl` access to the namespace of your observatory. This guide
@@ -47,9 +47,8 @@ arcseconds per pixel and its short side is 38.1 arcminutes.
 | 4209 | 42 to 60 | 60 arcminutes or more |
 
 A series of smaller quads also fits, and solves a frame with fewer
-bright stars, but its files are larger. The lab uses 4207 and 4208
-for the field of 38.1 arcminutes: each solved the simulator's field
-in about a second on a laptop, and 4209 did not.
+bright stars, but its files are larger. For the field of 38.1
+arcminutes, 4207 and 4208 fit, and 4209 does not.
 
 The 4200 series are built from 2MASS, and the 4100 series from
 Tycho-2. 2MASS reaches fainter stars. Series 4205 to 4207 come as 12
@@ -139,11 +138,11 @@ named `<name>-solver`.
 The operator tells the solver where it expects the frame to point,
 and the radius around that point to search. When a frame does not
 solve, it tries each next radius of `spec.search.radii`, and then the
-whole sky when `spec.search.blind` is `true`. The defaults are
-`[5, 10]` and `true`. A field that cannot solve holds the solver for
-up to 60 seconds of CPU time at each attempt, and every other
-telescope's solve waits behind it. On a mount that slews within a
-degree of its target, a shorter list costs less:
+whole sky when `spec.search.blind` is `true`. The radii are in degrees,
+and the defaults are `[5, 10]` and `true`. A frame that cannot be solved
+uses up to 60 seconds of CPU time in each attempt, and the solves for
+other telescopes wait until it ends. When your mount's slews end within
+a degree of the target, a shorter list gives up sooner:
 
 ```yaml
 spec:
@@ -157,30 +156,27 @@ spec:
 Copy the new files into the claim as above, while the solver runs.
 The solver's pod watches its directory, and loads each file when the
 program that writes it closes it, or renames it into the directory.
-So a file in the middle of its copy is never loaded half written, and
-a `Job` that downloads index files into the claim can run beside the
-solver. The `Solver`'s `INDEXES` column and its `Ready` message change
+So the solver never loads a half-copied file, and a `Job` can download
+index files into the claim while the solver runs. The `Solver`'s `INDEXES` column and its `Ready` message change
 when the file is loaded:
 
 ```sh
 kubectl get solver -n observatory lab
 ```
 
-The solver also leaves out a file that is deleted, renamed away, or
-written again in place, until its writer closes it.
+The solver stops using a file when the file is deleted or renamed out
+of the directory. It also stops using a file that is modified in
+place, until the writer closes it.
 
-The watch sees the writes of every pod on the solver's node, which is
-where a `local-path` claim's pods all run. On a network file system,
-such as NFS, the watch does not see a file that a pod on another node
-writes. In that case, restart the solver after the copy:
+The solver receives inotify events for the files that any pod on its
+own node writes, and a `local-path` claim's pods all run on one node.
+On a network file system, such as NFS, the solver receives no event
+for a file that a pod on another node writes. In that case, restart the solver after the copy:
 
 ```sh
 kubectl rollout restart -n observatory deployment/lab-solver
 kubectl wait -n observatory --for=condition=Ready solver/lab --timeout=5m
 ```
-
-The `Deployment` stops the old pod before it starts the new one, so a
-claim that only one node can mount still works.
 
 ## When the solver is not Ready
 
