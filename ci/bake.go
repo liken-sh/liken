@@ -14,19 +14,21 @@ import (
 const bakeFile = "docker-bake.hcl"
 
 // defaultPlatforms are the platforms of an image whose package.toml
-// names none.
+// lists none.
 var defaultPlatforms = []string{"linux/amd64"}
 
-// A bakeContext is one named context of a target. Value is what the
-// recipe reads: a directory, an outside image by its digest, or
-// target:<image> for an image of the repository. Published names the
-// bake variable that can point a base of a pinned component at its
-// published image instead, and is empty for every other context.
+// A bakeContext is one named build context of a target. Value is a
+// directory, an outside image by digest, or target:<image> for an
+// image of the repository, and the recipe hashes it as written.
+// Published is the name of a bake variable that, when set, replaces
+// the context with the published image of a pinned base. It is empty
+// for every other context.
 type bakeContext struct{ Name, Value, Published string }
 
-// publishedVariable names the bake variable that holds the published
-// reference of a pinned base, such as PUBLISHED_FFMPEG. `ci bases`
-// writes it into the override file when the image passes its checks.
+// publishedVariable returns the name of the bake variable that holds
+// the published reference of a pinned base, such as PUBLISHED_FFMPEG.
+// `ci bases` writes it into the override file when the published image
+// passes its checks.
 func publishedVariable(image string) string {
 	return "PUBLISHED_" + strings.ToUpper(strings.ReplaceAll(image, "-", "_"))
 }
@@ -36,11 +38,11 @@ type bakeArg struct{ Name, Value string }
 
 type bakeTarget struct {
 	Name, Context, Dockerfile, Target, Version string
-	// Description is the image's description, which `docker buildx bake
-	// --list=targets` prints. No build reads it, so settings leaves it out.
+	// Description is shown by `docker buildx bake --list=targets`. No
+	// build reads it, so settings leaves it out.
 	Description string
-	// Tag is a pinned image's own tag, <version>-<revision>, which also
-	// names its branch cache.
+	// Tag is a pinned image's tag, <version>-<revision>. The bake file
+	// also writes it into the registry cache tag buildcache-<Tag>.
 	Tag       string
 	Pinned    bool
 	Platforms []string
@@ -49,11 +51,11 @@ type bakeTarget struct {
 	Args      []bakeArg
 }
 
-// A cacheTarget builds one of the stages that copy an image's cache
-// mount into the build and out of it. It has no tag and reads no
-// layer cache from the registry, so on a CI runner, whose builder
-// starts empty, each stage runs. It does not set no-cache, because
-// BuildKit gives a step that runs without the cache a new, empty
+// A cacheTarget builds one of the Dockerfile stages that copy an
+// image's cache mount in before the build and out after it. It has no
+// tag and no cache-from, so on a CI runner, whose builder starts empty,
+// BuildKit runs each stage and reuses no cached result. It does not set
+// no-cache, because BuildKit would then give the build a new, empty
 // cache mount.
 type cacheTarget struct {
 	Name, Context, Dockerfile, Stage, Output string
@@ -61,17 +63,19 @@ type cacheTarget struct {
 	Contexts                                 []bakeContext
 }
 
-// cacheDir is the directory, relative to the repository root, that
-// holds an image's cache mount between the images job's steps.
+// cacheDir returns the directory, relative to the repository root,
+// that holds the files of an image's cache mount between the steps of
+// the images job.
 func cacheDir(image string) string { return ".image-cache/" + image }
 
-// cacheStages are the stages of a Dockerfile whose image sets
-// cache-mount.
+// cacheStages are the stages that the Dockerfile of an image with
+// cache-mount set must define.
 var cacheStages = []string{"cache-seed", "cache-export"}
 
-// cacheTargets gives the image's cache-seed and cache-export targets.
-// The seed takes the image's cache directory as the context `cache`,
-// and the export writes the mount's files into the same directory.
+// cacheTargets returns the cache-seed and cache-export targets of an
+// image. The seed reads the image's cache directory as the context
+// `cache`, and the export writes the mount's files into the same
+// directory.
 func cacheTargets(root string, t bakeTarget) ([]cacheTarget, error) {
 	parsed, err := readDockerfile(filepath.Join(root, t.Context, t.Dockerfile))
 	if err != nil {
@@ -101,13 +105,14 @@ func cacheTargets(root string, t bakeTarget) ([]cacheTarget, error) {
 	return targets, nil
 }
 
-// Bake renders the bake file: one target for each image, named for the
-// image. A Dockerfile that builds on another image of the repository
-// names it bare, as in FROM mpv, and the target maps that name to the
-// other image's target, so the build uses the image of the same commit.
-// A Dockerfile names an outside image of toolchains/images.toml bare
-// too, as in FROM golang, and the target maps that name to the
-// reference and its digest, so each outside image is written once.
+// Bake renders the bake file, with one target for each image, named
+// for the image. A Dockerfile refers to another image of the repository by
+// its bare name, as in FROM mpv, and the target maps that name to the
+// other image's target, so the build uses the image from the same
+// commit. A Dockerfile refers to an outside image of toolchains/images.toml
+// by its bare name too, as in FROM golang, and the bake file maps that
+// name to the image's reference and digest, so each outside image is
+// pinned in one place.
 func Bake(root string, components map[string]*Component) ([]byte, error) {
 	producer := ImageProducers(components)
 	var targets []bakeTarget
@@ -207,10 +212,10 @@ func newBakeTarget(root string, c *Component, image Image, producer map[string]s
 	return t, nil
 }
 
-// versionArgs gives the image's versions as build arguments. Each one
-// must name a pinned component that c depends on: a tracked component
-// has no version until a release gives it one, and a dependency is
-// what makes a change to the version build the image again.
+// versionArgs returns the image's versions as build arguments. Each
+// version must come from a pinned component in c's dependencies. A
+// tracked component has no version until a release gives it one. The
+// dependency makes a change to the version rebuild the image.
 func versionArgs(c *Component, image Image, components map[string]*Component) ([]bakeArg, error) {
 	var args []bakeArg
 	for _, name := range slices.Sorted(maps.Keys(image.Versions)) {
@@ -218,30 +223,29 @@ func versionArgs(c *Component, image Image, components map[string]*Component) ([
 		other, ok := components[dep]
 		switch {
 		case name == "VERSION":
-			return nil, fmt.Errorf("%s: the image %s: VERSION is the image's own version, so no other version may take its name", c.Name(), image.Name)
+			return nil, fmt.Errorf("%s: the image %s uses VERSION as the name of another version, and VERSION is the image's own version", c.Name(), image.Name)
 		case !ok:
-			return nil, fmt.Errorf("%s: the image %s takes %s from %q, which is not a component", c.Name(), image.Name, name, dep)
+			return nil, fmt.Errorf("%s: the image %s reads the version %s from %q, which is not a component", c.Name(), image.Name, name, dep)
 		case !other.Pinned():
-			return nil, fmt.Errorf("%s: the image %s takes %s from %s, which states no version", c.Name(), image.Name, name, dep)
+			return nil, fmt.Errorf("%s: the image %s reads the version %s from %s, which has no version", c.Name(), image.Name, name, dep)
 		case !slices.Contains(c.Depends.Components, dep):
-			return nil, fmt.Errorf("%s: the image %s takes %s from %s, which is not one of its dependencies", c.Name(), image.Name, name, dep)
+			return nil, fmt.Errorf("%s: the image %s reads the version %s from %s, which is not one of its dependencies", c.Name(), image.Name, name, dep)
 		}
 		args = append(args, bakeArg{name, other.Package.Version})
 	}
 	return args, nil
 }
 
-// hclString quotes plain text as an HCL string. HCL reads a backslash
-// and a quote as an escape and the end of the string, and reads ${ and
-// %{ as the start of an interpolation and of a directive, so each one
-// is escaped.
+// hclString quotes plain text as an HCL string. It escapes the
+// backslash, the quote, and the newline, and it escapes ${ and %{
+// because HCL starts an interpolation or a directive at those.
 func hclString(text string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "${", "$${", "%{", "%%{").Replace(text) + `"`
 }
 
-// settings lists what the target's build reads from the bake file,
-// with no tag and no cache: the recipe of a pinned image covers these,
-// and the tags and the cache change no byte of the image.
+// settings returns the target's fields that change the built image, as
+// one line for the recipe. It leaves out the tags and the cache,
+// because they change no byte of the image.
 func (t bakeTarget) settings() string {
 	var contexts []string
 	for _, c := range t.Contexts {

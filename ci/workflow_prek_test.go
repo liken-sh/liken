@@ -14,10 +14,10 @@ func TestAComponentWithHooksNeedsAPrekJob(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	if _, err := Workflows(root, components); err == nil || !strings.Contains(err.Error(), "no prek job") {
-		t.Errorf("got %v", err)
+		t.Errorf("Workflows returns %v, want an error that contains \"no prek job\"", err)
 	}
 }
 
@@ -29,11 +29,11 @@ func TestAPrekJobSkipsTheHooksThatOtherJobsRun(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	want := "      - uses: " + pinnedText("j178/prek-action") + "\n        env:\n          SKIP: test-go,test-docs\n"
 	if text := string(files[".github/workflows/component-app.yaml"]); !strings.Contains(text, want) {
@@ -41,10 +41,10 @@ func TestAPrekJobSkipsTheHooksThatOtherJobsRun(t *testing.T) {
 	}
 }
 
-// prek runs from the top of the repository and takes the directory of
-// the project it runs, so a component nested in another one names its
-// whole path, not its name.
-func TestANestedComponentsPrekJobNamesItsDirectory(t *testing.T) {
+// prek runs from the top of the repository and takes the project's
+// directory as an argument, so a nested component passes its whole
+// path, not its name.
+func TestANestedComponentsPrekJobPassesItsDirectory(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"os/package.toml":                 "[package]\nname = \"os\"\n",
 		"os/tree/package.toml":            "[package]\nname = \"tree\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n",
@@ -52,11 +52,11 @@ func TestANestedComponentsPrekJobNamesItsDirectory(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	want := "extra-args: --all-files os/tree/\n"
 	if text := string(files[".github/workflows/component-tree.yaml"]); !strings.Contains(text, want) {
@@ -69,18 +69,19 @@ func TestOnlyAPrekJobSkipsHooks(t *testing.T) {
 		"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\nskip = [\"x\"]\n",
 	})
 	if _, err := LoadComponents(root); err == nil || !strings.Contains(err.Error(), "only a prek job") {
-		t.Errorf("got %v", err)
+		t.Errorf("LoadComponents returns %v, want an error that contains \"only a prek job\"", err)
 	}
 }
 
 // The graph job runs `generate -check`, so the repository job skips the
-// root hook that runs the same check. prek ignores the SKIP variable
-// when the command line has a `--skip`, and the repository job skips
-// each component's directory, so the hook's skip is an argument too.
+// root hook that runs the same check. The repository job already passes
+// `--skip` for each component's directory, and prek ignores the SKIP
+// variable when the command line has a `--skip`, so the hook is skipped
+// with `--skip workflows` too.
 func TestTheRepositoryJobSkipsTheWorkflowsHook(t *testing.T) {
 	files, err := Workflows(fluxTree(t), graphFixture(t))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	jobs := workflowJobs(t, files[".github/workflows/ci.yaml"])
 	steps := jobs["repository"]["steps"].([]any)
@@ -122,11 +123,11 @@ func TestAPrekJobSetsUpGoOnlyForAHookThatRunsGo(t *testing.T) {
 			root := writeTree(t, files)
 			components, err := LoadComponents(root)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("loading the components: %v", err)
 			}
 			workflows, err := Workflows(root, components)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("generating the workflows: %v", err)
 			}
 			text := string(workflows[".github/workflows/component-app.yaml"])
 			if got := strings.Contains(text, "uses: actions/setup-go@"); got != tc.setsUpGo {

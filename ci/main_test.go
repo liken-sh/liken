@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-// channel serves a release channel's versions.yaml.
+// channel is a test server for a release channel's versions.yaml.
 func channel(t *testing.T, versions string) string {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -35,11 +35,11 @@ releases:
     digest: sha256:abc
 `
 
-// world is a World of fixtures: a registry, a channel, an environment,
-// and a recorder in place of the commands it would run.
-type world struct {
-	World
-	env      map[string]string
+// fakeEnv is an Env of fixtures: a registry, a channel, environment
+// variables, and a recorder in place of the commands it would run.
+type fakeEnv struct {
+	Env
+	vars     map[string]string
 	out      *bytes.Buffer
 	err      *bytes.Buffer
 	recorded *recorder
@@ -47,11 +47,11 @@ type world struct {
 	signed map[string]bool
 }
 
-func newWorld(t *testing.T, fake *fakeRegistry) *world {
+func newFakeEnv(t *testing.T, fake *fakeRegistry) *fakeEnv {
 	t.Helper()
 	registry := fake.serve(t)
-	w := &world{env: map[string]string{}, out: &bytes.Buffer{}, err: &bytes.Buffer{}, recorded: &recorder{registry: fake}, signed: map[string]bool{}}
-	w.World = World{
+	w := &fakeEnv{vars: map[string]string{}, out: &bytes.Buffer{}, err: &bytes.Buffer{}, recorded: &recorder{registry: fake}, signed: map[string]bool{}}
+	w.Env = Env{
 		Published: Published{Registry: registry, Channel: channel(t, fixtureVersions), Client: http.DefaultClient},
 		Registry: func(token string) Registry {
 			r := registry
@@ -65,7 +65,7 @@ func newWorld(t *testing.T, fake *fakeRegistry) *world {
 			}
 			return nil
 		},
-		Getenv: func(key string) string { return w.env[key] },
+		Getenv: func(key string) string { return w.vars[key] },
 		Stdout: w.out,
 		Stderr: w.err,
 	}
@@ -79,31 +79,31 @@ func TestGenerateWritesTheWorkflowsAndCheckFindsThemCurrent(t *testing.T) {
 	os.WriteFile(filepath.Join(r.git.Dir, fluxVersionFile), []byte(testFlux+"\n"), 0o644)
 	os.MkdirAll(filepath.Join(r.git.Dir, "toolchains"), 0o755)
 	os.WriteFile(filepath.Join(r.git.Dir, imagesFile), []byte(fixtureBuildKitImages), 0o644)
-	w := newWorld(t, &fakeRegistry{})
+	w := newFakeEnv(t, &fakeRegistry{})
 	if err := w.run([]string{"generate", "-root", r.git.Dir, "-check"}); err == nil {
 		t.Fatal("the check passed before the workflows existed")
 	}
 	if err := w.run([]string{"generate", "-root", r.git.Dir}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the generate command: %v", err)
 	}
 	if err := w.run([]string{"generate", "-root", r.git.Dir, "-check"}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the generate command: %v", err)
 	}
 }
 
 func TestSitesListsEachManualAndItsPrefix(t *testing.T) {
 	r := planFixture(t)
-	w := newWorld(t, &fakeRegistry{})
+	w := newFakeEnv(t, &fakeRegistry{})
 	if err := w.run([]string{"sites", "-root", r.git.Dir}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the sites command: %v", err)
 	}
 	if w.out.String() != "operator:operator\n" {
-		t.Errorf("sites printed %q", w.out.String())
+		t.Errorf("sites printed %q, want the prefix of each site", w.out.String())
 	}
 }
 
 func TestACommandNeedsAName(t *testing.T) {
-	w := newWorld(t, &fakeRegistry{})
+	w := newFakeEnv(t, &fakeRegistry{})
 	for _, args := range [][]string{nil, {"bake"}, {"publish", "-root", planFixture(t).git.Dir, "-component", "nope"}} {
 		if err := w.run(args); err == nil {
 			t.Errorf("%v ran", args)
@@ -113,33 +113,33 @@ func TestACommandNeedsAName(t *testing.T) {
 
 func TestDepsPassesATreeWithNothingToCheck(t *testing.T) {
 	root := writeTree(t, map[string]string{"a/package.toml": "[package]\nname = \"a\"\n"})
-	w := newWorld(t, &fakeRegistry{})
+	w := newFakeEnv(t, &fakeRegistry{})
 	if err := w.run([]string{"deps", "-root", root}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the deps command: %v", err)
 	}
 }
 
-// planWorld runs the plan command on the fixture repository for a push
-// to a branch, and returns its world and the two files the workflow
-// reads.
-func planWorld(t *testing.T, writers map[string]bool, env map[string]string) (*world, error, string, string) {
+// runPlan runs the plan command on the fixture repository for a push
+// to a branch. It returns the fake environment, the error, and the text that the
+// command wrote to GITHUB_OUTPUT and GITHUB_STEP_SUMMARY.
+func runPlan(t *testing.T, writers map[string]bool, env map[string]string) (*fakeEnv, error, string, string) {
 	t.Helper()
 	r := planFixture(t)
 	before := r.run("rev-parse", "HEAD")
 	r.write("operator/main.go", "package main // changed\n")
 	r.commit("change the operator")
-	w := newWorld(t, &fakeRegistry{
+	w := newFakeEnv(t, &fakeRegistry{
 		tags:    map[string][]string{"operator": {"2026.09.27-001"}, "base": {"2026.09.27-001"}},
 		writers: writers,
 	})
 	dir := t.TempDir()
 	output, summary := filepath.Join(dir, "output"), filepath.Join(dir, "summary")
-	w.env = map[string]string{
+	w.vars = map[string]string{
 		"EVENT": "push", "REF": "refs/heads/topic", "BEFORE": before,
 		"GITHUB_OUTPUT": output, "GITHUB_STEP_SUMMARY": summary,
 	}
 	for k, v := range env {
-		w.env[k] = v
+		w.vars[k] = v
 	}
 	err := w.run([]string{"plan", "-root", r.git.Dir})
 	outputText, _ := os.ReadFile(output)
@@ -148,14 +148,14 @@ func planWorld(t *testing.T, writers map[string]bool, env map[string]string) (*w
 }
 
 func TestThePlanWritesItsDecisionsAndItsDryRun(t *testing.T) {
-	_, err, output, summary := planWorld(t, map[string]bool{"token": true}, map[string]string{"GITHUB_TOKEN": "token", "PROBE": "true"})
+	_, err, output, summary := runPlan(t, map[string]bool{"token": true}, map[string]string{"GITHUB_TOKEN": "token", "PROBE": "true"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the plan command: %v", err)
 	}
 	var decisions map[string]Decision
 	line, _, _ := strings.Cut(output, "\n")
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "components=")), &decisions); err != nil {
-		t.Fatalf("%v: %s", err, output)
+		t.Fatalf("reading the components line of the output: %v: %s", err, output)
 	}
 	if d := decisions["operator"]; !d.Check || d.Publish != publishNone || !reflect.DeepEqual(d.Jobs, []string{"check", "codeql-check"}) ||
 		!reflect.DeepEqual(d.Images, []ImageRun{{Image: "operator", Load: true}}) {
@@ -183,14 +183,14 @@ func TestThePlanWritesWhetherTheSiteDeploys(t *testing.T) {
 		name, ref, output, summary string
 	}{
 		{"a push to a branch", "refs/heads/topic", "site=false\n", "The site does not deploy: only a push to main deploys the site."},
-		{"a push to main with no green run", "refs/heads/main", "site=true\n", "The site deploys: every job runs."},
+		{"a push to main with no run that passed", "refs/heads/main", "site=true\n", "The site deploys: every job runs."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err, output, summary := planWorld(t, nil, map[string]string{"REF": c.ref, "GITHUB_TOKEN": "token",
+			_, err, output, summary := runPlan(t, nil, map[string]string{"REF": c.ref, "GITHUB_TOKEN": "token",
 				"GITHUB_REPOSITORY": "liken-sh/liken", "GITHUB_API_URL": actionsAPI(t, http.StatusOK, `{"workflow_runs":[]}`)})
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("running the plan command: %v", err)
 			}
 			if !strings.Contains(output, c.output) || !strings.Contains(summary, c.summary) {
 				t.Errorf("the output:\n%s\nthe summary:\n%s", output, summary)
@@ -200,9 +200,9 @@ func TestThePlanWritesWhetherTheSiteDeploys(t *testing.T) {
 }
 
 func TestThePlanListsEachPackageItCannotPushTo(t *testing.T) {
-	_, err, _, summary := planWorld(t, nil, map[string]string{"GITHUB_TOKEN": "token", "PROBE": "true"})
+	_, err, _, summary := runPlan(t, nil, map[string]string{"GITHUB_TOKEN": "token", "PROBE": "true"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the plan command: %v", err)
 	}
 	for _, want := range []string{"cannot push to 3 packages", "- operator: the registry refused an upload to operator: 403 Forbidden"} {
 		if !strings.Contains(summary, want) {
@@ -212,16 +212,16 @@ func TestThePlanListsEachPackageItCannotPushTo(t *testing.T) {
 }
 
 func TestThePlanFailsWhenItWouldPushToAPackageThatRefuses(t *testing.T) {
-	_, err, _, _ := planWorld(t, nil, map[string]string{"GITHUB_TOKEN": "token", "PROBE": "true", "PUBLISH": "true"})
+	_, err, _, _ := runPlan(t, nil, map[string]string{"GITHUB_TOKEN": "token", "PROBE": "true", "PUBLISH": "true"})
 	if err == nil || !strings.Contains(err.Error(), "cannot push to 3 packages") {
-		t.Errorf("got %v", err)
+		t.Errorf("the plan returned %v, want an error about pushing to 3 packages", err)
 	}
 }
 
 func TestThePlanSkipsTheProbeWithoutAToken(t *testing.T) {
-	_, err, _, summary := planWorld(t, nil, map[string]string{"PROBE": "true"})
+	_, err, _, summary := runPlan(t, nil, map[string]string{"PROBE": "true"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the plan command: %v", err)
 	}
 	if !strings.Contains(summary, "Not checked") {
 		t.Errorf("the summary:\n%s", summary)
@@ -232,12 +232,12 @@ func TestTheRecordCreatesTheTagsRelease(t *testing.T) {
 	r := planFixture(t)
 	r.commit("an operator change")
 	r.run("tag", "2026.10.02-001")
-	w := newWorld(t, &fakeRegistry{tags: map[string][]string{"operator": {"2026.10.02-001"}}})
+	w := newFakeEnv(t, &fakeRegistry{tags: map[string][]string{"operator": {"2026.10.02-001"}}})
 	if err := w.run([]string{"record", "-root", r.git.Dir, "-tag", "2026.10.02-001"}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the record command: %v", err)
 	}
 	if len(w.recorded.commands) != 2 || !strings.HasPrefix(w.recorded.commands[1], "gh release edit 2026.10.02-001 --notes-file ") {
-		t.Errorf("commands %v", w.recorded.commands)
+		t.Errorf("the commands run are %v", w.recorded.commands)
 	}
 	for _, want := range []string{"| `operator` | `2026.10.02-001` | released by this tag |", "| `liken` | `2026.09.28-001` | unchanged |", "- an operator change\n"} {
 		if !strings.Contains(w.out.String(), want) {
@@ -245,21 +245,21 @@ func TestTheRecordCreatesTheTagsRelease(t *testing.T) {
 		}
 	}
 	if strings.Contains(w.out.String(), "- an OS release") {
-		t.Errorf("the notes reach past the previous tag:\n%s", w.out.String())
+		t.Errorf("the notes list the commit \"an OS release\" from before the previous tag, want only the commits since it:\n%s", w.out.String())
 	}
 }
 
-func TestPublishRunsThroughTheWorld(t *testing.T) {
+func TestThePublishCommandPushesSignsAndMovesLatest(t *testing.T) {
 	r := planFixture(t)
 	r.write(imagesFile, fixtureImages)
-	w := newWorld(t, &fakeRegistry{})
-	w.env["DOCKER_CONFIG"] = fixtureDockerConfig
+	w := newFakeEnv(t, &fakeRegistry{})
+	w.vars["DOCKER_CONFIG"] = fixtureDockerConfig
 	if err := w.run([]string{"publish", "-root", r.git.Dir, "-component", "base", "-version", "2026.10.02-001", "-mode", "release"}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the publish command: %v", err)
 	}
 	// The push, its signature, and the move of :latest.
 	if len(w.recorded.commands) != 3 || w.recorded.commands[1] != signCommand("ghcr.io/liken-sh/base@"+fakeDigest("base")) {
-		t.Errorf("commands %v", w.recorded.commands)
+		t.Errorf("the commands run are %v", w.recorded.commands)
 	}
 }
 
@@ -267,9 +267,9 @@ func TestTheOSVersionsComeFromTheChannelAndADeployArtifactFallsBackToItsImage(t 
 	r := planFixture(t)
 	components, err := LoadComponents(r.git.Dir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
-	w := newWorld(t, &fakeRegistry{tags: map[string][]string{"operator": {"2026.09.27-001"}, "operator-deploy": {"buildcache"}}})
+	w := newFakeEnv(t, &fakeRegistry{tags: map[string][]string{"operator": {"2026.09.27-001"}, "operator-deploy": {"buildcache"}}})
 	cases := map[string][]string{"liken": {"2026.09.28-001"}, "operator": {"2026.09.27-001"}, "brand": nil}
 	for name, want := range cases {
 		got, err := w.Published.Versions(components[name])
@@ -279,14 +279,14 @@ func TestTheOSVersionsComeFromTheChannelAndADeployArtifactFallsBackToItsImage(t 
 	}
 }
 
-func TestThePlanOnMainComparesWithTheNewestGreenRun(t *testing.T) {
+func TestThePlanOnMainComparesWithTheNewestSuccessfulRun(t *testing.T) {
 	cases := []struct {
 		name, want, body string
 		status           int
 	}{
-		{"a green run", "the newest main run that passed", `{"workflow_runs":[{"head_sha":"GREEN"}]}`, http.StatusOK},
+		{"a run that passed", "the newest main run that passed", `{"workflow_runs":[{"head_sha":"GREEN"}]}`, http.StatusOK},
 		{"an API that refuses", "Every job runs: the newest main run that passed is unknown", `{}`, http.StatusForbidden},
-		{"no green run", "Every job runs: no main run has passed yet", `{"workflow_runs":[]}`, http.StatusOK},
+		{"no run that passed", "Every job runs: no main run has passed yet", `{"workflow_runs":[]}`, http.StatusOK},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -296,15 +296,15 @@ func TestThePlanOnMainComparesWithTheNewestGreenRun(t *testing.T) {
 			before := r.commit("change the operator")
 			r.write("liken/init/main.go", "package main\n")
 			r.commit("change the OS")
-			w := newWorld(t, &fakeRegistry{})
+			w := newFakeEnv(t, &fakeRegistry{})
 			summary := filepath.Join(t.TempDir(), "summary")
-			w.env = map[string]string{
+			w.vars = map[string]string{
 				"EVENT": "push", "REF": "refs/heads/main", "BEFORE": before, "GITHUB_STEP_SUMMARY": summary,
 				"GITHUB_TOKEN": "token", "GITHUB_REPOSITORY": "liken-sh/liken",
 				"GITHUB_API_URL": actionsAPI(t, c.status, strings.ReplaceAll(c.body, "GREEN", green)),
 			}
 			if err := w.run([]string{"plan", "-root", r.git.Dir}); err != nil {
-				t.Fatal(err)
+				t.Fatalf("running the plan command: %v", err)
 			}
 			text, _ := os.ReadFile(summary)
 			if !strings.Contains(string(text), c.want) {

@@ -13,8 +13,8 @@ type RecordEntry struct {
 	Released bool `yaml:"released"`
 	// Pinned is true for a pinned component, whose version is the tag
 	// in its package.toml at the release's commit. Published is true
-	// when that tag is on ghcr, and Released when the tag is new since
-	// the previous release.
+	// when that tag is on ghcr.io, and Released is true when the tag is
+	// published and differs from the tag at the previous release.
 	Pinned    bool `yaml:"pinned"`
 	Published bool `yaml:"published"`
 }
@@ -26,15 +26,16 @@ type RecordEntry struct {
 type PinnedStateFunc func(*Component) (published bool, previous string, err error)
 
 // Record lists every component that publishes, with its version at
-// the tag: the newest release at or before the tag. A component that
-// did not change keeps the version an earlier tag gave it.
+// the tag. That version is the component's newest release at or before
+// the tag, so a component that did not change keeps the version of an
+// earlier release.
 //
-// A pinned component's version is its tag at the release's commit. The
-// release released it when that tag differs from the one at the
-// previous release. The commit that raised the revision can be any
-// commit between the two, and a push to main can publish the tag
-// before the release does, so the comparison is between the two
-// releases, not with the commit an image was built from.
+// A pinned component's version is its pinned tag at the release's
+// commit, and the release counts it as released when that tag differs
+// from the tag at the previous release. Record compares the two
+// releases, not the commit that an image was built from, because any
+// commit between the releases can raise the revision, and a push to
+// main can publish the tag before the release does.
 func Record(components map[string]*Component, versions VersionsFunc, pinned PinnedStateFunc, tag string) ([]RecordEntry, error) {
 	var entries []RecordEntry
 	for _, c := range sortedComponents(components) {

@@ -9,7 +9,7 @@ import (
 
 // Runs reads the workflow runs of one repository from the GitHub API.
 type Runs struct {
-	// API is the API's address, https://api.github.com.
+	// API is the base URL, such as https://api.github.com.
 	API string
 	// Repository is owner/name, such as liken-sh/liken.
 	Repository string
@@ -17,9 +17,9 @@ type Runs struct {
 	Client     *http.Client
 }
 
-// NewestGreen is the head commit of the newest push to main whose run
-// of the workflow file passed, or "" when no run passed.
-func (r Runs) NewestGreen(workflow string) (string, error) {
+// NewestSuccessful returns the head commit of the newest successful run of
+// the workflow file for a push to main, or "" when there is none.
+func (r Runs) NewestSuccessful(workflow string) (string, error) {
 	u := fmt.Sprintf("%s/repos/%s/actions/workflows/%s/runs?%s", r.API, r.Repository, url.PathEscape(workflow),
 		url.Values{"branch": {"main"}, "event": {"push"}, "status": {"success"}, "per_page": {"1"}, "exclude_pull_requests": {"true"}}.Encode())
 	req, err := http.NewRequest(http.MethodGet, u, nil)
@@ -40,7 +40,7 @@ func (r Runs) NewestGreen(workflow string) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("the GitHub API answered %s for the runs of %s", resp.Status, workflow)
+		return "", fmt.Errorf("the GitHub API returned %s for the runs of %s", resp.Status, workflow)
 	}
 	var body struct {
 		Runs []struct {

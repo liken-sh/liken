@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// Only a push to main writes the Actions cache, so a branch never
-// pushes one of main's entries out, and the manuals that share a go.sum
-// share one Hugo build cache.
+// Only a push to main saves to the Actions cache, so a branch never
+// evicts one of main's entries. The manuals that share a go.sum share
+// one Hugo build cache.
 func TestOnlyMainSavesTheCaches(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"app/package.toml": `[package]
@@ -32,23 +32,24 @@ run = "make test"
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	text := string(files[".github/workflows/component-app.yaml"])
 	for _, want := range []string{
 		"          cache: false\n",
-		// Each job has a build cache of its own: a job that builds less
-		// must not save the entry that another job then restores whole.
-		// The key holds no commit, so main saves an entry only when the
-		// files that choose the build change, and a restore takes the
-		// entry with the same flags, then the job's newest.
+		// Each job has its own build cache, so a job that builds less
+		// does not save an entry that another job then restores. The
+		// key has no commit, so main saves a new entry only when the
+		// hashed files change. A restore tries the exact key first,
+		// then the newest entry of the same job.
 		"key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}\n" +
 			"          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-\n",
-		// Every manual reads the same modules, so the manuals share one.
+		// Every manual reads the same modules, so the manuals share one
+		// modules entry.
 		"key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-${{ hashFiles('app/docs/go.sum') }}\n" +
 			"          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-\n",
 		"key: hugo-build-${{ runner.os }}-${{ hashFiles('app/docs/go.sum') }}\n" +
@@ -69,10 +70,9 @@ run = "make test"
 	}
 }
 
-// A build cache's key holds the hash of the files that choose what the
-// job compiles and with which flags: its go.sum, the Makefile where it
-// runs, and the component's package.toml and hooks. A restore takes the
-// newest entry with the same hash first.
+// A build cache's key hashes the files that decide what the job
+// compiles and with which flags: the go.sum and Makefile of the job's
+// directory, and the component's package.toml and hooks.
 func TestABuildCacheFollowsWhatChoosesTheBuild(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"app/package.toml":            "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\ndir = \"svc\"\nrun = \"make test\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n",
@@ -81,11 +81,11 @@ func TestABuildCacheFollowsWhatChoosesTheBuild(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	text := string(files[".github/workflows/component-app.yaml"])
 	for _, want := range []string{
@@ -98,22 +98,22 @@ func TestABuildCacheFollowsWhatChoosesTheBuild(t *testing.T) {
 	}
 }
 
-// A cache key that holds the commit misses on every push to main, so
-// every run on main saves a new entry, and the entries push each other
-// out of the repository's 10 GB. No key holds the commit, so main saves
-// an entry only when the inputs of its key change.
-func TestNoCacheKeyHoldsTheCommit(t *testing.T) {
+// A cache key that contains the commit misses on every push to main, so
+// every run on main saves a new entry, and the entries evict each other
+// from the repository's 10 GB cache. No key contains the commit, so main
+// saves an entry only when the inputs of its key change.
+func TestNoCacheKeyContainsTheCommit(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\n[[jobs]]\nname = \"docs\"\ntoolchain = \"hugo\"\nmodule = \"docs\"\nrun = \"make docs\"\n",
 		"os/package.toml":  "[package]\nname = \"os\"\n[[jobs]]\nname = \"build\"\ntoolchain = \"os\"\nrun = \"make all\"\n[outputs]\nchannel = true\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	for name, data := range files {
 		for _, line := range strings.Split(string(data), "\n") {
@@ -124,8 +124,8 @@ func TestNoCacheKeyHoldsTheCommit(t *testing.T) {
 	}
 }
 
-// cacheSteps describes each step of a job that restores or saves the
-// Actions cache, as its action, its key, and its paths.
+// cacheSteps returns "<uses> <key> <path>" for each step of a job that
+// restores or saves the Actions cache.
 func cacheSteps(t *testing.T, job map[string]any) []string {
 	t.Helper()
 	var found []string
@@ -140,11 +140,10 @@ func cacheSteps(t *testing.T, job map[string]any) []string {
 	return found
 }
 
-// The repository's cache holds 10 GB, so each module's downloaded
-// source is one entry, keyed on go.sum, that every job of the module
-// restores and only the `go` job saves. The entry leaves out the zip
-// files, which `go` does not read after it extracts the source. Each
-// job's build cache holds the compiled output alone.
+// The repository's Actions cache is limited to 10 GB, so each module's
+// downloaded source is one entry, keyed on go.sum, that every job of
+// the module restores and only the `go` job saves. The entry leaves out
+// the zip files, which `go` does not read after it extracts the source.
 func TestEveryJobOfAModuleSharesOneModulesEntry(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"app/package.toml":            "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n",
@@ -153,11 +152,11 @@ func TestEveryJobOfAModuleSharesOneModulesEntry(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	jobs := workflowJobs(t, files[".github/workflows/component-app.yaml"])
 	var (
@@ -177,26 +176,26 @@ func TestEveryJobOfAModuleSharesOneModulesEntry(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.job, func(t *testing.T) {
 			if got := cacheSteps(t, jobs[tt.job]); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("got %q\nwant %q", got, tt.want)
+				t.Errorf("the cache steps are %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-// The OS's build sets up Go in the build-setup action, which cannot save
-// after the build, so the job saves the action's build cache itself. The
-// OS's `go` job saves the modules.
+// The OS jobs set up Go in the build-setup action, which cannot save
+// after the build, so the build and publish jobs save the action's Go
+// build cache themselves.
 func TestTheOSBuildSavesItsGoCacheOnMain(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"os/package.toml": "[package]\nname = \"os\"\n[[jobs]]\nname = \"build\"\ntoolchain = \"os\"\nrun = \"make all\"\n[outputs]\nchannel = true\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	text := string(files[".github/workflows/component-os.yaml"])
 	save := "      - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.go-build-hit != 'true' }}\n        uses: " + pinnedText("actions/cache/save") + "\n        with:\n          path: ~/.cache/go-build\n"

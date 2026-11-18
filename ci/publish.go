@@ -14,18 +14,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// devVersion is the grammar of a development version.
+// devVersion matches the version of a development build, such as
+// 2026.10.02-001-dev-042-0123abcd.
 var devVersion = regexp.MustCompile(`^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}-dev-[0-9]{3,}-[0-9a-f]{8}$`)
 
-// source is the repository that every image and artifact names as its
-// source. ghcr links a new package to the repository that its
-// org.opencontainers.image.source label names.
+// source is the repository that every image and artifact lists as its
+// source. ghcr.io links a new package to the repository named in its
+// org.opencontainers.image.source label.
 const source = "https://github.com/liken-sh/liken"
 
-// A Runner runs one command in a directory, or prints it in a dry run.
+// A Runner runs one command in a directory. Tests replace it with a
+// recorder.
 type Runner func(dir, name string, args ...string) error
 
-// ExecRunner runs each command with its output on this program's.
+// ExecRunner runs the command, prints it first, and connects its output
+// to this program's.
 func ExecRunner(dir, name string, args ...string) error {
 	fmt.Printf("+ %s %s\n", name, strings.Join(args, " "))
 	cmd := exec.Command(name, args...)
@@ -41,54 +44,50 @@ type Publisher struct {
 	Run      Runner
 	// Commit is the full sha that the outputs are built from.
 	Commit string
-	// Created is the committer time of Commit. Each output carries it as
-	// org.opencontainers.image.created. No build takes it as
-	// SOURCE_DATE_EPOCH, because that argument changes the cache key of
-	// each WORKDIR step, and the publish would then miss the layer cache
-	// that the images job writes. So the config's created field is the
-	// time of the build.
+	// Created is the committer time of Commit. Each output records it as
+	// org.opencontainers.image.created. The publish does not pass it to
+	// the build as SOURCE_DATE_EPOCH, because that build argument changes
+	// the cache key of each WORKDIR step, and the publish would miss the
+	// layer cache that the images job writes. So the created field in
+	// the image config is the time of the build.
 	Created time.Time
-	// Components is every component, because a pinned component's
-	// recipe covers the tags of its dependencies, and an image writes
-	// the labels of the images it builds on.
+	// Components is every component in the repository, not only the one
+	// being published. The recipe of a pinned component includes the
+	// tags of its dependencies, and an image's labels include those of
+	// the images it builds on.
 	Components map[string]*Component
 	// SARIF is the directory where the Trivy scan of each pushed image
-	// is written, or "" for no scan. See scan.
+	// writes its report, or "" for no scan. See scan.
 	SARIF string
-	// DockerConfig is the directory of the Docker configuration that
-	// holds the registry credential, which cosign pushes each signature
-	// with. See sign.
+	// DockerConfig is the directory of the Docker configuration with the
+	// registry credential. cosign uses it to push each signature. See
+	// sign.
 	DockerConfig string
 }
 
-// Publish pushes the component's outputs under the version: every
-// image first, then the deploy artifact, because a cluster follows the
-// deploy artifact and must never read one that names an image that is
-// not pushed yet.
+// Publish pushes the component's outputs under the version. It pushes
+// every image before the deploy artifact, because a cluster follows the
+// deploy artifact, and the artifact must not name an image that is not
+// pushed yet. Publish does not push a version that is already
+// published, so when a run fails and runs again, the second run pushes
+// only what the first run did not.
 //
-// Each image carries an SBOM and its provenance, and cosign signs it,
-// so a person who pulls it can check what it holds, how it was built,
-// and that this repository's CI pushed it. See image.
+// A release moves each :latest tag to the new version, unless a newer
+// release already has it. A development build of a component that is
+// not pinned never moves :latest.
 //
-// A version that is already published stays as it is. A run of the
-// same tag again, after a failure, pushes only what the failed run did
-// not.
+// A pinned component publishes only the tag that the tree pins, with its
+// recipe hash as a label, and a dev or release publish then moves
+// :latest to that tag. No build in the repository reads :latest,
+// because each one uses a base by its digest or builds it from the
+// tree, but a person who pulls a base by hand does. The plan job
+// publishes a pin only when its tag is not published yet, so :latest
+// points to the pin that was published last.
 //
-// A release also moves each :latest tag, unless a newer release
-// already has it. A development build never moves :latest.
-//
-// A dry run builds each image as a publish would, with the same
-// arguments, labels, and tags, and stamps the deploy artifact, but it
-// pushes nothing and moves no tag. It proves the publish code on a
-// change to it, before a release needs it.
-//
-// A pinned component publishes its own tag in any mode, with its
-// recipe hash as a label, and then moves :latest to it. A consumer in
-// the repository builds on a base by its digest or from the tree, so
-// no build reads :latest, but a person who pulls a base by hand reads
-// it. Publish
-// takes only the tree's own pin, and the plan publishes a pin only
-// once, so the newest pin is the one that holds :latest.
+// A dry run builds each image with the same arguments, labels, and tags
+// as a real publish and stamps the deploy artifact, but it pushes
+// nothing and moves no tag. So a change to the publish code can be
+// tested before a release depends on it.
 func (p Publisher) Publish(c *Component, version, mode string) error {
 	if c.Pinned() {
 		return p.pinned(c, version, mode)
@@ -100,17 +99,17 @@ func (p Publisher) Publish(c *Component, version, mode string) error {
 		}
 	case publishDev:
 		if !devVersion.MatchString(version) {
-			return fmt.Errorf("%q is not a development version", version)
+			return fmt.Errorf("the version %q does not match a development version, which looks like 2026.10.02-001-dev-004-0123abcd", version)
 		}
 	case publishDry:
 		if !devVersion.MatchString(version) && CheckReleaseTag(version) != nil {
-			return fmt.Errorf("%q is not a version that a publish takes", version)
+			return fmt.Errorf("the version %q is neither a development version nor a release version", version)
 		}
 	default:
-		return fmt.Errorf("the publish mode %q is not dev, release, or dry", mode)
+		return fmt.Errorf("the publish mode %q is unknown, want dev, release, or dry", mode)
 	}
 	if c.Outputs.Channel {
-		return fmt.Errorf("%s publishes to the release channel through its own workflow", c.Name())
+		return fmt.Errorf("%s publishes to the release channel through its own workflow, so this command does not publish it", c.Name())
 	}
 	for _, image := range c.Outputs.Images {
 		if err := p.image(c, image, version, mode, ""); err != nil {
@@ -125,10 +124,10 @@ func (p Publisher) Publish(c *Component, version, mode string) error {
 
 func (p Publisher) pinned(c *Component, version, mode string) error {
 	if mode != publishDev && mode != publishRelease && mode != publishDry {
-		return fmt.Errorf("the publish mode %q is not dev, release, or dry", mode)
+		return fmt.Errorf("the publish mode %q is unknown, want dev, release, or dry", mode)
 	}
 	if version != c.PinnedTag() {
-		return fmt.Errorf("%s is pinned at %s, not %s", c.Name(), c.PinnedTag(), version)
+		return fmt.Errorf("%s is pinned at %s, and the version is %s", c.Name(), c.PinnedTag(), version)
 	}
 	recipe, err := Recipe(p.Root, p.Components, c)
 	if err != nil {
@@ -146,28 +145,26 @@ func ref(name, tag string) string { return "ghcr.io/liken-sh/" + name + ":" + ta
 
 func digestRef(name, digest string) string { return "ghcr.io/liken-sh/" + name + "@" + digest }
 
-// image builds and pushes one image through the bake file, so an
-// image that builds on another image of the repository builds on the
-// one at this commit. The bake file gives the target its context, its
-// platforms, and its layer cache. Only the target that the command
-// names is pushed; a base that the build needs builds with it and
+// image builds and pushes one image through the bake file, so an image
+// that builds on another image of the repository builds on the one at
+// this commit. The bake file sets the target's build contexts,
+// platforms, and layer cache. Bake pushes only the target named on the
+// command line. A base image that the build needs is built with it and
 // stays in the builder.
 //
-// The push carries an SBOM and the provenance, and cosign signs the
-// pushed digest under each name of the image before anything else
-// names it: before the scan, the move of :latest, and the deploy
-// artifact. A signature that fails fails the publish. A run again then
-// finds the version published, and signs it by its tag, which cosign
-// resolves to the digest. A published version tag never moves, so the
-// tag names the bytes that the failed run pushed.
-//
-// Between the push and the signature, the publish reads the labels of
-// the pushed image back from the registry, as checkLabels says, and
-// the run again checks the published image the same way.
+// The push includes an SBOM and the provenance. Then the publish reads
+// the pushed image's labels back from the registry and checks them (see
+// checkLabels), and cosign signs the pushed digest under each name of
+// the image. Both happen before anything else uses the image: the scan,
+// the move of :latest, and the deploy artifact. When either fails, the
+// publish fails. The next run for the same version finds the image
+// published, checks its labels, and signs it by its tag. cosign
+// resolves the tag to the digest that the failed run pushed, because a
+// published version tag never moves.
 //
 // A dry run exports the image into the builder and pushes nothing. The
-// exporter is what writes the index and its annotations, so the dry
-// run fails on an annotation that a push would fail on.
+// exporter writes the index and its annotations, so a dry run fails on
+// any annotation that a push would reject.
 func (p Publisher) image(c *Component, image Image, version, mode, recipe string) error {
 	tools, err := readPublishTools(p.Root)
 	if err != nil {
@@ -184,11 +181,11 @@ func (p Publisher) image(c *Component, image Image, version, mode, recipe string
 	names := append([]string{image.Name}, image.Aliases...)
 	dry := mode == publishDry
 	if slices.Contains(tags, version) && dry && c.Pinned() {
-		fmt.Printf("%s is already published, so a publish would only sign it again, and the dry run builds nothing\n", ref(image.Name, version))
+		fmt.Printf("%s is already published, so the dry run builds nothing\n", ref(image.Name, version))
 		return nil
 	}
 	if slices.Contains(tags, version) && !dry {
-		fmt.Printf("%s is already published; a published version never changes\n", ref(image.Name, version))
+		fmt.Printf("%s is already published, and a published version never changes\n", ref(image.Name, version))
 		if err := p.checkLabels(image, version, metadata.Labels); err != nil {
 			return err
 		}
@@ -203,9 +200,9 @@ func (p Publisher) image(c *Component, image Image, version, mode, recipe string
 		target := image.Name
 		set := func(key, value string) []string { return []string{"--set", target + "." + key + "=" + value} }
 		args := []string{"buildx", "bake", "--file", bakeFile}
-		// The override file points the build at the published image of
-		// each pinned base that passed its checks. With no file, every
-		// base builds from the tree.
+		// The override file makes the build use the published image of
+		// each pinned base that passed its checks. Without the file, the
+		// build builds every base from the tree.
 		if _, err := os.Stat(filepath.Join(p.Root, overrideFile)); err == nil {
 			args = append(args, "--file", overrideFile)
 		}
@@ -263,11 +260,9 @@ func (p Publisher) image(c *Component, image Image, version, mode, recipe string
 	return nil
 }
 
-// scan runs Trivy on the image that the publish just pushed. The scan
-// runs here because only the publish knows which images it pushed: an
-// image that is already published is not pushed again, and is not
-// scanned again. scanImage gives the arguments of the scan and why a
-// scan that fails does not fail the publish.
+// scan runs Trivy on an image that this run pushed. An image that was
+// already published is not pushed again, so it is not scanned again.
+// scanImage explains why a failed scan does not fail the publish.
 func (p Publisher) scan(image Image, version string) {
 	if p.SARIF != "" {
 		scanImage(p.Run, p.Root, p.SARIF, image.Name, version)
@@ -282,7 +277,7 @@ func (p Publisher) deploy(c *Component, version, mode string) error {
 	}
 	artifact := "oci://" + ref(pkg, version)
 	if slices.Contains(tags, version) && mode != publishDry {
-		fmt.Printf("%s is already published; a published version never changes\n", artifact)
+		fmt.Printf("%s is already published, and a published version never changes\n", artifact)
 	} else {
 		dir, err := os.MkdirTemp("", pkg)
 		if err != nil {
@@ -334,12 +329,12 @@ func sortedKeys(m map[string]string) []string {
 	return keys
 }
 
-// StampImages sets the tag of each of the component's own images in
-// every kustomization.yaml under dir to the version. The published
+// StampImages sets newTag to the version for each of the component's
+// own images in every kustomization.yaml under dir. The published
 // manifests then name the images that were pushed with them, so a
-// cluster that follows the deploy artifact moves the manifests and
-// the images in one step. An image of another project, such as
-// mosquitto, keeps the tag its manifest states.
+// cluster that follows the deploy artifact updates its manifests and
+// its images together. An image from another project, such as
+// mosquitto, keeps the tag in its manifest.
 func StampImages(dir string, c *Component, version string) error {
 	own := map[string]bool{}
 	for _, name := range c.Packages() {
@@ -355,7 +350,7 @@ func StampImages(dir string, c *Component, version string) error {
 		}
 		var doc yaml.Node
 		if err := yaml.Unmarshal(data, &doc); err != nil {
-			return fmt.Errorf("%s: %w", path, err)
+			return fmt.Errorf("parsing %s: %w", path, err)
 		}
 		if !stampNode(&doc, own, version) {
 			return nil

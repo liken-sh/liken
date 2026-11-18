@@ -6,19 +6,19 @@ import (
 	"testing"
 )
 
-// The site takes a coverage profile only from a job that ran, because a
-// job that did not run uploaded nothing.
-func TestTheSiteTakesCoverageOnlyFromAJobThatRan(t *testing.T) {
+// The site job downloads a coverage profile only from a job that ran,
+// because a job that did not run uploaded nothing.
+func TestTheSiteDownloadsCoverageOnlyFromAJobThatRan(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"m\"\ncoverage = [\"coverage.out\"]\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	want := "if: ${{ fromJSON(needs.plan.outputs.components)['app'].check && contains(fromJSON(needs.plan.outputs.components)['app'].jobs, 'go') }}\n        with:\n          name: coverage-app-go"
 	if !strings.Contains(string(files[".github/workflows/ci.yaml"]), want) {
@@ -26,13 +26,13 @@ func TestTheSiteTakesCoverageOnlyFromAJobThatRan(t *testing.T) {
 	}
 }
 
-// The site compiles Hugo in every manual's module, so it restores the
-// Hugo build cache that the docs jobs save, saves its own on main, and
-// builds the manuals in parallel.
+// The site job builds every manual with Hugo. It restores the Hugo
+// build cache that the docs jobs save, saves its own cache on main when
+// the restore found no exact key, and builds the manuals in parallel.
 func TestTheSiteSharesTheHugoBuildCacheAndBuildsInParallel(t *testing.T) {
 	files, err := Workflows(fluxTree(t), graphFixture(t))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	text := string(files[".github/workflows/ci.yaml"])
 	for _, want := range []string{
@@ -47,10 +47,10 @@ func TestTheSiteSharesTheHugoBuildCacheAndBuildsInParallel(t *testing.T) {
 	}
 }
 
-// The site reads only the tree and the coverage artifacts of the check
-// jobs, so it waits for the checks and not for the publishes. The
-// release record lists every published version, so it waits for the
-// publishes too.
+// The site job reads only the tree and the coverage artifacts of the
+// check jobs, so it waits for the checks and not for the publishes.
+// The release record lists every published version, so it waits for
+// the publishes as well.
 func TestTheSiteWaitsForTheChecksAndTheRecordForThePublishes(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"lib/package.toml":   "[package]\nname = \"lib\"\n",
@@ -59,11 +59,11 @@ func TestTheSiteWaitsForTheChecksAndTheRecordForThePublishes(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	jobs := workflowJobs(t, files[".github/workflows/ci.yaml"])
 	cases := map[string][]any{

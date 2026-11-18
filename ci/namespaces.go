@@ -15,33 +15,39 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// checkNamespaces lists every object in a component's deploy base that a
-// namespace override would move. A
-// Flux Kustomization's targetNamespace and kustomize's top-level
-// namespace field set one namespace on every object, so an object that
-// must live elsewhere breaks under either one: an events Role in default
-// moved to liken-system made every Event of a cluster-scoped object fail
-// with a 403. So each object states no namespace, states liken-system,
-// or is cluster-scoped, and a grant that reaches another namespace goes
-// through a ClusterRole.
+// checkNamespaces lists every object in a component's deploy base that
+// a namespace override would move to another namespace. A Flux
+// Kustomization's targetNamespace and kustomize's top-level namespace
+// field both set one namespace on every namespaced object, so an object
+// that must be in another namespace breaks when someone deploys the base
+// with either one. For example, an operator writes the Event of a
+// cluster-scoped object in default. If an override moves the events
+// Role from default to liken-system, each of those writes fails with a
+// 403.
 //
-// Two exceptions stay, because the ecosystem fixes their namespace:
+// So each object sets no namespace, sets liken-system, or is
+// cluster-scoped, and a grant in another namespace goes through a
+// ClusterRole. The check allows these exceptions, whose namespace is
+// fixed outside the component:
 //
-//   - the RoleBinding of an aggregated API to the built-in
-//     extension-apiserver-authentication-reader Role, which exists only
-//     in kube-system, named <component>-api-authentication-reader in
-//     api-authentication.yaml, so a reader finds the one object to
-//     exempt from an override;
-//   - the dashboards and monitors of a deploy/monitoring component, which
-//     a monitoring stack reads from its own namespace.
+//   - A RoleBinding in kube-system whose name ends in
+//     -api-authentication-reader, in a file named
+//     api-authentication.yaml. An aggregated API binds the built-in
+//     Role extension-apiserver-authentication-reader, which exists
+//     only in kube-system.
+//   - An object in monitoring under a deploy/monitoring/ directory,
+//     because the monitoring stack reads its dashboards and monitors
+//     from its own namespace.
 //
-// A base sets liken-system with an unsetOnly NamespaceTransformer, so the
+// A base sets liken-system with an unsetOnly NamespaceTransformer,
+// which does not change an object that sets its own namespace. So the
 // check also fails on a kustomization.yaml with a top-level namespace.
 //
-// The manifests the OS applies are out of scope: the OS applies them as
-// they are, with no kustomize step that could override a namespace, and
-// its Flux feature grants writes to the Secrets of flux-system alone,
-// which a ClusterRole would grant in every namespace.
+// The check reads only the deploy/ directory of each component, so it
+// does not read the OS's other manifests. The OS applies those as they
+// are, with no kustomize step. Its Flux manifests grant rights in the
+// flux-system namespace only, and a ClusterRole would grant the same
+// rights in every namespace.
 func checkNamespaces(root string) ([]string, error) {
 	files, err := namespaceFiles(root)
 	if err != nil {
@@ -62,8 +68,8 @@ func checkNamespaces(root string) ([]string, error) {
 	return findings, nil
 }
 
-// namespaceFiles lists the YAML files of every component's deploy/,
-// relative to root and in order.
+// namespaceFiles returns the YAML files under each component's
+// deploy/, relative to root and sorted.
 func namespaceFiles(root string) ([]string, error) {
 	dirs, err := filepath.Glob(filepath.Join(root, "*", "deploy"))
 	if err != nil {
@@ -102,8 +108,6 @@ type namespacedObject struct {
 	} `yaml:"metadata"`
 }
 
-// namespacesIn reads every document of one file and answers a finding for
-// each object that a namespace override would move.
 func namespacesIn(file string, data []byte) ([]string, error) {
 	var findings []string
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
@@ -114,11 +118,11 @@ func namespacesIn(file string, data []byte) ([]string, error) {
 			return findings, nil
 		}
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", file, err)
+			return nil, fmt.Errorf("parsing %s: %w", file, err)
 		}
 		if object.Kind == "Kustomization" {
 			if object.Namespace != "" {
-				findings = append(findings, fmt.Sprintf("%s sets a top-level namespace; set liken-system with an unsetOnly NamespaceTransformer, which leaves an object's own namespace alone", file))
+				findings = append(findings, fmt.Sprintf("%s sets a top-level namespace. Set liken-system with an unsetOnly NamespaceTransformer, which leaves an object's own namespace alone", file))
 			}
 			continue
 		}
@@ -126,12 +130,12 @@ func namespacesIn(file string, data []byte) ([]string, error) {
 		if namespace == "" || namespace == "liken-system" || exempt(file, object) {
 			continue
 		}
-		findings = append(findings, fmt.Sprintf("%s: %s %s is in the namespace %s, and a namespace override would move it; grant across namespaces with a ClusterRole", file, object.Kind, object.Metadata.Name, namespace))
+		findings = append(findings, fmt.Sprintf("%s: %s %s is in the namespace %s, and a namespace override would move it. Grant across namespaces with a ClusterRole", file, object.Kind, object.Metadata.Name, namespace))
 	}
 }
 
-// exempt answers whether an object outside liken-system is one of the two
-// the rule allows.
+// exempt reports whether an object outside liken-system is one of the
+// exceptions that checkNamespaces allows.
 func exempt(file string, object namespacedObject) bool {
 	switch object.Metadata.Namespace {
 	case "kube-system":

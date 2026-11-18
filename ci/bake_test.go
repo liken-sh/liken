@@ -17,11 +17,11 @@ func TestTheBakeFileBuildsEachConsumerOnTheBaseInTheTree(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	out, err := Bake(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the bake file: %v", err)
 	}
 	text := string(out)
 	for _, want := range []string{
@@ -75,9 +75,9 @@ func TestTheBakeFileBuildsEachConsumerOnTheBaseInTheTree(t *testing.T) {
 	}
 }
 
-// A consumer of a tracked image builds it from the tree every time,
-// because only a pinned component publishes under a tag that a recipe
-// can vouch for.
+// A consumer of a tracked image always builds it from the tree,
+// because only a pinned component publishes a tag whose recipe label
+// `ci bases` can check against the tree.
 func TestTheBakeFileBuildsATrackedBaseFromTheTreeAlways(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"lib/package.toml": "[package]\nname = \"lib\"\n[[outputs.images]]\nname = \"lib\"\ndescription = \"The lib image.\"\n",
@@ -87,21 +87,21 @@ func TestTheBakeFileBuildsATrackedBaseFromTheTreeAlways(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	out, err := Bake(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the bake file: %v", err)
 	}
 	if text := string(out); !strings.Contains(text, `"lib" = "target:lib"`) || strings.Contains(text, "PUBLISHED_LIB") {
-		t.Errorf("the bake file builds the tracked base lib some other way:\n%s", text)
+		t.Errorf("the bake file lacks the target:lib context for lib, or mentions PUBLISHED_LIB:\n%s", text)
 	}
 }
 
-// The recipe of a consumer names a pinned base by its target, whether
-// a build pulls the base or builds it, so publishing a base changes no
-// recipe above it.
-func TestASettingOfTheRecipeNamesAPublishedBaseByItsTarget(t *testing.T) {
+// The recipe of a consumer refers to a pinned base by its target,
+// whether a build pulls the published base or builds it from the tree,
+// so publishing a base changes no recipe above it.
+func TestARecipeRefersToAPinnedBaseByItsTarget(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"base-image\"\ndescription = \"The base-image image.\"\n",
 		"base/Dockerfile":   "FROM scratch\n",
@@ -110,22 +110,22 @@ func TestASettingOfTheRecipeNamesAPublishedBaseByItsTarget(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	app := components["app"]
 	target, err := newBakeTarget(root, app, app.Outputs.Images[0], ImageProducers(components), components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the bake target: %v", err)
 	}
 	if settings := target.settings(); !strings.Contains(settings, "contexts=base-image=target:base-image ") {
-		t.Errorf("the settings name the base some other way: %s", settings)
+		t.Errorf("the settings are %s, want the context base-image=target:base-image", settings)
 	}
 	out, err := Bake(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the bake file: %v", err)
 	}
 	if !strings.Contains(string(out), `"base-image" = PUBLISHED_BASE_IMAGE != "" ? "docker-image://${PUBLISHED_BASE_IMAGE}" : "target:base-image"`) {
-		t.Errorf("the bake file names the base some other way:\n%s", out)
+		t.Errorf("the bake file lacks the base-image context that reads PUBLISHED_BASE_IMAGE:\n%s", out)
 	}
 }
 
@@ -133,7 +133,7 @@ func TestTheBakeFileNeedsEachDockerfile(t *testing.T) {
 	root := writeTree(t, map[string]string{"app/package.toml": "[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n"})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	if _, err := Bake(root, components); err == nil {
 		t.Error("the bake file rendered with no Dockerfile")
@@ -159,11 +159,11 @@ func TestTheBakeFilePassesAPinnedDependencysVersionAsABuildArgument(t *testing.T
 		"[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\nversions = { SNAPSHOT = \"base\" }\n")
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	out, err := Bake(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the bake file: %v", err)
 	}
 	want := "  args = {\n    VERSION = VERSION\n    SNAPSHOT = \"20260928\"\n  }\n"
 	if !strings.Contains(string(out), want) {
@@ -183,10 +183,10 @@ func TestTheBakeFileRefusesAVersionArgument(t *testing.T) {
 				"[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\nversions = "+versions+"\n")
 			components, err := LoadComponents(root)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("loading the components: %v", err)
 			}
 			if _, err := Bake(root, components); err == nil {
-				t.Errorf("the bake file rendered with versions = %s", versions)
+				t.Errorf("Bake accepted versions = %s, want an error", versions)
 			}
 		})
 	}
@@ -215,11 +215,11 @@ func TestTheBakeFileResolvesAToolchainImageToItsDigest(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	out, err := Bake(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the bake file: %v", err)
 	}
 	want := "  contexts = {\n    \"brand\" = \"brand\"\n    \"golang\" = \"docker-image://golang:1.27.3-trixie@sha256:aaa\"\n  }\n"
 	if !strings.Contains(string(out), want) {
@@ -227,17 +227,17 @@ func TestTheBakeFileResolvesAToolchainImageToItsDigest(t *testing.T) {
 	}
 }
 
-func TestTheBakeFileGivesOverlaysEveryToolchainImage(t *testing.T) {
+func TestTheToolchainsTargetHasAContextForEveryToolchainImage(t *testing.T) {
 	root := toolchainTree(t, map[string]string{
 		"app/package.toml": "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	out, err := Bake(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the bake file: %v", err)
 	}
 	want := "target \"toolchains\" {\n  contexts = {\n    \"golang\" = \"docker-image://golang:1.27.3-trixie@sha256:aaa\"\n  }\n}\n"
 	if !strings.Contains(string(out), want) {
@@ -246,7 +246,7 @@ func TestTheBakeFileGivesOverlaysEveryToolchainImage(t *testing.T) {
 	_, group, _ := strings.Cut(string(out), "group \"default\" {")
 	group, _, _ = strings.Cut(group, "}")
 	if strings.Contains(group, "\"toolchains\"") {
-		t.Errorf("the default group builds the toolchains target:\n%s", group)
+		t.Errorf("the default group contains the toolchains target, want none:\n%s", group)
 	}
 }
 
@@ -261,7 +261,7 @@ func TestTheBakeFileRefusesAToolchainImage(t *testing.T) {
 		"with no digest": {map[string]string{
 			"toolchains/images.toml": "[build]\ngolang = \"golang:1.27.3-trixie\"\n",
 			"app/package.toml":       "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
-		}, "golang names no digest"},
+		}, "golang must have a tag and a digest"},
 		"with the name of an image of the repository": {map[string]string{
 			"app/package.toml":    "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
 			"golang/package.toml": "[package]\nname = \"golang\"\n[[outputs.images]]\nname = \"golang\"\ndescription = \"The golang image.\"\n",
@@ -277,10 +277,10 @@ func TestTheBakeFileRefusesAToolchainImage(t *testing.T) {
 			root := toolchainTree(t, c.files)
 			components, err := LoadComponents(root)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("loading the components: %v", err)
 			}
 			if _, err := Bake(root, components); err == nil || !strings.Contains(err.Error(), c.wants) {
-				t.Errorf("got %v, want an error with %q", err, c.wants)
+				t.Errorf("Bake returned %v, want an error with %q", err, c.wants)
 			}
 		})
 	}

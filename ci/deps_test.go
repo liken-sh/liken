@@ -8,11 +8,14 @@ import (
 	"testing"
 )
 
-// depsFixture is a repository whose tools report fixed answers: an
-// operator whose Go module uses brand and base, whose docs module uses
-// brand, whose Cargo workspace takes a crate of base by path and one of
-// the project's crates from git, and whose Dockerfile starts from
-// base's image.
+// depsFixture is a repository with fixed results for go list and
+// cargo metadata. It has an operator component with these uses:
+//   - its Go module uses brand and base
+//   - its docs module uses brand
+//   - its Cargo workspace uses a crate of base by path, and serde from
+//     crates.io
+//   - its Dockerfile builds on the image of base, and its images take
+//     brand as a build context
 func depsFixture(t *testing.T, operatorDepends string) DepsChecker {
 	t.Helper()
 	root := writeTree(t, map[string]string{
@@ -30,11 +33,11 @@ func depsFixture(t *testing.T, operatorDepends string) DepsChecker {
 	})
 	abs, err := filepath.Abs(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the fixture root absolute: %v", err)
 	}
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	return DepsChecker{
 		Root:       root,
@@ -51,7 +54,7 @@ func depsFixture(t *testing.T, operatorDepends string) DepsChecker {
 					{Path: "k8s.io/client-go", Dir: "/home/x/go/pkg/mod/k8s.io/client-go@v0.36.3"},
 				}, nil
 			}
-			t.Fatalf("go list ran in %s", dir)
+			t.Fatalf("the check ran go list in %s, want it to skip that directory", dir)
 			return nil, nil
 		},
 		CargoMetadata: func(dir string) ([]cargoPackage, error) {
@@ -76,17 +79,17 @@ func depsFixture(t *testing.T, operatorDepends string) DepsChecker {
 func TestEveryUseIsDeclared(t *testing.T) {
 	findings, err := depsFixture(t, `"brand", "base"`).Check()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the dependencies: %v", err)
 	}
 	if len(findings) != 0 {
-		t.Errorf("findings %v", findings)
+		t.Errorf("the findings are %v, want none", findings)
 	}
 }
 
 func TestAnUndeclaredUseIsFound(t *testing.T) {
 	findings, err := depsFixture(t, "").Check()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the dependencies: %v", err)
 	}
 	var got []string
 	for _, f := range findings {
@@ -102,7 +105,7 @@ func TestAnUndeclaredUseIsFound(t *testing.T) {
 		"operator uses brand, and its package.toml does not name it in [depends]: the image operator-sidecar takes brand as its build context brand",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Errorf("findings:\n%s", strings.Join(got, "\n"))
+		t.Errorf("the findings are:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 
@@ -113,10 +116,10 @@ func TestAProjectModuleFromTheProxyIsFound(t *testing.T) {
 	}
 	findings, err := d.Check()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the dependencies: %v", err)
 	}
 	if len(findings) != 2 || !strings.Contains(findings[0].String(), "reads github.com/liken-sh/liken/brand from the module proxy") {
-		t.Errorf("findings %v", findings)
+		t.Errorf("the findings are %v, want 2, the first for reading brand from the module proxy", findings)
 	}
 }
 
@@ -133,10 +136,10 @@ func TestAProjectCrateFromGitIsFound(t *testing.T) {
 	}
 	findings, err := d.Check()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the dependencies: %v", err)
 	}
 	if len(findings) != 1 || !strings.Contains(findings[0].String(), "use a path dependency") {
-		t.Errorf("findings %v", findings)
+		t.Errorf("the findings are %v, want 1 that says to use a path dependency", findings)
 	}
 }
 
@@ -147,7 +150,7 @@ func TestANestedComponentOwnsItsOwnDirectory(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	d := DepsChecker{Root: root, Components: components}
 	cases := map[string]string{"liken/init": "liken", "liken/kernel/config": "kernel", "liken": "liken", "plans": "", "likenx": ""}
@@ -158,10 +161,11 @@ func TestANestedComponentOwnsItsOwnDirectory(t *testing.T) {
 	}
 }
 
-// A line uses a project image only when one of its words starts with that
-// image's reference and the image's name ends at a tag, a digest, or the end
-// of the word. Another registry's path that holds the same text, a longer
-// host name, and a repository under the image's name are not uses of it.
+// A line uses a project image only when one of its words starts with
+// the image's reference and the image name ends at a tag, a digest, or
+// the end of the word. Another registry's path that contains the same
+// text, a longer host name, and a repository under the image's name
+// are not uses of the image.
 func TestAnImageReferenceIsReadFromTheStartOfAWord(t *testing.T) {
 	for name, tc := range map[string]struct {
 		line string
@@ -180,16 +184,16 @@ func TestAnImageReferenceIsReadFromTheStartOfAWord(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			d := depsFixture(t, `"brand"`)
 			if err := os.WriteFile(filepath.Join(d.Root, "operator/Dockerfile"), []byte(tc.line+"\n"), 0o644); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing a fixture file: %v", err)
 			}
 			findings, err := d.Check()
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("checking the dependencies: %v", err)
 			}
 			want := "operator uses base, and its package.toml does not name it in [depends]: operator/Dockerfile starts from ghcr.io/liken-sh/base-image"
 			got := slices.ContainsFunc(findings, func(f Finding) bool { return f.String() == want })
 			if got != tc.uses {
-				t.Errorf("found the use: %v, want %v, in %v", got, tc.uses, findings)
+				t.Errorf("the findings include the use: %v, want %v, in %v", got, tc.uses, findings)
 			}
 		})
 	}

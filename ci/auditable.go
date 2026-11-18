@@ -5,18 +5,15 @@ import (
 	"strings"
 )
 
-// unauditedBuilds lists each instruction of a Dockerfile that runs
-// `cargo build`. A Rust binary holds no record of the crates it links,
-// so syft and Trivy list none of them from an image, and a scan matches
-// no advisory against them. `cargo auditable build` records the crate
-// graph in the binary's .dep-v0 section, which both scanners read.
-// Root AGENTS.md states the rule under "Rust binaries".
+// unauditedBuilds returns a finding for each instruction of a
+// Dockerfile that runs `cargo build`. A Rust binary does not record the
+// crates it links, so syft and Trivy list none of them and match no
+// advisory against them. `cargo auditable build` writes the crate graph
+// into the binary's .dep-v0 section, which both scanners read.
 //
-// The check holds every build in a Dockerfile to the rule, the stub
-// build of the dependency layer too. A pattern cannot tell the build
-// that makes the shipped binary from the stub build, and a stub build
-// through the same wrapper keeps the dependency layer usable for the
-// real build.
+// The check also covers the stub build of the dependency layer, because
+// a pattern cannot tell it from the real build. When the stub builds
+// through the same wrapper, the dependencies compile once.
 func unauditedBuilds(file, text string) []string {
 	var findings []string
 	for _, l := range logicalLines(text) {
@@ -30,7 +27,7 @@ func unauditedBuilds(file, text string) []string {
 				rest = rest[1:]
 			}
 			if len(rest) > 0 && rest[0] == "build" {
-				findings = append(findings, fmt.Sprintf("%s:%d runs cargo build; run cargo auditable build, so the binary records its crates", file, l.n))
+				findings = append(findings, fmt.Sprintf("%s:%d runs cargo build. Run cargo auditable build, so the binary records its crates", file, l.n))
 				break
 			}
 		}

@@ -23,10 +23,9 @@ func newRepo(t *testing.T, files map[string]string) *repo {
 	return r
 }
 
-// testGit is the environment of a test's git commands, on top of
-// gitEnv, which drops every GIT_* variable that a hook sets. The test
-// reads no configuration of the machine's, and it names the author in
-// the environment, so it writes no configuration either.
+// testGit is the environment of a test's git commands, added to what
+// gitEnv returns. git reads none of the machine's configuration, and
+// the author is set here, so the test writes no configuration either.
 var testGit = []string{
 	"GIT_CONFIG_GLOBAL=/dev/null",
 	"GIT_CONFIG_NOSYSTEM=1",
@@ -52,10 +51,10 @@ func (r *repo) write(name, text string) {
 	r.t.Helper()
 	path := filepath.Join(r.git.Dir, name)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		r.t.Fatal(err)
+		r.t.Fatalf("creating the directory: %v", err)
 	}
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-		r.t.Fatal(err)
+		r.t.Fatalf("writing the file: %v", err)
 	}
 }
 
@@ -71,7 +70,7 @@ func (r *repo) planner(published map[string][]string) Planner {
 	r.t.Helper()
 	components, err := LoadComponents(r.git.Dir)
 	if err != nil {
-		r.t.Fatal(err)
+		r.t.Fatalf("loading the components: %v", err)
 	}
 	return Planner{Components: components, Git: r.git, Versions: func(c *Component) ([]string, error) {
 		return published[c.Name()], nil
@@ -81,7 +80,7 @@ func (r *repo) planner(published map[string][]string) Planner {
 // planFixture is a repository with an OS, an operator that builds on a
 // base, the base, and brand, each with one Go job. The OS's go.mod
 // replaces brand's module. The OS's release 2026.09.28-001 and the
-// operator's imported release operator/2026.09.27-001 are tagged.
+// releases operator/2026.09.27-001 and base/2026.09.27-001 are tagged.
 func planFixture(t *testing.T) *repo {
 	r := newRepo(t, map[string]string{
 		"brand/package.toml":    "[package]\nname = \"brand\"\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n",
@@ -114,7 +113,7 @@ func TestAReleaseTagPublishesWhatChangedSinceEachComponentsOwnRelease(t *testing
 	r.run("tag", "2026.10.02-001")
 	decisions, err := r.planner(fixturePublished).Plan(Event{Name: "push", Ref: "refs/tags/2026.10.02-001", Head: "HEAD", Publishing: true})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the release tag: %v", err)
 	}
 	want := map[string]Decision{
 		"operator": {Check: true, Publish: publishRelease, Version: "2026.10.02-001"},
@@ -125,11 +124,11 @@ func TestAReleaseTagPublishesWhatChangedSinceEachComponentsOwnRelease(t *testing
 	for name, w := range want {
 		d := decisions[name]
 		if d.Check != w.Check || d.Publish != w.Publish || d.Version != w.Version {
-			t.Errorf("%s: %+v, want %+v", name, d, w)
+			t.Errorf("the decision for %s is %+v, want %+v", name, d, w)
 		}
 	}
 	if why := decisions["operator"].Why; why != "changed: operator/main.go (since operator/2026.09.27-001)" {
-		t.Errorf("the operator's reason is %q", why)
+		t.Errorf("the operator's reason is %q, want the changed file and the operator's last release", why)
 	}
 }
 
@@ -139,22 +138,21 @@ func TestAChangeToADependencyReleasesTheDependent(t *testing.T) {
 	r.commit("change the base")
 	decisions, err := r.planner(fixturePublished).Candidates("HEAD")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("finding the candidates: %v", err)
 	}
 	if !decisions["base"].Changed || !decisions["operator"].Changed || decisions["liken"].Changed {
-		t.Fatalf("decisions %+v", decisions)
+		t.Fatalf("the decisions are %+v, want base and operator changed and liken unchanged", decisions)
 	}
 	if why := decisions["operator"].Why; !strings.HasPrefix(why, "its dependency base changed") {
-		t.Errorf("the operator's reason is %q", why)
+		t.Errorf("the operator's reason is %q, want it to start with \"its dependency base changed\"", why)
 	}
 }
 
-// A release tag diffs with the newest main run that passed, the way a
-// push to main does: a job whose files did not change since that run
-// passed there. The release still publishes every output of each
-// component that changed since its own release. When the plan cannot
-// say which run passed last, every job of a release runs.
-func TestAReleaseTagRunsWhatTheNewestGreenRunDidNotVerify(t *testing.T) {
+// A release tag diffs with the newest main run that passed, as a push
+// to main does, and skips a job whose files did not change since that
+// run. A component that changed since its own release still publishes.
+// When the plan cannot find that run, every job of a release runs.
+func TestAReleaseTagRunsWhatTheNewestSuccessfulRunDidNotVerify(t *testing.T) {
 	r := planFixture(t)
 	before := r.run("rev-parse", "HEAD")
 	r.write("operator/main.go", "package main // changed\n")
@@ -167,9 +165,9 @@ func TestAReleaseTagRunsWhatTheNewestGreenRunDidNotVerify(t *testing.T) {
 		jobs       []string
 		images     []string
 	}{
-		{"a tag on the newest green run runs nothing", head, "", nil, nil},
-		{"a tag past the newest green run runs what changed since", before, "", []string{"check", "codeql-check"}, []string{"operator"}},
-		{"a tag with no green run to compare with runs everything", "", "the API answered 403", []string{"check", "codeql-check"}, []string{"operator"}},
+		{"a tag on the newest run that passed runs nothing", head, "", nil, nil},
+		{"a tag past the newest run that passed runs what changed since", before, "", []string{"check", "codeql-check"}, []string{"operator"}},
+		{"a tag with no run that passed to compare with runs everything", "", "the API returned 403", []string{"check", "codeql-check"}, []string{"operator"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -187,16 +185,16 @@ func TestAComponentWithNoReleaseOrNoTagReleases(t *testing.T) {
 	published := map[string][]string{"operator": {"2026.09.20-001"}, "liken": {"2026.09.28-001"}}
 	decisions, err := r.planner(published).Candidates("HEAD")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("finding the candidates: %v", err)
 	}
 	if d := decisions["base"]; !d.Changed || d.Why != "nothing is published yet" {
-		t.Errorf("base: %+v", d)
+		t.Errorf("base: %+v, want Changed because nothing is published yet", d)
 	}
-	if d := decisions["operator"]; !d.Changed || d.Why != "no git tag names its release 2026.09.20-001" {
-		t.Errorf("operator: %+v", d)
+	if d := decisions["operator"]; !d.Changed || d.Why != "no git tag marks its release 2026.09.20-001" {
+		t.Errorf("operator: %+v, want Changed because no git tag marks its release", d)
 	}
 	if d := decisions["liken"]; d.Changed {
-		t.Errorf("liken: %+v", d)
+		t.Errorf("liken: %+v, want not Changed", d)
 	}
 }
 
@@ -204,7 +202,7 @@ func TestATagThatIsNotAReleaseVersionIsRefused(t *testing.T) {
 	r := planFixture(t)
 	for _, tag := range []string{"v1.0.0", "2026.10.02-000", "2026.10.02-1"} {
 		if _, err := r.planner(fixturePublished).Plan(Event{Name: "push", Ref: "refs/tags/" + tag, Head: "HEAD"}); err == nil {
-			t.Errorf("the tag %s planned a release", tag)
+			t.Errorf("the tag %s planned a release, want a refusal", tag)
 		}
 	}
 }
@@ -213,10 +211,10 @@ func TestAReleaseTagPublishesNothingWhilePublishingIsOff(t *testing.T) {
 	r := planFixture(t)
 	decisions, err := r.planner(map[string][]string{}).Plan(Event{Name: "push", Ref: "refs/tags/2026.09.28-001", Head: "HEAD"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the push to main: %v", err)
 	}
 	if d := decisions["operator"]; !d.Check || d.Publish != publishNone {
-		t.Errorf("operator: %+v", d)
+		t.Errorf("operator: %+v, want Check and publish none", d)
 	}
 }
 
@@ -227,13 +225,13 @@ func TestAPushToMainPublishesADevelopmentBuildOfWhatChanged(t *testing.T) {
 	head := r.commit("change the operator")
 	decisions, err := r.planner(fixturePublished).Plan(Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the push to main: %v", err)
 	}
 	if d := decisions["operator"]; !d.Check || d.Publish != publishDev || d.Version != "2026.09.28-001-dev-001-"+head[:8] {
-		t.Errorf("operator: %+v", d)
+		t.Errorf("operator: %+v, want Check, a development publish, and version 2026.09.28-001-dev-001-%s", d, head[:8])
 	}
 	if d := decisions["base"]; d.Check || d.Publish != publishNone {
-		t.Errorf("base: %+v", d)
+		t.Errorf("base: %+v, want no Check and publish none", d)
 	}
 }
 
@@ -243,7 +241,7 @@ func TestAPushToMainRunsAManualChangeAndPublishesNothing(t *testing.T) {
 	r.commit("edit the manual")
 	d := planGate(t, r, fixturePublished, Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})["operator"]
 	if !d.Check || d.Publish != publishNone || !reflect.DeepEqual(d.Jobs, []string{"docs"}) || d.Images != nil {
-		t.Errorf("operator: %+v", d)
+		t.Errorf("operator: %+v, want Check, publish none, jobs [docs], and no images", d)
 	}
 }
 
@@ -254,10 +252,10 @@ func TestTheOSNeverPublishesADevelopmentBuild(t *testing.T) {
 	r.commit("change the OS")
 	decisions, err := r.planner(fixturePublished).Plan(Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the push to main: %v", err)
 	}
 	if d := decisions["liken"]; !d.Check || d.Publish != publishNone {
-		t.Errorf("liken: %+v", d)
+		t.Errorf("liken: %+v, want Check and publish none", d)
 	}
 }
 
@@ -273,11 +271,11 @@ func TestAPushWithNoEarlierCommitRunsEveryJob(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			decisions, err := r.planner(fixturePublished).Plan(e)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("planning the event: %v", err)
 			}
 			for component, d := range decisions {
 				if !d.Check || d.Publish != publishNone {
-					t.Errorf("%s: %+v", component, d)
+					t.Errorf("%s: %+v, want Check and publish none", component, d)
 				}
 			}
 		})
@@ -291,13 +289,13 @@ func TestAPullRequestRunsWhatItChanged(t *testing.T) {
 	r.commit("change brand")
 	decisions, err := r.planner(fixturePublished).Plan(Event{Name: "pull_request", Ref: "refs/pull/1/merge", Base: base, Head: "HEAD"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the pull request: %v", err)
 	}
-	// brand's theme reaches only a manual's hugo job, and the operator
-	// has none.
+	// Only a hugo job reads brand's theme, and the operator of
+	// planFixture has a manual but no hugo job.
 	for name, runs := range map[string]bool{"brand": true, "liken": true, "operator": false, "base": false} {
 		if decisions[name].Check != runs {
-			t.Errorf("%s: %+v", name, decisions[name])
+			t.Errorf("%s: %+v, want Check %v", name, decisions[name], runs)
 		}
 	}
 }
@@ -326,7 +324,7 @@ func TestAPushToMainRunsWhatReadsAChangeAndPublishesOnlyAChangedOutput(t *testin
 			r.commit("the change")
 			decisions, err := r.planner(fixturePublished).Plan(Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("planning the push to main: %v", err)
 			}
 			for name, want := range map[string]Decision{"base": c.base, "operator": c.operator} {
 				if d := decisions[name]; d.Check != want.Check || d.Publish != want.Publish {

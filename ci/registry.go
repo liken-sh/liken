@@ -31,10 +31,10 @@ func (r Registry) client() *http.Client {
 	return http.DefaultClient
 }
 
-// bearer asks the registry's token service for a token with the
-// scope. The service grants the scopes that the credential allows and
-// drops the rest without an error, so a granted token does not prove
-// a push is allowed. Only the request that uses it can prove that.
+// bearer requests a token for the package from the registry's token
+// service. The service grants only the actions that the credential
+// allows and does not fail for the others, so a token does not prove
+// that a push is allowed. CanPush proves it with an upload request.
 func (r Registry) bearer(pkg, actions string) (string, error) {
 	u := fmt.Sprintf("%s/token?service=%s&scope=%s", r.Base, url.QueryEscape(strings.TrimPrefix(strings.TrimPrefix(r.Base, "https://"), "http://")),
 		url.QueryEscape(fmt.Sprintf("repository:%s/%s:%s", r.Owner, pkg, actions)))
@@ -62,21 +62,20 @@ func (r Registry) bearer(pkg, actions string) (string, error) {
 	return body.Token, nil
 }
 
-// tokenRefused is the token service's refusal of a scope.
 type tokenRefused struct {
 	pkg, status string
 	code        int
 }
 
 func (e tokenRefused) Error() string {
-	return fmt.Sprintf("the token service answered %s for %s", e.status, e.pkg)
+	return fmt.Sprintf("the token service returned %s for %s", e.status, e.pkg)
 }
 
-// Tags lists every tag of the package. A package that does not exist
-// has no tags. ghcr's token service refuses an anonymous pull of a
-// package that does not exist, the same as a private one, and every
-// package of the project is public, so a refusal there means the
-// package does not exist yet.
+// Tags lists every tag of the package, and returns no tags and no error
+// for a package that does not exist. ghcr's token service refuses an
+// anonymous pull of a missing package the same way as a pull of a
+// private one. Every package of the project is public, so without a
+// Token, a refusal means that the package does not exist yet.
 func (r Registry) Tags(pkg string) ([]string, error) {
 	token, err := r.bearer(pkg, "pull")
 	if refused, ok := err.(tokenRefused); ok && r.Token == "" &&
@@ -107,7 +106,7 @@ func (r Registry) Tags(pkg string) ([]string, error) {
 			return nil, nil
 		}
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("listing the tags of %s: %s", pkg, resp.Status)
+			return nil, fmt.Errorf("listing the tags of %s: the registry returned %s", pkg, resp.Status)
 		}
 		var page struct {
 			Tags []string `json:"tags"`
@@ -135,11 +134,11 @@ func nextPage(base, link string) string {
 	return target
 }
 
-// CanPush proves that the credential may push to the package. It
-// starts a blob upload, which the registry allows only for a
-// credential that may write, and then cancels the upload, so the probe
-// leaves nothing in the package. A package that does not exist yet
-// answers the same way: the first push creates it.
+// CanPush checks that Token may push to the package. It starts a blob
+// upload, which the registry allows only for a credential that may
+// write, and then cancels the upload so that nothing is left in the
+// package. A package that does not exist yet accepts the upload too,
+// because the first push creates it.
 func (r Registry) CanPush(pkg string) error {
 	token, err := r.bearer(pkg, "pull,push")
 	if err != nil {
@@ -179,12 +178,12 @@ func (r Registry) CanPush(pkg string) error {
 const manifestTypes = "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, " +
 	"application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
 
-// Labels reads the labels of the image at the tag. When the tag names
-// an index, the labels come from its linux/amd64 image, or from its
-// first image when it holds no linux/amd64 one. buildx writes an
-// attestation into an index as an image of the platform unknown/unknown,
-// so that entry never counts. A tag or a package that does not exist
-// has no labels and no error, the same as Tags.
+// Labels reads the labels of the image at the tag. When the tag points
+// at an index, the labels come from its linux/amd64 image, or from its
+// first image when it has no linux/amd64 one. buildx writes each
+// attestation into the index as an image of the platform
+// unknown/unknown, so Labels skips those entries. A tag or a package
+// that does not exist returns no labels and no error, the same as Tags.
 func (r Registry) Labels(pkg, tag string) (map[string]string, error) {
 	token, err := r.bearer(pkg, "pull")
 	if refused, ok := err.(tokenRefused); ok && r.Token == "" &&
@@ -212,7 +211,7 @@ func (r Registry) Labels(pkg, tag string) (map[string]string, error) {
 			return false, nil
 		}
 		if resp.StatusCode != http.StatusOK {
-			return false, fmt.Errorf("reading %s of %s: %s", path, pkg, resp.Status)
+			return false, fmt.Errorf("reading %s of %s: the registry returned %s", path, pkg, resp.Status)
 		}
 		return true, json.NewDecoder(resp.Body).Decode(out)
 	}
@@ -253,7 +252,7 @@ func (r Registry) Labels(pkg, tag string) (map[string]string, error) {
 			} `json:"config"`
 		}
 		if found, err := get("manifests/"+digest, manifestTypes, &manifest); err != nil || !found {
-			return nil, fmt.Errorf("reading %s of %s:%s: %v", digest, pkg, tag, orNotFound(err))
+			return nil, fmt.Errorf("reading the manifest %s of %s:%s: %v", digest, pkg, tag, orNotFound(err))
 		}
 		config = manifest.Config.Digest
 	}
@@ -271,10 +270,10 @@ func (r Registry) Labels(pkg, tag string) (map[string]string, error) {
 	return blob.Config.Labels, nil
 }
 
-// Digest resolves the tag to the digest of the manifest that the
-// registry serves for it: the sha256 of the manifest's bytes, which is
-// what a reference by digest names. A tag or a package that does not
-// exist has no digest and no error, the same as Labels.
+// Digest returns the sha256 of the manifest bytes that the registry
+// serves for the tag, which is the digest that a reference by digest
+// uses. For a tag or a package that does not exist, it returns false
+// and no error, the same as Labels.
 func (r Registry) Digest(pkg, tag string) (string, bool, error) {
 	token, err := r.bearer(pkg, "pull")
 	if refused, ok := err.(tokenRefused); ok && r.Token == "" &&
@@ -299,7 +298,7 @@ func (r Registry) Digest(pkg, tag string) (string, bool, error) {
 		return "", false, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", false, fmt.Errorf("reading %s:%s: %s", pkg, tag, resp.Status)
+		return "", false, fmt.Errorf("reading the manifest of %s:%s: the registry returned %s", pkg, tag, resp.Status)
 	}
 	sum := sha256.New()
 	n, err := io.Copy(sum, io.LimitReader(resp.Body, manifestLimit+1))
@@ -312,12 +311,13 @@ func (r Registry) Digest(pkg, tag string) (string, bool, error) {
 	return "sha256:" + hex.EncodeToString(sum.Sum(nil)), true, nil
 }
 
-// manifestLimit caps the manifest that Digest reads. An index of a
-// pinned image is a few kilobytes.
+// manifestLimit is the largest manifest, in bytes, that Digest reads.
 const manifestLimit = 4 << 20
 
-// orNotFound names a missing object that the registry's index or
-// manifest points at, where get reports it as no error.
+// orNotFound returns err, or a "no such object" error when err is nil.
+// get returns a 404 as found=false with no error, and Labels uses
+// orNotFound to make a missing manifest or blob that an index or a
+// manifest refers to an error.
 func orNotFound(err error) error {
 	if err != nil {
 		return err

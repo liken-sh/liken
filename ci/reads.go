@@ -13,59 +13,63 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// A job reads the files that its toolchain builds and tests from, and
-// a change that none of them reads cannot change the job's result. The
-// rules below describe the jobs of this repository, and each rule
-// follows from how the toolchain finds its files:
+// A job runs only when a changed file is one that its toolchain reads,
+// because a change to any other file cannot change the job's result.
+// In a component with a manual, the manual is the docs/ directory and
+// the skills/ directory that the guides generate. brand has no manual,
+// and its skills/ is the Go program that generates every manual's
+// skills.
 //
-//   - A Go job reads every Go file of its component, because its gofmt
-//     check walks every directory, and every other file except the Rust
-//     sources, the manual, and the smoke checks. A Go test can read
-//     any data file by its path, such as a file of cases that a Rust
-//     crate reads too, so a data file runs it.
-//   - A Rust job reads every file of its component except the Go
-//     sources, the manual, and the smoke checks.
-//   - A manual's hugo job reads every file of its component except the
-//     Rust sources: its build can run the component's Go code, as a
-//     manual does that generates its API reference with go run.
-//   - The OS build reads every file of the OS except the manual, which
-//     is not an OS artifact and ships to the site on its own path.
-//   - A prek job reads every file, because its hooks check every file
-//     of the component.
+// Of the files of its own component:
+//
+//   - A Go job reads every file except Rust sources, the manual, and
+//     the smoke checks. It reads every Go file, also in docs/ and
+//     smoke/, because gofmt walks every directory. It reads data
+//     files, because a Go test can open any file by path.
+//   - A Rust job reads every file except Go sources, the manual, and
+//     the smoke checks.
+//   - A hugo job reads every file except Rust sources, because a manual
+//     can run the component's Go code to build, as one that generates
+//     its API reference with go run does.
+//   - The OS build reads every file except the manual, which is not in
+//     the OS image.
 //   - A CodeQL job reads only the sources of its language in its own
-//     directory, because the analysis reports results only for those
-//     files, and no data file, manifest, or Makefile changes them.
+//     directory, because the analysis reports results only for them.
+//   - Every other job, such as prek, reads every file.
 //
-// The manual is docs/ and the skills/ that its guides generate, in a
-// component that has a manual. brand has no manual, and its skills/
-// is the Go program that generates every manual's skills.
+// Of the files of the components in its closure, except files that no
+// output is built from (see isNotOutput):
 //
-// A job reads a dependency only through what its toolchain builds
-// from. A Go job reads the Go modules that its go.mod replaces with a
-// directory: Go honors the replace directives of the main module
-// alone, and the deps check fails a module of the repository that Go
-// would fetch from the proxy, so those directives name every module of
-// the repository that the job compiles. A Rust job reads the crates
-// that its crate takes by path, through every crate they take by path
-// in turn, and every other file of the components that hold them,
-// because a crate can include a file beside it, as brand's crate
-// includes the stylesheet. A hugo job reads what its manual's go.mod
-// and its component's go.mod replace, and brand's theme. A prek job and
-// the OS build read every dependency, because a hook such as go mod
-// tidy reads the modules that go.mod replaces. A Go or a Rust CodeQL
-// job reads the sources of its language in the dependencies of the job
-// it comes from, and a C, C++, or Python one reads no dependency. A
-// pinned dependency is a base image, and only images build on it.
+//   - A Go job reads every file except Rust sources of the components
+//     that its go.mod replaces with a local directory. Go applies only the main module's replace
+//     directives, and the deps check fails when a module of this
+//     repository would come from the proxy, so the job's go.mod lists
+//     every module of the repository that the job compiles.
+//   - A Rust job reads the components that hold the crates its crate
+//     depends on by path, followed to the end of the chain. It reads
+//     every file of those components except Go sources, because a crate
+//     can include a file beside it, as brand's crate includes its
+//     stylesheet.
+//   - A hugo job reads the components that the go.mod of its manual
+//     and the go.mod of its component replace. It also reads every file
+//     of brand except Rust sources, for the theme, even when brand is
+//     not in the component's [depends].
+//   - A Go or Rust CodeQL job reads the sources of its language in the
+//     components that its go.mod replaces or that its crate depends on
+//     by path. A C, C++, or Python CodeQL job reads none.
+//   - Every other job, such as prek and the OS build, reads every
+//     component. A prek hook such as go mod tidy reads the modules that
+//     go.mod replaces.
+//   - No job reads a pinned component, such as a base image. A change
+//     to it builds the images that build on it (see imageReads).
 //
-// A job also reads each file of another component that it names in
-// reads in its package.toml, such as a file of test cases that a Go test
-// and a Rust test share. No toolchain finds such a file through a
-// dependency, so the job names it.
-//
-// A go.mod or a Cargo.toml that cannot be read makes the job read every
-// dependency, so the job runs and fails there.
+// A job also reads each file that the reads list of the job in
+// package.toml lists, such as a file of test cases that a Go test and a
+// Rust test share, because no toolchain finds such a file through a
+// dependency. When a go.mod or a Cargo.toml cannot be parsed, the job
+// reads every component, so it runs and fails on that file.
 
-// rustSource is true for a file that only a Rust build reads.
+// rustSource is true for a file that only Rust builds read.
 func rustSource(file string) bool {
 	switch path.Base(file) {
 	case "Cargo.toml", "Cargo.lock", "rust-toolchain.toml":
@@ -74,7 +78,7 @@ func rustSource(file string) bool {
 	return path.Ext(file) == ".rs"
 }
 
-// goSource is true for a file that only a Go build reads.
+// goSource is true for a file that only Go builds read.
 func goSource(file string) bool {
 	switch path.Base(file) {
 	case "go.mod", "go.sum":
@@ -83,8 +87,8 @@ func goSource(file string) bool {
 	return path.Ext(file) == ".go"
 }
 
-// ownReads is true when the job reads the file of its own component,
-// given as a path relative to the component.
+// ownReads is true when the job reads a file of its own component.
+// rest is the file's path relative to the component.
 func ownReads(c *Component, job Job, rest string) bool {
 	manual := c.Docs != nil && (strings.HasPrefix(rest, "docs/") || strings.HasPrefix(rest, "skills/"))
 	aside := manual || strings.HasPrefix(rest, "smoke/")
@@ -103,8 +107,8 @@ func ownReads(c *Component, job Job, rest string) bool {
 	return true
 }
 
-// jobDeps names the components whose files the job reads through its
-// toolchain, other than its own. nil means every component in the
+// jobDeps returns the other components whose files the job reads
+// through its toolchain. A nil map means every component in the
 // closure.
 func (s selector) jobDeps(c *Component, job Job) map[string]bool {
 	var deps map[string]bool
@@ -132,8 +136,8 @@ func (s selector) jobDeps(c *Component, job Job) map[string]bool {
 	return deps
 }
 
-// jobReads is true when the job reads the changed file. deps is what
-// jobDeps returns for the job.
+// jobReads is true when the job reads the changed file. deps is the
+// result of jobDeps for the job.
 func (s selector) jobReads(c *Component, job Job, deps map[string]bool, file string) bool {
 	if slices.Contains(job.Reads, file) {
 		return true
@@ -149,8 +153,6 @@ func (s selector) jobReads(c *Component, job Job, deps map[string]bool, file str
 	if owner.Name() == c.Name() {
 		return ownReads(c, job, rest)
 	}
-	// Every manual builds with brand's theme, whether or not the
-	// component names brand in [depends].
 	if job.Toolchain == "hugo" && owner.Name() == "brand" {
 		return !rustSource(rest)
 	}
@@ -171,8 +173,9 @@ func (s selector) jobReads(c *Component, job Job, deps map[string]bool, file str
 	return true
 }
 
-// goReplaces names the components that the go.mod in dir replaces a
-// module with. A directory with no go.mod replaces nothing.
+// goReplaces returns the components that hold the local directories
+// in the replace directives of the go.mod in dir. A directory with no
+// go.mod returns an empty map.
 func (s selector) goReplaces(dir string) (map[string]bool, error) {
 	deps := map[string]bool{}
 	data, err := os.ReadFile(filepath.Join(s.root, dir, "go.mod"))
@@ -198,9 +201,10 @@ func (s selector) goReplaces(dir string) (map[string]bool, error) {
 	return deps, nil
 }
 
-// cratePaths names the components that hold the crate in dir, and every
-// crate that it or its workspace members take by path, through the
-// whole chain. A directory with no Cargo.toml takes nothing.
+// cratePaths returns the components that hold the crate in dir and
+// every crate that it or its workspace members depend on by path,
+// followed to the end of the chain. A directory with no Cargo.toml
+// returns an empty map.
 func (s selector) cratePaths(dir string) (map[string]bool, error) {
 	deps := map[string]bool{}
 	seen := map[string]bool{}
@@ -252,11 +256,11 @@ func (s selector) cratePaths(dir string) (map[string]bool, error) {
 	return deps, visit(dir)
 }
 
-// dependencyPaths lists the path of every dependency in a Cargo
-// manifest: under [dependencies], [dev-dependencies],
-// [build-dependencies], their [target] and [workspace] forms, and
-// [patch]. The path of a [lib] or a [[bin]] names a source file of the
-// crate itself, and it is not a dependency.
+// dependencyPaths returns the path of every path dependency in a parsed
+// Cargo manifest, from any table whose name ends in "dependencies" and
+// from [patch]. It skips the path of a [lib] or [[bin]] table, which is
+// a source file of the crate itself. inDeps is true inside a dependency
+// table.
 func dependencyPaths(table map[string]any, inDeps bool) []string {
 	var paths []string
 	for key, value := range table {
@@ -272,10 +276,12 @@ func dependencyPaths(table map[string]any, inDeps bool) []string {
 	return paths
 }
 
-// readsVersion is true when the image's build reads the VERSION build
-// argument, directly or through a tracked image of the repository that
-// it builds on. A pinned image's VERSION is its own pinned version, so
-// it never changes from one publish to the next.
+// readsVersion is true when the image's Dockerfile, or the Dockerfile
+// of an unpinned image of the repository that it builds on, declares
+// the VERSION build argument. It is false for a pinned image, because
+// its VERSION is the pinned version and does not change between
+// publishes. seen stops a cycle of base images. A Dockerfile that does
+// not parse returns true.
 func (s selector) readsVersion(c *Component, image Image, seen map[string]bool) bool {
 	if c.Pinned() || seen[image.Name] {
 		return false

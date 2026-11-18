@@ -30,10 +30,11 @@ type dependabotConfig struct {
 	} `yaml:"updates"`
 }
 
-// dependabotTree is a repository with two Go modules, a manual's
-// module, a Cargo workspace with a member crate, a standalone crate,
-// a composite action, and the trees that the configuration leaves out: test data, a cache,
-// and a checkout that .gitignore leaves out.
+// dependabotTree writes a repository with Go modules, the module of a
+// manual, a Cargo workspace with a member crate, a standalone crate,
+// and a composite action. It also has go.mod and Cargo.lock files that
+// the configuration must leave out: in test data, a cache, a plan, and
+// a checkout that .gitignore excludes.
 func dependabotTree(t *testing.T) string {
 	t.Helper()
 	root := writeTree(t, map[string]string{
@@ -63,7 +64,7 @@ func readDependabot(t *testing.T, root string) dependabotConfig {
 	t.Helper()
 	text, err := Dependabot(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating dependabot.yml: %v", err)
 	}
 	var config dependabotConfig
 	if err := yaml.Unmarshal(text, &config); err != nil {
@@ -80,7 +81,7 @@ func TestDependabotListsEveryModuleAndEveryLockfile(t *testing.T) {
 	}
 	want := []string{"gomod /", "gomod /a", "gomod /a/docs", "cargo /b", "cargo /d", "github-actions /", "github-actions /.github/actions/setup"}
 	if config.Version != 2 || !reflect.DeepEqual(entries, want) {
-		t.Errorf("version %d, entries %q, want version 2 and %q", config.Version, entries, want)
+		t.Errorf("dependabot.yml has version %d and entries %q, want version 2 and %q", config.Version, entries, want)
 	}
 }
 
@@ -89,13 +90,14 @@ func TestEveryDependabotEntryOpensOnlyGroupedSecurityUpdates(t *testing.T) {
 		group, grouped := u.Groups["security"]
 		if u.Limit == nil || *u.Limit != 0 || u.Schedule.Interval == "" || len(u.Groups) != 1 || !grouped ||
 			group.AppliesTo != "security-updates" || !reflect.DeepEqual(group.Patterns, []string{"*"}) {
-			t.Errorf("%s %s opens more than one grouped pull request of security updates: %+v", u.Ecosystem, u.Directory, u)
+			t.Errorf("the entry for %s %s is %+v, want one group of security updates and a limit of 0", u.Ecosystem, u.Directory, u)
 		}
 	}
 }
 
-// The Kubernetes modules follow the k3s release, and the flux action
-// follows the flux that the OS ships, so Dependabot moves none of them.
+// The Kubernetes modules take their version from the k3s release, and
+// the flux action reads its version from the flux that the OS ships, so
+// Dependabot ignores all of them.
 func TestDependabotLeavesThePinsThatFollowAnotherPin(t *testing.T) {
 	ignored := map[string][]string{}
 	for _, u := range readDependabot(t, dependabotTree(t)).Updates {
@@ -108,7 +110,7 @@ func TestDependabotLeavesThePinsThatFollowAnotherPin(t *testing.T) {
 	want := map[string][]string{"gomod /": k8s, "gomod /a": k8s, "gomod /a/docs": k8s,
 		"github-actions /": flux, "github-actions /.github/actions/setup": flux}
 	if !reflect.DeepEqual(ignored, want) {
-		t.Errorf("ignored %q, want %q", ignored, want)
+		t.Errorf("the ignored dependencies are %q, want %q", ignored, want)
 	}
 }
 
@@ -120,12 +122,12 @@ func TestDependabotSkipsAModuleThatTheTreeDeleted(t *testing.T) {
 		entries = append(entries, u.Ecosystem+" "+u.Directory)
 	}
 	if want := []string{"gomod /a", "github-actions /"}; !reflect.DeepEqual(entries, want) {
-		t.Errorf("entries %q, want %q", entries, want)
+		t.Errorf("the entries are %q, want %q", entries, want)
 	}
 }
 
-// A new module fails `generate -check` until `make workflows` writes
-// its entry, so no component goes without security updates.
+// `generate -check` fails for a new module until `make workflows`
+// writes its entry, so every module gets security updates.
 func TestGenerateCheckFailsForAModuleThatDependabotDoesNotList(t *testing.T) {
 	r := planFixture(t)
 	os.MkdirAll(filepath.Join(r.git.Dir, ".github/workflows"), 0o755)
@@ -133,13 +135,13 @@ func TestGenerateCheckFailsForAModuleThatDependabotDoesNotList(t *testing.T) {
 	os.WriteFile(filepath.Join(r.git.Dir, fluxVersionFile), []byte(testFlux+"\n"), 0o644)
 	os.MkdirAll(filepath.Join(r.git.Dir, "toolchains"), 0o755)
 	os.WriteFile(filepath.Join(r.git.Dir, imagesFile), []byte(fixtureBuildKitImages), 0o644)
-	w := newWorld(t, &fakeRegistry{})
+	w := newFakeEnv(t, &fakeRegistry{})
 	if err := w.run([]string{"generate", "-root", r.git.Dir}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	r.write("operator/go.mod", "module example.com/operator\n")
 	err := w.run([]string{"generate", "-root", r.git.Dir, "-check"})
 	if err == nil || !strings.Contains(err.Error(), dependabotFile) {
-		t.Errorf("the check gave %v, want a failure that names %s", err, dependabotFile)
+		t.Errorf("generate -check returned %v, want a failure that names %s", err, dependabotFile)
 	}
 }

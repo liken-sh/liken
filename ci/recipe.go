@@ -15,45 +15,47 @@ import (
 	"github.com/moby/patternmatcher/ignorefile"
 )
 
-// recipeLabel is the image label that holds a pinned component's
-// recipe hash. The plan reads it from the published image and compares
-// it with the hash of the tree.
+// recipeLabel is the image label whose value is a pinned component's
+// recipe. `ci bases` and `ci plan` read it from the published image and
+// compare it with the recipe of the tree.
 const recipeLabel = "sh.liken.recipe"
 
-// recipeFormat names the way Recipe and the bake file turn a
-// component into a build, and the labels that the publish writes on a
-// pinned image. A change to either one that can change what a build
-// makes, such as a new default in the bake template, changes this
-// value, so every pinned component needs a new revision. A change to
-// the labels of a pinned image changes it too: a published tag never
-// changes, so without a new revision a tag pushed by the old code
-// keeps the old labels, and the plan reads its recipe as current.
-// pinnedLabelsOfFormat in imagemeta_test.go holds the labels of each
-// format, and its test fails on a change to them that keeps the value.
+// recipeFormat is part of every recipe. Raise it when Recipe or the
+// bake template changes what a build makes, or when the publish changes
+// the labels it writes on a pinned image. The new value changes the
+// recipe of every pinned component, so each one needs a new revision.
+//
+// A label change needs the new revision because a published tag is
+// never overwritten. Without it, the old tag keeps the old labels, and
+// `ci bases` still reads its recipe as current. pinnedLabelsOfFormat in
+// imagemeta_test.go lists the labels of each format, and its test fails
+// when the labels change and this value does not.
 var recipeFormat = "2"
 
-// Recipe hashes everything a pinned component's images are built from:
-// its package.toml, each Dockerfile, every file that Docker sends in
-// each build context, the settings of each image's bake target, the
-// digest of each image outside the repository that a Dockerfile builds
-// from or copies from, the checksum of each file an ADD line fetches,
-// and the tag of each component in [depends].
+// Recipe returns a hash of everything a pinned component's images are
+// built from: its package.toml, each Dockerfile, every file that
+// Docker sends in each build context, the settings of each image's
+// bake target, the digest of each outside image that a Dockerfile
+// builds from or copies from, the checksum of each file that an ADD
+// line fetches, and the tag of each component in [depends].
 //
-// A dependency's tag stands in for its files, because its own recipe
-// covers them. So a new revision of a dependency changes the hash of
-// every pinned component above it, and each one needs a new revision
-// too.
+// For a dependency that publishes, the hash covers its tag and not its
+// files, because the dependency's own recipe covers its files. So a new
+// revision of a dependency changes the recipe of each pinned component
+// that depends on it, and each of those needs a new revision too.
 //
 // A dependency that publishes nothing, such as toolchains, has no tag.
-// The recipe covers what a build reads from it: the reference with its
+// For it, the recipe covers what the build reads: the reference and
 // digest that toolchains/images.toml gives each bare name that a
-// Dockerfile names, and not the entries that no Dockerfile here reads.
+// Dockerfile uses. Entries that no Dockerfile of the component uses are
+// left out.
 //
-// Recipe refuses what it cannot pin. An image outside the repository
-// must be named by its digest, because a tag can move to other bytes
-// with no change to the tree. A file from the network needs a
-// checksum for the same reason. An image of the repository must belong
-// to a component in the dependencies, whose tag the hash covers.
+// Recipe returns an error for anything it cannot pin. An outside image
+// must be named by digest, and a file fetched from the network must
+// have a checksum, because a tag or a URL can serve other bytes with no
+// change to the tree. An image of the repository must belong to a
+// component in the dependencies, because the hash covers that
+// component's tag.
 func Recipe(root string, components map[string]*Component, c *Component) (string, error) {
 	producer := ImageProducers(components)
 	closure := Closure(components, c.Name())
@@ -75,10 +77,11 @@ func Recipe(root string, components map[string]*Component, c *Component) (string
 		}
 		add("dockerfile", file, data)
 		parsed := parseDockerfile(string(data))
-		// The parser reads a backslash as the continuation character, so
-		// a file that changes it could hide a source from the recipe.
+		// parseDockerfile reads a backslash as the line continuation.
+		// An escape directive changes that character, and the parser
+		// would then miss sources that the recipe must hash.
 		if parsed.Escape {
-			return "", fmt.Errorf("%s: %s starts with an escape directive; a pinned component's Dockerfile continues its lines with a backslash", c.Name(), file)
+			return "", fmt.Errorf("%s: %s starts with an escape directive, and a pinned component's Dockerfile must continue its lines with a backslash", c.Name(), file)
 		}
 		if err := parsed.SnapshotFirst(); err != nil {
 			return "", fmt.Errorf("%s: %s: %w", c.Name(), file, err)
@@ -108,13 +111,13 @@ func Recipe(root string, components map[string]*Component, c *Component) (string
 				continue
 			}
 			if !strings.Contains(name, "@sha256:") {
-				return "", fmt.Errorf("%s: %s builds on %s, which names no digest; a pinned component names each image by its digest", c.Name(), file, name)
+				return "", fmt.Errorf("%s: %s builds on %s, which has no digest, and a pinned component must name each image by its digest", c.Name(), file, name)
 			}
 			lines["image "+name] = true
 		}
 		for _, remote := range parsed.Remotes {
 			if remote.Checksum == "" {
-				return "", fmt.Errorf("%s: %s adds %s with no --checksum; a pinned component states the checksum of each file it fetches", c.Name(), file, remote.URL)
+				return "", fmt.Errorf("%s: %s adds %s with no --checksum, and a pinned component must give a checksum for each file it fetches", c.Name(), file, remote.URL)
 			}
 			lines["remote "+remote.URL+" "+remote.Checksum] = true
 		}
@@ -148,9 +151,9 @@ func Recipe(root string, components map[string]*Component, c *Component) (string
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
-// ignoreFile is the ignore file that BuildKit reads for a build context:
-// <Dockerfile>.dockerignore beside the Dockerfile when it exists, and
-// the context's own .dockerignore when it does not.
+// ignoreFile returns the path of the ignore file that BuildKit reads
+// for a build context: <Dockerfile>.dockerignore beside the Dockerfile
+// when it exists, and the context's own .dockerignore otherwise.
 func ignoreFile(root, context, dockerfile string) string {
 	if _, err := os.Stat(filepath.Join(root, dockerfile+".dockerignore")); err == nil {
 		return dockerfile + ".dockerignore"
@@ -158,14 +161,16 @@ func ignoreFile(root, context, dockerfile string) string {
 	return path.Join(context, ".dockerignore")
 }
 
-// coveredByDependency is true when a named directory context is the
+// coveredByDependency reports whether a named directory context is the
 // build context of an image of another component in the closure, and
-// that image reads the context's own .dockerignore. That component's
-// recipe then covers exactly the files that Docker sends, and its tag
-// is in this recipe. Any other directory can send a file that no
-// recipe covers: a subdirectory reads only its own .dockerignore, and
-// a <Dockerfile>.dockerignore shapes the dependency's context and not
-// this one. So this recipe hashes such a directory itself.
+// that image reads the context's own .dockerignore. Then the
+// dependency's recipe already hashes the same files that Docker sends
+// for this context, so this recipe skips them.
+//
+// Any other directory can send files that no other recipe hashes. A
+// subdirectory of a dependency's context reads only its own
+// .dockerignore, and a <Dockerfile>.dockerignore filters only the
+// dependency's own build.
 func coveredByDependency(root string, components map[string]*Component, closure []string, self, dir string) bool {
 	for _, name := range closure {
 		if name == self {
@@ -183,11 +188,12 @@ func coveredByDependency(root string, components map[string]*Component, closure 
 	return false
 }
 
-// hashContext adds each file of a build context that Docker sends: the
-// files under dir, less the ones the ignore file excludes. Each file
-// adds whether it is executable, which is the one mode bit that git
-// keeps; the other bits follow the umask of the checkout. A symbolic
-// link adds its target, the way Docker sends it.
+// hashContext calls add for each file of a build context that Docker
+// sends: the files under dir that the ignore file does not exclude.
+// The name includes the file's mode, either 644, 755, or link, because
+// git records only whether a file is executable, and the other
+// permission bits follow the umask of the checkout. For a symbolic
+// link, the data is its target, because Docker sends the link itself.
 func hashContext(root, dir, ignorePath string, add func(kind, name string, data []byte)) error {
 	base := filepath.Join(root, dir)
 	ignore, err := readIgnore(root, ignorePath)
@@ -228,25 +234,24 @@ func hashContext(root, dir, ignorePath string, add func(kind, name string, data 
 	})
 }
 
-// readIgnore reads a build context's ignore file. A missing file
-// ignores nothing.
+// readIgnore parses a build context's ignore file. A missing file
+// excludes nothing.
 func readIgnore(root, ignorePath string) (*patternmatcher.PatternMatcher, error) {
 	var patterns []string
 	if f, err := os.Open(filepath.Join(root, ignorePath)); err == nil {
 		patterns, err = ignorefile.ReadAll(f)
 		f.Close()
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", ignorePath, err)
+			return nil, fmt.Errorf("reading %s: %w", ignorePath, err)
 		}
 	}
 	ignore, err := patternmatcher.New(patterns)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", ignorePath, err)
+		return nil, fmt.Errorf("parsing the patterns of %s: %w", ignorePath, err)
 	}
 	return ignore, nil
 }
 
-// Recipes hashes every pinned component.
 func Recipes(root string, components map[string]*Component) (map[string]string, error) {
 	recipes := map[string]string{}
 	for _, c := range sortedComponents(components) {

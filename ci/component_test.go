@@ -16,19 +16,19 @@ func writeTree(t *testing.T, files map[string]string) string {
 	for name, text := range files {
 		path := filepath.Join(root, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the directory of %s: %v", name, err)
 		}
 		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing %s: %v", name, err)
 		}
 	}
-	// The loader and the checks list a repository's files through git,
-	// so every tree is a repository, with its files not yet committed.
+	// The loader and the checks list a repository's files with git, so
+	// every tree is a git repository whose files are not committed.
 	init := exec.Command("git", "init", "--quiet", "--initial-branch=main")
 	init.Dir = root
 	init.Env = gitEnv(testGit...)
 	if out, err := init.CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v: %s", err, out)
+		t.Fatalf("initializing the git repository: %v: %s", err, out)
 	}
 	return root
 }
@@ -59,18 +59,18 @@ aliases = ["app-sidecar"]
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	app := components["app"]
 	if len(components) != 2 || app.Dir != "app" || app.Docs.Prefix != "app" {
-		t.Fatalf("loaded %v", components)
+		t.Fatalf("loaded the components %v, want 2 with app in app and its docs prefix app", components)
 	}
 	if got := strings.Join(app.Packages(), " "); got != "app app-sidecar app-deploy" {
-		t.Errorf("packages %q", got)
+		t.Errorf("the packages are %q, want %q", got, "app app-sidecar app-deploy")
 	}
 }
 
-func TestAnotherCheckoutInsideTheTreeHoldsNoComponent(t *testing.T) {
+func TestLoadComponentsSkipsAnotherCheckoutInsideTheTree(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"app/package.toml":                         "[package]\nname = \"app\"\n",
 		".claude/worktrees/agent/.git":             "gitdir: /elsewhere\n",
@@ -78,14 +78,15 @@ func TestAnotherCheckoutInsideTheTreeHoldsNoComponent(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	if len(components) != 1 || components["app"].Dir != "app" {
-		t.Errorf("loaded %v", components)
+		t.Errorf("loaded the components %v, want only app in app", components)
 	}
 }
 
-// pinnedImage is the outputs table of a pinned component with one image.
+// pinnedImage is the outputs table of a pinned component that has one
+// image.
 const pinnedImage = "[[outputs.images]]\nname = \"a\"\ndescription = \"The a image.\"\n"
 
 func TestAPinnedComponentPublishesUnderItsVersionAndRevision(t *testing.T) {
@@ -95,10 +96,10 @@ func TestAPinnedComponentPublishesUnderItsVersionAndRevision(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	if a, b := components["a"], components["b"]; !a.Pinned() || a.PinnedTag() != "20260928-2" || b.Pinned() {
-		t.Errorf("a pinned %v at %s, b pinned %v", a.Pinned(), a.PinnedTag(), b.Pinned())
+		t.Errorf("a.Pinned() = %v with tag %s, b.Pinned() = %v, want true with tag 20260928-2, false", a.Pinned(), a.PinnedTag(), b.Pinned())
 	}
 }
 
@@ -109,7 +110,7 @@ func TestAPinnedComponentDependsOnlyOnPinnedComponents(t *testing.T) {
 	})
 	_, err := LoadComponents(root)
 	if err == nil || !strings.Contains(err.Error(), "a pinned component depends only on pinned components") {
-		t.Fatalf("got %v", err)
+		t.Fatalf("LoadComponents returned %v, want an error that a pinned component depends only on pinned components", err)
 	}
 }
 
@@ -119,7 +120,7 @@ func TestAPinnedComponentMayDependOnAComponentThatPublishesNothing(t *testing.T)
 		"toolchains/package.toml": "[package]\nname = \"toolchains\"\n",
 	})
 	if _, err := LoadComponents(root); err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 }
 
@@ -136,7 +137,7 @@ func TestAPackageTomlIsRefused(t *testing.T) {
 		"a version that looks like a release": {"[package]\nname = \"a\"\nversion = \"2026.09.28\"\nrevision = 1\n" + pinnedImage,
 			"looks like a release version"},
 		"an upstream version on a tracked component": {"[package]\nname = \"a\"\n[package.upstream]\nindi = \"2.2.5\"\n",
-			"only a pinned component states upstream versions"},
+			"only a pinned component can list upstream versions"},
 		"an upstream name a label cannot hold": {"[package]\nname = \"a\"\nversion = \"20260928\"\nrevision = 1\n[package.upstream]\n\"Intel Media\" = \"25.2\"\n" + pinnedImage,
 			"an upstream name may hold only"},
 		"an empty upstream version": {"[package]\nname = \"a\"\nversion = \"20260928\"\nrevision = 1\n[package.upstream]\nindi = \"\"\n" + pinnedImage,
@@ -154,7 +155,7 @@ func TestAPackageTomlIsRefused(t *testing.T) {
 			"set grype = true"},
 		"two grype jobs": {"[package]\nname = \"a\"\n[[jobs]]\nname = \"x\"\ntoolchain = \"os\"\nrun = \"s $GITHUB_WORKSPACE/grype/a.sarif\"\ngrype = true\n[[jobs]]\nname = \"y\"\ntoolchain = \"os\"\nrun = \"s $GITHUB_WORKSPACE/grype/a.sarif\"\ngrype = true\n",
 			"two jobs upload a grype scan"},
-		"a job named images": {"[package]\nname = \"a\"\n[[jobs]]\nname = \"images\"\ntoolchain = \"go\"\nrun = \"m\"\n", "belong to the outputs"},
+		"a job named images": {"[package]\nname = \"a\"\n[[jobs]]\nname = \"images\"\ntoolchain = \"go\"\nrun = \"m\"\n", "because the outputs use those names"},
 		"two images of one name": {"[package]\nname = \"a\"\n[[outputs.images]]\nname = \"a\"\ndescription = \"The a image.\"\n[[outputs.images]]\nname = \"b\"\ndescription = \"The b image.\"\naliases = [\"a\"]\n",
 			"two images are named"},
 		"an excluded path that does not exist": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"monitoring/\"]\n",
@@ -170,11 +171,11 @@ func TestAPackageTomlIsRefused(t *testing.T) {
 		"the component itself excluded": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"./\"]\n",
 			"a path inside the component"},
 		"an excluded deploy directory": {"[package]\nname = \"a\"\n[outputs]\ndeploy = \"deploy\"\nexclude = [\"deploy/\"]\n",
-			"the deploy artifact holds"},
+			"the deploy artifact contains"},
 		"an excluded path in the deploy directory": {"[package]\nname = \"a\"\n[outputs]\ndeploy = \"deploy\"\nexclude = [\"deploy/base/\"]\n",
-			"the deploy artifact holds"},
+			"the deploy artifact contains"},
 		"an excluded directory that holds the deploy directory": {"[package]\nname = \"a\"\n[outputs]\ndeploy = \"deploy/base\"\nexclude = [\"deploy/\"]\n",
-			"the deploy artifact holds"},
+			"the deploy artifact contains"},
 		"an excluded path that an image's build context sends": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"cmd/\"]\n[[outputs.images]]\nname = \"a\"\ndescription = \"The a image.\"\n",
 			"the image a receives"},
 		"an excluded path that a named build context sends": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"cmd/main.go\"]\n[[outputs.images]]\nname = \"a\"\ndescription = \"The a image.\"\ncontext = \"deploy\"\ncontexts = { src = \"a/cmd\" }\n",
@@ -190,7 +191,7 @@ func TestAPackageTomlIsRefused(t *testing.T) {
 			})
 			_, err := LoadComponents(root)
 			if err == nil || !strings.Contains(err.Error(), c.wants) {
-				t.Fatalf("got %v, want an error with %q", err, c.wants)
+				t.Fatalf("LoadComponents returned %v, want an error with %q", err, c.wants)
 			}
 		})
 	}
@@ -203,7 +204,7 @@ func TestACycleIsRefused(t *testing.T) {
 	})
 	_, err := LoadComponents(root)
 	if err == nil || !strings.Contains(err.Error(), "a -> b -> a") {
-		t.Fatalf("got %v", err)
+		t.Fatalf("LoadComponents returned %v, want an error that shows the cycle a -> b -> a", err)
 	}
 }
 
@@ -214,13 +215,13 @@ func TestTwoDirectoriesCannotNameOneComponent(t *testing.T) {
 	})
 	_, err := LoadComponents(root)
 	if err == nil || !strings.Contains(err.Error(), "both name the component") {
-		t.Fatalf("got %v", err)
+		t.Fatalf("LoadComponents returned %v, want an error that both directories name the component", err)
 	}
 }
 
-// A deploy/ directory is where a component keeps its manifests, but
-// only the deploy key publishes them. liken keeps its monitoring
-// component in deploy/ and publishes to the channel alone.
+// Only outputs.deploy publishes a directory of manifests as an
+// artifact. The `liken` OS keeps its monitoring manifests in
+// deploy/ and publishes to the channel only.
 func TestADeployDirectoryWithNoDeployKeyPublishesNoArtifact(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"os/package.toml":                         "[package]\nname = \"os\"\n[outputs]\nchannel = true\nexclude = [\"deploy/monitoring/\"]\n",
@@ -228,9 +229,9 @@ func TestADeployDirectoryWithNoDeployKeyPublishesNoArtifact(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	if got := components["os"].Packages(); len(got) != 0 {
-		t.Errorf("packages %v", got)
+		t.Errorf("the packages are %v, want none", got)
 	}
 }

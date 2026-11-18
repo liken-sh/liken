@@ -17,19 +17,17 @@ import (
 // component's workflow.
 const rootWorkflowFile = ".github/workflows/ci.yaml"
 
-// A Diff is what changed between two commits, in the terms that the
-// plan decides with. The generated files at the top of the repository
-// hold a part for each component, so a change to one of them names the
-// components whose part changed, not every component.
+// A Diff is what changed between two commits, sorted into the kinds of
+// change that the planner selects jobs by. The generated root workflow and
+// bake file hold a section for each component, so a change to one of
+// them marks only the components whose section changed.
 type Diff struct {
 	// Files are the changed files, less the generated workflows, the
 	// bake file, and the other files under .github/.
 	Files []string
-	// Checks holds each changed package.toml whose change is only in
-	// its jobs or its excluded paths. The jobs are what the component's
-	// checks run, and the excluded paths name files no output is built
-	// from, so the change runs the component's own checks and gives no
-	// output a new version.
+	// Checks maps each changed package.toml to true when only its jobs
+	// or its outputs.exclude paths changed. Such a change runs the
+	// component's checks and does not change the version of any output.
 	Checks map[string]bool
 	// Workflows maps each component whose workflow changed to the file
 	// that changed: its own generated workflow, its call in the root
@@ -39,29 +37,30 @@ type Diff struct {
 	// file that changed: the publish job of its workflow, or its publish
 	// call in the root workflow.
 	Publishes map[string]string
-	// Targets holds each image whose target in the bake file changed.
+	// Targets is true for each image whose target in the bake file
+	// changed.
 	Targets map[string]bool
-	// SharedBake is true when the bake file changed outside its
-	// targets, such as a variable that every target reads.
+	// SharedBake is true when the bake file changed outside its targets,
+	// for example in a variable that every target reads.
 	SharedBake bool
 	// Site is true when the site job of the root workflow changed.
 	Site bool
-	// GitHub is a changed file under .github/, or "" when none changed.
-	// The CodeQL analysis of the Actions code reads those files.
+	// GitHub is the first changed file under .github/, or "" when none
+	// changed. The CodeQL analysis of the Actions code reads those files.
 	GitHub string
 }
 
 // componentWorkflow matches the path of a component's generated
-// workflow, and names the component.
+// workflow, and captures the component name.
 var componentWorkflow = regexp.MustCompile(`^\.github/workflows/component-(.+)\.yaml$`)
 
 // ReadDiff reads what changed between two commits.
 //
-// A file under .github/ that is not a component's part runs no
-// component's jobs: the root workflow's own jobs run in every run, and
-// no component's jobs read any other file there. A changed local action
-// runs each component whose workflow uses any local action, because
-// one action can use another.
+// A file under .github/ other than a component's workflow, the root
+// workflow, or a local action runs no component's jobs, because no
+// component's jobs read it. A changed local action marks every
+// component whose workflow uses any local action, because one local
+// action can call another.
 func (g Git) ReadDiff(components map[string]*Component, from, to string) (Diff, error) {
 	d := Diff{Workflows: map[string]string{}, Publishes: map[string]string{}, Targets: map[string]bool{}, Checks: map[string]bool{}}
 	files, err := g.Changed(from, to)
@@ -122,15 +121,16 @@ func (g Git) ReadDiff(components map[string]*Component, from, to string) (Diff, 
 	return d, nil
 }
 
-// outputFiles are the changed files less each package.toml whose change
-// is only in what the checks read.
+// outputFiles returns Files without each package.toml that Checks
+// marks true, because that change does not change the version of any output.
 func (d Diff) outputFiles() []string {
 	return slices.DeleteFunc(slices.Clone(d.Files), func(file string) bool { return d.Checks[file] })
 }
 
 // checksOnly is true when a package.toml differs between the two commits
-// only in its jobs and its excluded paths. A file missing at either commit,
-// or one that does not parse, is a change to everything it holds.
+// only in its jobs and its excluded paths. A file that is missing at
+// either commit or does not parse counts as a change to everything in
+// it.
 func (g Git) checksOnly(from, to, file string) (bool, error) {
 	var parts [2]map[string]any
 	for i, rev := range []string{from, to} {
@@ -142,8 +142,8 @@ func (g Git) checksOnly(from, to, file string) (bool, error) {
 			return false, nil
 		}
 		delete(parts[i], "jobs")
-		// An outputs table that held only the excluded paths is the same
-		// as no outputs table.
+		// A package.toml whose outputs table has only the excluded paths
+		// equals one with no outputs table.
 		if outputs, ok := parts[i]["outputs"].(map[string]any); ok {
 			delete(outputs, "exclude")
 			if len(outputs) == 0 {
@@ -154,11 +154,11 @@ func (g Git) checksOnly(from, to, file string) (bool, error) {
 	return reflect.DeepEqual(parts[0], parts[1]), nil
 }
 
-// rootWorkflowDiff names each component whose calls in the root
-// workflow differ between the two commits: the call of its checks, or
-// the call of its publish. It also finds whether the site job differs.
-// A root workflow that is missing or does not parse at either commit
-// names every component and the site.
+// rootWorkflowDiff records each component whose checks call or publish
+// call in the root workflow differs between the two commits, and
+// whether the site job differs. A root workflow that is missing or does
+// not parse at either commit counts as a change to every component and
+// the site.
 func (g Git) rootWorkflowDiff(components map[string]*Component, from, to string, d *Diff) error {
 	var calls [2]map[string][]byte
 	for i, rev := range []string{from, to} {
@@ -167,7 +167,7 @@ func (g Git) rootWorkflowDiff(components map[string]*Component, from, to string,
 			return err
 		}
 		if found {
-			calls[i] = workflowCalls(text)
+			calls[i] = jobTexts(text)
 		}
 	}
 	if calls[0] == nil || calls[1] == nil || !bytes.Equal(calls[0]["site"], calls[1]["site"]) {
@@ -187,7 +187,8 @@ func (g Git) rootWorkflowDiff(components map[string]*Component, from, to string,
 }
 
 // jobChanged is true when the job of a workflow differs between the two
-// commits, or when the workflow does not parse at either one.
+// commits, or when the workflow is missing or does not parse at either
+// one.
 func (g Git) jobChanged(from, to, file, job string) (bool, error) {
 	var jobs [2]map[string][]byte
 	for i, rev := range []string{from, to} {
@@ -196,15 +197,15 @@ func (g Git) jobChanged(from, to, file, job string) (bool, error) {
 			return false, err
 		}
 		if found {
-			jobs[i] = workflowCalls(text)
+			jobs[i] = jobTexts(text)
 		}
 	}
 	return jobs[0] == nil || jobs[1] == nil || !bytes.Equal(jobs[0][job], jobs[1][job]), nil
 }
 
-// workflowCalls maps each job of a workflow to its text, or returns nil
+// jobTexts maps each job of a workflow to its text, or returns nil
 // when the workflow does not parse.
-func workflowCalls(text string) map[string][]byte {
+func jobTexts(text string) map[string][]byte {
 	var doc struct {
 		Jobs map[string]yaml.Node `yaml:"jobs"`
 	}
@@ -222,9 +223,10 @@ func workflowCalls(text string) map[string][]byte {
 	return calls
 }
 
-// bakeDiff names each target of the bake file that differs between the
-// two commits, and whether the part outside the targets differs. A bake
-// file that is missing at either commit differs everywhere.
+// bakeDiff records each target of the bake file that differs between
+// the two commits, and whether the text outside the targets differs. A
+// bake file that is missing at either commit counts as different
+// everywhere.
 func (g Git) bakeDiff(from, to string, d *Diff) error {
 	var parts [2]bakeParts
 	for i, rev := range []string{from, to} {
@@ -254,18 +256,18 @@ type bakeParts struct {
 }
 
 // bakeBlock matches the first line of a top-level block of the bake
-// file, and names its kind and its label.
+// file, and captures its kind and its label.
 var bakeBlock = regexp.MustCompile(`^(target|group|variable) "([^"]+)" \{$`)
 
 // splitBake splits the bake file into the text of each target and the
 // text that every target shares: the variables and any other line
-// outside a block. The default group names the targets for a build of
-// every image on a workstation, and no build in CI reads it, so it is
-// in neither part; comments outside a block are in neither part too.
+// outside a block. It leaves out the groups, because the default group
+// lists every image for a build on a workstation and no build in CI
+// reads it. It also leaves out comments outside a block.
 //
-// The file is generated, and `ci generate -check` holds it to the
-// template, so every top-level block starts on a line of its own at
-// the left margin and ends with a line that holds only "}".
+// The parse works only on the generated file: `ci generate -check`
+// keeps the file equal to the template, so every top-level block starts
+// at the left margin and ends with a line that is only "}".
 func splitBake(text string) bakeParts {
 	p := bakeParts{targets: map[string]string{}}
 	var shared strings.Builder

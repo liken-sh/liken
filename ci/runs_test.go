@@ -6,8 +6,9 @@ import (
 	"testing"
 )
 
-// actionsAPI serves the runs of ci.yaml, and checks the query that
-// asks for the newest green push to main.
+// actionsAPI starts a fake Actions API that responds with status and
+// body to the query for successful push runs of ci.yaml on main, and
+// with 404 to any other path, query, or token.
 func actionsAPI(t *testing.T, status int, body string) string {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -25,24 +26,24 @@ func actionsAPI(t *testing.T, status int, body string) string {
 	return server.URL
 }
 
-func TestTheNewestGreenRunIsReadFromTheActionsAPI(t *testing.T) {
+func TestTheNewestSuccessfulRunIsReadFromTheActionsAPI(t *testing.T) {
 	cases := []struct {
 		name, body string
 		status     int
 		want       string
 		fails      bool
 	}{
-		{"a green run", `{"workflow_runs":[{"head_sha":"abc123"}]}`, http.StatusOK, "abc123", false},
-		{"no green run", `{"workflow_runs":[]}`, http.StatusOK, "", false},
+		{"a run that passed", `{"workflow_runs":[{"head_sha":"abc123"}]}`, http.StatusOK, "abc123", false},
+		{"no run that passed", `{"workflow_runs":[]}`, http.StatusOK, "", false},
 		{"a refusal", `{}`, http.StatusForbidden, "", true},
-		{"an answer that is not JSON", `<html>`, http.StatusOK, "", true},
+		{"a response that is not JSON", `<html>`, http.StatusOK, "", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			runs := Runs{API: actionsAPI(t, c.status, c.body), Repository: "liken-sh/liken", Token: "token"}
-			got, err := runs.NewestGreen("ci.yaml")
+			got, err := runs.NewestSuccessful("ci.yaml")
 			if got != c.want || (err != nil) != c.fails {
-				t.Errorf("NewestGreen = %q, %v", got, err)
+				t.Errorf("NewestSuccessful = %q, %v, want %q and failure %v", got, err, c.want, c.fails)
 			}
 		})
 	}

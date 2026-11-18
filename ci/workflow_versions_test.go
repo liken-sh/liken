@@ -11,44 +11,44 @@ func TestADeployNeedsTheFluxVersion(t *testing.T) {
 	root := writeTree(t, map[string]string{"app/package.toml": "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n"})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	if _, err := Workflows(root, components); err == nil || !strings.Contains(err.Error(), "liken/flux/VERSION") {
 		t.Errorf("got %v, want an error that names liken/flux/VERSION", err)
 	}
 }
 
-// Every prek job and the repository job run one prek, so a hook
-// behaves the same in each.
+// Every prek job and the repository job of ci.yaml install the same
+// prek version, so a hook behaves the same in each.
 func TestEveryPrekJobRunsOnePrek(t *testing.T) {
 	root := writeTree(t, map[string]string{"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n"})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	for _, file := range []string{".github/workflows/ci.yaml", ".github/workflows/component-app.yaml"} {
 		if want := "prek-version: " + prekVersion + "\n"; !strings.Contains(string(files[file]), want) {
-			t.Errorf("%s lacks %q", file, want)
+			t.Errorf("%s does not contain %q", file, want)
 		}
 	}
 }
 
-// prek-action verifies a download only against its own checksum table,
-// and it runs a prek that the table does not name unverified. So every
-// prek step passes the digest that this repository pins.
+// prek-action checks a download only against a checksum table built
+// into the action, and runs a prek version that is not in the table
+// with no check. So every prek step passes the pinned sha256.
 func TestEveryPrekStepVerifiesThePinnedDigest(t *testing.T) {
 	root := writeTree(t, map[string]string{"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n"})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(prekSHA256) {
 		t.Fatalf("prekSHA256 is %q, want a SHA-256 digest", prekSHA256)
@@ -65,15 +65,15 @@ func TestEveryPrekStepVerifiesThePinnedDigest(t *testing.T) {
 	}
 }
 
-// setup-trivy installs Trivy with an install script that checks the
-// archive against the checksums file of the same release, read at run
-// time, so a changed release changes what CI runs. So each step that
-// installs Trivy checks the archive against the digest that this
-// repository pins.
+// setup-trivy's install script checks the archive against the
+// release's checksums file, which it downloads at run time, so a
+// changed release changes what CI runs. So no workflow uses
+// setup-trivy, and each step that installs Trivy passes the pinned
+// TRIVY_SHA256.
 func TestEveryTrivyInstallVerifiesThePinnedDigest(t *testing.T) {
 	files, err := Workflows(fluxTree(t), graphFixture(t))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(trivySHA256) {
 		t.Fatalf("trivySHA256 is %q, want a SHA-256 digest", trivySHA256)
@@ -84,7 +84,7 @@ func TestEveryTrivyInstallVerifiesThePinnedDigest(t *testing.T) {
 			continue
 		}
 		if strings.Contains(string(text), "setup-trivy") {
-			t.Errorf("%s installs Trivy with setup-trivy", file)
+			t.Errorf("%s installs Trivy with setup-trivy, want an install that checks TRIVY_SHA256", file)
 		}
 		for job, fields := range workflowJobs(t, text) {
 			steps, _ := fields["steps"].([]any)
@@ -101,16 +101,16 @@ func TestEveryTrivyInstallVerifiesThePinnedDigest(t *testing.T) {
 		}
 	}
 	if installs == 0 {
-		t.Error("no step installs Trivy")
+		t.Error("no step of the generated workflows installs Trivy, want at least one")
 	}
 }
 
-// The graph job runs on every push, so a pin that drifts fails the
-// commit that makes it drift.
+// The graph job runs on every push, so a commit that breaks a pin rule
+// fails its own CI run.
 func TestTheGraphJobChecksThePins(t *testing.T) {
 	files, err := Workflows(fluxTree(t), graphFixture(t))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	var runs []string
 	for _, step := range workflowJobs(t, files[".github/workflows/ci.yaml"])["graph"]["steps"].([]any) {
@@ -118,6 +118,6 @@ func TestTheGraphJobChecksThePins(t *testing.T) {
 		runs = append(runs, run)
 	}
 	if !slices.Contains(runs, "go run . pins -root ..") {
-		t.Errorf("the graph job runs %q", runs)
+		t.Errorf("the graph job runs %q, want it to run \"go run . pins -root ..\"", runs)
 	}
 }

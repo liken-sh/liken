@@ -10,34 +10,26 @@ import (
 	"strings"
 )
 
-// dependabotFile is the path of the generated Dependabot configuration,
-// from the repository root. GitHub reads it under this name.
+// dependabotFile is the path of the generated Dependabot configuration.
+// GitHub reads the configuration only from this path.
 const dependabotFile = ".github/dependabot.yml"
 
-// dependabotEntry is one directory that Dependabot reads: a Go module,
-// a Cargo workspace or a standalone crate, or a directory of workflows
-// or of one composite action.
+// dependabotEntry is one directory that Dependabot updates: a Go
+// module, a Cargo workspace or standalone crate, the workflows
+// directory, or one composite action.
 type dependabotEntry struct {
 	Ecosystem, Directory string
 }
 
-// Dependabot renders the Dependabot configuration: one entry for each
-// directory with a go.mod, and one for each directory with a
-// Cargo.lock. Dependabot opens a security update only for a directory
-// that the configuration lists, so the generator lists every one that
-// git tracks or would track, and `generate -check` fails at the commit
-// that adds a module or a crate without its entry. A member of a Cargo
-// workspace has no Cargo.lock of its own, and the workspace's entry
-// covers it.
-//
-// The github-actions entries cover the workflows, which Dependabot
-// reads from .github/workflows under the entry of the root, and each
-// composite action under .github/actions, which needs an entry of its
-// own directory. The root's entry is always there, because the
-// generator always writes ci.yaml. A security update of an action rewrites the commit and
-// the release comment of each uses: line, and `generate -check` fails
-// until `ci/latest.sh --bump <repository>` writes the same pin into
-// actionPins in ci/actions.go.
+// Dependabot renders the Dependabot configuration, with one entry for
+// each directory with a go.mod, each directory with a Cargo.lock, the
+// repository root for .github/workflows, and each composite action in
+// .github/actions. Dependabot opens a security update only for a
+// directory that the configuration lists, so `generate -check` fails
+// at a commit that adds a module, a crate, or an action without its
+// entry. A member of a Cargo workspace has no Cargo.lock, and the
+// workspace's entry covers it. The template, dependabot.yml.tmpl,
+// explains the settings of each entry.
 func Dependabot(root string) ([]byte, error) {
 	files, err := sourceFiles(root)
 	if err != nil {
@@ -55,7 +47,7 @@ func Dependabot(root string) ([]byte, error) {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(root, file)); errors.Is(err, fs.ErrNotExist) {
-			// git still tracks a file that the tree deleted.
+			// git can list a file that is deleted from the working tree.
 			continue
 		} else if err != nil {
 			return nil, err

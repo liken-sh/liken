@@ -13,22 +13,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// buildkitKey is the entry of imagesFile that names the BuildKit daemon
-// image. docker/setup-buildx-action creates a builder with the
-// docker-container driver, which runs BuildKit in a container, and
-// every image that CI builds and publishes comes out of that daemon.
-// With no image in the step's driver-opts, the action and buildx both
-// pull moby/buildkit:buildx-stable-1, a tag that BuildKit moves to each
-// new release. So the daemon that builds every image would change with
-// no change to the tree. Each generated setup-buildx-action step names
-// this entry's digest in driver-opts, and checkBuildKit fails any
-// workflow or composite action whose step names another image or none.
+// buildkitKey is the entry of imagesFile that pins the BuildKit image.
+// docker/setup-buildx-action creates a builder with the docker-container
+// driver, which runs BuildKit in a container, and that daemon builds
+// every image that CI publishes. When driver-opts sets no image, buildx
+// pulls moby/buildkit:buildx-stable-1, a tag that moves to each BuildKit
+// release, so the daemon would change with no commit to the tree. So
+// each generated setup-buildx-action step sets this image in
+// driver-opts, and checkBuildKit fails a step that sets another image
+// or none.
 const buildkitKey = "buildkit"
 
-// setupBuildx is the action that creates each CI job's builder.
 const setupBuildx = "docker/setup-buildx-action"
 
-// readBuildKit reads the reference of buildkitKey from imagesFile.
+// readBuildKit returns the image reference that imagesFile pins under
+// buildkitKey.
 func readBuildKit(root string) (string, error) {
 	tools, err := readToolchains(root)
 	if err != nil {
@@ -36,16 +35,16 @@ func readBuildKit(root string) (string, error) {
 	}
 	image := tools.Build[buildkitKey]
 	if image == "" {
-		return "", fmt.Errorf("%s names no %s image, so CI's builders would run BuildKit's moving default image", imagesFile, buildkitKey)
+		return "", fmt.Errorf("%s has no %s image, so CI's builders would run BuildKit's moving default image", imagesFile, buildkitKey)
 	}
 	return image, nil
 }
 
-// checkBuildKit lists each setup-buildx-action step under .github that
-// does not start the BuildKit image of imagesFile: the generated
-// workflows, the hand-written workflows, and each composite action.
-// A tree whose imagesFile names no BuildKit image fails on its first
-// setup-buildx-action step, and a tree with no such step needs no pin.
+// checkBuildKit lists each setup-buildx-action step in a workflow or a
+// composite action under .github that does not run the BuildKit image
+// that imagesFile pins. When imagesFile pins no BuildKit image, each
+// step that sets an image in driver-opts is a finding, and a step that
+// sets none is not.
 func checkBuildKit(root string) ([]string, error) {
 	tools, err := readToolchains(root)
 	if err != nil {
@@ -63,7 +62,8 @@ func checkBuildKit(root string) ([]string, error) {
 		}
 		data, err := os.ReadFile(filepath.Join(root, file))
 		if errors.Is(err, fs.ErrNotExist) {
-			// git still tracks a file that the tree deleted.
+			// git ls-files still lists a file that was deleted from the
+			// working tree and not from the index.
 			continue
 		}
 		if err != nil {
@@ -79,9 +79,9 @@ func checkBuildKit(root string) ([]string, error) {
 }
 
 // unpinnedBuilders lists each setup-buildx-action step of one workflow
-// or composite action whose driver-opts name no image, or an image
-// other than the pinned one. A workflow's steps are under jobs, and a
-// composite action's are under runs.
+// or composite action whose driver-opts do not set image=<image>.
+// A workflow's steps are under jobs, and a composite action's are under
+// runs.
 func unpinnedBuilders(file string, data []byte, image string) ([]string, error) {
 	var doc struct {
 		Jobs map[string]struct {
@@ -92,7 +92,7 @@ func unpinnedBuilders(file string, data []byte, image string) ([]string, error) 
 		} `yaml:"runs"`
 	}
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("%s: %w", file, err)
+		return nil, fmt.Errorf("parsing %s: %w", file, err)
 	}
 	steps := doc.Runs.Steps
 	for _, job := range doc.Jobs {
@@ -106,7 +106,7 @@ func unpinnedBuilders(file string, data []byte, image string) ([]string, error) 
 			With map[string]any `yaml:"with"`
 		}
 		if err := node.Decode(&step); err != nil {
-			return nil, fmt.Errorf("%s:%d: %w", file, node.Line, err)
+			return nil, fmt.Errorf("decoding the step at %s:%d: %w", file, node.Line, err)
 		}
 		if !strings.HasPrefix(step.Uses, setupBuildx+"@") {
 			continue
@@ -116,7 +116,7 @@ func unpinnedBuilders(file string, data []byte, image string) ([]string, error) 
 		case image:
 			continue
 		case "":
-			findings = append(findings, fmt.Sprintf("%s:%d runs %s with no image in driver-opts, so its builder runs moby/buildkit:buildx-stable-1, a moving tag; write driver-opts: image=%s",
+			findings = append(findings, fmt.Sprintf("%s:%d runs %s with no image in driver-opts, so its builder runs moby/buildkit:buildx-stable-1, a moving tag. Write driver-opts: image=%s",
 				file, node.Line, setupBuildx, image))
 		default:
 			findings = append(findings, fmt.Sprintf("%s:%d runs %s with the BuildKit image %s, and %s pins %s as %s",
@@ -126,8 +126,9 @@ func unpinnedBuilders(file string, data []byte, image string) ([]string, error) 
 	return findings, nil
 }
 
-// driverImage is the image that a driver-opts input names, one option
-// on each line, the way setup-buildx-action reads the input.
+// driverImage returns the value of the image option in a driver-opts
+// input, or "" when there is none. setup-buildx-action reads the input
+// as one option on each line.
 func driverImage(opts string) string {
 	for _, opt := range strings.Split(opts, "\n") {
 		if image, ok := strings.CutPrefix(strings.TrimSpace(opt), "image="); ok {

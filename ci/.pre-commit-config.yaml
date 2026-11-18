@@ -1,7 +1,6 @@
-# These checks run before every commit, through pre-commit or prek,
-# its drop-in replacement. They are the fast, local ones: formatters,
-# linters, and hygiene checks. The test suites and the coverage gates
-# run in CI, through the `make` targets that package.toml names.
+# The fast checks that run before every commit, through pre-commit or
+# prek. The tests and the coverage gate run in `make test`, which CI
+# runs.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -17,7 +16,7 @@ repos:
     rev: v0.11.0.1
     hooks:
       - id: shellcheck
-        # -x follows the source line of latest.sh into
+        # -x lets shellcheck follow latest.sh's source of
         # toolchains/pin.sh.
         args: [-x]
   - repo: local
@@ -36,9 +35,9 @@ repos:
         pass_filenames: false
       - id: go-mod-tidy
         name: go mod tidy
-        # -diff reports what a tidy would change, without changing it,
-        # so a stale go.mod fails the commit instead of changing under
-        # it.
+        # -diff prints what a tidy would change and changes nothing, so
+        # an untidy go.mod fails the commit instead of being rewritten
+        # during it.
         entry: bash -c 'go mod tidy -diff'
         language: system
         files: \.go$|^go\.(mod|sum)$

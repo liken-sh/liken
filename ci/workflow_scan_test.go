@@ -23,11 +23,11 @@ func scanFixture(t *testing.T) map[string][]byte {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	return files
 }
@@ -69,13 +69,11 @@ func scanWorkflow(t *testing.T, data []byte) (map[string]any, map[string]scanJob
 	return doc.On, doc.Jobs
 }
 
-// The scheduled scan runs on a timer and by hand, and its plan job
-// writes the outputs that the trivy-db and trivy jobs read.
 func TestTheScanWorkflowRunsOnATimerAndByHand(t *testing.T) {
 	on, jobs := scanWorkflow(t, scanFixture(t)[".github/workflows/scan.yaml"])
 	schedule := on["schedule"].([]any)[0].(map[string]any)
 	if _, dispatch := on["workflow_dispatch"]; schedule["cron"] != "43 4 */3 * *" || !dispatch || len(on) != 2 {
-		t.Errorf("the triggers: %v", on)
+		t.Errorf("the triggers are %v, want a schedule at 43 4 */3 * * and workflow_dispatch only", on)
 	}
 	plan := jobs["plan"]
 	want := map[string]string{
@@ -84,16 +82,16 @@ func TestTheScanWorkflowRunsOnATimerAndByHand(t *testing.T) {
 		"release":  "${{ steps.plan.outputs.release }}",
 	}
 	if !reflect.DeepEqual(plan.Outputs, want) {
-		t.Errorf("the plan's outputs: %v", plan.Outputs)
+		t.Errorf("the plan's outputs are %v, want %v", plan.Outputs, want)
 	}
 	if !slices.ContainsFunc(plan.Steps, func(s scanStep) bool { return s.Run == "go run . scans -root .." && s.WorkingDirectory == "ci" }) {
-		t.Errorf("the plan does not run the scans command: %+v", plan.Steps)
+		t.Errorf("the plan steps are %+v, want one that runs the scans command in ci", plan.Steps)
 	}
 }
 
-// The scheduled scan runs the same trivy-db and trivy jobs that the
-// root workflow runs, so a scan reports the same way in both, and
-// uploads under the same category.
+// The scheduled scan's trivy-db and trivy jobs must equal the root
+// workflow's, so that a rescan uploads under the same categories as the
+// scan of each push and replaces its findings.
 func TestTheScanWorkflowRunsTheRootWorkflowsTrivyJobs(t *testing.T) {
 	files := scanFixture(t)
 	root := workflowJobs(t, files[".github/workflows/ci.yaml"])
@@ -105,32 +103,27 @@ func TestTheScanWorkflowRunsTheRootWorkflowsTrivyJobs(t *testing.T) {
 	}
 }
 
-// Every job of the scheduled scan has a limit and states its
-// permissions, and only a job that uploads may write to code scanning.
 func TestEveryJobOfTheScanWorkflowHasATimeoutAndItsOwnPermissions(t *testing.T) {
 	_, jobs := scanWorkflow(t, scanFixture(t)[".github/workflows/scan.yaml"])
 	want := map[string]string{"plan": "", "trivy-db": "", "trivy": "write", "os": "write"}
 	if len(jobs) != len(want) {
-		t.Errorf("the jobs: %v", jobs)
+		t.Errorf("the jobs are %v, want %d", jobs, len(want))
 	}
 	for name, events := range want {
 		job := jobs[name]
 		if job.TimeoutMinutes == 0 || job.Permissions["contents"] != "read" || job.Permissions["security-events"] != events {
-			t.Errorf("%s: timeout %d, permissions %v", name, job.TimeoutMinutes, job.Permissions)
+			t.Errorf("job %s has timeout %d and permissions %v, want a timeout, contents read, and security-events %q", name, job.TimeoutMinutes, job.Permissions, events)
 		}
 	}
 }
 
-// The OS's job of the scheduled scan fetches the newest release's SBOM
-// with the toolkit, which checks the release's signature, scans it with
-// grype, and uploads the findings under grype/<component>-release. It
-// runs only
-// when the channel holds a release, and it never fails the run.
+// The OS's job fetches the SBOM with the toolkit's sbom command, which
+// checks the release's signature before it returns the SBOM.
 func TestTheScanWorkflowScansTheSBOMOfTheNewestRelease(t *testing.T) {
 	_, jobs := scanWorkflow(t, scanFixture(t)[".github/workflows/scan.yaml"])
 	job := jobs["os"]
 	if job.If != "${{ needs.plan.outputs.release != '' }}" || !job.ContinueOnError || job.Needs != "plan" {
-		t.Errorf("the os job: %+v", job)
+		t.Errorf("the os job is %+v, want it to run only when the plan names a release, to continue on error, and to need plan", job)
 	}
 	var order []string
 	for _, step := range job.Steps {
@@ -153,11 +146,9 @@ func TestTheScanWorkflowScansTheSBOMOfTheNewestRelease(t *testing.T) {
 	}
 }
 
-// The OS's publish job scans the release that it just published and
-// uploads under grype/<component>-release, the category of the
-// scheduled scan, so the new release's findings replace the old
-// release's. A dry run scans
-// nothing, and a scan never fails the publish.
+// The publish job uploads under the scheduled scan's category,
+// grype/<component>-release, so the findings of a new release replace
+// those of the release before it.
 func TestTheChannelPublishScansTheReleaseAfterItUploads(t *testing.T) {
 	_, jobs := scanWorkflow(t, scanFixture(t)[".github/workflows/component-os.yaml"])
 	publish := jobs["publish"]
@@ -168,12 +159,12 @@ func TestTheChannelPublishScansTheReleaseAfterItUploads(t *testing.T) {
 			order = append(order, "publish")
 		case strings.Contains(step.Run, "releases/sbom/vulnerabilities.sh"):
 			if step.If != "${{ !inputs.dryrun }}" || !step.ContinueOnError || step.TimeoutMinutes == 0 {
-				t.Errorf("the scan step: %+v", step)
+				t.Errorf("the scan step is %+v, want it to skip a dry run, to continue on error, and to have a timeout", step)
 			}
 			order = append(order, step.Run+" in "+step.WorkingDirectory)
 		case strings.HasPrefix(step.Uses, "github/codeql-action/upload-sarif@"):
 			if !step.ContinueOnError {
-				t.Errorf("the upload step fails the publish: %+v", step)
+				t.Errorf("the upload step is %+v, want continue-on-error so that a failed upload does not fail the publish", step)
 			}
 			order = append(order, "upload "+step.With["sarif_file"]+" "+step.With["category"]+" if "+step.If)
 		}
@@ -187,26 +178,24 @@ func TestTheChannelPublishScansTheReleaseAfterItUploads(t *testing.T) {
 		t.Errorf("the steps:\n%s\nwant\n%s", strings.Join(order, "\n"), strings.Join(want, "\n"))
 	}
 	if publish.Permissions["security-events"] != "write" {
-		t.Errorf("the publish job's permissions: %v", publish.Permissions)
+		t.Errorf("the publish job's permissions are %v, want security-events write", publish.Permissions)
 	}
 }
 
-// GitHub checks every job of a called workflow against the call, so
-// both calls of the OS's workflow grant what its publish job uploads
-// with.
+// GitHub refuses a call of a reusable workflow that grants less than
+// any of its jobs requests, so both calls of the OS's workflow must
+// grant security-events, which its publish job needs.
 func TestBothCallsOfTheOSWorkflowGrantSecurityEvents(t *testing.T) {
 	jobs := workflowJobs(t, scanFixture(t)[".github/workflows/ci.yaml"])
 	for _, name := range []string{"os", "os-publish"} {
 		if got := jobs[name]["permissions"].(map[string]any)["security-events"]; got != "write" {
-			t.Errorf("%s grants security-events %v", name, got)
+			t.Errorf("%s grants security-events %v, want write", name, got)
 		}
 	}
 }
 
-// A repository with no component that publishes to a channel has no
-// release to scan, and its scheduled scan has no job for one.
 // grypeTree is the workflows of an OS whose build job scans what it
-// built and a check job that scans nothing.
+// built and whose go job scans nothing.
 func grypeTree(t *testing.T) map[string][]byte {
 	t.Helper()
 	root := writeTree(t, map[string]string{
@@ -217,19 +206,17 @@ func grypeTree(t *testing.T) map[string][]byte {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	return files
 }
 
-// A job with grype = true uploads the scan that its command writes,
-// under grype/<component>, on every ref that it runs on, and only that
-// job may write to code scanning. The build job keeps packages: write,
-// because on main it pushes the userland that it compiled.
+// The build job also has packages: write, because on main it pushes
+// the userland that it compiled.
 func TestAJobThatScansItsBuildUploadsTheScan(t *testing.T) {
 	_, jobs := scanWorkflow(t, grypeTree(t)[".github/workflows/component-os.yaml"])
 	cases := []struct {
@@ -250,7 +237,7 @@ func TestAJobThatScansItsBuildUploadsTheScan(t *testing.T) {
 				}
 			}
 			if !reflect.DeepEqual(jobs[c.job].Permissions, c.permissions) || !reflect.DeepEqual(uploads, c.uploads) {
-				t.Errorf("permissions %v, uploads %v", jobs[c.job].Permissions, uploads)
+				t.Errorf("job %s has permissions %v and uploads %v, want %v and %v", c.job, jobs[c.job].Permissions, uploads, c.permissions, c.uploads)
 			}
 		})
 	}
@@ -259,6 +246,6 @@ func TestAJobThatScansItsBuildUploadsTheScan(t *testing.T) {
 func TestAScanWorkflowWithNoChannelScansOnlyImages(t *testing.T) {
 	_, jobs := scanWorkflow(t, trivyFixture(t)[".github/workflows/scan.yaml"])
 	if len(jobs) != 3 {
-		t.Errorf("the jobs: %v", jobs)
+		t.Errorf("the jobs are %v, want 3", jobs)
 	}
 }

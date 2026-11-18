@@ -16,10 +16,7 @@ func siteFixture(t *testing.T) (*repo, string) {
 	return r, r.commit("add lib and the site job")
 }
 
-// The site serves every manual and each component's coverage report,
-// so a push to main deploys it when a manual's job or a job that writes
-// a coverage profile ran, or when the site's own build changed.
-func TestThePushToMainDeploysTheSiteWhenWhatItServesChanged(t *testing.T) {
+func TestAPushToMainDeploysTheSiteWhenAManualAReportOrItsBuildChanges(t *testing.T) {
 	cases := []struct {
 		name  string
 		file  string
@@ -32,7 +29,7 @@ func TestThePushToMainDeploysTheSiteWhenWhatItServesChanged(t *testing.T) {
 		{"the root Makefile, which builds the site", "Makefile", "site:\n", Event{}, true},
 		{"the site job", rootWorkflowFile, "jobs:\n  site:\n    runs-on: ubuntu-latest\n", Event{}, true},
 		{"a Rust file that no manual and no coverage job reads", "operator/ui/app.rs", "fn main() { }\n", Event{}, false},
-		{"any change when every job runs", "operator/ui/app.rs", "fn main() { }\n", Event{Unverified: "the API answered 403"}, true},
+		{"any change when every job runs", "operator/ui/app.rs", "fn main() { }\n", Event{Unverified: "the API returned 403"}, true},
 		{"a push to a branch", "operator/docs/index.md", "an edit\n", Event{Ref: "refs/heads/topic"}, false},
 	}
 	for _, c := range cases {
@@ -48,11 +45,11 @@ func TestThePushToMainDeploysTheSiteWhenWhatItServesChanged(t *testing.T) {
 			p := r.planner(nil)
 			decisions, err := p.Plan(e)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("planning the event: %v", err)
 			}
 			site, why, err := p.Site(e, decisions)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("deciding whether the site deploys: %v", err)
 			}
 			if site != c.site {
 				t.Errorf("the site deploys: %v (%s), want %v", site, why, c.site)

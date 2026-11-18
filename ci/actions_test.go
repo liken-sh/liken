@@ -57,24 +57,25 @@ description = "The app image."
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	return root, components
 }
 
-// remoteUses matches a step or a job that runs an action from another
-// repository: every uses: whose reference does not start with ./.
+// remoteUses matches every uses: line whose reference does not start
+// with ./, which is an action from another repository.
 var remoteUses = regexp.MustCompile(`(?m)^\s*(?:- )?uses: ([^.\s][^\s]*)(.*)$`)
 
 // pinnedUses is the form of a pinned reference: the action, the commit,
-// and the release tag that the commit is, as Dependabot reads it.
+// and a comment with the release tag of that commit, which Dependabot
+// reads.
 var pinnedUses = regexp.MustCompile(`^([\w.-]+/[\w.-]+)(?:/[\w./-]+)?@[0-9a-f]{40} # v\d+\.\d+\.\d+$`)
 
 func TestEveryGeneratedActionIsPinnedByCommit(t *testing.T) {
 	root, components := everyJobFixture(t)
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	var repositories []string
 	for _, name := range slices.Sorted(maps.Keys(files)) {
@@ -82,7 +83,7 @@ func TestEveryGeneratedActionIsPinnedByCommit(t *testing.T) {
 			ref := m[1] + m[2]
 			pinned := pinnedUses.FindStringSubmatch(ref)
 			if pinned == nil {
-				t.Errorf("%s runs %s, which names no commit and no release", name, ref)
+				t.Errorf("%s runs %s, want a commit and a release comment", name, ref)
 				continue
 			}
 			repositories = append(repositories, pinned[1])
@@ -91,17 +92,17 @@ func TestEveryGeneratedActionIsPinnedByCommit(t *testing.T) {
 	slices.Sort(repositories)
 	repositories = slices.Compact(repositories)
 	if want := pinnedRepositories(); !slices.Equal(repositories, want) {
-		t.Errorf("the workflows run %s, and the table pins %s", strings.Join(repositories, " "), strings.Join(want, " "))
+		t.Errorf("the workflows run %s, want the repositories of actionPins: %s", strings.Join(repositories, " "), strings.Join(want, " "))
 	}
 }
 
-// testFlux is the flux release of the table, which a fixture writes into
+// testFlux is the flux release in actionPins. A fixture writes it into
 // liken/flux/VERSION, because the generator refuses a flux action that
 // differs from the flux of the OS.
 var testFlux = func() string { pin, _ := pinOf(fluxActionRepository); return pin.Version }()
 
-// pinnedText is the reference that a generated workflow's text holds
-// after uses:, with the comment that names the release.
+// pinnedText returns the text that a generated workflow writes after
+// uses:, with the comment that names the release.
 func pinnedText(action string) string {
 	ref, err := pinnedAction(action)
 	if err != nil {
@@ -110,20 +111,20 @@ func pinnedText(action string) string {
 	return ref
 }
 
-// pinnedRef is the reference that a parsed workflow holds, without the
-// comment.
+// pinnedRef returns the reference that a parsed workflow has after
+// uses:, without the comment.
 func pinnedRef(action string) string {
 	return strings.SplitN(pinnedText(action), " ", 2)[0]
 }
 
-func TestTheChecksRefuseAnActionThatNoCommitNamed(t *testing.T) {
+func TestTheChecksRefuseAnActionNotPinnedToTheCommitInActionPins(t *testing.T) {
 	checkout, _ := pinOf("actions/checkout")
 	other := strings.Repeat("a", 40)
 	cases := []struct {
 		name, line string
 		refused    bool
 	}{
-		{"the table's commit and release", "      - uses: " + pinnedText("actions/checkout"), false},
+		{"the commit and release in actionPins", "      - uses: " + pinnedText("actions/checkout"), false},
 		{"an action in a subdirectory", "        uses: " + pinnedText("github/codeql-action/init"), false},
 		{"a local action", "        uses: ./.github/actions/build-setup", false},
 		{"a reusable workflow of the repository", "    uses: ./.github/workflows/component-app.yaml", false},
@@ -133,9 +134,9 @@ func TestTheChecksRefuseAnActionThatNoCommitNamed(t *testing.T) {
 		{"an exact tag", "      - uses: actions/checkout@" + checkout.Version, true},
 		{"a branch", "      - uses: actions/checkout@main", true},
 		{"a commit with no release", "      - uses: actions/checkout@" + checkout.Commit, true},
-		{"a commit that is not the table's", "      - uses: actions/checkout@" + other + " # " + checkout.Version, true},
-		{"a release that is not the table's", "      - uses: actions/checkout@" + checkout.Commit + " # v1.0.0", true},
-		{"a repository that the table lacks", "      - uses: example/action@" + other + " # v1.0.0", true},
+		{"a commit other than the one in actionPins", "      - uses: actions/checkout@" + other + " # " + checkout.Version, true},
+		{"a release other than the one in actionPins", "      - uses: actions/checkout@" + checkout.Commit + " # v1.0.0", true},
+		{"a repository that actionPins does not list", "      - uses: example/action@" + other + " # v1.0.0", true},
 		{"an image by tag", "      - uses: docker://alpine:3", true},
 	}
 	for _, tc := range cases {
@@ -156,7 +157,7 @@ func TestTheChecksReadEveryWorkflowAndCompositeAction(t *testing.T) {
 	})
 	findings, err := checkActions(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the actions: %v", err)
 	}
 	var files []string
 	for _, f := range findings {
@@ -164,7 +165,7 @@ func TestTheChecksReadEveryWorkflowAndCompositeAction(t *testing.T) {
 	}
 	want := []string{".github/actions/build-setup/action.yml", ".github/workflows/cert.yaml"}
 	if !slices.Equal(files, want) {
-		t.Errorf("findings %v, want one in each of %v", findings, want)
+		t.Errorf("findings are in %v, want one in each of %v", files, want)
 	}
 }
 
@@ -175,9 +176,9 @@ func TestTheGeneratorRefusesAFluxActionOtherThanTheOSFlux(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	if _, err := Workflows(root, components); err == nil || !strings.Contains(err.Error(), "--bump fluxcd/flux2") {
-		t.Errorf("got %v", err)
+		t.Errorf("Workflows returned %v, want an error that names --bump fluxcd/flux2", err)
 	}
 }

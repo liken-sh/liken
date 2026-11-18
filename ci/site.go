@@ -5,23 +5,27 @@ import (
 	"strings"
 )
 
-// siteBuilder is the component whose sites and reports commands the
-// root Makefile runs to build the site.
+// siteBuilder is the component whose `ci sites` and `ci reports`
+// commands the root Makefile runs to build the site.
 const siteBuilder = "ci"
 
-// Site decides whether a push to main deploys the site. The site
-// serves every manual and each component's coverage report, and its
-// build reads nothing else: the root Makefile, and the commands of
-// the ci program that list the manuals and the reports. A manual reads
-// no file that its own hugo job does not read, and a report changes
-// only when the job that writes its profile runs. So the site deploys
-// when a hugo job or a job with a coverage profile runs, when a file
-// that no component holds changes, when the ci program changes, when
-// the site job itself changes, and when every job runs.
+// Site decides whether a push to main deploys the site. The site has
+// every manual and each component's coverage report, and the root
+// Makefile builds it with the ci program. A manual changes only when
+// its hugo job runs, and a report changes only when the job that
+// writes its coverage profile runs. So the site deploys when one of
+// these is true:
 //
-// A deploy that fails leaves the run red, so the next push compares
-// with an older green run, and the same manual or report reaches the
-// site on that push.
+//   - every job runs
+//   - the site job in the root workflow changed
+//   - a file that no component owns changed, other than a file under
+//     plans/
+//   - a file of the ci component changed that notOutputs does not
+//     name
+//   - a hugo job or a job with a coverage profile runs
+//
+// A failed deploy fails the run, so the next push compares with an
+// older run that passed and deploys the same change again.
 func (p Planner) Site(e Event, decisions map[string]Decision) (bool, string, error) {
 	if !e.Main() {
 		return false, "only a push to main deploys the site", nil

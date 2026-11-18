@@ -15,11 +15,11 @@ func TestAPinnedImageJobLogsInOnEveryBranch(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	text := string(files[".github/workflows/component-base.yaml"])
 	for _, want := range []string{"|| matrix.pinned }}\n        uses: " + pinnedText("docker/login-action")} {
@@ -30,9 +30,10 @@ func TestAPinnedImageJobLogsInOnEveryBranch(t *testing.T) {
 }
 
 // A component's checks wait only for the pinned bases it builds on,
-// whose layers its images read from the cache that the bases' jobs
-// write. Its publish waits for the checks of every component in its
-// closure, so it never publishes on a dependency that failed.
+// because its images read those bases' layers from the cache that the
+// bases' jobs write. Its publish waits for the checks of every
+// component in its closure, so it never publishes when a dependency
+// failed.
 func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"base/package.toml":      "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
@@ -44,11 +45,11 @@ func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	jobs := workflowJobs(t, files[".github/workflows/ci.yaml"])
 	cases := map[string][]any{
@@ -65,24 +66,25 @@ func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
 		}
 	}
 	if _, ok := jobs["lib-publish"]; ok {
-		t.Error("a component with no outputs has a publish call")
+		t.Error("the lib component has a publish call, want none because it has no outputs")
 	}
 	publish := jobs["app-publish"]
 	if publish["uses"] != "./.github/workflows/component-app.yaml" ||
 		publish["if"] != "${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['app'].publish != 'none' }}" ||
 		publish["with"].(map[string]any)["stage"] != "publish" || jobs["app"]["with"].(map[string]any)["stage"] != "check" {
-		t.Errorf("app's publish call is %v", publish)
+		t.Errorf("app's publish call is %v, want the component workflow at the publish stage, run when the plan publishes app", publish)
 	}
 	component := workflowJobs(t, files[".github/workflows/component-app.yaml"])
 	if needs, ok := component["publish"]["needs"]; ok || component["publish"]["if"] != "${{ inputs.stage == 'publish' || inputs.dryrun }}" {
-		t.Errorf("the publish job needs %v, if %v", needs, component["publish"]["if"])
+		t.Errorf("the publish job needs %v and runs if %v, want no needs and a run on the publish stage or a dry run", needs, component["publish"]["if"])
 	}
 }
 
-// The check stage runs the publish job in its dry mode when the plan
-// asks for a dry run. The dry run logs in to nothing, and the OS's dry
-// run builds and boots a release under the lab's serial and uploads
-// nothing.
+// When the plan selects a dry run, the check stage runs the publish job
+// with dryrun set. A dry run logs in to no registry and uploads nothing.
+// The OS's dry run builds and boots a release under today's date and the
+// serial 000, which no published release has, and checks only that the
+// publish script parses.
 func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"app/package.toml":       "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
@@ -92,18 +94,18 @@ func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	calls := workflowJobs(t, files[".github/workflows/ci.yaml"])
 	if with := calls["app"]["with"].(map[string]any); with["dryrun"] != "${{ fromJSON(needs.plan.outputs.components)['app'].dryrun }}" {
-		t.Errorf("the check call passes dryrun %v", with["dryrun"])
+		t.Errorf("the check call passes dryrun %v, want the plan's dryrun for app", with["dryrun"])
 	}
 	if with := calls["app-publish"]["with"].(map[string]any); with["dryrun"] != false {
-		t.Errorf("the publish call passes dryrun %v", with["dryrun"])
+		t.Errorf("the publish call passes dryrun %v, want false", with["dryrun"])
 	}
 	app := string(files[".github/workflows/component-app.yaml"])
 	for _, want := range []string{
@@ -128,7 +130,7 @@ func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
 	// A tag that changes no Go code runs no check job, so the publish
 	// job writes its own coverage profile instead of downloading one.
 	if strings.Contains(os, "download-artifact") {
-		t.Error("the OS's publish job downloads an artifact that a tag may never upload")
+		t.Error("the OS's publish job downloads an artifact, want none because a tag that changes no Go code never uploads one")
 	}
 }
 
@@ -142,11 +144,11 @@ func TestThePublishJobSetsUpOnlyWhatTheOutputsNeed(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	cases := map[string][]string{
 		"operator": {pinnedRef("docker/setup-buildx-action"), pinnedRef("docker/login-action"), pinnedRef("fluxcd/flux2/action")},
@@ -180,19 +182,15 @@ func trivyFixture(t *testing.T) map[string][]byte {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	return files
 }
 
-// The publish of a component with images installs Trivy, scans each
-// image it pushes, and uploads each scan under the image's own
-// category. Both calls of its workflow grant the upload, because
-// GitHub checks every job of a called workflow against the call.
 func TestThePublishUploadsATrivyScanOfEachImage(t *testing.T) {
 	files := trivyFixture(t)
 	publish := workflowJobs(t, files[".github/workflows/component-base.yaml"])["publish"]
@@ -213,21 +211,20 @@ func TestThePublishUploadsATrivyScanOfEachImage(t *testing.T) {
 		}
 	}
 	if trivy != trivyVersion || !sarif {
-		t.Errorf("trivy %q, the publish writes the scans: %v", trivy, sarif)
+		t.Errorf("the publish job sets up trivy %q and writes the scans: %v, want trivy %q and scans written", trivy, sarif, trivyVersion)
 	}
 	if want := []string{"trivy/base.sarif trivy/base", "trivy/base-dev.sarif trivy/base-dev"}; !reflect.DeepEqual(uploads, want) {
 		t.Errorf("uploads %v, want %v", uploads, want)
 	}
 	if got := publish["permissions"].(map[string]any)["security-events"]; got != "write" {
-		t.Errorf("the publish job's security-events: %v", got)
+		t.Errorf("the publish job's security-events is %v, want write", got)
 	}
 }
 
-// The root workflow's trivy job runs one scan for each image that the
-// plan names, and uploads it under the image's own category, the one
-// that the image's publish uploads under. It runs only when the plan
-// names an image, and it never fails the run.
-func TestTheTrivyJobScansEachImageThatThePlanNames(t *testing.T) {
+// The trivy job uploads under trivy/<image>, the category that the
+// image's publish uploads under, so a later scan replaces the findings
+// of the publish.
+func TestTheTrivyJobScansEachImageThatThePlanLists(t *testing.T) {
 	root := trivyFixture(t)[".github/workflows/ci.yaml"]
 	var doc struct {
 		Jobs map[string]struct {
@@ -249,15 +246,15 @@ func TestTheTrivyJobScansEachImageThatThePlanNames(t *testing.T) {
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal(root, &doc); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the workflow: %v", err)
 	}
 	if got := doc.Jobs["plan"].Outputs["trivy"]; got != "${{ steps.plan.outputs.trivy }}" {
-		t.Errorf("the plan's trivy output is %q", got)
+		t.Errorf("the plan's trivy output is %q, want the output of the plan step", got)
 	}
 	job := doc.Jobs["trivy"]
 	if job.If != "${{ !cancelled() && fromJSON(needs.plan.outputs.trivy)[0] != null }}" || !job.ContinueOnError ||
 		job.Strategy.Matrix.Include != "${{ fromJSON(needs.plan.outputs.trivy) }}" || job.Permissions["security-events"] != "write" {
-		t.Errorf("the trivy job: %+v", job)
+		t.Errorf("the trivy job is %+v, want a matrix over the plan's trivy output, continue-on-error, and security-events write", job)
 	}
 	var trivy, scan, upload string
 	for _, step := range job.Steps {
@@ -272,7 +269,7 @@ func TestTheTrivyJobScansEachImageThatThePlanNames(t *testing.T) {
 	}
 	if trivy != trivyVersion || scan != `go run . scan -root .. -image "$IMAGE" -version "$VERSION" -sarif "${{ github.workspace }}/trivy"` ||
 		upload != "trivy/${{ matrix.image }}.sarif trivy/${{ matrix.image }}" {
-		t.Errorf("trivy %q, scan %q, upload %q", trivy, scan, upload)
+		t.Errorf("the trivy job sets up trivy %q, scans with %q, and uploads %q, want trivy %q, the scans command for the matrix image, and its sarif upload", trivy, scan, upload, trivyVersion)
 	}
 }
 
@@ -284,7 +281,7 @@ func TestEveryScanRestoresTheDatabaseThatTheTrivyDBJobSaves(t *testing.T) {
 	jobs := workflowJobs(t, files[".github/workflows/ci.yaml"])
 	db := jobs["trivy-db"]
 	if db["if"] != "${{ needs.plan.outputs.trivy-db == 'true' }}" || db["permissions"].(map[string]any)["actions"] != "write" {
-		t.Errorf("the trivy-db job: %v", db)
+		t.Errorf("the trivy-db job is %v, want it to run when the plan sets trivy-db and to have actions write", db)
 	}
 	needs := map[string]bool{}
 	for _, job := range []string{"trivy", "base-publish", "app-publish"} {
@@ -338,11 +335,11 @@ func TestEveryBuildReadsTheBasesThatThePlanJobChecked(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	ci := string(files[".github/workflows/ci.yaml"])
 	component := string(files[".github/workflows/component-base.yaml"])

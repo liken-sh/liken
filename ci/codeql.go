@@ -7,33 +7,27 @@ import (
 	"strings"
 )
 
-// CodeQL reads the repository's own code for faults, and each analysis
-// uploads its results to code scanning. GitHub's default setup
-// analyzes every language of the whole repository on every push, so
-// `liken` derives one CodeQL job for each analysis instead, and the
-// plan runs it only when a file that the analysis reads changed, the
-// same way it runs any other job.
+// GitHub's default CodeQL setup analyzes every language of the whole
+// repository on every push. So the loader derives a CodeQL job for each
+// analysis of a component and adds it to the component's jobs, and the
+// plan runs it only when a file that the analysis reads changed. Each
+// job uploads its results to code scanning:
 //
-// The loader derives the jobs and appends them to the component's
-// jobs. So the plan, the selector, and the workflow see an ordinary
-// job, and no package.toml has to repeat its Go and Rust jobs as
-// CodeQL jobs. Each derived job is named codeql-<what it analyzes>:
-//
-//   - A go job gets codeql-<job>, which builds the job's module with
-//     `go build ./...` while CodeQL traces the build.
-//   - A rust job gets codeql-<job>, which reads the crate in its
+//   - A go job gets codeql-<job>, which runs `go build ./...` in the
+//     job's module while CodeQL traces the build.
+//   - A rust job gets codeql-<job>, which analyzes the crate in its
 //     directory without a build.
-//   - A component that holds C or C++ sources gets codeql-c-cpp, and
-//     one that holds Python sources gets codeql-python. No job of the
-//     repository compiles those files, so the loader finds them by
-//     their file names, and each analysis reads them without a build.
+//   - A component with C or C++ sources gets codeql-c-cpp, and one with
+//     Python sources gets codeql-python. No job of the repository
+//     compiles those files, so the loader finds them by their file
+//     extensions, and the analysis runs without a build.
 //
-// The GitHub Actions workflows belong to no component, and the root
-// workflow analyzes them in a job of its own: see Planner.Actions.
+// The workflows under .github/ belong to no component, so the root
+// workflow analyzes them in a job of its own (see Planner.Actions).
 
-// codeqlPrefix starts the name of every derived job. A package.toml
-// cannot declare a job with it, so a derived name never collides with
-// a declared one.
+// codeqlPrefix starts the name of every derived job.
+// validateDeclaredName refuses a declared job with this prefix, so a
+// derived name never collides with a declared one.
 const codeqlPrefix = "codeql-"
 
 // The CodeQL languages that a derived job analyzes.
@@ -45,7 +39,8 @@ const (
 )
 
 // codeqlTimeout is the timeout of a derived job, in minutes. A CodeQL
-// analysis of an operator's Go module takes longer than its tests.
+// analysis of an operator's Go module takes longer than the 15 minutes
+// that a job gets by default.
 const codeqlTimeout = 30
 
 // languageSource is true for a file that the analysis of the language
@@ -69,17 +64,14 @@ func languageSource(language, file string) bool {
 }
 
 // codeqlJobs derives the CodeQL jobs of the component from its
-// declared jobs and from sources, the files of the component, relative
-// to the component, that the loader found.
+// declared jobs and from sources, the paths of the component's files
+// relative to the component.
 //
-// A derived job does not take the apt packages or the environment of
-// the job it comes from. Those packages are the programs that the
-// job's tests run, such as ffmpeg and cage, and a build reads none of
-// them.
-//
-// Two jobs of one language in one directory, such as a module's tests
-// and its lint, build the same code, so they derive one job, named for
-// the first of them.
+// A derived job does not copy the apt packages or the env of its
+// declared job, because those packages are programs that the tests run,
+// such as ffmpeg, and the build does not use them. Two jobs of one
+// language in one directory, such as a module's tests and its lint,
+// build the same code, so they derive one job, named after the first.
 func codeqlJobs(c *Component, sources []string) []Job {
 	var jobs []Job
 	analyzed := map[string]bool{}
@@ -115,12 +107,13 @@ func codeqlJobs(c *Component, sources []string) []Job {
 	return jobs
 }
 
-// codeqlReads is true when the CodeQL job reads the file, given as a
-// path relative to the component that owns it. A job reads the sources
-// of its language in its own directory. A Go or a Rust analysis also
-// reads the sources of its language in each module or crate that the
-// job it comes from builds with, because CodeQL follows the data flow
-// through them, and jobDeps names those components.
+// codeqlReads is true when the CodeQL job analyzes the file. rest is
+// the file's path relative to the component that holds it, and own is
+// true when that is the job's component. In its own component the job
+// reads the sources of its language under its directory. In another
+// component it reads every source of its language, because a Go or Rust
+// analysis follows data flow into the modules and crates that the build
+// uses. codeqlDeps finds those components.
 func codeqlReads(job Job, own bool, rest string) bool {
 	if !languageSource(job.Language, rest) {
 		return false
@@ -128,10 +121,11 @@ func codeqlReads(job Job, own bool, rest string) bool {
 	return !own || job.Dir == "" || job.Dir == "." || strings.HasPrefix(rest, strings.TrimSuffix(job.Dir, "/")+"/")
 }
 
-// codeqlDeps names the components whose sources the CodeQL job reads,
-// other than its own: what the job it comes from builds with. A C,
-// C++, or Python analysis reads no dependency. nil means every
-// component in the closure, as for jobDeps.
+// codeqlDeps returns the other components whose sources the CodeQL job
+// reads: those that hold a module that go.mod replaces with a local
+// directory, or a crate that the job's crate depends on by path. A C,
+// C++, or Python analysis reads none. A nil map means every component
+// in the closure, as for jobDeps.
 func (s selector) codeqlDeps(c *Component, job Job) map[string]bool {
 	var deps map[string]bool
 	var err error
@@ -149,20 +143,17 @@ func (s selector) codeqlDeps(c *Component, job Job) map[string]bool {
 	return deps
 }
 
-// codeqlCategory is the category that the job's results upload under.
-// Code scanning closes an alert only when a later upload in the same
-// category no longer reports it. So each job has a category of its
-// own, and the analysis of one component never closes the alerts of
-// another, or of another job of the same component.
+// codeqlCategory is the code scanning category of the job's upload.
+// Code scanning closes an alert when a later upload in the same
+// category does not report it, so each job uploads under its own
+// category and never closes the alerts of another job.
 func codeqlCategory(c *Component, job Job) string {
 	return "codeql/" + c.Name() + "/" + strings.TrimPrefix(job.Name, codeqlPrefix)
 }
 
-// validateDeclaredName refuses a declared job whose name starts with
-// the prefix of the derived jobs.
 func validateDeclaredName(path string, job Job) error {
 	if strings.HasPrefix(job.Name, codeqlPrefix) {
-		return fmt.Errorf("%s: job %q: a job name that starts with %s belongs to the CodeQL jobs that ci/ derives", path, job.Name, codeqlPrefix)
+		return fmt.Errorf("%s: job %q: the name starts with %s, which is reserved for the CodeQL jobs that ci/ derives", path, job.Name, codeqlPrefix)
 	}
 	return nil
 }
@@ -170,15 +161,12 @@ func validateDeclaredName(path string, job Job) error {
 // githubDir holds the GitHub Actions workflows and the local actions.
 const githubDir = ".github/"
 
-// Actions decides whether the run analyzes the GitHub Actions code:
-// the workflows and the local actions under .github/. ci/ writes the
-// generated workflows from its templates and from each package.toml,
-// and the graph job fails a commit whose generated files differ from
-// what the generator writes. So every change to the Actions code is a
-// change to a file under .github/, and a change to a template or a
-// package.toml that writes no different workflow changes no Actions
-// code. The analysis runs when a file under .github/ changed, and when
-// every job runs.
+// Actions reports whether the run analyzes the GitHub Actions code
+// under .github/, with the reason. It runs when a file under .github/
+// changed or when every job runs. A change to a template or a
+// package.toml needs no check of its own, because the graph job fails a
+// commit whose generated workflows differ from the generator's output,
+// so every change to the workflows also changes a file under .github/.
 func (p Planner) Actions(e Event) (bool, string, error) {
 	list, all := p.Comparisons(e)
 	if all != "" {

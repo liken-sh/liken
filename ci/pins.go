@@ -18,54 +18,41 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// checkPins lists every pin that two files of the repository share and
-// name at different versions. Each copy of a pin can drift on its own,
-// and a drift builds or runs two versions of one thing, so the check
-// fails at the commit that makes the copies differ:
+// checkPins returns a finding for each pin whose copies in the
+// repository disagree. A pin copied into several files drifts when one
+// copy changes alone, and the repository then builds two versions of
+// one thing, so the check fails at the commit that changes one copy.
+// It compares:
 //
-//   - each go.mod names the Go of the golang image in images.toml, and
-//     each rust-toolchain.toml names the Rust of the rust image;
-//   - each Go module that a go.mod requires directly, or as a tool, has
-//     one version across every go.mod, and each crate has one version
-//     across every Cargo.toml;
-//   - each hook repository has one revision across every
-//     .pre-commit-config.yaml;
-//   - each image of images.toml that a manifest, a guide, a skill, a
-//     Makefile, or a test names has the tag of its entry;
-//   - each Dockerfile names each outside image by its key in
-//     images.toml, and never by a reference of its own, which would be
-//     a second copy of the pin or a pin that no report reads;
-//   - each shell script reads an outside image that it pins by digest
-//     from images.toml with image_of, for the same reason;
-//   - each Dockerfile builds Rust with `cargo auditable build`, so each
-//     binary records its crates for the SBOM, as unauditedBuilds says;
-//   - no Dockerfile writes a LABEL or a MAINTAINER, because ci publish
-//     writes every key of an image from its package.toml, as
-//     labelInstructions says;
-//   - each Dockerfile builds and ships a Go program in the one form
-//     that goImageFindings says, at /<name> with its build info kept;
-//   - each copy of a Wayland protocol that liken defines, such as
-//     liken-arrangement-v1.xml, holds the same bytes. The compositor
-//     module and each client build from their own directory, so each
-//     keeps a copy, and a client built from a drifted copy sends
-//     requests that the compositor does not read the same way;
-//   - each copy of the closure library, closure.sh, holds the same
-//     bytes. vulkan/closure.sh is the library, and indi keeps a copy
-//     because its build context does not reach vulkan/. A drifted copy
-//     builds images whose trees, notices, and package records follow
-//     other rules than the bases'.
-//   - each Dockerfile that downloads buildroot names the commit in
-//     liken/userland/VERSION and the digest that liken/userland/fetch.sh
-//     pins for it, because the image and the OS build their static
-//     programs from one BR2_EXTERNAL tree, and the tree is written for
-//     one buildroot;
-//   - each Dockerfile that downloads the SPDX license list that
-//     buildroot's generate-cyclonedx reads names a version and a digest
-//     of the spdx_schema_sha256 table of liken/userland/fetch.sh, so
-//     the image's SBOM and the OS's read the same list.
+//   - the go directive of each go.mod with the tag of the golang image
+//     in images.toml, and the channel of each rust-toolchain.toml with
+//     the tag of the rust image.
+//   - the version of each Go module and each crate across all go.mod
+//     and Cargo.toml files, and the rev of each hook repository across
+//     all .pre-commit-config.yaml files.
+//   - the tag of each image of images.toml with every reference to that
+//     image in a manifest, a guide, a skill, a Makefile, or a test.
+//   - the bytes of each copy of a Wayland protocol that liken defines,
+//     such as liken-arrangement-v1.xml. The compositor and each client
+//     build from their own directory, so each keeps a copy, and a
+//     client built from a different copy sends requests that the
+//     compositor decodes differently.
+//   - the bytes of each copy of closure.sh. indi keeps a copy of
+//     vulkan/closure.sh because its build context does not include
+//     vulkan/.
+//   - the BUILDROOT_COMMIT and BUILDROOT_SHA256 of each Dockerfile with
+//     liken/userland/VERSION and its digest in liken/userland/fetch.sh,
+//     because the image and the OS build from one BR2_EXTERNAL tree,
+//     written for one buildroot commit.
+//   - the SPDX_SCHEMA_SHA256 of each Dockerfile with the
+//     spdx_schema_sha256 table of liken/userland/fetch.sh, so the
+//     image's SBOM and the OS's SBOM use the same SPDX license list.
 //
-// The plans keep the versions of their day, so the check reads none of
-// them. Neither does it read test data, a cache, or another checkout.
+// It also fails on a Dockerfile that names an outside image by its full
+// reference, and on a shell script that runs an image by digest,
+// because each is a copy of a pin that images.toml does not hold. The
+// Dockerfile rules of unauditedBuilds, labelInstructions, and
+// goImageFindings run here too.
 func checkPins(root string) ([]string, error) {
 	tools, err := readToolchains(root)
 	if err != nil {
@@ -90,7 +77,7 @@ func checkPins(root string) ([]string, error) {
 	for _, file := range files {
 		data, err := os.ReadFile(filepath.Join(root, file))
 		if errors.Is(err, fs.ErrNotExist) {
-			// git still tracks a file that the tree deleted.
+			// git can list a file that is deleted from the working tree.
 			continue
 		}
 		if err != nil {
@@ -141,10 +128,9 @@ func checkPins(root string) ([]string, error) {
 	return findings, nil
 }
 
-// userlandBuildroot reads the buildroot pin of liken/userland: the
-// commit in VERSION and its digest in the buildroot_sha256 table of
-// fetch.sh, as "<commit> sha256:<digest>". A tree with no userland pin
-// has none to compare.
+// userlandBuildroot returns the buildroot pin of liken/userland as
+// "<commit> sha256:<digest>": the commit in VERSION and its digest in
+// fetch.sh. A tree without liken/userland/VERSION returns no pin.
 func userlandBuildroot(root string) (versions, error) {
 	pins := versions{}
 	data, err := os.ReadFile(filepath.Join(root, "liken/userland/VERSION"))
@@ -170,11 +156,9 @@ func userlandBuildroot(root string) (versions, error) {
 	return pins, nil
 }
 
-// userlandSchemas reads the spdx_schema_sha256 table of
-// liken/userland/fetch.sh: the digest of the SPDX license list of each
-// CycloneDX version that a pinned buildroot's generate-cyclonedx names.
-// The table keeps the entries of older buildroot commits, so a
-// Dockerfile may name any of them.
+// userlandSchemas returns the spdx_schema_sha256 table of
+// liken/userland/fetch.sh, which maps each version of the SPDX license
+// list to its digest.
 func userlandSchemas(root string) (map[string]string, error) {
 	data, err := os.ReadFile(filepath.Join(root, "liken/userland/fetch.sh"))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -201,13 +185,13 @@ func userlandSchemas(root string) (map[string]string, error) {
 	return schemas, nil
 }
 
-// tableEntry matches one entry of a `declare -A` table, ["key"]="value".
+// tableEntry matches one entry of a bash associative array:
+// ["key"]="value".
 var tableEntry = regexp.MustCompile(`^\["([^"]+)"\]="([^"]*)"$`)
 
-// schemaFindings lists a Dockerfile whose SPDX_SCHEMA_VERSION and
-// SPDX_SCHEMA_SHA256 arguments name a digest that the
-// spdx_schema_sha256 table of liken/userland/fetch.sh does not pin for
-// that version.
+// schemaFindings returns a finding when a Dockerfile's
+// SPDX_SCHEMA_SHA256 differs from the digest that schemas has for its
+// SPDX_SCHEMA_VERSION.
 func schemaFindings(file, text string, schemas map[string]string) []string {
 	args := dockerfileArgs(text)
 	version, digest := args["SPDX_SCHEMA_VERSION"], args["SPDX_SCHEMA_SHA256"]
@@ -233,9 +217,9 @@ func dockerfileArgs(text string) map[string]string {
 	return args
 }
 
-// dockerfileBuildroot reads the BUILDROOT_COMMIT and BUILDROOT_SHA256
-// arguments of a Dockerfile that downloads buildroot, in the form of
-// userlandBuildroot, or "" for a Dockerfile that names neither.
+// dockerfileBuildroot returns the BUILDROOT_COMMIT and
+// BUILDROOT_SHA256 arguments of a Dockerfile in the form that
+// userlandBuildroot returns, or "" when the Dockerfile has neither.
 func dockerfileBuildroot(text string) string {
 	args := dockerfileArgs(text)
 	if args["BUILDROOT_COMMIT"] == "" && args["BUILDROOT_SHA256"] == "" {
@@ -244,7 +228,7 @@ func dockerfileBuildroot(text string) string {
 	return args["BUILDROOT_COMMIT"] + " sha256:" + args["BUILDROOT_SHA256"]
 }
 
-// pinFiles lists the files of the repository that can hold a pin.
+// pinFiles returns the files of sourceFiles that can hold a pin.
 func pinFiles(root string) ([]string, error) {
 	all, err := sourceFiles(root)
 	if err != nil {
@@ -260,12 +244,12 @@ func pinFiles(root string) ([]string, error) {
 	return files, nil
 }
 
-// sourceFiles lists the files that git tracks or would track, so a
-// download, a build output, or another checkout that .gitignore leaves
-// out is not read. It leaves out test data, which keeps the versions
-// that its test needs, a plan, which keeps the versions of its day,
-// and a cache. The list is sorted, and a file that the tree deleted
-// but git still tracks stays in it.
+// sourceFiles returns the sorted paths of the files that git tracks,
+// and of the untracked files that .gitignore does not exclude. It
+// leaves out files under testdata, plans, and .cache directories,
+// because test data keeps the versions its test needs and a plan keeps
+// the versions of its day. A tracked file that is deleted from the
+// working tree stays in the list.
 func sourceFiles(root string) ([]string, error) {
 	out, err := Git{Dir: root}.run("ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	if err != nil {
@@ -283,12 +267,10 @@ func sourceFiles(root string) ([]string, error) {
 	return slices.Compact(files), nil
 }
 
-// closureLibrary is the file name of the closure library and of each
-// copy of it.
 const closureLibrary = "closure.sh"
 
-// isProtocol is true for the file of a Wayland protocol that liken
-// defines: liken-<name>-v<N>.xml, the form wayland-scanner reads.
+// isProtocol is true for liken-<name>-v<N>.xml, the file name of a
+// Wayland protocol that liken defines.
 func isProtocol(name string) bool {
 	stem, ok := strings.CutSuffix(name, ".xml")
 	if !ok || !strings.HasPrefix(stem, "liken-") {
@@ -298,19 +280,19 @@ func isProtocol(name string) bool {
 	return i > 0 && i+2 < len(stem) && strings.Trim(stem[i+2:], "0123456789") == ""
 }
 
-// contentDigest names a file's bytes in a finding: the first twelve
-// hex digits of their SHA-256, enough to tell two copies apart.
+// contentDigest returns the first twelve hex digits of the SHA-256 of
+// data, to show in a finding.
 func contentDigest(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])[:12]
 }
 
-// namesImages is true for a file whose image references the check
-// reads. ci's own tests name drifted images on purpose, as fixtures of
-// this check and of the Dockerfile parser. flux generates
-// gotk-components.yaml, and its images move with liken/flux/VERSION. A
-// file of license notices quotes how third-party software was built,
-// which is not an image that liken runs.
+// namesImages is true for a file whose image references checkPins
+// compares with images.toml. It is false for the tests of ci, which
+// hold drifted references on purpose as fixtures, for
+// gotk-components.yaml, whose images flux generates from
+// liken/flux/VERSION, and for NOTICES.md and LICENSES.md, which quote
+// the images that third-party software was built with.
 func namesImages(file string) bool {
 	name := path.Base(file)
 	switch {
@@ -324,8 +306,8 @@ func namesImages(file string) bool {
 		slices.Contains([]string{".yaml", ".yml", ".md", ".rs"}, path.Ext(name))
 }
 
-// versions maps each pinned thing to each version it is named at, and
-// each version to the files that name it.
+// versions maps the name of a pin to each version found, and each
+// version to the files that have it.
 type versions map[string]map[string][]string
 
 func (v versions) add(name, version, file string) {
@@ -335,7 +317,8 @@ func (v versions) add(name, version, file string) {
 	v[name][version] = appendOnce(v[name][version], file)
 }
 
-// drift lists each name with more than one version.
+// drift returns a finding for each name that has more than one
+// version. kind starts the finding, such as "the crate".
 func (v versions) drift(kind string) []string {
 	var findings []string
 	for _, name := range slices.Sorted(maps.Keys(v)) {
@@ -351,11 +334,12 @@ func (v versions) drift(kind string) []string {
 	return findings
 }
 
-// readGoMod adds each module that the go.mod requires directly, or as a
-// tool, to modules, and checks its go directive. A module that a
-// replace directive points at a directory is a module of this
-// repository, and its version means nothing. An indirect requirement
-// is what the module's own requirements choose, so it follows them.
+// readGoMod adds each module that the go.mod requires directly or as a
+// tool to modules, and returns a finding when its go directive is not
+// goVersion. It skips a module that a replace directive maps to a local
+// directory, because the module is in this repository and its version
+// is a placeholder. It skips an indirect requirement, because its
+// version follows the direct requirements.
 func readGoMod(file, text, goVersion string, modules versions) []string {
 	var findings []string
 	required := map[string]string{}
@@ -380,7 +364,7 @@ func readGoMod(file, text, goVersion string, modules versions) []string {
 		switch verb {
 		case "go":
 			if len(fields) == 1 && fields[0] != goVersion {
-				findings = append(findings, fmt.Sprintf("%s names go %s, and the golang image in %s is %s", file, fields[0], imagesFile, goVersion))
+				findings = append(findings, fmt.Sprintf("%s sets go %s, and the golang image in %s is %s", file, fields[0], imagesFile, goVersion))
 			}
 		case "require":
 			if len(fields) == 2 {
@@ -406,7 +390,8 @@ func readGoMod(file, text, goVersion string, modules versions) []string {
 	return findings
 }
 
-// readRustToolchain checks the channel of a rust-toolchain.toml.
+// readRustToolchain returns a finding when the channel of a
+// rust-toolchain.toml is not rustVersion.
 func readRustToolchain(file string, data []byte, rustVersion string) ([]string, error) {
 	var config struct {
 		Toolchain struct {
@@ -414,22 +399,22 @@ func readRustToolchain(file string, data []byte, rustVersion string) ([]string, 
 		} `toml:"toolchain"`
 	}
 	if _, err := toml.Decode(string(data), &config); err != nil {
-		return nil, fmt.Errorf("%s: %w", file, err)
+		return nil, fmt.Errorf("parsing %s: %w", file, err)
 	}
 	if channel := config.Toolchain.Channel; channel != rustVersion {
-		return []string{fmt.Sprintf("%s names Rust %s, and the rust image in %s is %s", file, channel, imagesFile, rustVersion)}, nil
+		return []string{fmt.Sprintf("%s sets Rust %s, and the rust image in %s is %s", file, channel, imagesFile, rustVersion)}, nil
 	}
 	return nil, nil
 }
 
-// readCargo adds each crate that a Cargo.toml names with a version to
-// crates: in the dependency tables of a package, of a target, and of a
-// workspace. A crate that takes its version from the workspace names
-// none of its own.
+// readCargo adds each crate that a Cargo.toml requires with a version
+// to crates, from the dependency tables of the package, of each target,
+// and of the workspace. A dependency with workspace = true or only a
+// path has no version, so it adds nothing.
 func readCargo(file string, data []byte, crates versions) error {
 	var manifest map[string]any
 	if _, err := toml.Decode(string(data), &manifest); err != nil {
-		return fmt.Errorf("%s: %w", file, err)
+		return fmt.Errorf("parsing %s: %w", file, err)
 	}
 	tables := []any{manifest}
 	if workspace, ok := manifest["workspace"].(map[string]any); ok {
@@ -458,8 +443,9 @@ func readCargo(file string, data []byte, crates versions) error {
 	return nil
 }
 
-// readHooks adds the revision of each hook repository to hooks. The
-// local and meta repositories have no revision.
+// readHooks adds the rev of each hook repository of a
+// .pre-commit-config.yaml to hooks. It skips the local and meta
+// repositories, which have no rev.
 func readHooks(file string, data []byte, hooks versions) error {
 	var config struct {
 		Repos []struct {
@@ -468,7 +454,7 @@ func readHooks(file string, data []byte, hooks versions) error {
 		} `yaml:"repos"`
 	}
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return fmt.Errorf("%s: %w", file, err)
+		return fmt.Errorf("parsing %s: %w", file, err)
 	}
 	for _, repo := range config.Repos {
 		if repo.Rev != "" {

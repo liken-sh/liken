@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// recipeFixture is a pinned base on a pinned tool. The base's build
-// context leaves out its README and its smoke check, and it takes the
-// tool's directory as a named context.
+// recipeFixture is a pinned base that depends on a pinned tool. The
+// base's .dockerignore excludes its README and its smoke check, and the
+// base reads the tool's directory as a named build context.
 func recipeFixture(t *testing.T) string {
 	t.Helper()
 	return writeTree(t, map[string]string{
@@ -33,11 +33,11 @@ func recipeOf(t *testing.T, root, name string) string {
 	t.Helper()
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	recipe, err := Recipe(root, components, components[name])
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("computing the recipe: %v", err)
 	}
 	return recipe
 }
@@ -69,8 +69,8 @@ func TestTheRecipeCoversWhatTheImageIsBuiltFrom(t *testing.T) {
 			if after := recipeOf(t, root, "base"); after != before {
 				return fmt.Errorf("a file that Dockerfile.dockerignore leaves out changed the recipe")
 			}
-			// The Dockerfile's own ignore file replaces .dockerignore,
-			// so the README is in the context now.
+			// A <Dockerfile>.dockerignore replaces .dockerignore, so
+			// the README is now in the build context.
 			return os.WriteFile(filepath.Join(root, "base/README.md"), []byte("why, at length\n"), 0o644)
 		}, true},
 		{"a file of a named context outside its owner's image context", func(root string) error {
@@ -138,10 +138,10 @@ func TestTheRecipeCoversWhatTheImageIsBuiltFrom(t *testing.T) {
 			root := recipeFixture(t)
 			before := recipeOf(t, root, "base")
 			if err := c.change(root); err != nil {
-				t.Fatal(err)
+				t.Fatalf("changing the tree: %v", err)
 			}
 			if after := recipeOf(t, root, "base"); (after != before) != c.changes || !strings.HasPrefix(after, "sha256:") {
-				t.Errorf("before %s, after %s", before, after)
+				t.Errorf("the recipe is %s before the change and %s after it, want a change: %v", before, after, c.changes)
 			}
 		})
 	}
@@ -149,9 +149,9 @@ func TestTheRecipeCoversWhatTheImageIsBuiltFrom(t *testing.T) {
 
 func TestARecipeRefusesWhatItCannotPin(t *testing.T) {
 	cases := map[string]struct{ dockerfile, wants string }{
-		"a FROM with no digest":         {"FROM debian:trixie-slim\n", "debian:trixie-slim, which names no digest"},
-		"a COPY source with no digest":  {"FROM tool\nCOPY --from=alpine:3 / /a\n", "alpine:3, which names no digest"},
-		"a mount source with no digest": {"FROM tool\nRUN --mount=type=bind,from=busybox:latest,target=/b true\n", "busybox:latest, which names no digest"},
+		"a FROM with no digest":         {"FROM debian:trixie-slim\n", "debian:trixie-slim, which has no digest"},
+		"a COPY source with no digest":  {"FROM tool\nCOPY --from=alpine:3 / /a\n", "alpine:3, which has no digest"},
+		"a mount source with no digest": {"FROM tool\nRUN --mount=type=bind,from=busybox:latest,target=/b true\n", "busybox:latest, which has no digest"},
 		"an image outside its depends":  {"FROM tool\nCOPY --from=other / /o\n", "other is not in the dependencies of base"},
 		"an ADD with no checksum":       {"FROM tool\nADD https://example.com/x /x\n", "https://example.com/x with no --checksum"},
 		"an escape directive":           {"# escape=`\nFROM tool\n", "an escape directive"},
@@ -163,18 +163,18 @@ func TestARecipeRefusesWhatItCannotPin(t *testing.T) {
 			other := "[package]\nname = \"other\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"other\"\ndescription = \"The other image.\"\n"
 			for file, text := range map[string]string{"base/Dockerfile": c.dockerfile, "other/package.toml": other, "other/Dockerfile": "FROM scratch\n"} {
 				if err := os.MkdirAll(filepath.Dir(filepath.Join(root, file)), 0o755); err != nil {
-					t.Fatal(err)
+					t.Fatalf("creating the directory of %s: %v", file, err)
 				}
 				if err := os.WriteFile(filepath.Join(root, file), []byte(text), 0o644); err != nil {
-					t.Fatal(err)
+					t.Fatalf("writing %s: %v", file, err)
 				}
 			}
 			components, err := LoadComponents(root)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("loading the components: %v", err)
 			}
 			if _, err := Recipe(root, components, components["base"]); err == nil || !strings.Contains(err.Error(), c.wants) {
-				t.Errorf("got %v, want an error with %q", err, c.wants)
+				t.Errorf("Recipe returned %v, want an error with %q", err, c.wants)
 			}
 		})
 	}
@@ -196,10 +196,10 @@ func TestTheRecipeCoversTheDigestOfEachToolchainImageItReads(t *testing.T) {
 			})
 			before := recipeOf(t, root, "app")
 			if err := os.WriteFile(filepath.Join(root, "toolchains/images.toml"), []byte(c.images), 0o644); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing toolchains/images.toml: %v", err)
 			}
 			if after := recipeOf(t, root, "app"); (after != before) != c.changes {
-				t.Errorf("before %s, after %s", before, after)
+				t.Errorf("the recipe is %s before the change and %s after it, want a change: %v", before, after, c.changes)
 			}
 		})
 	}

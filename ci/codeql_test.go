@@ -41,12 +41,12 @@ run = "make test"
 }
 
 // The loader derives one CodeQL job for each Go and Rust job, and one
-// for each other language whose sources a component holds. A file in
+// for each other language that a component has source files in. A file in
 // testdata/ is a fixture, and it derives no job.
 func TestTheLoaderDerivesACodeQLJobForEachAnalysis(t *testing.T) {
 	components, err := LoadComponents(writeTree(t, codeqlFiles))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	type derived struct{ Name, Language, Dir, Run string }
 	cases := []struct {
@@ -73,7 +73,7 @@ func TestTheLoaderDerivesACodeQLJobForEachAnalysis(t *testing.T) {
 				}
 			}
 			if !reflect.DeepEqual(got, c.jobs) {
-				t.Errorf("got %+v, want %+v", got, c.jobs)
+				t.Errorf("the derived CodeQL jobs are %+v, want %+v", got, c.jobs)
 			}
 		})
 	}
@@ -91,7 +91,7 @@ func TestTwoGoJobsOfOneModuleShareOneCodeQLJob(t *testing.T) {
 		"app/docs/go.mod": "module example.com/app/docs\n",
 	}))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	var got []string
 	for _, job := range components["app"].Jobs {
@@ -100,7 +100,7 @@ func TestTwoGoJobsOfOneModuleShareOneCodeQLJob(t *testing.T) {
 		}
 	}
 	if want := []string{"codeql-go ", "codeql-docs docs"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("the CodeQL jobs are %q, not %q", got, want)
+		t.Errorf("the CodeQL jobs are %q, want %q", got, want)
 	}
 }
 
@@ -108,14 +108,14 @@ func TestTwoGoJobsOfOneModuleShareOneCodeQLJob(t *testing.T) {
 func TestAPackageTomlCannotDeclareACodeQLJob(t *testing.T) {
 	root := writeTree(t, map[string]string{"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"codeql-go\"\ntoolchain = \"go\"\nrun = \"true\"\n"})
 	if _, err := LoadComponents(root); err == nil || !strings.Contains(err.Error(), "codeql-") {
-		t.Errorf("got %v, want an error that names the prefix", err)
+		t.Errorf("LoadComponents returned %v, want an error that names the prefix codeql-", err)
 	}
 }
 
 // A CodeQL job runs only when a source of its language changes in its
-// own directory, or, for Go and Rust, in a module or a crate that the
-// job it comes from builds with. A header is a C source. A smoke check
-// runs no Go or Rust job, and it runs the Python analysis.
+// own directory or, for Go and Rust, in a module or crate that the
+// build uses. A Python smoke check runs no Go or Rust job, but it runs
+// the Python analysis.
 func TestACodeQLJobRunsWhenASourceOfItsLanguageChanges(t *testing.T) {
 	cases := []struct {
 		name string
@@ -139,7 +139,7 @@ func TestACodeQLJobRunsWhenASourceOfItsLanguageChanges(t *testing.T) {
 			r.commit("the change")
 			d := planGate(t, r, nil, Event{Name: "push", Ref: "refs/heads/topic", Before: before, Head: "HEAD"})["screen"]
 			if !reflect.DeepEqual(d.Jobs, c.jobs) {
-				t.Errorf("screen: jobs %v, want %v", d.Jobs, c.jobs)
+				t.Errorf("the jobs of screen are %v, want %v", d.Jobs, c.jobs)
 			}
 		})
 	}
@@ -165,10 +165,10 @@ func TestTheActionsAnalysisRunsWhenAFileUnderGitHubChanges(t *testing.T) {
 			r.commit("the change")
 			runs, why, err := r.planner(nil).Actions(Event{Name: "push", Ref: "refs/heads/topic", Before: before, Head: "HEAD"})
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("planning the Actions analysis: %v", err)
 			}
 			if runs != c.runs || why != c.why {
-				t.Errorf("got %v, %q; want %v, %q", runs, why, c.runs, c.why)
+				t.Errorf("the Actions analysis runs is %v with reason %q, want %v with reason %q", runs, why, c.runs, c.why)
 			}
 		})
 	}
@@ -185,21 +185,21 @@ func codeqlStep(t *testing.T, job map[string]any, action string) map[string]any 
 			return with
 		}
 	}
-	t.Fatalf("no step uses %s: %v", action, job["steps"])
+	t.Fatalf("the job has no step that uses %s: %v", action, job["steps"])
 	return nil
 }
 
-// Each derived job analyzes its own directory and uploads under a
-// category of its own, with the one permission that the upload needs.
+// Each derived job analyzes its own directory and uploads under its own
+// category, with the security-events permission that the upload needs.
 func TestEachCodeQLJobUploadsUnderItsOwnCategory(t *testing.T) {
 	root := writeTree(t, codeqlFiles)
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	jobs := workflowJobs(t, files[".github/workflows/component-screen.yaml"])
 	cases := []struct {
@@ -214,42 +214,43 @@ func TestEachCodeQLJobUploadsUnderItsOwnCategory(t *testing.T) {
 		t.Run(c.job, func(t *testing.T) {
 			job := jobs[c.job]
 			if want := map[string]any{"contents": "read", "security-events": "write"}; !reflect.DeepEqual(job["permissions"], want) {
-				t.Errorf("permissions %v", job["permissions"])
+				t.Errorf("the permissions are %v, want %v", job["permissions"], want)
 			}
 			init := codeqlStep(t, job, "github/codeql-action/init")
 			if init["languages"] != c.language || init["build-mode"] != c.mode || init["config"] != "paths:\n  - "+c.paths {
-				t.Errorf("init %v", init)
+				t.Errorf("the init step has %v, want language %s, build-mode %s, and paths %q", init, c.language, c.mode, c.paths)
 			}
 			if analyze := codeqlStep(t, job, "github/codeql-action/analyze"); analyze["category"] != c.category {
-				t.Errorf("analyze %v", analyze)
+				t.Errorf("the analyze step has %v, want category %s", analyze, c.category)
 			}
 		})
 	}
 }
 
-// A called workflow's jobs take no permission that the call does not
-// grant, so the call of a component with a CodeQL job grants the
-// upload, and the root workflow analyzes the Actions code itself.
+// A job of a called workflow gets no permission that the call does not
+// grant, so the root workflow's call of a component with a CodeQL job
+// grants security-events. The root workflow analyzes the Actions code
+// in a job of its own.
 func TestTheRootWorkflowGrantsTheUploadsAndAnalyzesTheActions(t *testing.T) {
 	root := writeTree(t, codeqlFiles)
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	jobs := workflowJobs(t, files[".github/workflows/ci.yaml"])
 	if got := jobs["screen"]["permissions"].(map[string]any)["security-events"]; got != "write" {
-		t.Errorf("the call of screen grants security-events: %v", got)
+		t.Errorf("the call of screen grants security-events: %v, want write", got)
 	}
 	actions := jobs["codeql-actions"]
 	if init := codeqlStep(t, actions, "github/codeql-action/init"); init["languages"] != "actions" || init["config"] != "paths:\n  - .github\n" {
-		t.Errorf("init %v", init)
+		t.Errorf("the init step of codeql-actions has %v, want language actions and paths .github", init)
 	}
 	if analyze := codeqlStep(t, actions, "github/codeql-action/analyze"); analyze["category"] != "codeql/actions" {
-		t.Errorf("analyze %v", analyze)
+		t.Errorf("the analyze step of codeql-actions has %v, want category codeql/actions", analyze)
 	}
 }
 
@@ -268,7 +269,7 @@ func TestAnIgnoredSourceDerivesNoCodeQLJob(t *testing.T) {
 	})
 	components, err := LoadComponents(r.git.Dir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	cases := []struct {
 		component string
@@ -284,7 +285,7 @@ func TestAnIgnoredSourceDerivesNoCodeQLJob(t *testing.T) {
 				got = append(got, job.Name)
 			}
 			if !reflect.DeepEqual(got, c.jobs) {
-				t.Errorf("got %v, want %v", got, c.jobs)
+				t.Errorf("the job names are %v, want %v", got, c.jobs)
 			}
 		})
 	}

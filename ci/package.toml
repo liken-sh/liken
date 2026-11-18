@@ -9,11 +9,9 @@ name = "go"
 toolchain = "go"
 run = "make test"
 
-# The hooks in .pre-commit-config.yaml: the formatters, the linters,
-# and the hygiene checks. The jobs above run the tests and the
-# coverage gates.
+# Runs the hooks of .pre-commit-config.yaml. It skips the Go hooks,
+# because `make test` in the go job runs the same checks.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-# The go job runs the same checks as these hooks.
 skip = ["gofmt", "go-vet", "go-mod-tidy"]

@@ -1,6 +1,6 @@
 // ci reads the package.toml of every component in the repository and
-// runs the parts of CI that need the whole graph: it writes the
-// workflows and the Dependabot configuration, decides what each run
+// runs the parts of CI that need the whole component graph. It writes
+// the workflows and the Dependabot configuration, decides what each run
 // builds and publishes, checks each component's declared dependencies
 // against its code, publishes a component's images and deploy
 // artifact, and writes the release record.
@@ -37,7 +37,7 @@ import (
 )
 
 func main() {
-	world := World{
+	env := Env{
 		Published:   Published{Registry: ghcr(""), Channel: "https://releases.liken.sh", Client: httpClient},
 		Registry:    ghcr,
 		Run:         ExecRunner,
@@ -46,17 +46,17 @@ func main() {
 		Stdout:      os.Stdout,
 		Stderr:      os.Stderr,
 	}
-	if err := world.run(os.Args[1:]); err != nil {
+	if err := env.run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "ci:", err)
 		os.Exit(1)
 	}
 }
 
-// World is everything outside the repository that a command reads or
-// changes: the registry, the channel, the commands it runs, and the
-// environment the workflow sets. The tests give each command a world
-// of fixtures.
-type World struct {
+// Env holds everything outside the repository that a command reads or
+// changes: the registry, the release channel, the programs it runs, and
+// the environment variables. The tests give each command an Env of
+// fixtures.
+type Env struct {
 	Published Published
 	// Registry returns a client of ghcr.io that uses the token.
 	Registry func(token string) Registry
@@ -69,10 +69,10 @@ type World struct {
 	Stderr      io.Writer
 }
 
-func (w World) run(args []string) error {
-	stdout := w.Stdout
+func (e Env) run(args []string) error {
+	stdout := e.Stdout
 	if len(args) == 0 {
-		return fmt.Errorf("name a command: generate, plan, bases, deps, pins, namespaces, selectors, publish, scan, scans, record, sites, reports, or profile")
+		return fmt.Errorf("missing command. The commands are generate, plan, bases, deps, pins, namespaces, selectors, publish, scan, scans, record, sites, reports, or profile")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := flags.String("root", ".", "the repository root")
@@ -80,7 +80,7 @@ func (w World) run(args []string) error {
 	component := flags.String("component", "", "publish, profile: the component")
 	version := flags.String("version", "", "publish, scan: the version")
 	mode := flags.String("mode", "", "publish: dev or release")
-	sarif := flags.String("sarif", "", "publish: the directory for the Trivy scan of each pushed image, or empty for no scan; scan: the directory for the scan")
+	sarif := flags.String("sarif", "", "publish: the directory for the Trivy scan of each pushed image, or empty for no scan. scan: the directory for the scan")
 	image := flags.String("image", "", "scan: the image")
 	tag := flags.String("tag", "", "record: the release tag")
 	site := flags.String("site", "", "reports, profile: the address of the site that serves the profiles now")
@@ -97,9 +97,9 @@ func (w World) run(args []string) error {
 	case "generate":
 		return generate(*root, components, *check, stdout)
 	case "plan":
-		return w.plan(*root, components)
+		return e.plan(*root, components)
 	case "bases":
-		return w.bases(*root, components, *out)
+		return e.bases(*root, components, *out)
 	case "deps":
 		return deps(*root, components, stdout)
 	case "pins":
@@ -122,23 +122,23 @@ func (w World) run(args []string) error {
 		if err != nil {
 			return err
 		}
-		p := Publisher{Root: *root, Registry: w.Published.Registry, Run: w.Run, Commit: commit, Created: created, Components: components, SARIF: *sarif, DockerConfig: dockerConfig(w.Getenv)}
+		p := Publisher{Root: *root, Registry: e.Published.Registry, Run: e.Run, Commit: commit, Created: created, Components: components, SARIF: *sarif, DockerConfig: dockerConfig(e.Getenv)}
 		return p.Publish(c, *version, *mode)
 	case "scan":
-		return w.scan(*root, components, *image, *version, *sarif)
+		return e.scan(*root, components, *image, *version, *sarif)
 	case "scans":
-		return w.scans(components)
+		return e.scans(components)
 	case "record":
-		return w.record(*root, components, *tag)
+		return e.record(*root, components, *tag)
 	case "reports":
-		return gatherReports(*root, *site, *dest, w.Published.Client, components, stdout, w.Stderr)
+		return gatherReports(*root, *site, *dest, e.Published.Client, components, stdout, e.Stderr)
 	case "profile":
 		c, ok := components[*component]
 		if !ok {
 			return fmt.Errorf("%q is not a component", *component)
 		}
-		if err := reuseProfiles(*root, *site, "HEAD", w.Published.Client, components, c); err != nil {
-			return fmt.Errorf("%s: the site's coverage profile does not describe HEAD: %w", c.Name(), err)
+		if err := reuseProfiles(*root, *site, "HEAD", e.Published.Client, components, c); err != nil {
+			return fmt.Errorf("%s: the coverage profile that the site serves does not match HEAD: %w", c.Name(), err)
 		}
 		fmt.Fprintf(stdout, "%s: took the coverage profile that the site serves\n", c.Name())
 		return nil
@@ -178,7 +178,7 @@ func generate(root string, components map[string]*Component, check bool, stdout 
 		return err
 	}
 	if len(differ) > 0 {
-		return fmt.Errorf("these files differ from what the generator writes; run `make workflows`: %s", strings.Join(differ, ", "))
+		return fmt.Errorf("these files differ from what the generator writes: %s. Run make workflows to write them", strings.Join(differ, ", "))
 	}
 	fmt.Fprintln(stdout, "every generated workflow, the bake file, and the Dependabot configuration are current")
 	return nil
@@ -194,9 +194,9 @@ func deps(root string, components map[string]*Component, stdout io.Writer) error
 		fmt.Fprintln(stdout, f)
 	}
 	if len(findings) > 0 {
-		return fmt.Errorf("%d undeclared uses", len(findings))
+		return fmt.Errorf("%d uses are not declared in a package.toml", len(findings))
 	}
-	fmt.Fprintln(stdout, "every package.toml names what its component uses")
+	fmt.Fprintln(stdout, "every package.toml declares what its component uses")
 	return nil
 }
 
@@ -226,10 +226,10 @@ func pins(root string, stdout io.Writer) error {
 		fmt.Fprintln(stdout, f)
 	}
 	if len(drift) > 0 || len(fetches) > 0 || len(manifests) > 0 || len(actions) > 0 {
-		return fmt.Errorf("%d pins drift, %d downloads break a rule in AGENTS.md, %d manifests disagree with their pins, and %d actions or builders run code that no commit named",
+		return fmt.Errorf("the pins check found pins that drift: %d, downloads that break a rule in AGENTS.md: %d, manifests that disagree with their pins: %d, actions or builders that run code no commit pins: %d",
 			len(drift), len(fetches), len(manifests), len(actions))
 	}
-	fmt.Fprintln(stdout, "every shared pin names one version, every download follows the rules in AGENTS.md, every pin that ships has a manifest that agrees with it, and every action and builder is pinned by commit")
+	fmt.Fprintln(stdout, "every shared pin has one version, every download follows the rules in AGENTS.md, every pin that ships has a manifest that agrees with it, and every action and builder is pinned by commit")
 	return nil
 }
 
@@ -263,11 +263,11 @@ func namespaces(root string, stdout io.Writer) error {
 	return nil
 }
 
-func (w World) record(root string, components map[string]*Component, tag string) error {
+func (e Env) record(root string, components map[string]*Component, tag string) error {
 	if err := CheckReleaseTag(tag); err != nil {
 		return err
 	}
-	p := w.Published
+	p := e.Published
 	git := Git{Dir: root}
 	previous, _, describeErr := git.Describe(tag + "^")
 	pinned := func(c *Component) (bool, string, error) {
@@ -306,7 +306,7 @@ func (w World) record(root string, components map[string]*Component, tag string)
 		changes = strings.Split(subjects, "\n")
 	}
 	notes := RecordNotes(tag, entries, digest, changes)
-	fmt.Fprint(w.Stdout, notes)
+	fmt.Fprint(e.Stdout, notes)
 	dir, err := os.MkdirTemp("", "record")
 	if err != nil {
 		return err
@@ -316,24 +316,25 @@ func (w World) record(root string, components map[string]*Component, tag string)
 	if err := os.WriteFile(file, []byte(notes), 0o644); err != nil {
 		return err
 	}
-	if err := w.Run(root, "gh", "release", "view", tag); err == nil {
-		return w.Run(root, "gh", "release", "edit", tag, "--notes-file", file)
+	if err := e.Run(root, "gh", "release", "view", tag); err == nil {
+		return e.Run(root, "gh", "release", "edit", tag, "--notes-file", file)
 	}
-	return w.Run(root, "gh", "release", "create", tag, "--verify-tag", "--title", tag, "--notes-file", file)
+	return e.Run(root, "gh", "release", "create", tag, "--verify-tag", "--title", tag, "--notes-file", file)
 }
 
-// scan runs Trivy on one published image of a component, for the root
-// workflow's trivy job. A scan that fails prints a warning and returns
-// no error, as scanImage says; only a request that names no image of
-// the repository, or no version or directory, is an error.
-func (w World) scan(root string, components map[string]*Component, image, version, dir string) error {
+// scan runs Trivy on one published image of a component, for the trivy
+// jobs of ci.yaml and scan.yaml. A failed scan prints a warning and
+// returns no error, as scanImage documents. The command returns an
+// error only when -version or -sarif is empty, or when no component
+// builds the image.
+func (e Env) scan(root string, components map[string]*Component, image, version, dir string) error {
 	if version == "" || dir == "" {
-		return fmt.Errorf("a scan needs a -version and a -sarif directory")
+		return fmt.Errorf("scan needs -version and -sarif")
 	}
 	for _, c := range components {
 		for _, i := range c.Outputs.Images {
 			if i.Name == image {
-				scanImage(w.Run, root, dir, image, version)
+				scanImage(e.Run, root, dir, image, version)
 				return nil
 			}
 		}

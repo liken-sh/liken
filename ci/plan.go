@@ -14,19 +14,20 @@ type Event struct {
 	Name string
 	// Ref is the full ref: refs/heads/main or refs/tags/2026.10.02-001.
 	Ref string
-	// Before is the commit the branch named before a push.
+	// Before is the branch's commit before the push.
 	Before string
-	// Base is a pull request's base commit.
-	Base string
+	Base   string
 	// Head is the commit the run builds.
 	Head string
 	// Verified is the head of the newest run on main that passed.
-	// Unverified says why the plan could not find that run, such as an
-	// error from the API or no run that passed yet. When both are "",
-	// nothing looked for the run, as in a test or on a workstation.
+	// Unverified is the reason the plan could not find that run, such
+	// as an error from the API or no run that passed yet. Both are ""
+	// when the plan did not search for the run, as in a test or on a
+	// workstation.
 	Verified, Unverified string
-	// MainRef names main in the checkout, such as origin/main, for the
-	// merge base of a branch that has no earlier commit to compare with.
+	// MainRef is the ref of main in the checkout, such as origin/main.
+	// A push to another branch is also compared with its merge base on
+	// main.
 	MainRef string
 	// Publishing is true when the repository allows real publishes.
 	// Without it, a push to main and a release tag run their checks
@@ -46,7 +47,6 @@ func (e Event) Tag() string {
 	return tag
 }
 
-// Main is true for a push to main.
 func (e Event) Main() bool { return e.Name == "push" && e.Ref == "refs/heads/main" }
 
 // Publish modes for a component's workflow.
@@ -58,11 +58,10 @@ const (
 	publishDry = "dry"
 )
 
-// publishCode are the files that hold the code of every component's
-// publish, other than the OS's: the publisher, the labels and the
-// annotations it writes on each image, and the attestations and the
-// signature of each image it pushes. A dry run runs each of them but
-// the push and the signature.
+// publishCode lists the files of the publish of every component except
+// the OS. When one of them changes, dryRun runs the publish job of each
+// component in dry mode, which builds each image and pushes and signs
+// nothing.
 var publishCode = []string{"ci/publish.go", "ci/imagemeta.go", "ci/sign.go"}
 
 // A Decision is what the run does with one component.
@@ -73,25 +72,25 @@ type Decision struct {
 	Publish string `json:"publish"`
 	// Version is the version the component's outputs get in this run.
 	Version string `json:"version"`
-	// Reason says why the component's jobs run, or why they do not.
+	// Reason is why the component's jobs run, or why they do not.
 	Reason string `json:"-"`
-	// Changed is true when a change goes into the component's outputs,
-	// so a release or a development build would publish it.
+	// Changed is true when the change modifies a file that the
+	// component's outputs are built from, so a release or a development
+	// build would publish the component.
 	Changed bool `json:"-"`
-	// Why says what changed in the outputs.
-	Why string `json:"-"`
-	// Newest is the component's newest published release.
+	// Why is the file or the reason that made Changed true.
+	Why    string `json:"-"`
 	Newest string `json:"-"`
 	// Jobs and Images are the jobs and the images that run when Check
 	// is true.
 	Jobs   []string   `json:"jobs"`
 	Images []ImageRun `json:"images"`
-	// DryRun is true when the check stage runs the publish job in its
-	// dry mode: its code changed, and the run does not publish.
+	// DryRun is true when the check stage runs the publish job in dry
+	// mode, which builds each image and pushes nothing. The method
+	// dryRun sets it.
 	DryRun bool `json:"dryrun"`
 }
 
-// VersionsFunc lists the published versions of a component.
 type VersionsFunc func(*Component) ([]string, error)
 
 // Planner decides what a run does with every component.
@@ -99,8 +98,8 @@ type Planner struct {
 	Components map[string]*Component
 	Git        Git
 	Versions   VersionsFunc
-	// Recipes holds the recipe hash of each pinned component in the
-	// tree, and PublishedRecipe reads the hash of its published tag.
+	// Recipes is the recipe hash of each pinned component in the tree,
+	// and PublishedRecipe reads the hash of its published tag.
 	Recipes         map[string]string
 	PublishedRecipe PublishedRecipeFunc
 }
@@ -118,11 +117,12 @@ func (p Planner) Plan(e Event) (map[string]Decision, error) {
 // went into its outputs since its newest published release. A
 // component that does not release runs nothing.
 //
-// A component that releases runs the jobs and the images that read
-// the change since the newest main run that passed, the same way a
-// push to main selects them, and each image that reads the version.
-// Its other jobs passed on the same files in that run. When the plan
-// cannot find that run, every job of the component runs.
+// A component that releases runs only the jobs and images that the
+// change since the newest main run that passed touches, because its
+// other jobs passed on the same files in that run. When the run
+// publishes, it also builds each image that uses the VERSION build
+// argument. When the plan cannot find that run, every job of the
+// component runs.
 func (p Planner) release(e Event, tag string) (map[string]Decision, error) {
 	if err := CheckReleaseTag(tag); err != nil {
 		return nil, err
@@ -154,8 +154,8 @@ func (p Planner) release(e Event, tag string) (map[string]Decision, error) {
 	return decisions, nil
 }
 
-// Candidates decides which components a release tag at the commit
-// would publish, and why.
+// Candidates returns a decision for each component: whether a release
+// tag at the commit would publish it, and why.
 func (p Planner) Candidates(head string) (map[string]Decision, error) {
 	published, err := p.pinnedPublished()
 	if err != nil {
@@ -186,16 +186,16 @@ func (p Planner) Candidates(head string) (map[string]Decision, error) {
 	return decisions, nil
 }
 
-// sinceRelease fills in whether a change went into the component's
-// outputs after its newest published release.
+// sinceRelease sets d.Changed and d.Why: whether the component's
+// outputs changed after its newest published release.
 //
-// The diff starts at the git tag of that release: the bare version for
-// a release made in this repository, or <component>/<version> for a
-// release that a component made in its own repository before it moved
-// here. The prefixed tag wins, because the OS's bare tags share the
-// same calendar, and a bare tag of the same date names the OS's commit.
-// A component with no release, or whose release has no git tag here,
-// releases.
+// The diff starts at the git tag of that release. That tag is the bare
+// version for a release made in this repository, or
+// <component>/<version> for a release that the component made in its
+// own repository before it moved here. The prefixed tag is tried
+// first, because a bare tag with the same date may be the OS's
+// release and would point at the OS's commit. A component with no
+// release, or whose release has no git tag here, counts as changed.
 func (p Planner) sinceRelease(c *Component, head string, d *Decision) error {
 	versions, err := p.Versions(c)
 	if err != nil {
@@ -214,7 +214,7 @@ func (p Planner) sinceRelease(c *Component, head string, d *Decision) error {
 		}
 	}
 	if from == "" {
-		d.Changed, d.Why = true, "no git tag names its release "+d.Newest
+		d.Changed, d.Why = true, "no git tag marks its release "+d.Newest
 		return nil
 	}
 	diff, err := p.Git.ReadDiff(p.Components, from, head)
@@ -231,8 +231,8 @@ func (p Planner) sinceRelease(c *Component, head string, d *Decision) error {
 // gate plans a push to a branch, a pull request, or a dispatch. The
 // jobs of every component whose check paths changed run. A push to
 // main also publishes a development build of each component whose
-// outputs changed since its newest published version, and runs its jobs
-// first.
+// outputs changed since its newest published version, and runs that
+// component's jobs before the publish.
 func (p Planner) gate(e Event) (map[string]Decision, error) {
 	list, all := p.Comparisons(e)
 	diff, err := p.readDiffs(list, e.Head)
@@ -275,8 +275,8 @@ func (p Planner) gate(e Event) (map[string]Decision, error) {
 		if c.Pinned() {
 			d = pinnedDecision(c, published[c.Name()], d.Check, d.Reason)
 		}
-		// The OS publishes only releases: a machine installs from the
-		// channel, and the channel holds releases.
+		// The OS publishes no development build, because machines
+		// install from the release channel, which has only releases.
 		devBuild := e.Main() && c.HasOutputs() && !c.Outputs.Channel
 		if devBuild && e.Publishing && !c.Pinned() && !d.Changed {
 			if err := p.sincePublished(c, e.Head, &d); err != nil {
@@ -300,18 +300,14 @@ func (p Planner) gate(e Event) (map[string]Decision, error) {
 	return decisions, nil
 }
 
-// selectJobs fills in the jobs and the images that run. A run that
-// builds a pinned tag that is not published, or changed the
-// component's workflow, runs all of them, and so does a run with no
-// commit to compare with. Otherwise the selector decides, and a
-// component whose jobs and images all read nothing of the change does
-// not run.
+// selectJobs sets the jobs and images that run. Every job and image
+// runs when every job of the run runs, when the change touches the
+// component's workflow, or when the component is pinned and its tag is
+// not published. Otherwise the selector picks the ones that the change
+// touches, and a component with none does not run.
 //
-// A run that publishes selects the same way. On main the plan compares
-// with the newest main run that passed too, so a job whose files did
-// not change since that run passed there, on the same files. The
-// publish waits for the jobs and the images that run, and builds every
-// image of the component.
+// The publish waits for the jobs and images that run, and then builds
+// every image of the component.
 func (p Planner) selectJobs(c *Component, d *Decision, sel selector, all bool) {
 	_, workflow := sel.diff.Workflows[c.Name()]
 	if all || workflow || c.Pinned() && d.Changed {
@@ -327,13 +323,12 @@ func (p Planner) selectJobs(c *Component, d *Decision, sel selector, all bool) {
 	}
 }
 
-// pullPublished turns the images of a pinned component whose tag is
-// published with the tree's recipe into checks of the published
-// images. The recipe covers every input of the build, so the published
-// image is what a build from the tree would make, and a build would
-// only reach the upstream servers again. An image with a smoke check
-// that loads is pulled and checked, and every other image runs
-// nothing.
+// pullPublished returns the image runs of a pinned component whose
+// published tag has the tree's recipe. The recipe covers every input of
+// the build, so a build from the tree would make the same image and
+// only download from upstream again. So pullPublished drops each image
+// build, and keeps only the images that have a smoke check and Load
+// set, which the run pulls from the registry and smoke-checks.
 func pullPublished(images []ImageRun) []ImageRun {
 	var pulled []ImageRun
 	for _, image := range images {
@@ -345,11 +340,17 @@ func pullPublished(images []ImageRun) []ImageRun {
 	return pulled
 }
 
-// dryRun runs the component's publish job in its dry mode when the
-// code of that publish changed and the run does not publish the
-// component, and when the run has no commit to compare with. A dry run
-// of a tracked component takes a development version, so the publish
-// sees a version of the shape it sees on main.
+// dryRun runs the component's publish job in dry mode when the
+// component has outputs, the run does not publish it, and one of these
+// is true:
+//
+//   - every job runs
+//   - a file of publishCode changed, and the component is not the OS
+//   - the component's publish job in a workflow changed
+//
+// When the decision has no version, as on a branch other than main,
+// the dry run gets a development version, because the publish accepts
+// only a development or a release version. The OS gets none.
 func (p Planner) dryRun(c *Component, d *Decision, diff Diff, all bool, head string) error {
 	changed := diff.Publishes[c.Name()]
 	for _, file := range publishCode {

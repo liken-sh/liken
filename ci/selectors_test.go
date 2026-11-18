@@ -7,10 +7,8 @@ import (
 	"testing"
 )
 
-// A device that lacks an attribute fails a selector that reads it with
-// a CEL error, and the scheduler then fails every claim of the class on
-// that node, not only the claim of that device. So each read of an
-// attribute or a capacity needs a has() of it earlier in the selector.
+// Each read of an attribute or a capacity needs a has() of it earlier
+// in the selector, or the optional form .? with orValue().
 func TestASelectorReadsAnAttributeOnlyAfterItsHas(t *testing.T) {
 	cases := []struct {
 		expression string
@@ -34,16 +32,16 @@ func TestASelectorReadsAnAttributeOnlyAfterItsHas(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.expression, func(t *testing.T) {
 			if got := unguardedReads(c.expression); !reflect.DeepEqual(got, c.want) {
-				t.Errorf("unguarded %q, want %q", got, c.want)
+				t.Errorf("unguardedReads returned %q, want %q", got, c.want)
 			}
 		})
 	}
 }
 
-// The check reads every DeviceClass in the repository's YAML files and
-// in the YAML blocks of its pages, because a reader copies a class from
-// a guide as often as from a deploy base. A plan is a record and is
-// left as it was written.
+// The check covers every DeviceClass in the repository's YAML files and
+// in the YAML blocks of its pages, because readers copy classes from
+// guides as well as from deploy bases. It skips plans and test data,
+// and the selectors of a claim.
 func TestEveryDeviceClassInTheTreeIsChecked(t *testing.T) {
 	class := "apiVersion: resource.k8s.io/v1\nkind: DeviceClass\nmetadata:\n  name: %s\nspec:\n  selectors:\n    - cel:\n        expression: device.attributes[\"liken.sh\"].bus == \"usb\"\n"
 	root := writeTree(t, map[string]string{
@@ -56,7 +54,7 @@ func TestEveryDeviceClassInTheTreeIsChecked(t *testing.T) {
 	})
 	findings, err := checkSelectors(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the selectors: %v", err)
 	}
 	want := []string{
 		`op/deploy/classes.yaml: the DeviceClass upload reads device.attributes["liken.sh"].bus with no has() of it before`,
@@ -67,8 +65,8 @@ func TestEveryDeviceClassInTheTreeIsChecked(t *testing.T) {
 	}
 }
 
-// The command fails on a finding and names it, and passes on a tree
-// whose classes guard every read.
+// The command fails and prints the finding when a class has an
+// unguarded read, and passes when every read is guarded.
 func TestTheSelectorsCommandFailsOnAnUnguardedRead(t *testing.T) {
 	cases := []struct {
 		name, expression string
@@ -83,10 +81,10 @@ func TestTheSelectorsCommandFailsOnAnUnguardedRead(t *testing.T) {
 				"op/deploy/classes.yaml": "kind: DeviceClass\nmetadata:\n  name: upload\nspec:\n  selectors:\n    - cel:\n        expression: '" + c.expression + "'\n",
 				"op/docs/notes.md":       "```yaml\nkey: [unclosed\n```\n",
 			})
-			w := newWorld(t, &fakeRegistry{})
+			w := newFakeEnv(t, &fakeRegistry{})
 			err := w.run([]string{"selectors", "-root", root})
 			if (err != nil) != c.fails || c.fails != strings.Contains(w.out.String(), "op/deploy/classes.yaml: the DeviceClass upload") {
-				t.Errorf("err %v, out %q", err, w.out.String())
+				t.Errorf("the selectors command returned %v and printed %q, want failure %v with the finding for the DeviceClass upload printed only on failure", err, w.out.String(), c.fails)
 			}
 		})
 	}

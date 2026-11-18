@@ -11,40 +11,40 @@ import (
 // plan reads the event from the environment that ci.yaml's plan job
 // sets, decides what the run does with each component, and writes the
 // decisions to the job's outputs and the run's summary.
-func (w World) plan(root string, components map[string]*Component) error {
-	e := Event{
-		Name:       w.Getenv("EVENT"),
-		Ref:        w.Getenv("REF"),
-		Before:     w.Getenv("BEFORE"),
-		Base:       w.Getenv("BASE"),
+func (e Env) plan(root string, components map[string]*Component) error {
+	event := Event{
+		Name:       e.Getenv("EVENT"),
+		Ref:        e.Getenv("REF"),
+		Before:     e.Getenv("BEFORE"),
+		Base:       e.Getenv("BASE"),
 		Head:       "HEAD",
 		MainRef:    "origin/main",
-		Publishing: w.Getenv("PUBLISH") == "true",
+		Publishing: e.Getenv("PUBLISH") == "true",
 	}
 	var notes []string
 	// A push to main and a release tag both diff with the newest main
 	// run that passed, so a job whose files did not change since that
 	// run does not run again.
-	if e.Main() || e.Tag() != "" {
-		runs := Runs{API: orDefault(w.Getenv("GITHUB_API_URL"), "https://api.github.com"), Repository: w.Getenv("GITHUB_REPOSITORY"),
-			Token: w.Getenv("GITHUB_TOKEN"), Client: w.Published.Client}
-		verified, err := runs.NewestGreen("ci.yaml")
+	if event.Main() || event.Tag() != "" {
+		runs := Runs{API: orDefault(e.Getenv("GITHUB_API_URL"), "https://api.github.com"), Repository: e.Getenv("GITHUB_REPOSITORY"),
+			Token: e.Getenv("GITHUB_TOKEN"), Client: e.Published.Client}
+		verified, err := runs.NewestSuccessful("ci.yaml")
 		switch {
 		case err != nil:
-			e.Unverified = fmt.Sprintf("the newest main run that passed is unknown (%v)", err)
+			event.Unverified = fmt.Sprintf("the newest main run that passed is unknown (%v)", err)
 		case verified == "":
-			e.Unverified = "no main run has passed yet"
+			event.Unverified = "no main run has passed yet"
 		}
-		e.Verified = verified
+		event.Verified = verified
 	}
 	git := Git{Dir: root}
 	recipes, err := Recipes(root, components)
 	if err != nil {
 		return err
 	}
-	planner := Planner{Components: components, Git: git, Versions: onceEach(w.Published.Versions),
-		Recipes: recipes, PublishedRecipe: w.Published.Recipe}
-	decisions, err := planner.Plan(e)
+	planner := Planner{Components: components, Git: git, Versions: onceEach(e.Published.Versions),
+		Recipes: recipes, PublishedRecipe: e.Published.Recipe}
+	decisions, err := planner.Plan(event)
 	if err != nil {
 		return err
 	}
@@ -52,26 +52,26 @@ func (w World) plan(root string, components map[string]*Component) error {
 	// what a release tag at this commit would publish, which is the dry
 	// run of a release.
 	candidates := decisions
-	if e.Tag() == "" {
-		if candidates, err = planner.Candidates(e.Head); err != nil {
+	if event.Tag() == "" {
+		if candidates, err = planner.Candidates(event.Head); err != nil {
 			return err
 		}
 	}
 	var refused []string
 	probed := false
-	if token := w.Getenv("GITHUB_TOKEN"); token != "" && w.Getenv("PROBE") == "true" {
+	if token := e.Getenv("GITHUB_TOKEN"); token != "" && e.Getenv("PROBE") == "true" {
 		probed = true
-		refused = probe(w.Registry(token), components)
+		refused = probe(e.Registry(token), components)
 	}
 
-	list, all := planner.Comparisons(e)
+	list, all := planner.Comparisons(event)
 	for _, c := range list {
 		notes = append(notes, fmt.Sprintf("The plan compares with `%s`, %s.", c.Commit, c.Why))
 	}
 	if all != "" {
 		notes = append(notes, "Every job runs: "+all+".")
 	}
-	site, siteWhy, err := planner.Site(e, decisions)
+	site, siteWhy, err := planner.Site(event, decisions)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func (w World) plan(root string, components map[string]*Component) error {
 	} else {
 		notes = append(notes, "The site does not deploy: "+siteWhy+".")
 	}
-	actions, actionsWhy, err := planner.Actions(e)
+	actions, actionsWhy, err := planner.Actions(event)
 	if err != nil {
 		return err
 	}
@@ -89,21 +89,22 @@ func (w World) plan(root string, components map[string]*Component) error {
 	} else {
 		notes = append(notes, "CodeQL does not analyze the Actions code: "+actionsWhy+".")
 	}
-	rescan, rescanWhy, err := planner.Rescan(e, decisions)
+	rescan, rescanWhy, err := planner.Rescan(event, decisions)
 	if err != nil {
 		return err
 	}
 	notes = append(notes, rescanNote(rescan, rescanWhy))
 	var summary strings.Builder
-	writeSummary(&summary, e, components, decisions, candidates, notes, probed, refused)
-	fmt.Fprint(w.Stdout, summary.String())
-	if path := w.Getenv("GITHUB_STEP_SUMMARY"); path != "" {
+	writeSummary(&summary, event, components, decisions, candidates, notes, probed, refused)
+	fmt.Fprint(e.Stdout, summary.String())
+	if path := e.Getenv("GITHUB_STEP_SUMMARY"); path != "" {
 		if err := appendFile(path, summary.String()); err != nil {
 			return err
 		}
 	}
-	// A list that runs nothing is [] and never null, so every input of
-	// a component's workflow is a JSON list, as its description says.
+	// An empty Jobs or Images encodes as [], not null, because the
+	// component workflow declares its jobs and images inputs as JSON
+	// lists.
 	for name, d := range decisions {
 		if d.Jobs == nil {
 			d.Jobs = []string{}
@@ -124,7 +125,7 @@ func (w World) plan(root string, components map[string]*Component) error {
 	if err != nil {
 		return err
 	}
-	if path := w.Getenv("GITHUB_OUTPUT"); path != "" {
+	if path := e.Getenv("GITHUB_OUTPUT"); path != "" {
 		if err := appendFile(path, fmt.Sprintf("components=%s\nsite=%t\nactions=%t\ntrivy=%s\ntrivy-db=%t\n",
 			encoded, site, actions, scans, ScansImages(components, decisions, rescan))); err != nil {
 			return err
@@ -134,14 +135,14 @@ func (w World) plan(root string, components map[string]*Component) error {
 	// it. Before the repository allows publishing, the refusals are the
 	// list of packages whose settings still need to grant this
 	// repository write access.
-	if len(refused) > 0 && e.Publishing {
+	if len(refused) > 0 && event.Publishing {
 		return fmt.Errorf("the workflow cannot push to %d packages", len(refused))
 	}
 	return nil
 }
 
-// probe proves that the token can push to every package of every
-// component, and lists each refusal.
+// probe checks that the token can push to every package of every
+// component, and returns each refusal.
 func probe(registry Registry, components map[string]*Component) []string {
 	var refused []string
 	for _, c := range sortedComponents(components) {
@@ -222,8 +223,9 @@ func outputsOf(c *Component) []string {
 	return names
 }
 
-// onceEach asks for each component's versions once, because the plan
-// and the dry run of a release both read them.
+// onceEach caches the result of versions for each component, because
+// the plan and the dry run of a release both read the versions, and
+// each read queries the registry. A failed read is not cached.
 func onceEach(versions VersionsFunc) VersionsFunc {
 	seen := map[string][]string{}
 	return func(c *Component) ([]string, error) {
@@ -238,7 +240,6 @@ func onceEach(versions VersionsFunc) VersionsFunc {
 	}
 }
 
-// imageNames lists the images that run.
 func imageNames(runs []ImageRun) []string {
 	var names []string
 	for _, run := range runs {

@@ -11,76 +11,72 @@ import (
 	"unicode/utf8"
 )
 
-// What a published image says about itself: the OCI keys, which name
-// the image, its version, its commit, and where to read about it, and
-// the sh.liken.* keys of a pinned image. ci publish writes every key
-// at publish time, through --set arguments to docker buildx bake, and
-// no Dockerfile names one. So a build in a fork carries no label that
-// says it is liken's, and a change to a key changes no layer that
-// BuildKit caches.
+// The metadata of a published image: the OCI keys (title, version,
+// revision, source, documentation, and so on) and the sh.liken.* keys
+// of a pinned image. ci publish passes every key to docker buildx bake
+// as a --set argument, and no Dockerfile writes one. A Dockerfile that
+// wrote a label would make a build in a fork claim to be liken's, and
+// labels set through bake do not change a layer that BuildKit caches.
 //
-// Each OCI key goes into the image config as a label, and into the
-// image index and each image manifest as an annotation, because
-// ghcr.io reads the description of an index from the index's
-// annotations, and a tool such as docker inspect reads the config.
+// Each OCI key, except base.name and base.digest, is written twice: as
+// a label in the image config, which docker inspect reads, and as an
+// annotation on the image index and on each image manifest, because
+// ghcr.io reads an index's description from the index's annotations.
+// base.name and base.digest are written only as annotations.
 
-// ociPrefix starts each key of the OCI image specification's
-// annotations.
 const ociPrefix = "org.opencontainers.image."
 
 func ociKey(name string) string { return ociPrefix + name }
 
 const (
-	// vendor is the organization that publishes every image.
 	vendor = "liken"
-	// homePage is the project's site, the url key of every image.
+	// homePage is the value of the url key of every image.
 	homePage = "https://liken.sh/"
-	// upstreamLabel prefixes the label that holds one upstream version
-	// of a pinned image, from [package.upstream] in its package.toml.
+	// upstreamLabel prefixes one label for each entry of
+	// [package.upstream] in a pinned image's package.toml.
 	upstreamLabel = "sh.liken.upstream."
-	// descriptionLimit is the length in characters that ghcr.io shows
-	// of org.opencontainers.image.description.
+	// descriptionLimit is how many characters of the description
+	// ghcr.io shows.
 	descriptionLimit = 512
 )
 
-// validateImage checks the description of an image. The publish
-// writes it into a label and two annotations, and ghcr.io shows it on
-// the package page as one line of plain text of at most 512
-// characters. The em-dash is the one character that brand/voice.md
-// forbids that a check can find.
+// validateImage checks an image's description. The publish writes it
+// into a label and two annotations, and ghcr.io shows it on the
+// package page as one line of plain text of at most 512 characters.
+// The check also rejects an em-dash, which brand/voice.md forbids.
 func validateImage(path string, image Image) error {
 	description := image.Description
-	where := "; the publish writes it into " + ociKey("description") + ", which ghcr.io shows on the package page"
+	target := ociKey("description")
 	switch {
 	case strings.TrimSpace(description) == "":
-		return fmt.Errorf("%s: the image %q has no description%s", path, image.Name, where)
+		return fmt.Errorf("%s: the image %q has no description, and the publish writes it into %s, which ghcr.io shows on the package page", path, image.Name, target)
 	case strings.ContainsAny(description, "\r\n"):
-		return fmt.Errorf("%s: the description of the image %q is more than one line%s as one line", path, image.Name, where)
+		return fmt.Errorf("%s: the description of the image %q is more than one line, and ghcr.io shows %s on the package page as one line", path, image.Name, target)
 	case utf8.RuneCountInString(description) > descriptionLimit:
-		return fmt.Errorf("%s: the description of the image %q is %d characters%s, and it shows %d", path, image.Name, utf8.RuneCountInString(description), where, descriptionLimit)
+		return fmt.Errorf("%s: the description of the image %q is %d characters, and ghcr.io shows %d characters of %s on the package page", path, image.Name, utf8.RuneCountInString(description), descriptionLimit, target)
 	case strings.Contains(description, "\u2014"):
-		return fmt.Errorf("%s: the description of the image %q holds an em-dash, which brand/voice.md forbids", path, image.Name)
+		return fmt.Errorf("%s: the description of the image %q contains an em-dash, and brand/voice.md forbids em-dashes", path, image.Name)
 	}
 	return nil
 }
 
-// imageMetadata is what the publish writes on one image: the labels of
-// its config, and the annotations of its index and of each image
+// imageMetadata is what the publish writes on one image: the labels in
+// its config, and the annotations on its index and on each image
 // manifest. buildx writes no annotation on an attestation manifest.
 type imageMetadata struct {
 	Labels, Annotations map[string]string
 }
 
-// metadata gives the labels and the annotations of one image at the
-// version. recipe is the recipe of a pinned component, and "" for a
-// tracked one.
+// metadata returns the labels and annotations of one image at the
+// version. recipe is the recipe hash of a pinned component, and "" for
+// a tracked one.
 //
-// A label of the image that a Dockerfile builds FROM passes into the
-// new config, and Docker cannot delete it. So the image writes each
-// label that an image of the repository in its FROM chain writes, and
-// a label it does not own takes the value "". Without that, a player
-// built on mpv would say it holds mpv's upstream versions and mpv's
-// recipe. Annotations do not pass through FROM.
+// An image inherits every label of the image in its FROM line, and
+// Docker cannot delete an inherited label. So the image writes each
+// label key that any repository image in its FROM chain writes, with
+// the value "" for a key it does not own. Otherwise an image built on
+// mpv would carry mpv's upstream versions and recipe as if they were
+// its own. Annotations are not inherited.
 func (p Publisher) metadata(c *Component, image Image, version, recipe string) (imageMetadata, error) {
 	m := imageMetadata{Labels: p.ownLabels(c, image, version, recipe), Annotations: map[string]string{}}
 	for key, value := range m.Labels {
@@ -112,16 +108,17 @@ func (p Publisher) metadata(c *Component, image Image, version, recipe string) (
 	return m, nil
 }
 
-// ownLabels gives the labels that an image of the component writes
-// with a value of its own.
+// ownLabels returns the labels that an image of the component sets to
+// a value of its own.
 //
-// licenses is the license of liken's own code in a tracked image, the
-// license of its package.toml. A pinned image holds the packages of
-// other projects under their own licenses, so it writes no licenses
-// key, and its SBOM names the license of each package. created is the
-// committer time of the commit, so a run again at the commit writes
-// the same value. The config's created field is the time of the build,
-// as the Created field of Publisher says.
+// A tracked image gets licenses from its package.toml, because it
+// contains liken's own code. A pinned image contains other projects'
+// packages under their own licenses, so it gets no licenses label and
+// its SBOM lists the license of each package. created is the
+// committer time of the commit, so running the publish again at the
+// same commit writes the same value. The config's own created field is
+// the build time, because passing SOURCE_DATE_EPOCH to the build would
+// change the cache key of each WORKDIR step and miss the layer cache.
 func (p Publisher) ownLabels(c *Component, image Image, version, recipe string) map[string]string {
 	labels := map[string]string{
 		ociKey("title"):         image.Name,
@@ -146,11 +143,11 @@ func (p Publisher) ownLabels(c *Component, image Image, version, recipe string) 
 	return labels
 }
 
-// inheritedLabels lists every label key that an image of the
-// repository in the image's FROM chain writes, through the whole
-// chain, so a key that a base itself inherited counts too. The chain
-// ends at scratch, at an image from outside the repository, and at a
-// name that the image declares as a directory context.
+// inheritedLabels lists every label key written by a repository image
+// in the image's FROM chain, including keys that a base inherited from
+// its own base. The walk stops at scratch, at an image from outside
+// the repository, and at a base that the image declares as a
+// directory context.
 func (p Publisher) inheritedLabels(c *Component, image Image) ([]string, error) {
 	producer := ImageProducers(p.Components)
 	keys := map[string]bool{}
@@ -178,13 +175,12 @@ func (p Publisher) inheritedLabels(c *Component, image Image) ([]string, error) 
 	return slices.Sorted(maps.Keys(keys)), nil
 }
 
-// baseReference names the image that the build starts from, as the
-// OCI keys base.name and base.digest state it: a pinned base that the
-// override file points the build at, by its tag and the digest of its
-// index, or an outside image of toolchains/images.toml, by its fully
-// qualified name and its digest. A base that the build makes from the
-// tree was never published, and scratch is no image, so neither has a
-// reference.
+// baseReference returns the values of the OCI keys base.name and
+// base.digest. For a pinned base that the override file points the
+// build at, they are its tag and the digest of its index. For an
+// outside image of toolchains/images.toml, they are its fully
+// qualified name with its tag, when it has one, and its digest. For a base that the build makes from the
+// tree, which was never published, and for scratch, both are empty.
 func (p Publisher) baseReference(c *Component, image Image, published map[string]string) (name, digest string, err error) {
 	parsed, err := readDockerfile(filepath.Join(p.Root, c.Dir, orDefault(image.File, "Dockerfile")))
 	if err != nil {
@@ -215,10 +211,9 @@ func (p Publisher) baseReference(c *Component, image Image, published map[string
 	return "", "", nil
 }
 
-// documentationURL is where a person reads about the component's
-// images: its manual on the site, or, for a component with no manual,
-// its directory in the repository at the commit, whose README.md says
-// what it is.
+// documentationURL returns the component's manual on the site, or, for
+// a component with no manual, its directory in the repository at the
+// commit.
 func documentationURL(c *Component, commit string) string {
 	switch {
 	case c.Docs != nil && c.Docs.Prefix != "":
@@ -229,9 +224,9 @@ func documentationURL(c *Component, commit string) string {
 	return source + "/tree/" + commit + "/" + c.Dir
 }
 
-// bakeArgs gives the --set arguments that write the metadata on the
-// target, in sorted order. Each annotation goes on the index and on the
-// image manifest.
+// bakeArgs returns the --set arguments that write the metadata on the
+// bake target, in sorted order. Each annotation goes on the index and
+// on the image manifest.
 func (m imageMetadata) bakeArgs(target string) []string {
 	var args []string
 	for _, key := range sortedKeys(m.Labels) {
@@ -245,10 +240,10 @@ func (m imageMetadata) bakeArgs(target string) []string {
 
 // labelInstructions lists each LABEL and MAINTAINER instruction of a
 // Dockerfile. The publish writes every key of an image, so a key in a
-// Dockerfile would be a second copy that drifts from package.toml, and
-// a fork that builds the file would carry a label that says the image
-// is liken's. MAINTAINER writes the config's author field, not a
-// label, and has the same fault.
+// Dockerfile would be a second copy that can drift from package.toml,
+// and a fork that builds the file would carry a label that claims the
+// image is liken's. MAINTAINER writes the config's author field, not a
+// label, and has the same problem.
 func labelInstructions(file, text string) []string {
 	var findings []string
 	for _, l := range logicalLines(text) {
@@ -258,22 +253,22 @@ func labelInstructions(file, text string) []string {
 		}
 		switch instruction := strings.ToUpper(words[0]); instruction {
 		case "LABEL", "MAINTAINER":
-			findings = append(findings, fmt.Sprintf("%s:%d writes %s; ci publish writes every label and annotation of an image from its package.toml", file, l.n, instruction))
+			findings = append(findings, fmt.Sprintf("%s:%d writes %s, and ci publish writes every label and annotation of an image from its package.toml", file, l.n, instruction))
 		}
 	}
 	return findings
 }
 
-// deployAnnotations gives the --annotations arguments of the flux push
-// of the component's deploy artifact. flux writes source and revision
-// from their own flags, with the revision in its <version>@sha1:<commit>
-// form, and writes the time of the push as created unless an
-// annotation gives it. The given time is the commit's, so a person
-// reads when the manifests were written. The manifests are liken's own
-// files, so licenses is the component's license.
+// deployAnnotations returns the --annotations arguments for the flux
+// push of the component's deploy artifact. flux sets source and
+// revision from its own flags, with the revision in the form
+// <version>@sha1:<commit>. It sets created to the time of the push
+// unless an annotation sets it, so created here is the commit's time,
+// which is when the manifests were written. The manifests are
+// liken's own files, so licenses is the component's license.
 //
 // flux splits each argument at "=" and refuses one with more than two
-// parts, so a value that holds "=" fails here, in a dry run too.
+// parts, so a value that contains "=" fails here, in a dry run too.
 func (p Publisher) deployAnnotations(c *Component, version string) ([]string, error) {
 	values := map[string]string{
 		ociKey("created"):       p.Created.UTC().Format(time.RFC3339),
@@ -290,29 +285,25 @@ func (p Publisher) deployAnnotations(c *Component, version string) ([]string, er
 	var args []string
 	for _, key := range sortedKeys(values) {
 		if strings.Contains(values[key], "=") {
-			return nil, fmt.Errorf("%s: the annotation %s=%q holds \"=\", which flux push artifact refuses", c.Name(), key, values[key])
+			return nil, fmt.Errorf("%s: the annotation %s=%q contains \"=\", and flux push artifact refuses an annotation with \"=\" in its value", c.Name(), key, values[key])
 		}
 		args = append(args, "--annotations", key+"="+values[key])
 	}
 	return args, nil
 }
 
-// errNoImage is the registry's answer that it serves no image at a
-// reference.
-var errNoImage = errors.New("the registry serves no image")
+var errNoImage = errors.New("the registry has no image")
 
-// How many times the publish reads the labels of a digest that it just
-// pushed, and how long it waits before the next read. ghcr.io answered
-// 404 once for a digest that it had accepted two seconds before, and
-// that answer failed a publish whose image was in the registry. The
-// pause grows with each read, so the reads cover half a minute.
+// ghcr.io can return 404 for a digest for a few seconds after it
+// accepts the push. So the publish reads the labels of a digest it
+// just pushed up to pushedLabelTries times, and waits 3, 6, 9, and 12
+// seconds between the reads.
 const pushedLabelTries = 5
 
 var pushedLabelPause = 3 * time.Second
 
-// checkPushedLabels checks the labels of a digest that this run just
-// pushed. The registry accepted the push, so its answer that it serves
-// no image there is one to ask again, and every other answer stands.
+// checkPushedLabels runs checkLabels on a digest that this run just
+// pushed, and retries only errNoImage.
 func (p Publisher) checkPushedLabels(image Image, digest string, want map[string]string) error {
 	for try := 1; ; try++ {
 		err := p.checkLabels(image, digest, want)
@@ -323,13 +314,13 @@ func (p Publisher) checkPushedLabels(image Image, digest string, want map[string
 	}
 }
 
-// checkLabels reads the labels of the image that the registry serves
-// at the reference, and fails when they differ from the labels that
-// the publish wrote. An outside base can start to carry a label of its
-// own after a bump of toolchains/images.toml, which no check of the
-// tree sees, and the label would pass into the image under liken's
-// signature. The publish runs this before it signs, so an image with a
-// label that no one wrote is never signed.
+// checkLabels reads the labels of the image in the registry at the
+// reference, and fails when they differ from the labels that the
+// publish wrote. A bump of toolchains/images.toml can give an outside
+// base a label of its own, which no check of the tree reads, and the
+// label would be inherited into an image that liken signs. The publish
+// runs this before it signs, so it never signs an image with a label
+// that it did not write.
 func (p Publisher) checkLabels(image Image, reference string, want map[string]string) error {
 	named := ref(image.Name, reference)
 	if strings.HasPrefix(reference, "sha256:") {
@@ -340,7 +331,7 @@ func (p Publisher) checkLabels(image Image, reference string, want map[string]st
 		return fmt.Errorf("reading the labels of %s: %w", named, err)
 	}
 	if got == nil {
-		return fmt.Errorf("%w for %s, so its labels cannot be checked", errNoImage, named)
+		return fmt.Errorf("%w at %s", errNoImage, named)
 	}
 	keys := map[string]bool{}
 	for key := range got {
@@ -363,7 +354,7 @@ func (p Publisher) checkLabels(image Image, reference string, want map[string]st
 		}
 	}
 	if len(differ) > 0 {
-		return fmt.Errorf("the pushed %s holds labels that differ from the ones the publish wrote, so it is not signed: %s", named, strings.Join(differ, "; "))
+		return fmt.Errorf("the labels of the pushed %s differ from the labels the publish wrote, so the publish does not sign it: %s", named, strings.Join(differ, "; "))
 	}
 	return nil
 }

@@ -18,14 +18,15 @@ import (
 
 // recorder is a Runner that records each command and runs nothing.
 // For a bake with --metadata-file, it writes the file that buildx
-// writes, with the digest that fakeDigest gives the target, which is
-// the bake's last argument. The file's path is a new temporary path
-// in each publish, so the recorded command names it <metadata>.
+// would write, with the digest that fakeDigest returns for the target,
+// which is the last argument of the bake. Each publish uses a new
+// temporary path for that file, so the recorded command shows it as
+// <metadata>.
 //
-// When registry is set, a bake with --push puts the image into it
-// under each tag, with the labels that the --set arguments give and
-// the labels in inherited, the way an outside base passes its labels
-// into the image. A flux push of an artifact adds its tag.
+// When registry is set, a bake with --push adds the image to it under
+// each tag. The image has the labels from the --set arguments and the
+// labels in inherited, as when an outside base passes its labels into
+// the image. A flux push of an artifact adds its tag.
 type recorder struct {
 	commands  []string
 	registry  *fakeRegistry
@@ -82,17 +83,17 @@ func (r *recorder) run(dir, name string, args ...string) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-// fixtureCommit and fixtureCreated are the commit of the publish
-// fixtures and its committer time.
+// fixtureCommit and fixtureCreated are the commit hash and committer
+// time that the publish fixtures use.
 const fixtureCommit = "0123456789abcdef0123456789abcdef01234567"
 
 var fixtureCreated = time.Date(2026, 10, 2, 9, 30, 0, 0, time.UTC)
 
-// seedPublished puts each tag into the fixture's registry as an earlier
-// run of the publish at the same commit left it: an image at each tag
-// with the labels that the publish writes there, and a deploy artifact
-// as its tag alone.
-func seedPublished(t *testing.T, p Publisher, fake *fakeRegistry, tags map[string][]string) {
+// addPublishedTags adds each tag to the fixture's registry as an
+// earlier publish at the same commit would have left it. An image tag
+// gets the labels that the publish writes, and a deploy artifact gets
+// only its tag.
+func addPublishedTags(t *testing.T, p Publisher, fake *fakeRegistry, tags map[string][]string) {
 	t.Helper()
 	images := map[string]bool{}
 	for _, c := range sortedComponents(p.Components) {
@@ -103,12 +104,12 @@ func seedPublished(t *testing.T, p Publisher, fake *fakeRegistry, tags map[strin
 				if c.Pinned() {
 					var err error
 					if recipe, err = Recipe(p.Root, p.Components, c); err != nil {
-						t.Fatal(err)
+						t.Fatalf("computing the recipe of the component: %v", err)
 					}
 				}
 				m, err := p.metadata(c, image, version, recipe)
 				if err != nil {
-					t.Fatal(err)
+					t.Fatalf("reading the metadata of the image: %v", err)
 				}
 				fake.push(image.Name, version, fakeDigest(image.Name), m.Labels)
 			}
@@ -121,39 +122,39 @@ func seedPublished(t *testing.T, p Publisher, fake *fakeRegistry, tags map[strin
 	}
 }
 
-// fixturePublisher gives a publisher of the tree at root, with a
-// recorder that pushes into a fake registry, and the tags already
-// published there.
+// fixturePublisher returns a Publisher for the tree at root. Its
+// recorder pushes into a fake registry that already has the given
+// tags.
 func fixturePublisher(t *testing.T, root string, tags map[string][]string) (Publisher, *recorder, map[string]*Component) {
 	t.Helper()
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	fake := &fakeRegistry{tags: map[string][]string{}}
 	rec := &recorder{registry: fake}
 	p := Publisher{Root: root, Registry: fake.serve(t), Run: rec.run, Commit: fixtureCommit, Created: fixtureCreated, Components: components, DockerConfig: fixtureDockerConfig}
-	seedPublished(t, p, fake, tags)
+	addPublishedTags(t, p, fake, tags)
 	return p, rec, components
 }
 
 // fixtureDockerConfig is the Docker configuration directory of the
-// publish fixtures, where docker/login-action writes the credential
-// that cosign pushes each signature with.
+// publish fixtures. In CI, docker/login-action writes the registry
+// credential there, and cosign uses it to push signatures.
 const fixtureDockerConfig = "/home/runner/.docker"
 
-// fakeDigest is the digest of the image that the recorder's bake
+// fakeDigest returns the digest of the image that the recorder's bake
 // pushes for a target.
 func fakeDigest(target string) string {
 	return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(target)))
 }
 
-// fixtureCosign is the cosign image of the publish fixtures'
-// images.toml.
+// fixtureCosign is the cosign image in the images.toml of the publish
+// fixtures.
 const fixtureCosign = "ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c273506d52ca43edaa1d9e53e6510fa78a48f69c2d"
 
-// fixtureScanner is the SBOM generator of the publish fixtures'
-// images.toml.
+// fixtureScanner is the SBOM generator image in the images.toml of the
+// publish fixtures.
 const fixtureScanner = "docker/buildkit-syft-scanner:1.12.1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315"
 
 const fixtureImages = "[build]\ncosign = \"" + fixtureCosign + "\"\nbuildkit-syft-scanner = \"" + fixtureScanner + "\"\n"
@@ -193,9 +194,9 @@ images:
 	return p, rec, components["operator"]
 }
 
-// metadataArgs gives the --set arguments that write each key=value as
-// a label and as an annotation of the index and the manifest, in the
-// order given, which is the sorted order of the keys.
+// metadataArgs returns the --set arguments that write each key=value
+// as a label and as an annotation of the index and the manifest. The
+// publish writes the keys in sorted order, so pass them sorted.
 func metadataArgs(target string, keyValues ...string) string {
 	var labels, annotations string
 	for _, kv := range keyValues {
@@ -205,12 +206,12 @@ func metadataArgs(target string, keyValues ...string) string {
 	return labels + annotations
 }
 
-// The publish writes every OCI key onto each image, as a label of its
-// config and as an annotation of its index and its manifest.
+// The publish writes every OCI key onto each image, as a label in its
+// config and as an annotation on its index and its manifest.
 func TestAReleasePushesEveryImageThenTheDeployArtifactThenLatest(t *testing.T) {
 	p, rec, c := publishFixture(t, map[string][]string{"operator": {"2026.09.27-001"}})
 	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the component: %v", err)
 	}
 	labels := func(target string) string {
 		return metadataArgs(target,
@@ -242,34 +243,33 @@ func TestAReleasePushesEveryImageThenTheDeployArtifactThenLatest(t *testing.T) {
 		"docker buildx imagetools create --tag ghcr.io/liken-sh/operator-cli:latest ghcr.io/liken-sh/operator-cli:2026.10.02-001",
 	}
 	if !reflect.DeepEqual(rec.commands[:len(want)], want) {
-		t.Fatalf("commands:\n%s", strings.Join(rec.commands, "\n"))
+		t.Fatalf("the commands are:\n%s\nwant them to start with:\n%s", strings.Join(rec.commands, "\n"), strings.Join(want, "\n"))
 	}
 	rest := rec.commands[len(want):]
 	if len(rest) != 2 || !strings.HasPrefix(rest[0], "flux push artifact oci://ghcr.io/liken-sh/operator-deploy:2026.10.02-001 --path ") ||
 		rest[1] != "flux tag artifact oci://ghcr.io/liken-sh/operator-deploy:2026.10.02-001 --tag latest" {
-		t.Errorf("the deploy commands:\n%s", strings.Join(rest, "\n"))
+		t.Errorf("the commands after the images are:\n%s\nwant the push of the deploy artifact, then its move to latest", strings.Join(rest, "\n"))
 	}
 }
 
-// The publish sets no build argument except VERSION, because the
-// images job writes the layer cache that the publish reads, and the
-// images job sets VERSION alone. A build argument can change a step's
-// cache key when no Dockerfile declares it: BuildKit writes
-// SOURCE_DATE_EPOCH as the created time of each WORKDIR step, so a
-// publish that sets it misses the cache from the first step of every
-// stage, and builds each image again.
+// The publish reads the layer cache that the images job writes, and
+// that job sets no build argument except VERSION. Another build
+// argument can change a step's cache key even when no Dockerfile
+// declares it. BuildKit uses SOURCE_DATE_EPOCH as the created time of
+// each WORKDIR step, so a publish that set it would miss the cache from
+// the first step of every stage and build each image again.
 func TestThePublishSetsNoBuildArgumentExceptVersion(t *testing.T) {
 	p, rec, c := publishFixture(t, nil)
 	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the component: %v", err)
 	}
 	if got := buildArguments(rec.commands); !reflect.DeepEqual(got, []string{"VERSION"}) {
 		t.Errorf("the publish sets the build arguments %v, and the images job sets only VERSION", got)
 	}
 }
 
-// buildArguments gives the name of each build argument that the
-// commands set on a bake target, sorted, each one once.
+// buildArguments returns the sorted names of the build arguments that
+// the commands set on a bake target, without duplicates.
 func buildArguments(commands []string) []string {
 	var names []string
 	for _, match := range regexp.MustCompile(`\.args\.([A-Za-z0-9_]+)=`).FindAllStringSubmatch(strings.Join(commands, "\n"), -1) {
@@ -279,13 +279,13 @@ func buildArguments(commands []string) []string {
 	return slices.Compact(names)
 }
 
-// The deploy artifact names its commit and carries the commit's time as
-// created, in place of the time of the push that flux writes on its
-// own, and the same OCI keys that describe an image.
-func TestTheDeployArtifactCarriesTheCommitTime(t *testing.T) {
+// The deploy artifact records its commit and uses the commit's time as
+// its created time, in place of the push time that flux writes by
+// default. It also has the same OCI keys as an image.
+func TestTheDeployArtifactRecordsTheCommitTime(t *testing.T) {
 	p, rec, c := publishFixture(t, nil)
 	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the component: %v", err)
 	}
 	var push string
 	for _, command := range rec.commands {
@@ -308,36 +308,36 @@ func TestTheDeployArtifactCarriesTheCommitTime(t *testing.T) {
 }
 
 // The publish reads the labels of each pushed image back before it
-// signs it. A label that the publish did not write, such as one that an
-// outside base starts to carry, fails the publish, and the image is
-// never signed.
+// signs the image. A label that the publish did not write, such as one
+// that an outside base starts to carry, fails the publish, and the
+// image is not signed.
 func TestAPushWhoseLabelsDifferIsNeverSigned(t *testing.T) {
 	p, rec, c := publishFixture(t, nil)
 	rec.inherited = map[string]string{"maintainer": "a person"}
 	err := p.Publish(c, "2026.10.02-001", publishRelease)
-	if err == nil || !strings.Contains(err.Error(), `maintainer="a person", which the publish did not write`) {
-		t.Fatalf("got %v, want the label that the publish did not write", err)
+	if err == nil || !strings.Contains(err.Error(), `maintainer="a person"`) {
+		t.Fatalf("the publish returned %v, want the error for the label that the publish did not write", err)
 	}
 	if signs := signCommands(rec.commands); len(signs) > 0 {
-		t.Errorf("signed:\n%s", strings.Join(signs, "\n"))
+		t.Errorf("the publish signed:\n%s\nwant no signature", strings.Join(signs, "\n"))
 	}
 }
 
-// A test's registry answers at once, so a publish that reads a pushed
-// digest again does not wait between reads.
+// The fake registry responds immediately, so the pause between reads of
+// a pushed digest is set to zero.
 func init() {
 	pushedLabelPause = 0
 }
 
-// A registry can answer 404 for a digest that it accepted a moment
-// before. The publish asks again, so a late answer does not fail a
-// publish whose image is in the registry.
+// A registry can return 404 for a digest that it accepted a moment
+// before. The publish reads the labels again, so a late response does
+// not fail a publish whose image is in the registry.
 func TestAPublishWaitsForTheRegistryToServeWhatItPushed(t *testing.T) {
 	p, rec, c := publishFixture(t, nil)
 	rec.registry.lag = 2
 
 	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the component: %v", err)
 	}
 
 	if signs := signCommands(rec.commands); len(signs) == 0 {
@@ -345,37 +345,38 @@ func TestAPublishWaitsForTheRegistryToServeWhatItPushed(t *testing.T) {
 	}
 }
 
-// A registry that never serves the digest fails the publish, and the
-// image is not signed.
+// When the registry never serves the pushed digest, the publish fails
+// and the image is not signed.
 func TestAPushThatTheRegistryNeverServesIsNeverSigned(t *testing.T) {
 	p, rec, c := publishFixture(t, nil)
 	rec.registry.lag = 1000
 
 	err := p.Publish(c, "2026.10.02-001", publishRelease)
 
-	if err == nil || !strings.Contains(err.Error(), "the registry serves no image") {
-		t.Fatalf("got %v, want the image that the registry does not serve", err)
+	if !errors.Is(err, errNoImage) {
+		t.Fatalf("the publish returned %v, want the error that the registry serves no image", err)
 	}
 	if signs := signCommands(rec.commands); len(signs) > 0 {
-		t.Errorf("signed:\n%s", strings.Join(signs, "\n"))
+		t.Errorf("the publish signed:\n%s\nwant no signature", strings.Join(signs, "\n"))
 	}
 }
 
-// A run again of a publish checks the labels of the image that the
-// failed run pushed before it signs it, the same as the push does.
+// When a publish runs again after a failure, it checks the labels of
+// the image that the failed run pushed before it signs the image, as a
+// first run does.
 func TestARunAgainChecksThePublishedLabelsBeforeItSigns(t *testing.T) {
 	p, rec, c := publishFixture(t, nil)
 	rec.registry.push("operator", "2026.10.02-001", fakeDigest("operator"), map[string]string{"org.opencontainers.image.version": "2026.10.02-001"})
 	err := p.Publish(c, "2026.10.02-001", publishRelease)
-	if err == nil || !strings.Contains(err.Error(), "the pushed ghcr.io/liken-sh/operator:2026.10.02-001 holds labels that differ") {
-		t.Fatalf("got %v, want the labels that differ", err)
+	if err == nil || !strings.Contains(err.Error(), "ghcr.io/liken-sh/operator:2026.10.02-001 differ from the labels the publish wrote") {
+		t.Fatalf("the publish returned %v, want the error for labels that differ", err)
 	}
 	if signs := signCommands(rec.commands); len(signs) > 0 {
-		t.Errorf("signed:\n%s", strings.Join(signs, "\n"))
+		t.Errorf("the publish signed:\n%s\nwant no signature", strings.Join(signs, "\n"))
 	}
 }
 
-// trivyCommands lists the Trivy scans among the recorded commands.
+// trivyCommands returns the Trivy scans among the recorded commands.
 func trivyCommands(commands []string) []string {
 	var scans []string
 	for _, command := range commands {
@@ -386,8 +387,8 @@ func trivyCommands(commands []string) []string {
 	return scans
 }
 
-// The publish scans each image right after it pushes it, and only an
-// image that it pushes: a dry run pushes nothing, and a published
+// The publish scans each image right after it pushes it, and scans only
+// an image that it pushes. A dry run pushes nothing, and a published
 // version is not pushed again.
 func TestThePublishScansEachImageThatItPushes(t *testing.T) {
 	scan := func(dir, image, version string) string {
@@ -411,7 +412,7 @@ func TestThePublishScansEachImageThatItPushes(t *testing.T) {
 			p, rec, component := publishFixture(t, map[string][]string{"operator": c.tags})
 			p.SARIF = t.TempDir()
 			if err := p.Publish(component, c.version, c.mode); err != nil {
-				t.Fatal(err)
+				t.Fatalf("publishing the component: %v", err)
 			}
 			var want []string
 			for _, image := range c.scans {
@@ -424,8 +425,8 @@ func TestThePublishScansEachImageThatItPushes(t *testing.T) {
 	}
 }
 
-// failingTrivy records each command and fails each Trivy scan, as a
-// scan does when the vulnerability database cannot be downloaded.
+// failingTrivy records each command and fails each Trivy scan, as
+// Trivy does when it cannot download the vulnerability database.
 type failingTrivy struct{ recorder }
 
 func (f *failingTrivy) run(dir, name string, args ...string) error {
@@ -436,17 +437,17 @@ func (f *failingTrivy) run(dir, name string, args ...string) error {
 	return nil
 }
 
-// A scan reports and does not gate: a scan that fails leaves the
-// publish to push every image and the deploy artifact.
+// A failed scan does not stop the publish. It still pushes every image
+// and the deploy artifact.
 func TestAScanThatFailsDoesNotStopThePublish(t *testing.T) {
 	p, rec, c := publishFixture(t, nil)
 	runner := &failingTrivy{recorder{registry: rec.registry}}
 	p.Run, p.SARIF = runner.run, t.TempDir()
 	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the component: %v", err)
 	}
 	if last := runner.commands[len(runner.commands)-1]; last != "flux tag artifact oci://ghcr.io/liken-sh/operator-deploy:2026.10.02-001 --tag latest" {
-		t.Errorf("the publish stopped at %q", last)
+		t.Errorf("the last command is %q, want the deploy artifact tagged latest, so the failed scan did not stop the publish", last)
 	}
 }
 
@@ -457,11 +458,11 @@ func TestAPublishedVersionIsNeverPushedAgain(t *testing.T) {
 		"operator-deploy": {"2026.10.02-001"},
 	})
 	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the component: %v", err)
 	}
 	for _, command := range rec.commands {
 		if strings.Contains(command, "bake") || strings.Contains(command, "push artifact") {
-			t.Errorf("pushed again: %s", command)
+			t.Errorf("the publish ran %q for a version that is already published, want no push", command)
 		}
 	}
 }
@@ -469,11 +470,11 @@ func TestAPublishedVersionIsNeverPushedAgain(t *testing.T) {
 func TestAnOlderReleaseDoesNotMoveLatest(t *testing.T) {
 	p, rec, c := publishFixture(t, map[string][]string{"operator": {"2026.10.03-001"}})
 	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the component: %v", err)
 	}
 	for _, command := range rec.commands {
 		if strings.Contains(command, "operator:latest ") {
-			t.Errorf("moved latest: %s", command)
+			t.Errorf("the publish ran %q, want no move of latest", command)
 		}
 	}
 }
@@ -481,15 +482,15 @@ func TestAnOlderReleaseDoesNotMoveLatest(t *testing.T) {
 func TestADevelopmentBuildNeverMovesLatest(t *testing.T) {
 	p, rec, c := publishFixture(t, nil)
 	if err := p.Publish(c, "2026.10.02-001-dev-017-abcdef01", publishDev); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the component: %v", err)
 	}
 	for _, command := range rec.commands {
 		if strings.Contains(command, "latest") {
-			t.Errorf("moved latest: %s", command)
+			t.Errorf("the publish ran %q, want no move of latest", command)
 		}
 	}
-	// Two pushes, a signature for each of the three image names, and
-	// the deploy artifact.
+	// Two image pushes, one signature for each of the three image
+	// names, and the deploy artifact.
 	if len(rec.commands) != 6 {
 		t.Errorf("commands:\n%s", strings.Join(rec.commands, "\n"))
 	}
@@ -509,7 +510,7 @@ func TestAPublishRefusesAVersionOfTheWrongShape(t *testing.T) {
 	}
 }
 
-func TestTheDeployArtifactNamesTheImagesPushedWithIt(t *testing.T) {
+func TestTheDeployArtifactSetsTheTagOfEachImagePushedWithIt(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"kustomization.yaml": `# The base, with a comment that survives.
 resources:
@@ -526,7 +527,7 @@ images:
 	c := &Component{Outputs: Outputs{Images: []Image{{Name: "operator", Aliases: []string{"operator-sidecar"}}}}}
 	c.Package.Name = "operator"
 	if err := StampImages(root, c, "2026.10.02-001"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("stamping the images: %v", err)
 	}
 	got, _ := os.ReadFile(filepath.Join(root, "kustomization.yaml"))
 	want := `# The base, with a comment that survives.
@@ -541,16 +542,16 @@ images:
     newTag: 2.0.22
 `
 	if string(got) != want {
-		t.Errorf("kustomization.yaml:\n%s", got)
+		t.Errorf("kustomization.yaml is:\n%s\nwant:\n%s", got, want)
 	}
 	untouched, _ := os.ReadFile(filepath.Join(root, "monitoring/kustomization.yaml"))
 	if string(untouched) != "resources:\n  - rules.yaml\n" {
-		t.Errorf("monitoring/kustomization.yaml:\n%s", untouched)
+		t.Errorf("monitoring/kustomization.yaml is:\n%s\nwant it unchanged", untouched)
 	}
 }
 
-// pinnedPublishFixture is a pinned base on a pinned tool, with its
-// recipe's inputs on disk.
+// pinnedPublishFixture is a pinned base image that builds on a pinned
+// tool image, with the files of its recipe on disk.
 func pinnedPublishFixture(t *testing.T, tags map[string][]string) (Publisher, *recorder, map[string]*Component) {
 	t.Helper()
 	root := writeTree(t, map[string]string{
@@ -566,11 +567,11 @@ func pinnedPublishFixture(t *testing.T, tags map[string][]string) (Publisher, *r
 func TestAPinnedComponentPushesItsTagWithItsRecipeThenMovesLatest(t *testing.T) {
 	p, rec, components := pinnedPublishFixture(t, map[string][]string{"base": {"20260927-1"}})
 	if err := p.Publish(components["base"], "20260928-1", publishRelease); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the component: %v", err)
 	}
 	recipe, err := Recipe(p.Root, components, components["base"])
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("computing the recipe of the component: %v", err)
 	}
 	oci := []string{
 		"org.opencontainers.image.created=2026-10-02T09:30:00Z",
@@ -599,10 +600,10 @@ func TestAPinnedComponentPushesItsTagWithItsRecipeThenMovesLatest(t *testing.T) 
 	}
 }
 
-// A pinned image carries a label for each upstream version that its
-// package.toml states, so a person reads from the registry which
-// release of the upstream project a dated tag holds.
-func TestAPinnedImageCarriesItsUpstreamVersionsAsLabels(t *testing.T) {
+// A pinned image has a label for each upstream version in its
+// package.toml, so a person can read from the registry which upstream
+// release a dated tag contains.
+func TestAPinnedImageHasALabelForEachUpstreamVersion(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20261004\"\nrevision = 1\n" +
 			"[package.upstream]\nindi = \"2.2.5\"\nphd2 = \"2.6.14\"\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
@@ -611,22 +612,22 @@ func TestAPinnedImageCarriesItsUpstreamVersionsAsLabels(t *testing.T) {
 	})
 	p, rec, components := fixturePublisher(t, root, nil)
 	if err := p.Publish(components["base"], "20261004-1", publishDev); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the component: %v", err)
 	}
 	for _, label := range []string{" --set base.labels.sh.liken.upstream.indi=2.2.5 ", " --set base.labels.sh.liken.upstream.phd2=2.6.14 "} {
 		if !strings.Contains(rec.commands[0], label) {
-			t.Errorf("the build has no%s:\n%s", label, rec.commands[0])
+			t.Errorf("the build command lacks%s:\n%s", label, rec.commands[0])
 		}
 	}
 }
 
 // A pin that is already published is still signed and still moves
-// :latest, so a run again after a failed signature or a failed move
-// does it.
+// :latest, so a run after a failed signature or a failed move finishes
+// the work.
 func TestAPublishedPinStillMovesLatest(t *testing.T) {
 	p, rec, components := pinnedPublishFixture(t, map[string][]string{"base": {"20260928-1"}})
 	if err := p.Publish(components["base"], "20260928-1", publishDev); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the component: %v", err)
 	}
 	want := []string{
 		signCommand("ghcr.io/liken-sh/base:20260928-1"),
@@ -651,15 +652,15 @@ func TestAPinnedComponentPublishesOnlyItsOwnTag(t *testing.T) {
 	}
 }
 
-// A dry run builds each image the way a publish would, with the same
-// tags and labels, and stamps the deploy artifact, but it pushes
-// nothing and moves no tag, even for a version that is published. It
-// exports each image into the builder, so the exporter writes the
-// index and its annotations, and refuses one that a push would refuse.
+// A dry run builds each image as a publish would, with the same tags
+// and labels, and stamps the deploy artifact, but it pushes nothing and
+// moves no tag, even for a version that is already published. It
+// exports each image into the builder, where the exporter writes the
+// index and its annotations and rejects any that a push would reject.
 func TestADryRunBuildsWhatAPublishWouldAndPushesNothing(t *testing.T) {
 	p, rec, c := publishFixture(t, map[string][]string{"operator": {"2026.10.02-001-dev-017-abcdef01"}})
 	if err := p.Publish(c, "2026.10.02-001-dev-017-abcdef01", publishDry); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the component: %v", err)
 	}
 	if len(rec.commands) != 2 {
 		t.Fatalf("commands:\n%s", strings.Join(rec.commands, "\n"))
@@ -668,7 +669,7 @@ func TestADryRunBuildsWhatAPublishWouldAndPushesNothing(t *testing.T) {
 		command := rec.commands[i]
 		if !strings.HasPrefix(command, "docker buildx bake --file docker-bake.hcl --set "+target+".output=type=image,push=false --set "+target+".args.VERSION=2026.10.02-001-dev-017-abcdef01") ||
 			!strings.HasSuffix(command, " "+target) || strings.Contains(command, "--push") {
-			t.Errorf("the build of %s: %s", target, command)
+			t.Errorf("the build of %s is %q, want a build that does not push", target, command)
 		}
 	}
 }
@@ -676,14 +677,14 @@ func TestADryRunBuildsWhatAPublishWouldAndPushesNothing(t *testing.T) {
 func TestADryRunRefusesAVersionOfTheWrongShape(t *testing.T) {
 	p, _, c := publishFixture(t, nil)
 	if err := p.Publish(c, "check", publishDry); err == nil {
-		t.Error("a dry run took a version that no publish takes")
+		t.Error("a dry run accepted the version \"check\", want an error")
 	}
 }
 
-// A dry run does what the publish of the same tag would do, and
-// pushes nothing. A pinned tag that is not published yet builds. A
-// published one would only be signed again, so its dry run builds
-// nothing, and never reaches the base's upstream servers.
+// A dry run does what a publish of the same tag would do, and pushes
+// nothing. A pinned tag that is not published yet is built. A published
+// one would only be signed again, so its dry run builds nothing and
+// never contacts the base's upstream servers.
 func TestADryRunOfAPinnedComponentBuildsOnlyATagThatIsNotPublished(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -697,7 +698,7 @@ func TestADryRunOfAPinnedComponentBuildsOnlyATagThatIsNotPublished(t *testing.T)
 		t.Run(c.name, func(t *testing.T) {
 			p, rec, components := pinnedPublishFixture(t, map[string][]string{"base": c.tags})
 			if err := p.Publish(components["base"], "20260928-1", publishDry); err != nil {
-				t.Fatal(err)
+				t.Fatalf("publishing the component: %v", err)
 			}
 			built := len(rec.commands) == 1 && !strings.Contains(rec.commands[0], "--push") &&
 				strings.Contains(rec.commands[0], "--set base.labels.sh.liken.recipe=sha256:")
@@ -708,18 +709,18 @@ func TestADryRunOfAPinnedComponentBuildsOnlyATagThatIsNotPublished(t *testing.T)
 	}
 }
 
-// The publish builds on the published bases that the plan job checked,
-// when the job wrote the override file, and on the tree's when it did
-// not.
+// When the plan job wrote the override file, the publish builds on the
+// published bases that the job checked. Without the file, it builds on
+// the bases in the tree.
 func TestThePublishReadsTheOverrideFileWhenItIsThere(t *testing.T) {
 	p, rec, components := pinnedPublishFixture(t, map[string][]string{"base": {"20260927-1"}})
 	if err := os.WriteFile(filepath.Join(p.Root, overrideFile), []byte("# no bases\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing a fixture file: %v", err)
 	}
 	if err := p.Publish(components["base"], "20260928-1", publishRelease); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the component: %v", err)
 	}
 	if !strings.HasPrefix(rec.commands[0], "docker buildx bake --file docker-bake.hcl --file docker-bake.override.hcl --push ") {
-		t.Errorf("the build reads other files: %s", rec.commands[0])
+		t.Errorf("the build command is %q, want it to read the override file", rec.commands[0])
 	}
 }

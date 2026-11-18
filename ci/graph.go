@@ -34,25 +34,25 @@ func Closure(components map[string]*Component, name string) []string {
 	return names
 }
 
-// plansDir holds a component's plans. No build, test, or drill reads
-// a plan. Only the whitespace hooks check one, and those hooks run at
-// commit time, and again over every file the next time the
-// component's prek job runs. So a change to a plan runs none of the
-// component's jobs, and an edit to the OS's plans does not start the
-// OS build and its boot drills.
+// plansDir holds a component's plans. A change to a plan runs none of
+// the component's jobs, because no build, test, or drill reads a plan.
+// The whitespace hooks are the only checks of a plan. They run at
+// commit time, and over every file whenever the component's prek job
+// runs.
 const plansDir = "plans/"
 
-// notOutputs are the paths at the top of a component that no output
-// is built from: the manual, the plans, the agent and reader notes, the
-// skills, and the smoke checks, which test an image and do not go into
-// it. A manual generates its skills from its guides, and the repository
-// keeps them for agents to read. brand's skills/ is the generator, and
-// only the manuals run it. The hooks, the coverage floor, and the git
-// ignore file configure checks and git, and no build reads them. A
-// .dockerignore is not in the list: it decides what an image's build
-// context sends, so it shapes the image. A change to these paths does
-// not give the component a new version. A change to any of them except
-// plans/ still runs the component's own jobs.
+// notOutputs are the paths at the top of a component that no output is
+// built from, so a change to one of them does not release the
+// component. A change to any of them except plans/ still runs the
+// component's own jobs.
+//
+// The skills in skills/ are generated from the guides of the manual, and
+// the repository keeps them for agents to read. In brand, skills/ holds
+// the generator, and only the builds of the manuals run it. smoke/ holds
+// checks that test an image and are not copied into it. The hooks, the
+// coverage floor, and .gitignore configure the checks and git, and no
+// build reads them. .dockerignore is not in the list, because it sets
+// which files an image's build context sends.
 var notOutputs = []string{"docs/", plansDir, "AGENTS.md", "README.md", "skills/", "smoke/",
 	".pre-commit-config.yaml", ".testcoverage.yml", ".gitignore"}
 
@@ -75,9 +75,10 @@ func within(a, b string) bool {
 	return a == b || strings.HasPrefix(a, b+"/")
 }
 
-// validateReads refuses a file that a job reads by name unless it is a
-// file of another component. A file of the job's own component runs the
-// job already, and a path that names nothing would never run it.
+// validateReads checks that each path in a job's reads is a clean path
+// to a file of another component. A file of the job's own component
+// already runs the job, and a path that matches no file would never run
+// it.
 func validateReads(root string, components map[string]*Component) error {
 	for _, c := range sortedComponents(components) {
 		for _, job := range c.Jobs {
@@ -96,12 +97,12 @@ func validateReads(root string, components map[string]*Component) error {
 	return nil
 }
 
-// validateExcluded refuses an excluded path that an image receives. A
-// build reads each file that its contexts send, less what their ignore
-// files leave out, so an image built from an excluded file would change
-// and its component would not release. An image of any component can
-// take a directory of another as a named context, so every image
-// counts.
+// validateExcluded fails when a path in a component's outputs.exclude
+// is an input to the build of an image, as its Dockerfile or as a file that a
+// build context sends. A change to that path would then change the image
+// without a release of its component. Each image of every component is
+// checked, because an image can take another component's directory as a
+// named context.
 func validateExcluded(root string, components map[string]*Component) error {
 	for _, c := range sortedComponents(components) {
 		for _, excluded := range c.Outputs.Exclude {
@@ -122,10 +123,10 @@ func validateExcluded(root string, components map[string]*Component) error {
 	return nil
 }
 
-// imageReceives names the first file at or under target that the image
-// receives: its Dockerfile, or a file that one of its build contexts
-// sends. It uses the same ignore files as the recipe and the
-// selection.
+// imageReceives returns the first file at or under target that the
+// image's build reads: its Dockerfile, or a file that one of its build
+// contexts sends. It reads the same ignore files as Recipe and the
+// selector in selection.go.
 func imageReceives(root string, c *Component, image Image, target string) (string, error) {
 	dockerfile := path.Join(c.Dir, orDefault(image.File, "Dockerfile"))
 	if within(dockerfile, target) {
@@ -145,8 +146,8 @@ func imageReceives(root string, c *Component, image Image, target string) (strin
 	return "", nil
 }
 
-// contextSends names the first file at or under target that the build
-// context dir sends, or "".
+// contextSends returns the first file at or under target that the
+// build context dir sends, or "".
 func contextSends(root, dir, ignorePath, target string) (string, error) {
 	start := target
 	switch {
@@ -178,8 +179,8 @@ func contextSends(root, dir, ignorePath, target string) (string, error) {
 	return sent, err
 }
 
-// outputFile names the first changed file of the component that an
-// output is built from, or "".
+// outputFile returns the first of the changed files that an output of
+// the component is built from, or "".
 func outputFile(c *Component, files []string) string {
 	for _, file := range files {
 		if rest, ok := strings.CutPrefix(file, c.Dir+"/"); ok && !c.isNotOutput(rest) {
@@ -189,10 +190,10 @@ func outputFile(c *Component, files []string) string {
 	return ""
 }
 
-// ReleaseChanged is true when a change goes into the component's
-// outputs: a file in the directory of a component in its closure,
-// except the paths that no output is built from, or the bake target of
-// an image in its closure.
+// ReleaseChanged reports whether the diff changes an output of the
+// component, and why. A change counts when it is to a file that an
+// output of a component in the closure is built from, or to the bake
+// target of an image in the closure.
 func ReleaseChanged(components map[string]*Component, name string, d Diff) (bool, string) {
 	for _, n := range Closure(components, name) {
 		what := outputFile(components[n], d.outputFiles())
@@ -211,19 +212,20 @@ func ReleaseChanged(components map[string]*Component, name string, d Diff) (bool
 	return false, ""
 }
 
-// CheckChanged is true when a change reaches the component's jobs:
+// CheckChanged reports whether the diff runs the component's jobs, and
+// the file that runs them. These changes run them:
 //
-//   - its part of a generated workflow;
-//   - any file in its own directory, except its plans;
-//   - a file of another component that one of its jobs names in reads;
+//   - its part of a generated workflow
+//   - any file in its own directory, except its plans
+//   - a file that one of its jobs lists in reads
 //   - a file that an output of a component in its closure is built
 //     from, because a component reads its dependencies only through
-//     their builds;
+//     their builds
 //   - any file in brand/ except its plans, when a component in its
 //     closure has a manual, because every manual builds with brand's
-//     theme;
+//     theme
 //   - the bake target of an image in its closure, or the part of the
-//     bake file that every target shares when its closure has an image.
+//     bake file that every target shares, when its closure has an image
 func CheckChanged(components map[string]*Component, name string, d Diff) (bool, string) {
 	if file, ok := d.Workflows[name]; ok {
 		return true, file
@@ -261,8 +263,8 @@ func CheckChanged(components map[string]*Component, name string, d Diff) (bool, 
 	return false, ""
 }
 
-// targetChanged names the first image of the component whose bake
-// target changed, or "".
+// targetChanged describes the first image of the component whose bake
+// target changed, or returns "".
 func targetChanged(c *Component, d Diff) string {
 	for _, image := range c.Outputs.Images {
 		if d.Targets[image.Name] {

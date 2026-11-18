@@ -13,8 +13,8 @@ import (
 	"strings"
 )
 
-// A Finding is one use of another component that package.toml does
-// not declare.
+// A Finding is one place where a component uses another component that
+// its package.toml does not list in [depends].
 type Finding struct {
 	Component string
 	Uses      string
@@ -28,27 +28,28 @@ func (f Finding) String() string {
 	return fmt.Sprintf("%s uses %s, and its package.toml does not name it in [depends]: %s", f.Component, f.Uses, f.Where)
 }
 
-// DepsChecker compares each component's [depends] with what the tools
-// report: the Go modules each go.mod resolves inside the repository,
-// the path crates each Cargo workspace uses, and the images and build
-// contexts each Dockerfile starts from.
+// DepsChecker compares each component's [depends] with the
+// dependencies that its code has. It reads the Go modules that each
+// go.mod resolves inside the repository, the path crates of each Cargo
+// workspace, and the images and build contexts of each Dockerfile.
 type DepsChecker struct {
 	Root       string
 	Components map[string]*Component
-	// GoList and CargoMetadata run the tools. Tests replace them with
-	// fixtures, because the real tools download modules and crates.
+	// GoList and CargoMetadata run the Go and Cargo commands. Tests
+	// replace them with fixed results, because the real commands
+	// download modules and crates.
 	GoList        func(dir string) ([]goModule, error)
 	CargoMetadata func(dir string) ([]cargoPackage, error)
 }
 
-// Check lists every undeclared use.
+// Check returns every use of a component that is not declared.
 func (d DepsChecker) Check() ([]Finding, error) {
 	var findings []Finding
 	for _, c := range sortedComponents(d.Components) {
 		for _, check := range []func(*Component) ([]Finding, error){d.goModules, d.cargoWorkspaces, d.images} {
 			found, err := check(c)
 			if err != nil {
-				return nil, fmt.Errorf("%s: %w", c.Name(), err)
+				return nil, fmt.Errorf("checking the dependencies of %s: %w", c.Name(), err)
 			}
 			findings = append(findings, found...)
 		}
@@ -56,10 +57,10 @@ func (d DepsChecker) Check() ([]Finding, error) {
 	return findings, nil
 }
 
-// owner names the component whose directory holds the path, relative
-// to the repository root, or "" for a path that no component holds.
-// A component inside another one, such as liken/kernel inside liken,
-// owns its own directory.
+// owner returns the name of the component whose directory contains the
+// path, relative to the repository root, or "" when no component does.
+// A component nested inside another, such as liken/kernel inside
+// liken, owns its own directory, so the innermost component wins.
 func (d DepsChecker) owner(rel string) string { return ownerOf(d.Components, rel) }
 
 func ownerOf(components map[string]*Component, rel string) string {
@@ -77,17 +78,17 @@ func ownerOf(components map[string]*Component, rel string) string {
 	return ""
 }
 
-// allowed reports whether component c may use component other. A
-// manual builds with brand's theme and tools, so a docs module may use
-// brand without a declaration.
+// allowed reports whether component c may use component other. The
+// manuals are built with the theme and tools of brand, so a docs module
+// may use brand without declaring it.
 func (d DepsChecker) allowed(c *Component, other string, inDocs bool) bool {
 	return other == "" || other == c.Name() || slices.Contains(c.Depends.Components, other) ||
 		inDocs && other == "brand"
 }
 
-// walkFiles lists the files with the name under the component's
-// directory, and skips the directories that hold no source, and the
-// directories of components nested inside this one.
+// walkFiles returns the files with the given name under the component's
+// directory. It skips the directories in skipDirs and the directories
+// of components nested inside this one.
 func (d DepsChecker) walkFiles(c *Component, name string) ([]string, error) {
 	var files []string
 	base := filepath.Join(d.Root, c.Dir)
@@ -118,16 +119,16 @@ type goModule struct {
 	Dir  string
 }
 
-// GoList runs go list over every package of the module in dir,
-// together with its tests, and reports each module those packages
-// come from.
+// GoList runs go list over every package of the module in dir, with
+// the packages of its tests, and returns each module that those
+// packages come from.
 func GoList(dir string) ([]goModule, error) {
 	cmd := exec.Command("go", "list", "-deps", "-test", "-f", "{{with .Module}}{{.Path}}\t{{.Dir}}{{end}}", "./...")
 	cmd.Dir = dir
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("go list in %s: %w", dir, err)
+		return nil, fmt.Errorf("listing the Go dependencies in %s: %w", dir, err)
 	}
 	seen := map[string]bool{}
 	var modules []goModule
@@ -145,9 +146,10 @@ func GoList(dir string) ([]goModule, error) {
 }
 
 // goModules checks each go.mod in the component. A module under
-// github.com/liken-sh that Go resolves outside the repository is a
-// finding too: it means a go.mod lost its replace directive and reads
-// an old copy from the module proxy.
+// github.com/liken-sh that Go resolves outside the repository is also
+// a finding, because it means the go.mod has no replace directive for
+// it, and the build reads a published copy from the module proxy in
+// place of the code at this commit.
 func (d DepsChecker) goModules(c *Component) ([]Finding, error) {
 	gomods, err := d.walkFiles(c, "go.mod")
 	if err != nil {
@@ -172,7 +174,7 @@ func (d DepsChecker) goModules(c *Component) ([]Finding, error) {
 			if !inside {
 				if strings.HasPrefix(m.Path, "github.com/liken-sh/") {
 					findings = append(findings, Finding{Component: c.Name(),
-						Where: fmt.Sprintf("%s reads %s from the module proxy, not from the tree; add a replace directive", filepath.ToSlash(rel)+"/go.mod", m.Path)})
+						Where: fmt.Sprintf("%s reads %s from the module proxy, not from the tree. Add a replace directive", filepath.ToSlash(rel)+"/go.mod", m.Path)})
 				}
 				continue
 			}
@@ -196,15 +198,15 @@ type cargoPackage struct {
 	} `json:"dependencies"`
 }
 
-// CargoMetadata reads the packages of the Cargo workspace in dir and
-// the dependencies each one declares.
+// CargoMetadata returns the packages of the Cargo workspace in dir and
+// the dependencies that each one declares.
 func CargoMetadata(dir string) ([]cargoPackage, error) {
 	cmd := exec.Command("cargo", "metadata", "--format-version", "1", "--no-deps")
 	cmd.Dir = dir
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("cargo metadata in %s: %w", dir, err)
+		return nil, fmt.Errorf("reading the cargo metadata in %s: %w", dir, err)
 	}
 	var metadata struct {
 		Packages []cargoPackage `json:"packages"`
@@ -217,8 +219,8 @@ func CargoMetadata(dir string) ([]cargoPackage, error) {
 
 // cargoWorkspaces checks each Cargo workspace in the component. A
 // workspace is a directory with a Cargo.lock. A git dependency on a
-// repository of the project is a finding too: the crate is in the
-// tree, and a path dependency follows it.
+// repository of the project is also a finding, because the crate is in
+// the tree, and a path dependency builds it from the same commit.
 func (d DepsChecker) cargoWorkspaces(c *Component) ([]Finding, error) {
 	locks, err := d.walkFiles(c, "Cargo.lock")
 	if err != nil {
@@ -240,7 +242,7 @@ func (d DepsChecker) cargoWorkspaces(c *Component) ([]Finding, error) {
 			for _, dep := range p.Dependencies {
 				if strings.HasPrefix(dep.Source, "git+https://github.com/liken-sh/") {
 					findings = append(findings, Finding{Component: c.Name(),
-						Where: fmt.Sprintf("%s takes %s from git (%s); the crate is in the tree, so use a path dependency", manifest, dep.Name, dep.Source)})
+						Where: fmt.Sprintf("%s gets %s from git (%s), and the crate is in the tree, so use a path dependency", manifest, dep.Name, dep.Source)})
 					continue
 				}
 				if dep.Path == "" {
@@ -260,20 +262,18 @@ func (d DepsChecker) cargoWorkspaces(c *Component) ([]Finding, error) {
 	return findings, nil
 }
 
-// imageRef matches an image of the project in one word of a FROM line,
-// or in the value of an ARG default that a FROM line names. The pattern
-// is anchored at the start of the word, and the image's name ends at a
-// tag, a digest, or the end of the word. Unanchored, it would also match
-// another registry's path such as mirror.example/ghcr.io/liken-sh/mpv
-// and a repository under the name such as ghcr.io/liken-sh/mpv/extra,
-// and report a use of mpv that the Dockerfile does not make. The first
-// group is the reference without its tag, and the second is the name.
+// imageRef matches a project image at the start of one word of a FROM
+// or ARG line. The first group is the reference without its tag, and
+// the second is the image name. The anchors keep it from matching
+// another registry's path, such as mirror.example/ghcr.io/liken-sh/mpv,
+// or a different repository, such as ghcr.io/liken-sh/mpv/extra.
 var imageRef = regexp.MustCompile(`\A(ghcr\.io/liken-sh/([a-z0-9-]+))(?:[:@]|\z)`)
 
-// images checks each image's build contexts, and the images of other
-// components that its Dockerfile starts from: a published image by its
-// ghcr.io reference, or an image in the tree by its bare name, such as
-// FROM mpv, which the bake file resolves to the mpv target.
+// images checks each image's build contexts and the images of other
+// components that its Dockerfile builds on. A Dockerfile refers to such an
+// image by its ghcr.io reference, or by its bare name for an image in
+// the tree, as in FROM mpv, which the bake file resolves to the mpv
+// target.
 func (d DepsChecker) images(c *Component) ([]Finding, error) {
 	producer := map[string]string{}
 	for _, other := range d.Components {
@@ -307,8 +307,8 @@ func (d DepsChecker) images(c *Component) ([]Finding, error) {
 				continue
 			}
 			for _, field := range fields[1:] {
-				// An ARG default and a flag such as --platform carry their
-				// value after the last "=", and a default may be quoted.
+				// The value of an ARG default or of a flag such as
+				// --platform follows the last "=", and may be quoted.
 				word := strings.Trim(field[strings.LastIndex(field, "=")+1:], `"'`)
 				match := imageRef.FindStringSubmatch(word)
 				if match == nil {
@@ -321,8 +321,8 @@ func (d DepsChecker) images(c *Component) ([]Finding, error) {
 			}
 		}
 	}
-	// Two images that share a Dockerfile, such as two targets of one
-	// file, report its uses once.
+	// Images that share a Dockerfile, such as two targets of one file,
+	// would report the same finding more than once.
 	var once []Finding
 	for _, f := range findings {
 		if !slices.Contains(once, f) {

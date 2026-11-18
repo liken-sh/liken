@@ -10,22 +10,20 @@ func planGate(t *testing.T, r *repo, published map[string][]string, e Event) map
 	t.Helper()
 	decisions, err := r.planner(published).Plan(e)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning: %v", err)
 	}
 	return decisions
 }
 
-// A main run that fails leaves its change unverified. The next push
-// compares with the newest green run too, so the change runs again.
-// When the plan cannot say which run was the newest green one, it runs
-// every job: a change that it skipped would stay unverified for good,
-// because the next green run would hide it.
-func TestAPushToMainRunsWhatTheNewestGreenRunDidNotVerify(t *testing.T) {
+// A main run that fails leaves its change unverified, so the next push
+// also diffs against the newest run that passed. When the plan cannot
+// find that run, it runs every job.
+func TestAPushToMainRunsWhatTheNewestSuccessfulRunDidNotVerify(t *testing.T) {
 	r := planFixture(t)
 	root := r.run("rev-parse", "HEAD")
 	r.run("checkout", "--quiet", "-b", "old")
 	r.write("brand/voice.md", "a rule on a branch that main left behind\n")
-	aside := r.commit("a green run's commit that main no longer holds")
+	aside := r.commit("the commit of a passed run, which main does not contain")
 	r.run("checkout", "--quiet", "main")
 	r.write("operator/main.go", "package main // changed in a run that failed\n")
 	before := r.commit("change the operator")
@@ -37,10 +35,10 @@ func TestAPushToMainRunsWhatTheNewestGreenRunDidNotVerify(t *testing.T) {
 		unverified string
 		checks     []string
 	}{
-		{"with the newest green run", root, "", []string{"liken", "operator"}},
-		{"with a green run that is not an ancestor, from the merge base", aside, "", []string{"liken", "operator"}},
-		{"with a green run that is not in the repository", "1111111111111111111111111111111111111111", "", []string{"base", "brand", "liken", "operator"}},
-		{"when the API failed", "", "the API answered 403", []string{"base", "brand", "liken", "operator"}},
+		{"with the newest run that passed", root, "", []string{"liken", "operator"}},
+		{"with a passed run that is not an ancestor, from the merge base", aside, "", []string{"liken", "operator"}},
+		{"with a passed run that is not in the repository", "1111111111111111111111111111111111111111", "", []string{"base", "brand", "liken", "operator"}},
+		{"when the API failed", "", "the API returned 403", []string{"base", "brand", "liken", "operator"}},
 		{"with no lookup, as on a workstation", "", "", []string{"liken"}},
 	}
 	for _, c := range cases {
@@ -64,7 +62,7 @@ func TestABranchPushRunsWhatTheBranchChangedSinceMain(t *testing.T) {
 	r.commit("change the OS on the topic branch")
 	decisions := planGate(t, r, fixturePublished, Event{Name: "push", Ref: "refs/heads/topic", Before: before, MainRef: "main", Head: "HEAD"})
 	if got := checked(decisions); !reflect.DeepEqual(got, []string{"liken", "operator"}) {
-		t.Errorf("the checks that run: %v", got)
+		t.Errorf("the checks that run: %v, want [liken operator]", got)
 	}
 }
 
@@ -90,10 +88,10 @@ func TestAPushToMainPublishesWhatTheNewestDevelopmentBuildLacks(t *testing.T) {
 	decisions := planGate(t, r, devPublished(published), Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})
 	d := decisions["operator"]
 	if d.Publish != publishDev || !strings.Contains(d.Reason, "operator/main.go") {
-		t.Errorf("operator: %+v", d)
+		t.Errorf("the decision for operator is %+v, want a development publish with a reason that names operator/main.go", d)
 	}
 	if d := decisions["base"]; d.Check || d.Publish != publishNone {
-		t.Errorf("base: %+v", d)
+		t.Errorf("the decision for base is %+v, want no check and no publish", d)
 	}
 }
 
@@ -104,7 +102,7 @@ func TestAPushToMainPublishesNothingWhenTheNewestDevelopmentBuildIsCurrent(t *te
 	r.commit("change the OS")
 	decisions := planGate(t, r, devPublished(before), Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})
 	if d := decisions["operator"]; d.Check || d.Publish != publishNone {
-		t.Errorf("operator: %+v", d)
+		t.Errorf("the decision for operator is %+v, want no check and no publish", d)
 	}
 }
 
@@ -144,7 +142,7 @@ func TestABranchRunsWhatItChangedFromWhereItLeftMain(t *testing.T) {
 			r, branchPoint, mainTip := branchFixture(t)
 			decisions := planGate(t, r, fixturePublished, c.event(branchPoint, mainTip))
 			if got := checked(decisions); !reflect.DeepEqual(got, []string{"operator"}) {
-				t.Errorf("the checks that run: %v", got)
+				t.Errorf("the checks that run: %v, want [operator]", got)
 			}
 		})
 	}
@@ -154,16 +152,16 @@ func TestABranchWithNoMainToCompareWithRunsEveryJob(t *testing.T) {
 	r, _, _ := branchFixture(t)
 	decisions := planGate(t, r, fixturePublished, Event{Name: "push", Ref: "refs/heads/topic", Before: "0000000000000000000000000000000000000000", MainRef: "origin/main", Head: "HEAD"})
 	if got := checked(decisions); len(got) != 4 {
-		t.Errorf("the checks that run: %v", got)
+		t.Errorf("the checks that run: %v, want all 4 components", got)
 	}
 }
 
 func TestTheNewestDevelopmentBuildSortsByItsCount(t *testing.T) {
 	tags := []string{"2026.09.28-001", "2026.09.28-001-dev-999-aaaaaaaa", "2026.09.28-001-dev-1000-bbbbbbbb", "2026.09.27-003-dev-5000-cccccccc", "latest"}
 	if got := NewestDev(tags); got != "2026.09.28-001-dev-1000-bbbbbbbb" {
-		t.Errorf("NewestDev = %q", got)
+		t.Errorf("NewestDev(tags) = %q, want the build with the highest count, 2026.09.28-001-dev-1000-bbbbbbbb", got)
 	}
 	if got := NewestDev([]string{"2026.09.28-001"}); got != "" {
-		t.Errorf("NewestDev of releases alone = %q", got)
+		t.Errorf("NewestDev of releases alone = %q, want none", got)
 	}
 }

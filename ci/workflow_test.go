@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// fluxTree is a repository that holds only the flux version, which the
+// fluxTree is a repository that contains only the flux version, which the
 // publish job of a component with a deploy artifact reads.
 func fluxTree(t *testing.T) string {
 	t.Helper()
@@ -21,7 +21,7 @@ func TestTheWorkflowsAreWrittenAndChecked(t *testing.T) {
 	components := graphFixture(t)
 	root := fluxTree(t)
 	if err := os.MkdirAll(filepath.Join(root, ".github/workflows"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the workflows directory: %v", err)
 	}
 	stale := filepath.Join(root, ".github/workflows/component-gone.yaml")
 	os.WriteFile(stale, []byte(generatedMark+" from gone/package.toml.\n"), 0o644)
@@ -30,30 +30,30 @@ func TestTheWorkflowsAreWrittenAndChecked(t *testing.T) {
 
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	differ, err := CheckWorkflows(root, files)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the workflows: %v", err)
 	}
 	if len(differ) != len(files)+1 {
-		t.Errorf("before writing, %v differ", differ)
+		t.Errorf("before writing, the files that differ are %v, want all %d generated files and the stale one", differ, len(files))
 	}
 	if err := WriteWorkflows(root, files); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the workflows: %v", err)
 	}
 	if differ, _ := CheckWorkflows(root, files); len(differ) != 0 {
-		t.Errorf("after writing, %v differ", differ)
+		t.Errorf("after writing, the files that differ are %v, want none", differ)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Error("the workflow of a removed component stayed")
+		t.Error("the workflow of a removed component is still there, want it deleted")
 	}
 	if _, err := os.Stat(handWritten); err != nil {
-		t.Error("a hand-written workflow was removed")
+		t.Error("a hand-written workflow was deleted, want it kept")
 	}
 	os.WriteFile(filepath.Join(root, ".github/workflows/ci.yaml"), []byte(generatedMark+" by hand\n"), 0o644)
 	if differ, _ := CheckWorkflows(root, files); !reflect.DeepEqual(differ, []string{".github/workflows/ci.yaml"}) {
-		t.Errorf("after an edit, %v differ", differ)
+		t.Errorf("after an edit, the files that differ are %v, want only ci.yaml", differ)
 	}
 }
 
@@ -64,7 +64,7 @@ func workflowJobs(t *testing.T, data []byte) map[string]map[string]any {
 		Jobs map[string]map[string]any `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		t.Fatalf("%v:\n%s", err, data)
+		t.Fatalf("parsing the generated workflow: %v\n%s", err, data)
 	}
 	return doc.Jobs
 }
@@ -72,33 +72,33 @@ func workflowJobs(t *testing.T, data []byte) map[string]map[string]any {
 func TestTheRootWorkflowCallsEachComponentAfterItsDependencies(t *testing.T) {
 	files, err := Workflows(fluxTree(t), graphFixture(t))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	jobs := workflowJobs(t, files[".github/workflows/ci.yaml"])
 	app := jobs["app"]
 	if app["uses"] != "./.github/workflows/component-app.yaml" {
-		t.Errorf("app uses %v", app["uses"])
+		t.Errorf("the call of app uses %v, want ./.github/workflows/component-app.yaml", app["uses"])
 	}
 	if _, ok := jobs["os-publish"]["secrets"]; !ok {
-		t.Error("the OS's publish call does not pass the secrets")
+		t.Error("the call of os-publish passes no secrets, want them passed")
 	}
 	if _, ok := jobs["os"]["secrets"]; ok {
-		t.Error("the OS's checks get the secrets")
+		t.Error("the call of os passes the secrets, want none")
 	}
 	for name, images := range map[string]bool{"base": true, "app": false} {
 		with := jobs[name]["with"].(map[string]any)
 		if with["jobs"] != "${{ toJSON(fromJSON(needs.plan.outputs.components)['"+name+"'].jobs) }}" {
-			t.Errorf("%s's call passes the jobs %v", name, with["jobs"])
+			t.Errorf("the call of %s passes the jobs %v, want the jobs that the plan selects for it", name, with["jobs"])
 		}
 		if _, ok := with["images"]; ok != images {
-			t.Errorf("%s's call passes images: %v", name, ok)
+			t.Errorf("the call of %s passes images is %v, want %v", name, ok, images)
 		}
 	}
 	if _, ok := jobs["app"]["secrets"]; ok {
-		t.Error("an operator's call passes the secrets")
+		t.Error("the call of app passes the secrets, want none")
 	}
 	if !strings.Contains(string(files[".github/workflows/ci.yaml"]), "fetch https://liken.sh/app/ > page.html") {
-		t.Error("the site check does not fetch the app's manual")
+		t.Error("the site check does not fetch the manual of app, want it fetched")
 	}
 }
 
@@ -141,17 +141,17 @@ platforms = ["linux/amd64", "linux/arm64"]
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	text := string(files[".github/workflows/component-app.yaml"])
 	jobs := workflowJobs(t, files[".github/workflows/component-app.yaml"])
 	for _, name := range []string{"go", "docs", "images", "publish"} {
 		if _, ok := jobs[name]; !ok {
-			t.Errorf("no %s job", name)
+			t.Errorf("the workflow of app has no %s job, want one", name)
 		}
 	}
 	for _, want := range []string{
@@ -169,7 +169,7 @@ platforms = ["linux/amd64", "linux/arm64"]
 		"go run . publish -root .. -component app",
 	} {
 		if !strings.Contains(text, want) {
-			t.Errorf("the workflow lacks %q", want)
+			t.Errorf("the workflow of app does not contain %q, want it", want)
 		}
 	}
 }
@@ -183,14 +183,14 @@ func TestAComponentWorkflowIsNamedApartFromTheRootWorkflow(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	if text := string(files[".github/workflows/component-ci.yaml"]); !strings.Contains(text, "\nname: component-ci\n") {
-		t.Errorf("the ci component's workflow is not named component-ci:\n%s", text)
+		t.Errorf("the workflow of the ci component does not have the name component-ci:\n%s", text)
 	}
 }
 
@@ -200,9 +200,9 @@ func TestACoverageFileMustBeAtTheComponentsTop(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	if _, err := Workflows(root, components); err == nil || !strings.Contains(err.Error(), "at the component's top") {
-		t.Errorf("got %v", err)
+		t.Errorf("Workflows returned %v, want an error that says a coverage file must be at the component's top", err)
 	}
 }

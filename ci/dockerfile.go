@@ -10,12 +10,12 @@ import (
 	"strings"
 )
 
-// A Dockerfile is what one Dockerfile builds from: the images its FROM
-// lines name, the sources its COPY --from and RUN --mount from= flags
-// name, and the files its ADD lines fetch from the network. A name that
-// an earlier stage of the same file declares with AS, or a number that
-// counts an earlier stage, is that stage, not an image, so neither list
-// holds it.
+// A Dockerfile lists what one Dockerfile builds from: the images of its
+// FROM lines, the sources of its COPY --from and RUN --mount from=
+// flags, and the files that its ADD lines download. From and Sources
+// leave out a name that an earlier stage declared with AS, because the
+// name refers to that stage and not to an image. Sources also leaves out
+// the number of an earlier stage, as in COPY --from=0.
 type Dockerfile struct {
 	From    []string
 	Sources []string
@@ -25,8 +25,8 @@ type Dockerfile struct {
 	// lines declare, in any stage.
 	Args []string
 	// Escape is true when the file starts with an escape parser
-	// directive, which changes the continuation character from the
-	// backslash that this parser reads.
+	// directive. The directive changes the line continuation character,
+	// and this parser reads only a backslash as the continuation.
 	Escape bool
 }
 
@@ -37,16 +37,16 @@ type Stage struct {
 	// from, and Sources are the images or stages it copies from.
 	From    string
 	Sources []string
-	// Runs are the commands of the stage's RUN lines, in order.
+	// Runs are the commands of the stage's RUN lines without their
+	// flags, in order.
 	Runs []string
 }
 
-// escapeDirective matches the escape parser directive, which BuildKit
-// reads only in the comment lines at the top of the file, before any
-// other line.
+// BuildKit reads parser directives only at the top of the file. The
+// first line that is not a directive, such as a comment, an empty line,
+// or an instruction, ends them.
 var escapeDirective = regexp.MustCompile(`(?i)^#\s*escape\s*=`)
 
-// directive matches any parser directive line.
 var directive = regexp.MustCompile(`^#\s*[A-Za-z]+\s*=`)
 
 // A Remote is one source of an ADD line that the build fetches from
@@ -64,9 +64,8 @@ func readDockerfile(path string) (Dockerfile, error) {
 }
 
 // instructions joins each instruction that a backslash continues onto
-// the next lines into one line. BuildKit skips a comment line and an
-// empty line inside an instruction, so the join does too: an empty
-// line there does not end the instruction.
+// the next lines into one line. BuildKit skips comment lines and empty
+// lines inside a continued instruction, so the join skips them too.
 func instructions(text string) []string {
 	var lines []string
 	current := ""
@@ -185,9 +184,10 @@ func addSources(fields []string) []string {
 }
 
 // Reachable lists the images and sources that the build of the target
-// stage reads: the target's own, and those of every stage it builds on
-// or copies from, through the whole file. An empty target is the last
-// stage, the one a build with no target builds.
+// stage reads: the target's own, and those of every stage that it builds
+// on or copies from, directly or through other stages. A target that
+// matches no stage name, such as "", is the last stage, which a build with no
+// target builds.
 func (d Dockerfile) Reachable(target string) []string {
 	byName := map[string]int{}
 	for i, stage := range d.Stages {
@@ -221,12 +221,12 @@ func (d Dockerfile) Reachable(target string) []string {
 	return names
 }
 
-// FromImage names the image that the target stage starts from: the
-// FROM of the stage, or of the earlier stage that it names, through
-// the file, until the name is not a stage. An empty target is the last
-// stage. The config of that image, with its labels, is where the
-// target's config starts, and Docker cannot delete a label it passes
-// down. A file with no stage starts from nothing, and the name is "".
+// FromImage returns the image that the target stage starts from. It
+// follows FROM through earlier stages until it reaches a name that is
+// not a stage. A target that matches no stage name is the last stage, and a
+// file with no stage returns "". The target's config starts as a copy
+// of that image's config, so the target inherits each of its labels,
+// and a Dockerfile can overwrite an inherited label but not remove it.
 func (d Dockerfile) FromImage(target string) string {
 	byName := map[string]int{}
 	for i, stage := range d.Stages {
@@ -317,11 +317,10 @@ func (d Dockerfile) Bases(image Image, producer map[string]string) []string {
 // such as /var/lib/apt/lists.
 var aptCommand = regexp.MustCompile(`(^|[\s;&|(])apt(-get)?\s`)
 
-// SnapshotFirst checks that every stage that runs apt points apt at
-// the snapshot first: a RUN of the stage, or of a stage it builds on,
-// calls snapshot.sh before the first apt command. A stage that ran apt
-// against Debian's moving archive would install packages that the
-// snapshot date does not name.
+// SnapshotFirst checks that each stage that runs apt runs snapshot.sh
+// before its first apt command, in its own RUN lines or in the stage
+// that its FROM refers to. Without snapshot.sh, apt installs from Debian's
+// current archive and not from the pinned snapshot date.
 func (d Dockerfile) SnapshotFirst() error {
 	pinned := map[string]bool{}
 	for i, stage := range d.Stages {

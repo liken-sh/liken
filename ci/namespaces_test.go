@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// namespacesTree is a repository whose deploy bases keep every object in
-// liken-system or in one of the two places the rule allows, with changes
-// laid over it. The OS manifest outside any deploy base is out of scope.
+// namespacesTree writes a repository that passes checkNamespaces, with
+// changes written over it. Its OS manifest in flux-system is outside any
+// deploy/, so the check must not read it.
 func namespacesTree(t *testing.T, changes map[string]string) string {
 	t.Helper()
 	tree := map[string]string{
@@ -27,10 +27,10 @@ func namespacesTree(t *testing.T, changes map[string]string) string {
 func TestEveryDeployObjectStaysWhereANamespaceOverrideCannotMoveIt(t *testing.T) {
 	findings, err := checkNamespaces(namespacesTree(t, nil))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the namespaces: %v", err)
 	}
 	if len(findings) > 0 {
-		t.Errorf("the tree has findings:\n%s", strings.Join(findings, "\n"))
+		t.Errorf("the tree has findings, want none:\n%s", strings.Join(findings, "\n"))
 	}
 }
 
@@ -44,7 +44,7 @@ func TestAnObjectOutsideLikenSystemIsFound(t *testing.T) {
 			"a/deploy/api.yaml: RoleBinding a-api-authentication-reader is in the namespace kube-system"},
 		"another object in kube-system": {"a/deploy/api-authentication.yaml", "kind: Role\nmetadata:\n  name: a-reader\n  namespace: kube-system\n",
 			"a/deploy/api-authentication.yaml: Role a-reader is in the namespace kube-system"},
-		"a dashboard outside the monitoring component": {"a/deploy/dashboard.yaml", "kind: ConfigMap\nmetadata:\n  name: a-dashboard\n  namespace: monitoring\n",
+		"a dashboard outside deploy/monitoring/": {"a/deploy/dashboard.yaml", "kind: ConfigMap\nmetadata:\n  name: a-dashboard\n  namespace: monitoring\n",
 			"a/deploy/dashboard.yaml: ConfigMap a-dashboard is in the namespace monitoring"},
 		"a top-level namespace field": {"a/deploy/kustomization.yaml", "kind: Kustomization\nnamespace: liken-system\n",
 			"a/deploy/kustomization.yaml sets a top-level namespace"},
@@ -53,10 +53,10 @@ func TestAnObjectOutsideLikenSystemIsFound(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			findings, err := checkNamespaces(namespacesTree(t, map[string]string{c.file: c.text}))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("checking the namespaces: %v", err)
 			}
 			if !strings.Contains(strings.Join(findings, "\n"), c.wants) {
-				t.Errorf("got:\n%s\nwant a finding with %q", strings.Join(findings, "\n"), c.wants)
+				t.Errorf("the findings are:\n%s\nwant one with %q", strings.Join(findings, "\n"), c.wants)
 			}
 		})
 	}
@@ -74,9 +74,9 @@ func TestTheNamespacesCommandFailsOnAFinding(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			w := newWorld(t, &fakeRegistry{})
+			w := newFakeEnv(t, &fakeRegistry{})
 			if err := w.run([]string{"namespaces", "-root", namespacesTree(t, c.changes)}); (err != nil) != c.fails {
-				t.Errorf("got %v", err)
+				t.Errorf("the namespaces command returned %v, want an error: %t", err, c.fails)
 			}
 		})
 	}
@@ -85,6 +85,6 @@ func TestTheNamespacesCommandFailsOnAFinding(t *testing.T) {
 func TestADeployFileThatDoesNotParseIsAnError(t *testing.T) {
 	root := namespacesTree(t, map[string]string{"a/deploy/broken.yaml": "kind: [\n"})
 	if _, err := checkNamespaces(root); err == nil {
-		t.Error("got no error")
+		t.Error("checkNamespaces returned no error, want one for a file that is not YAML")
 	}
 }

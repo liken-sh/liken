@@ -22,7 +22,7 @@ func graphFixture(t *testing.T) map[string]*Component {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the fixture components: %v", err)
 	}
 	return components
 }
@@ -30,7 +30,7 @@ func graphFixture(t *testing.T) map[string]*Component {
 func TestTheClosureFollowsEveryDependency(t *testing.T) {
 	components := graphFixture(t)
 	if got := Closure(components, "app"); !reflect.DeepEqual(got, []string{"app", "base"}) {
-		t.Errorf("closure %v", got)
+		t.Errorf("the closure of app is %v, want [app base]", got)
 	}
 }
 
@@ -75,7 +75,7 @@ func TestACheckRunsWhenItsPathsChange(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if runs, _ := CheckChanged(components, c.component, Diff{Files: []string{c.file}}); runs != c.runs {
-				t.Errorf("CheckChanged(%s, %s) = %v", c.component, c.file, runs)
+				t.Errorf("CheckChanged(%s, %s) = %v, want %v", c.component, c.file, runs, c.runs)
 			}
 		})
 	}
@@ -117,7 +117,7 @@ func TestAReleaseChangeIsAChangeToAnOutput(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			changed, why := ReleaseChanged(components, c.component, Diff{Files: []string{c.file}})
 			if changed != (c.why != "") || why != c.why {
-				t.Errorf("ReleaseChanged(%s, %s) = %v, %q", c.component, c.file, changed, why)
+				t.Errorf("ReleaseChanged(%s, %s) = %v, %q, want the reason %q", c.component, c.file, changed, why, c.why)
 			}
 		})
 	}
@@ -130,6 +130,6 @@ func TestTheDependencyOrderPutsEachComponentAfterItsDependencies(t *testing.T) {
 		names = append(names, c.Name())
 	}
 	if want := []string{"base", "app", "brand", "os"}; !reflect.DeepEqual(names, want) {
-		t.Errorf("order %v, want %v", names, want)
+		t.Errorf("the dependency order is %v, want %v", names, want)
 	}
 }

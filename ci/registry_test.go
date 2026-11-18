@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-// fakeRegistry answers the parts of the distribution API that the
+// fakeRegistry serves the parts of the distribution API that the
 // program uses: the token service, a paged tag list, manifests and
 // blobs, and blob upload sessions. A token grants a push only for a
 // credential in writers. manifests holds each manifest by
@@ -25,9 +25,9 @@ type fakeRegistry struct {
 	manifests map[string]string
 	blobs     map[string]string
 	cancelled []string
-	// lag is how many reads of a manifest answer 404 before the registry
-	// serves it, the way a registry can answer a read that follows a
-	// push at once.
+	// lag is how many reads of a manifest return 404 before the
+	// registry serves it, as a registry does before a manifest that was
+	// just pushed is readable.
 	lag int
 }
 
@@ -133,10 +133,10 @@ func TestTheTagsOfAPackageAreReadAcrossPages(t *testing.T) {
 	registry := fake.serve(t)
 	tags, err := registry.Tags("operator")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the tags of operator: %v", err)
 	}
 	if want := []string{"2026.09.26-001", "latest", "2026.09.27-001"}; !reflect.DeepEqual(tags, want) {
-		t.Errorf("tags %v", tags)
+		t.Errorf("tags are %v, want %v", tags, want)
 	}
 }
 
@@ -144,7 +144,7 @@ func TestAPackageThatDoesNotExistHasNoTags(t *testing.T) {
 	registry := (&fakeRegistry{}).serve(t)
 	tags, err := registry.Tags("new-operator")
 	if err != nil || tags != nil {
-		t.Errorf("tags %v, err %v", tags, err)
+		t.Errorf("Tags(new-operator) = %v, %v, want no tags and no error", tags, err)
 	}
 }
 
@@ -152,11 +152,11 @@ func TestAPackageTheTokenServiceRefusesHasNoTags(t *testing.T) {
 	registry := (&fakeRegistry{}).serve(t)
 	tags, err := registry.Tags("missing")
 	if err != nil || tags != nil {
-		t.Errorf("tags %v, err %v", tags, err)
+		t.Errorf("Tags(missing) = %v, %v, want no tags and no error", tags, err)
 	}
 	registry.Token = "reader"
 	if _, err := registry.Tags("missing"); err == nil {
-		t.Error("a refusal of a credential read as no tags")
+		t.Error("Tags(missing) with a refused token returned no error, want an error")
 	}
 }
 
@@ -165,10 +165,10 @@ func TestAPushProbeProvesWriteAccessAndLeavesNothing(t *testing.T) {
 	registry := fake.serve(t)
 	registry.Token = "writer"
 	if err := registry.CanPush("operator"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("probing a push to operator: %v", err)
 	}
 	if want := []string{"/v2/liken-sh/operator/blobs/uploads/session"}; !reflect.DeepEqual(fake.cancelled, want) {
-		t.Errorf("cancelled %v", fake.cancelled)
+		t.Errorf("the cancelled uploads are %v, want %v", fake.cancelled, want)
 	}
 }
 
@@ -176,14 +176,15 @@ func TestAPushProbeReportsARefusal(t *testing.T) {
 	registry := (&fakeRegistry{}).serve(t)
 	registry.Token = "reader"
 	if err := registry.CanPush("operator"); err == nil || !strings.Contains(err.Error(), "403") {
-		t.Errorf("got %v", err)
+		t.Errorf("CanPush(operator) with a reader token returned %v, want an error that holds 403", err)
 	}
 }
 
-// imageFixture is a registry that holds base:1 as an index of an amd64
-// image, an arm64 image, and an attestation, the way buildx pushes
-// one; base:2 as one image with no labels; and base:3 as an index
-// whose image manifest is missing.
+// imageFixture is a registry with these images. base:1 is an index of
+// an amd64 image, an arm64 image, and an attestation, the way buildx
+// pushes one. arm:1 is an index of an arm64 image only. base:2 is one
+// image with no labels. base:3 is an index whose image manifest is
+// missing.
 func imageFixture() *fakeRegistry {
 	return &fakeRegistry{
 		manifests: map[string]string{
@@ -222,14 +223,12 @@ func TestTheLabelsOfAnImageAreRead(t *testing.T) {
 		t.Run(c.pkg+":"+c.tag, func(t *testing.T) {
 			labels, err := registry.Labels(c.pkg, c.tag)
 			if err != nil || !reflect.DeepEqual(labels, c.want) {
-				t.Errorf("labels %v, err %v", labels, err)
+				t.Errorf("Labels(%s, %s) = %v, %v, want %v", c.pkg, c.tag, labels, err, c.want)
 			}
 		})
 	}
 }
 
-// The digest is the hash of the manifest's bytes, so a reference by
-// that digest names exactly the index that the registry served.
 func TestATagResolvesToTheDigestOfItsManifest(t *testing.T) {
 	registry := imageFixture().serve(t)
 	cases := []struct {
@@ -244,7 +243,7 @@ func TestATagResolvesToTheDigestOfItsManifest(t *testing.T) {
 		t.Run(c.pkg+":"+c.tag, func(t *testing.T) {
 			digest, found, err := registry.Digest(c.pkg, c.tag)
 			if err != nil || digest != c.want || found != c.found {
-				t.Errorf("digest %q, found %t, err %v", digest, found, err)
+				t.Errorf("Digest(%s, %s) = %q, %t, %v, want %q, %t", c.pkg, c.tag, digest, found, err, c.want, c.found)
 			}
 		})
 	}
@@ -258,6 +257,6 @@ func sha256Of(text string) string {
 func TestAnIndexThatPointsAtNothingIsAnError(t *testing.T) {
 	registry := imageFixture().serve(t)
 	if _, err := registry.Labels("base", "3"); err == nil || !strings.Contains(err.Error(), "no such object") {
-		t.Errorf("got %v", err)
+		t.Errorf("Labels(base, 3) returned %v, want an error that holds \"no such object\"", err)
 	}
 }

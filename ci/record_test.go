@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestTheRecordGivesEachComponentItsVersionAtTheTag(t *testing.T) {
+func TestTheRecordListsTheVersionOfEachComponentAtTheTag(t *testing.T) {
 	components := graphFixture(t)
 	published := map[string][]string{
 		"app":  {"2026.09.27-001", "2026.10.02-001", "2026.10.03-001", "2026.10.02-001-dev-001-abcdef01"},
@@ -14,7 +14,7 @@ func TestTheRecordGivesEachComponentItsVersionAtTheTag(t *testing.T) {
 	}
 	entries, err := Record(components, func(c *Component) ([]string, error) { return published[c.Name()], nil }, nil, "2026.10.02-001")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("recording the release: %v", err)
 	}
 	want := []RecordEntry{
 		{Component: "app", Version: "2026.10.02-001", Released: true},
@@ -22,7 +22,7 @@ func TestTheRecordGivesEachComponentItsVersionAtTheTag(t *testing.T) {
 		{Component: "os", Version: ""},
 	}
 	if !reflect.DeepEqual(entries, want) {
-		t.Errorf("entries %+v", entries)
+		t.Errorf("the entries are %+v, want %+v", entries, want)
 	}
 }
 
@@ -44,22 +44,22 @@ func TestTheRecordNotesPutTheCatalogEntryFirst(t *testing.T) {
 		}
 	}
 	if !strings.HasPrefix(notes, "liken 2026.10.02-001 is on the channel") {
-		t.Errorf("the notes start:\n%s", notes)
+		t.Errorf("the notes start with something other than the line that links the release:\n%s", notes)
 	}
 }
 
 func TestAReleaseVersionIsCalVer(t *testing.T) {
 	versions := []string{"2026.09.26-001", "latest", "2026.09.27-002", "2026.09.27-002-dev-004-abcdef01", "buildcache", "2026.09.27-001"}
 	if got := NewestRelease(versions); got != "2026.09.27-002" {
-		t.Errorf("NewestRelease = %s", got)
+		t.Errorf("NewestRelease = %s, want 2026.09.27-002", got)
 	}
 	if got := NewestReleaseAtOrBefore(versions, "2026.09.27-001"); got != "2026.09.27-001" {
-		t.Errorf("NewestReleaseAtOrBefore = %s", got)
+		t.Errorf("NewestReleaseAtOrBefore = %s, want 2026.09.27-001", got)
 	}
 	if got := NewestRelease([]string{"latest"}); got != "" {
-		t.Errorf("NewestRelease of no release = %s", got)
+		t.Errorf("NewestRelease of no release = %q, want an empty string", got)
 	}
 	if got := DevVersion("2026.10.02-001", 17, "abcdef0123456789"); got != "2026.10.02-001-dev-017-abcdef01" {
-		t.Errorf("DevVersion = %s", got)
+		t.Errorf("DevVersion = %s, want 2026.10.02-001-dev-017-abcdef01", got)
 	}
 }

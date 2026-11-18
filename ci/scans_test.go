@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// scansTree is a repository with a pinned base, a tracked operator
-// with two images, and the OS, which publishes to the channel.
+// scansTree is a repository with a pinned base, an operator with two
+// images, and the OS, which publishes to the channel.
 func scansTree(t *testing.T) string {
 	t.Helper()
 	return writeTree(t, map[string]string{
@@ -24,11 +24,7 @@ const twoReleases = `releases:
     digest: sha256:def
 `
 
-// The scans command plans the scheduled scan: every published image at
-// the version that a cluster pulls, and the newest release of the OS.
-// A pinned tag that is not published, a component with no published
-// version, and a channel with no release give nothing to scan.
-func TestTheScheduledScanNamesEveryPublishedImageAndTheNewestRelease(t *testing.T) {
+func TestTheScheduledScanListsEveryPublishedImageAndTheNewestRelease(t *testing.T) {
 	cases := []struct {
 		name     string
 		base     bool
@@ -53,12 +49,12 @@ func TestTheScheduledScanNamesEveryPublishedImageAndTheNewestRelease(t *testing.
 			if c.operator != nil {
 				fake.tags["operator"] = c.operator
 			}
-			w := newWorld(t, fake)
+			w := newFakeEnv(t, fake)
 			w.Published.Channel = channel(t, c.versions)
 			output := filepath.Join(t.TempDir(), "output")
-			w.env["GITHUB_OUTPUT"] = output
+			w.vars["GITHUB_OUTPUT"] = output
 			if err := w.run([]string{"scans", "-root", scansTree(t)}); err != nil {
-				t.Fatal(err)
+				t.Fatalf("running the scans command: %v", err)
 			}
 			if got, _ := os.ReadFile(output); string(got) != c.output {
 				t.Errorf("the output is\n%s\nwant\n%s", got, c.output)
@@ -79,7 +75,7 @@ func TestTheScheduledScanSaysWhatItScans(t *testing.T) {
 				"grype scans the SBOM of the OS release `2026.09.28-001`.\n"},
 		{"nothing", nil, "",
 			"## The scan\n\nTrivy scans no image: no image has a published version.\n\n" +
-				"grype scans no OS release: the channel holds none.\n"},
+				"grype scans no OS release: the channel has none.\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

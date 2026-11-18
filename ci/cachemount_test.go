@@ -13,15 +13,15 @@ func cacheMountTree(t *testing.T, dockerfile string) string {
 	})
 }
 
-func TestTheBakeFileCopiesAnImagesCacheMountInAndOut(t *testing.T) {
+func TestTheBakeFileSeedsAndExportsAnImagesCacheMount(t *testing.T) {
 	root := cacheMountTree(t, "FROM scratch AS cache-seed\nFROM scratch AS cache-export\nFROM scratch\n")
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	out, err := Bake(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the bake file: %v", err)
 	}
 	text := string(out)
 	for _, want := range []string{
@@ -58,11 +58,11 @@ func TestTheBakeFileNeedsTheCacheStagesOfACacheMount(t *testing.T) {
 	root := cacheMountTree(t, "FROM scratch AS cache-seed\nFROM scratch\n")
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	_, err = Bake(root, components)
 	if err == nil || !strings.Contains(err.Error(), "has no stage cache-export") {
-		t.Fatalf("Bake answered %v, want the missing stage named", err)
+		t.Fatalf("Bake returned %v, want an error that app has no stage cache-export", err)
 	}
 }
 
@@ -70,7 +70,7 @@ func TestTheImagesMatrixMarksAnImageWithACacheMount(t *testing.T) {
 	root := cacheMountTree(t, "FROM scratch AS cache-seed\nFROM scratch AS cache-export\nFROM scratch\n")
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	_, images := everything(components["app"])
 	if want := []ImageRun{{Image: "app", Load: true, Cache: true}}; !reflect.DeepEqual(images, want) {

@@ -6,49 +6,42 @@ import (
 	"path/filepath"
 )
 
-// This file and ci/templates/trivy.tmpl are the Trivy configuration:
-// the Trivy version, the arguments of each scan, the steps that install
-// Trivy, restore its database, and upload each scan, and the root
-// workflow's trivy-db and trivy jobs, which the scheduled scan in
-// .github/workflows/scan.yaml runs too. A change to either file can
-// change what a scan reports, so the plan of a push to main that
-// changes one of them scans every published image again. See
-// Planner.Rescan.
+// Keep every Trivy setting in this file or in ci/templates/trivy.tmpl.
+// trivyConfig lists both files, so a push to main that changes either
+// one scans every published image again. See Planner.Rescan.
 
-// trivyVersion is the Trivy that each publish job, the root workflow's
-// trivy-db job, and each entry of its trivy job's matrix install.
-// ci/latest.sh reports it against Trivy's newest release.
+// trivyVersion is the Trivy release that every workflow step installs.
+// ci/latest.sh compares it with Trivy's newest release.
 const trivyVersion = "0.76.1"
 
-// trivySHA256 is the digest of Trivy's Linux-64bit archive at
-// trivyVersion. Each step that installs Trivy downloads the archive and
-// checks it against this digest before it unpacks the binary. The
-// setup-trivy action checks the archive only against the checksums file
-// of the same release, which it reads at run time, so a changed release
-// would change what CI runs. `ci/latest.sh --bump trivy` writes it with
-// trivyVersion, after the archive verifies against the sigstore
-// signature of Trivy's release workflow.
+// trivySHA256 is the SHA-256 of Trivy's Linux-64bit archive at
+// trivyVersion. The install step checks the archive against it before
+// it unpacks the binary. CI does not use the setup-trivy action,
+// because that action checks the archive only against the release's
+// checksums file, which it downloads at run time, so a release that
+// changed upstream would change what CI runs. `ci/latest.sh --bump
+// trivy` writes this digest and trivyVersion, after it verifies the
+// archive against the Sigstore signature of Trivy's release workflow.
 const trivySHA256 = "c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0"
 
-// scanImage runs Trivy on one published image, and writes its findings
-// as SARIF to <dir>/<image>.sarif, which the job that runs the scan
-// uploads to code scanning under the category trivy/<image>.
+// scanImage runs Trivy on one published image and writes the findings
+// as SARIF to <dir>/<image>.sarif, which the job uploads to code
+// scanning under the category trivy/<image>.
 //
-// The scan reads the image from the registry by its version tag. A
-// publish never pushes a version tag twice, so the tag names the bytes
-// that a cluster pulls. It looks for known vulnerabilities only:
-// GitHub's secret scanning reads the repository that every image is
-// built from. It reports only a vulnerability that has a fixed
-// version, because a bump can act only on those. On an image of the
-// bases, which install from Debian sid, Trivy matches no Debian
-// package against an advisory, so the scan reports only what the
-// image holds beside those packages.
-// plans/open-problems/trivy-matches-nothing-on-debian-sid.md holds the
+// The scan pulls the image by its version tag. A publish never pushes a
+// version tag twice, so the scan reads the same bytes that a cluster
+// pulls. It looks for vulnerabilities only, because GitHub's secret
+// scanning already reads the repository that every image is built from,
+// and it reports only vulnerabilities with a fixed version, because a
+// bump can fix only those. Trivy matches no Debian sid package against
+// an advisory, so the scan of a base image reports only what the image
+// has besides those packages.
+// plans/open-problems/trivy-matches-nothing-on-debian-sid.md has the
 // measurement.
 //
-// A scan reports, and it does not gate. A finding has no effect on the
-// run, and a scan that fails prints a warning, so a publish is never
-// held back by Trivy or by its database download.
+// A finding does not fail the run, and a failed scan prints a warning
+// and returns, so a failure of Trivy or of its database download never
+// blocks a publish.
 func scanImage(run Runner, root, dir, image, version string) {
 	err := os.MkdirAll(dir, 0o755)
 	if err == nil {
@@ -56,22 +49,22 @@ func scanImage(run Runner, root, dir, image, version string) {
 			"--output", filepath.Join(dir, image+".sarif"), ref(image, version))
 	}
 	if err != nil {
-		fmt.Printf("::warning::the Trivy scan of %s failed, and the run goes on: %v\n", ref(image, version), err)
+		fmt.Printf("::warning::the Trivy scan of the image %s stopped, and the run continues: %v\n", ref(image, version), err)
 	}
 }
 
-// trivyUpload is the data of the trivy-upload template: the image
-// whose scan the step uploads, as text or as an expression, and the
-// pattern that hashFiles checks for the scan's file. Dry is true in a
-// publish job, which uploads nothing in a dry run.
+// trivyUpload is the data for the trivy-upload template. Image is the
+// image whose scan the step uploads, as text or as a workflow
+// expression. Present is the pattern that hashFiles uses to check that
+// the scan's file exists. Dry is true in a publish job, which uploads
+// nothing in a dry run.
 type trivyUpload struct {
 	Image, Present string
 	Dry            bool
 }
 
 // trivyCache is the Go cache of the trivy job, in the root workflow and
-// in the scheduled scan. The job restores the modules of the ci module,
-// which the ci module's go job saves, and keeps no build cache: each of
-// its jobs scans one image, and the many jobs of one run would each try
-// to save the same entry.
+// in the scheduled scan. The job restores the ci module's downloaded
+// modules, which the ci component's go job saves. It saves no build
+// cache, because every job of the matrix would save the same entry.
 var trivyCache = goCache{Mod: "ci/go.mod", Keys: []string{"ci/go.sum"}, Family: "ci"}

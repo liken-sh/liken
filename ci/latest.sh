@@ -1,48 +1,47 @@
 #!/usr/bin/env bash
 #
-# Report what the CI workflows pin, and what each upstream has
-# released now.
+# Report the versions that the CI workflows pin, next to the newest
+# upstream release of each, and bump one of them.
 #
-# actionPins in ci/actions.go names each repository of GitHub Actions
-# that CI runs once, by a release and the commit of its tag. ci/ writes
-# every workflow from that table, and the composite actions under
-# .github/actions name the same commits. The generator holds the prek
-# version and the digest of its archive that every prek job installs,
-# and the Trivy version and the digest of its archive that each publish
-# job, the trivy-db job, and the trivy job install. Each
-# .pre-commit-config.yaml holds the revision of each hook repository.
+# The pins are:
+#   - actionPins in ci/actions.go, one line for each repository of
+#     GitHub Actions, with a release and the commit of its tag. ci/
+#     writes every workflow from that table. The composite actions
+#     under .github/actions are written by hand with the same commits.
+#   - prekVersion and prekSHA256 in ci/workflow.go.
+#   - trivyVersion and trivySHA256 in ci/trivy.go.
+#   - the rev of each hook repository in each .pre-commit-config.yaml.
 #
-# Each pin is built from source by its upstream, so no row has a
-# channel. The newest release is GitHub's latest release, which is
-# never a pre-release or a draft. A hook repository that publishes no
-# releases compares against its newest version tag, and so does an
-# action whose latest release is not a version of the action:
-# github/codeql-action publishes the CodeQL bundle as its latest
-# release, and publishes each version of the action as a release too.
-# The fluxcd/flux2 row compares against liken/flux/VERSION, because
-# the publish job pushes each deploy artifact with the flux that the OS
-# ships.
+# These pins are upstream releases, so the report leaves the channel
+# columns empty. "Newest" is GitHub's latest release, which is never a
+# pre-release or a draft. A hook repository compares against its
+# newest version tag, and so does an action whose latest release is
+# not a version number: the latest release of github/codeql-action is
+# a CodeQL bundle, and each version of the action is a separate
+# release. fluxcd/flux2 compares against liken/flux/VERSION instead,
+# because the publish job pushes the deploy artifacts with the flux
+# that the OS ships.
 #
-# A tag can move to other code, so a bump pins the commit. It reads the
-# release of the tag from the GitHub API and stops unless the release
-# exists and is not a pre-release, then reads the commit of the tag
-# from git. An annotated tag is an object of its own, and the bump pins
-# the commit under it, which is what a checkout of the tag holds.
+# A bump pins the commit and not only the tag, because a tag can be
+# moved to other code. It refuses a tag that has no GitHub release or
+# whose release is a pre-release. For an annotated tag it pins the
+# commit that the tag points to, which is what a checkout of the tag
+# gets.
 #
 # Usage:
 #   ci/latest.sh                       report every action, prek, and
 #                                      each hook repository
-#   ci/latest.sh --bump <repository>   move one repository of actions,
+#   ci/latest.sh --bump <repository>   bump one repository of actions,
 #                                      such as actions/checkout, in
 #                                      ci/actions.go and in each
 #                                      composite action
-#   ci/latest.sh --bump prek           move the prek version and the
-#                                      digest of its archive; needs gh,
-#                                      which verifies the attestation
-#   ci/latest.sh --bump trivy          move the Trivy version and the
-#                                      digest of its archive; needs
-#                                      docker, which runs cosign
-#   ci/latest.sh --bump hook:<repo>    move one hook repository, such as
+#   ci/latest.sh --bump prek           bump prekVersion and prekSHA256
+#                                      (needs gh to verify the
+#                                      attestation)
+#   ci/latest.sh --bump trivy          bump trivyVersion and
+#                                      trivySHA256 (needs docker to
+#                                      run cosign)
+#   ci/latest.sh --bump hook:<repo>    bump one hook repository, such as
 #                                      pre-commit/pre-commit-hooks, in
 #                                      every .pre-commit-config.yaml
 
@@ -62,8 +61,6 @@ action_pins() {
     sed -n 's/^\t{"\([^"]*\)", "\([^"]*\)", "\([0-9a-f]*\)"},$/\1 \2 \3/p' "$here/actions.go"
 }
 
-# composite_actions lists the composite actions, which are written by
-# hand and name the same commits as the table.
 composite_actions() {
     find "$root/.github/actions" -name 'action.y*ml' | sort
 }
@@ -76,11 +73,10 @@ newest_version_tag() {
     newest_tag "https://github.com/$1" '^v?[0-9]+(\.[0-9]+)+$'
 }
 
-# flux_release prints the flux release that the OS ships.
 flux_release() { cat "$root/liken/flux/VERSION"; }
 
-# latest_release <repository>: the release that the table's line of the
-# repository should name.
+# latest_release <repository> prints the release that actionPins should
+# pin for that repository, or nothing when none is found.
 latest_release() {
     local release
     if [[ "$1" == fluxcd/flux2 ]]; then
@@ -96,8 +92,8 @@ pinned_prek() { sed -n 's/^const prekVersion = "\(.*\)"$/\1/p' "$here/workflow.g
 pinned_trivy() { sed -n 's/^const trivyVersion = "\(.*\)"$/\1/p' "$here/trivy.go"; }
 
 # hooks prints "repository rev file" for each hook repository of each
-# .pre-commit-config.yaml. git's list leaves out the caches, which
-# hold upstream copies of the files.
+# .pre-commit-config.yaml. It lists the files with git, which skips
+# ignored cache directories that contain upstream copies of the file.
 hooks() {
     git -C "$root" ls-files --cached --others --exclude-standard |
         grep -E '(^|/)\.pre-commit-config\.yaml$' | sort -u | while read -r file; do
@@ -150,12 +146,10 @@ prek)
     new="${new#v}"
     [[ "$new" != null ]] || new=""
     bump_needed prek "$old" "$new" || exit 0
-    # prek-action runs a prek that its own checksum table does not name
-    # without a check, so prekSHA256 pins the digest of the archive that
-    # the action downloads on the runner. The digest comes from the
-    # release's published .sha256 file, and the archive must match it
-    # and carry the GitHub attestation of prek's release workflow, so a
-    # changed release asset fails here and not in CI.
+    # The digest comes from the release's .sha256 file. The bump also
+    # checks that the archive matches it and has a GitHub attestation
+    # from prek's release workflow, so a changed release asset fails
+    # here and not in CI.
     asset="prek-x86_64-unknown-linux-gnu.tar.gz"
     base="https://github.com/j178/prek/releases/download/v$new"
     fetch_file "$base/$asset" "$work/$asset"
@@ -176,15 +170,12 @@ trivy)
     new="${new#v}"
     [[ "$new" != null ]] || new=""
     bump_needed trivy "$old" "$new" || exit 0
-    # Each install step checks Trivy's archive against trivySHA256, so
-    # the bump pins the digest of the archive. Trivy signs each release
-    # asset keylessly with sigstore and publishes the bundle beside it.
-    # cosign, from the image that toolchains/images.toml names, accepts
-    # the bundle only when Fulcio certified the signer as the
-    # reusable-release workflow of aquasecurity/trivy at the release's
-    # tag, from GitHub's OIDC issuer. The container runs as the calling
-    # user, and HOME points at a writable directory for the sigstore
-    # trust root that cosign fetches and caches.
+    # Trivy signs each release asset keyless with Sigstore and
+    # publishes the bundle beside it as <asset>.sigstore.json. cosign
+    # accepts the archive only when the signer is the reusable-release
+    # workflow of aquasecurity/trivy at the release's tag. HOME points
+    # at a writable directory because cosign caches the Sigstore trust
+    # root there, and the container runs as the calling user.
     require_tools docker
     asset="trivy_${new}_Linux-64bit.tar.gz"
     base="https://github.com/aquasecurity/trivy/releases/download/v$new"

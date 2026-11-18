@@ -12,28 +12,28 @@ import (
 	"strings"
 )
 
-// actionPin is one repository of GitHub Actions that a workflow runs:
-// the release that the repository tagged, and the commit of that tag.
+// actionPin is one repository of GitHub Actions that a workflow uses:
+// a release tag of the repository, and the commit that the tag points
+// at.
 type actionPin struct {
 	Repository, Version, Commit string
 }
 
-// actionPins names each repository of actions once, at the commit of a
-// release. A tag such as v7 or v7.0.1 is a name that the owner of the
-// repository can move to other code, and the publish jobs run these
-// actions with a token that writes the registry and an OIDC token that
-// signs the images. A commit names the same code on every run, so a
-// workflow runs only the code that a commit of this repository named.
-// Each reference carries the release as a comment, as in
-// `actions/checkout@<commit> # <release>`, which is the form that a
-// reader, the report, and Dependabot read.
+// actionPins lists each repository of actions once, at the commit of a
+// release. The owner of a repository can move a tag such as v7 or
+// v7.0.1 to other code, and the publish jobs run these actions with a
+// token that can write to the registry and an OIDC token that signs
+// images. A commit always refers to the same code. Each reference in a
+// workflow has the release as a trailing comment, as in
+// `actions/checkout@<commit> # <release>`, which Dependabot reads.
 //
-// `ci/latest.sh --bump <repository>` writes a line of this table, and
-// the uses: lines of each composite action under .github/actions, from
-// the newest release and the commit of its tag. The fluxcd/flux2 line
-// follows liken/flux/VERSION, so the publish job pushes each deploy
-// artifact with the flux that the OS ships; `liken/flux/latest.sh
-// --bump` moves it with the flux pin.
+// `ci/latest.sh` reads this table with sed, so keep each entry on one
+// line in this form. `ci/latest.sh --bump <repository>` rewrites that
+// repository's line, and the uses: lines of each composite action under
+// .github/actions, with the newest release and the commit of its tag.
+// The fluxcd/flux2 line must match liken/flux/VERSION, so the publish
+// job pushes each deploy artifact with the flux that the OS ships.
+// `liken/flux/latest.sh --bump` updates it along with the flux pin.
 var actionPins = []actionPin{
 	{"Swatinem/rust-cache", "v2.9.3", "d1527c8f67ef9af357290475d4af4b0fab8f12e0"},
 	{"actions/cache", "v6.1.0", "55cc8345863c7cc4c66a329aec7e433d2d1c52a9"},
@@ -52,12 +52,10 @@ var actionPins = []actionPin{
 	{"taiki-e/install-action", "v2.88.1", "68a389c788b2cd04016ce8c80ee23b80d2ab3d68"},
 }
 
-// fluxActionRepository is the repository of the flux action, whose
-// release follows fluxVersionFile.
 const fluxActionRepository = "fluxcd/flux2"
 
-// actionRepository is the repository that holds an action: the first
-// two parts of a name such as github/codeql-action/init.
+// actionRepository returns the repository of an action: the first two
+// parts of a name such as github/codeql-action/init.
 func actionRepository(action string) string {
 	parts := strings.SplitN(action, "/", 3)
 	if len(parts) < 2 {
@@ -66,7 +64,7 @@ func actionRepository(action string) string {
 	return parts[0] + "/" + parts[1]
 }
 
-// pinOf finds the table's line for the repository of an action.
+// pinOf returns the line of actionPins for the repository of an action.
 func pinOf(action string) (actionPin, bool) {
 	repository := actionRepository(action)
 	i := slices.IndexFunc(actionPins, func(p actionPin) bool { return p.Repository == repository })
@@ -76,8 +74,9 @@ func pinOf(action string) (actionPin, bool) {
 	return actionPins[i], true
 }
 
-// pinnedAction is the reference that a template writes after uses:,
-// the action at the commit of its pinned release.
+// pinnedAction returns the text that a workflow template writes after
+// uses: for an action: its name, the pinned commit, and the release as
+// a comment.
 func pinnedAction(action string) (string, error) {
 	pin, ok := pinOf(action)
 	if !ok {
@@ -86,7 +85,6 @@ func pinnedAction(action string) (string, error) {
 	return action + "@" + pin.Commit + " # " + pin.Version, nil
 }
 
-// pinnedRepositories lists each repository of the table, sorted.
 func pinnedRepositories() []string {
 	var repositories []string
 	for _, pin := range actionPins {
@@ -96,39 +94,41 @@ func pinnedRepositories() []string {
 	return repositories
 }
 
-// checkFluxAction is an error when the flux action's release differs
-// from the flux that the OS ships.
+// checkFluxAction returns an error when the flux action's release
+// differs from the flux version that the OS ships.
 func checkFluxAction(flux string) error {
 	pin, _ := pinOf(fluxActionRepository)
 	if pin.Version != "v"+flux {
-		return fmt.Errorf("%s names flux v%s, and actionPins in ci/actions.go runs %s %s; run ci/latest.sh --bump %s",
+		return fmt.Errorf("%s sets flux v%s, and actionPins in ci/actions.go runs %s %s. Run ci/latest.sh --bump %s",
 			fluxVersionFile, flux, fluxActionRepository, pin.Version, fluxActionRepository)
 	}
 	return nil
 }
 
-// usesLine matches the reference of a step or a job that runs an
-// action or a reusable workflow.
+// usesLine matches a uses: line of a step or a job, and captures its
+// reference and what follows it on the line.
 var usesLine = regexp.MustCompile(`^\s*(?:-\s+)?uses:\s*(\S+)(.*)$`)
 
-// pinnedReference is the form of a reference to another repository's
-// action: the action, the commit, and the release as a comment.
+// pinnedReference matches a reference to an action of another
+// repository that names a full commit: <action>@<40 hex digits>.
 var pinnedReference = regexp.MustCompile(`^([\w.-]+/[\w.-]+(?:/[\w./-]+)?)@([0-9a-f]{40})$`)
 
-// releaseComment is the comment that names the release of the commit.
+// releaseComment matches the trailing comment that names the release,
+// such as "  # v1.2.3".
 var releaseComment = regexp.MustCompile(`^\s+# (v\d+\.\d+\.\d+)$`)
 
-// pinnedDocker is a container action that names its image by digest.
+// pinnedDocker matches a docker:// action that names its image by
+// digest.
 var pinnedDocker = regexp.MustCompile(`^docker://[^@\s]+@sha256:[0-9a-f]{64}$`)
 
-// checkActions lists each uses: under .github that runs code which no
-// commit of this repository named: an action by a tag or a branch, an
-// action at a commit or a release other than the table's, and a
-// container image by a tag. The generated workflows, the hand-written
-// workflows, and each composite action under .github/actions are all
-// read, because each one runs with the token of the job that calls it.
-// A local reference, which starts with ./, runs the code of the same
-// commit.
+// checkActions returns a finding for each uses: line under .github
+// that runs code that this repository does not pin: an action
+// by a tag or a branch, an action at a commit or release that differs
+// from actionPins, and a container image by a tag. It reads the
+// generated workflows, the hand-written workflows, and the composite
+// actions under .github/actions, because each runs with the token of
+// the job that calls it. A local reference, which starts with ./, runs
+// code from the same commit and passes.
 func checkActions(root string) ([]string, error) {
 	files, err := sourceFiles(root)
 	if err != nil {
@@ -141,7 +141,8 @@ func checkActions(root string) ([]string, error) {
 		}
 		data, err := os.ReadFile(filepath.Join(root, file))
 		if errors.Is(err, fs.ErrNotExist) {
-			// git still tracks a file that the tree deleted.
+			// sourceFiles lists files that git tracks, and the working tree may
+			// have deleted one.
 			continue
 		}
 		if err != nil {
@@ -156,8 +157,9 @@ func checkActions(root string) ([]string, error) {
 	return findings, nil
 }
 
-// unpinnedAction describes what is wrong with the reference on one
-// line, or is empty when the line runs pinned code or names no action.
+// unpinnedAction returns what is wrong with the action reference on
+// one line, or an empty string when the line runs pinned code or has no
+// reference.
 func unpinnedAction(line string) string {
 	m := usesLine.FindStringSubmatch(line)
 	if m == nil || strings.HasPrefix(m[1], "./") {
@@ -168,22 +170,22 @@ func unpinnedAction(line string) string {
 		if pinnedDocker.MatchString(ref) {
 			return ""
 		}
-		return fmt.Sprintf("runs %s, which names no image digest", ref)
+		return fmt.Sprintf("runs %s, which has no image digest", ref)
 	}
 	p := pinnedReference.FindStringSubmatch(ref)
 	if p == nil {
-		return fmt.Sprintf("runs %s, which names no commit; write it as <action>@<commit> # <release>", ref)
+		return fmt.Sprintf("runs %s, which has no commit. Write it as <action>@<commit> # <release>", ref)
 	}
 	release := releaseComment.FindStringSubmatch(rest)
 	if release == nil {
-		return fmt.Sprintf("runs %s with no comment that names its release, such as # v1.2.3", ref)
+		return fmt.Sprintf("runs %s with no comment that states its release, such as # v1.2.3", ref)
 	}
 	pin, ok := pinOf(p[1])
 	if !ok {
 		return fmt.Sprintf("runs %s, whose repository is not in actionPins in ci/actions.go", p[1])
 	}
 	if p[2] != pin.Commit || release[1] != pin.Version {
-		return fmt.Sprintf("runs %s at %s %s, and actionPins in ci/actions.go names %s %s",
+		return fmt.Sprintf("runs %s at %s %s, and actionPins in ci/actions.go pins %s %s",
 			p[1], release[1], p[2], pin.Version, pin.Commit)
 	}
 	return ""

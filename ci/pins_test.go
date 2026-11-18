@@ -7,9 +7,8 @@ import (
 	"testing"
 )
 
-// pinsTree is a repository in which every shared pin names one
-// version: two Go modules, two Cargo workspaces, two hook files, and
-// a manifest and a guide that name images of images.toml.
+// pinsTree writes a repository in which every copy of each pin agrees,
+// and returns its root. changes replaces or adds files.
 func pinsTree(t *testing.T, changes map[string]string) string {
 	t.Helper()
 	tree := map[string]string{
@@ -39,9 +38,10 @@ func pinsTree(t *testing.T, changes map[string]string) string {
 		"a/Dockerfile": "FROM golang AS build\nFROM ${BASE} AS base\nFROM scratch\nCOPY --from=build /x /x\n" +
 			"COPY --from=trust / /\nRUN --mount=type=bind,from=vulkan,target=/v true\n",
 		"a/Dockerfile.cli": "FROM distroless\n",
-		// Out of scope: our own images, flux's generated manifests,
-		// test data, a cache, the plans, and the fixtures of ci's own
-		// tests.
+		// References that checkPins must not report: an image of the
+		// repository, flux's generated manifests, test data, a cache, a
+		// checkout that .gitignore excludes, a notice file, a plan, a
+		// test of ci, and image tags written as placeholders.
 		"a/deploy/app.yaml":                  "image: ghcr.io/liken-sh/curl:1.0.0\n",
 		"a/flux/gotk-components.yaml":        "image: curlimages/curl:7.0.0\n",
 		"a/testdata/go.mod":                  "module t\n\ngo 1.20\n",
@@ -63,8 +63,8 @@ func pinsTree(t *testing.T, changes map[string]string) string {
 		"liken/userland/fetch.sh":            "source \"$here/../../toolchains/pin.sh\"\ndeclare -A buildroot_sha256=(\n    [\"abc\"]=\"111\"\n    [\"old\"]=\"000\"\n)\ndeclare -A spdx_schema_sha256=(\n    [\"1.6.2\"]=\"333\"\n)\n",
 		"liken/userland/latest.sh":           "source \"$here/../../toolchains/pin.sh\"\n",
 		"d/Dockerfile":                       "FROM buildroot AS daemons\nARG BUILDROOT_COMMIT=abc\nARG BUILDROOT_SHA256=111\nARG SPDX_SCHEMA_VERSION=1.6.2\nARG SPDX_SCHEMA_SHA256=333\n",
-		// A script reads an outside image from images.toml, and a
-		// comment may quote a reference.
+		// A script that reads its image from images.toml passes, even
+		// when a comment quotes an image reference.
 		"a/models/push.sh": "# The image was ghcr.io/x/oras:v1@sha256:" + strings.Repeat("a", 64) + ".\n" +
 			"oras_image=\"$(image_of oras)\"\n",
 	}
@@ -73,18 +73,18 @@ func pinsTree(t *testing.T, changes map[string]string) string {
 	}
 	root := writeTree(t, tree)
 	if err := os.Chmod(filepath.Join(root, "liken/userland/latest.sh"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making liken/userland/latest.sh executable: %v", err)
 	}
 	return root
 }
 
-func TestEverySharedPinNamesOneVersion(t *testing.T) {
+func TestEverySharedPinHasOneVersion(t *testing.T) {
 	findings, err := checkPins(pinsTree(t, nil))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the pins of a consistent tree: %v", err)
 	}
 	if len(findings) > 0 {
-		t.Errorf("the tree drifts:\n%s", strings.Join(findings, "\n"))
+		t.Errorf("a consistent tree has findings:\n%s, want none", strings.Join(findings, "\n"))
 	}
 }
 
@@ -93,9 +93,9 @@ func TestADriftedPinIsFound(t *testing.T) {
 		file, text, wants string
 	}{
 		"a go directive": {"b/go.mod", "module b\n\ngo 1.27.2\n",
-			"b/go.mod names go 1.27.2, and the golang image in toolchains/images.toml is 1.27.3"},
+			"b/go.mod sets go 1.27.2, and the golang image in toolchains/images.toml is 1.27.3"},
 		"a Rust toolchain": {"b/rust-toolchain.toml", "[toolchain]\nchannel = \"1.97.0\"\n",
-			"b/rust-toolchain.toml names Rust 1.97.0, and the rust image in toolchains/images.toml is 1.99.1"},
+			"b/rust-toolchain.toml sets Rust 1.97.0, and the rust image in toolchains/images.toml is 1.99.1"},
 		"a Go module": {"b/go.mod", "module b\n\ngo 1.27.3\n\nrequire github.com/x/y v1.3.0\n",
 			"the Go module github.com/x/y has 2 versions: v1.2.0 in a/go.mod; v1.3.0 in b/go.mod"},
 		"a Go tool": {"b/go.mod", "module b\n\ngo 1.27.3\n\nrequire github.com/t/cover/v2 v2.18.0 // indirect\ntool github.com/t/cover/v2\n",
@@ -107,17 +107,17 @@ func TestADriftedPinIsFound(t *testing.T) {
 		"a hook": {"b/.pre-commit-config.yaml", "repos:\n  - repo: https://github.com/pre-commit/pre-commit-hooks\n    rev: v5.0.0\n    hooks:\n      - id: end-of-file-fixer\n",
 			"the hook repository https://github.com/pre-commit/pre-commit-hooks has 2 versions: v5.0.0 in b/.pre-commit-config.yaml; v6.0.0 in a/.pre-commit-config.yaml"},
 		"a run image in a manifest": {"a/deploy/bus.yaml", "image: eclipse-mosquitto:2\n",
-			"a/deploy/bus.yaml:1 names eclipse-mosquitto:2, and toolchains/images.toml names eclipse-mosquitto:2.0.22"},
+			"a/deploy/bus.yaml:1 refers to eclipse-mosquitto:2, and toolchains/images.toml has eclipse-mosquitto:2.0.22"},
 		"a build image in a guide": {"a/docs/guide.md", "Start from `debian:12-slim`.\n",
-			"a/docs/guide.md:1 names debian:12-slim, and toolchains/images.toml names debian:sid-slim"},
+			"a/docs/guide.md:1 refers to debian:12-slim, and toolchains/images.toml has debian:sid-slim"},
 		"a Docker Hub image by its full name": {"a/Makefile", "probe:\n\tdocker run docker.io/library/debian:trixie-slim\n",
-			"a/Makefile:2 names docker.io/library/debian:trixie-slim, and toolchains/images.toml names debian:sid-slim"},
+			"a/Makefile:2 refers to docker.io/library/debian:trixie-slim, and toolchains/images.toml has debian:sid-slim"},
 		"an image in a skill": {"a/skills/probe/SKILL.md", "kubectl run --image=curlimages/curl:8.5.0.\n",
-			"a/skills/probe/SKILL.md:1 names curlimages/curl:8.5.0, and toolchains/images.toml names curlimages/curl:8.22.0"},
+			"a/skills/probe/SKILL.md:1 refers to curlimages/curl:8.5.0, and toolchains/images.toml has curlimages/curl:8.22.0"},
 		"an image in a Go test": {"a/probe_test.go", "package a\n\nconst image = \"curlimages/curl:8.5.0\"\n",
-			"a/probe_test.go:3 names curlimages/curl:8.5.0"},
+			"a/probe_test.go:3 refers to curlimages/curl:8.5.0"},
 		"an image in a Rust file": {"a/src/lib.rs", "const IMAGE: &str = \"eclipse-mosquitto:2\";\n",
-			"a/src/lib.rs:1 names eclipse-mosquitto:2,"},
+			"a/src/lib.rs:1 refers to eclipse-mosquitto:2,"},
 		"an outside image in a FROM line": {"a/Dockerfile", "FROM ubuntu:24.04@sha256:abc AS build\n",
 			"a/Dockerfile builds from ubuntu:24.04@sha256:abc, which is not a key of toolchains/images.toml"},
 		"an outside image in a COPY --from": {"a/Dockerfile.cli", "FROM distroless\nCOPY --from=docker.io/library/busybox:1 /bin/sh /sh\n",
@@ -126,10 +126,10 @@ func TestADriftedPinIsFound(t *testing.T) {
 			"a/Dockerfile builds from alpine@sha256:abc,"},
 		"an outside image by digest in a script": {"a/models/push.sh",
 			"oras_image=ghcr.io/oras-project/oras:v1.3.4@sha256:" + strings.Repeat("a", 64) + "\n",
-			"a/models/push.sh:1 names ghcr.io/oras-project/oras:v1.3.4@sha256:" + strings.Repeat("a", 64) + ", which is not read from toolchains/images.toml; name the image there and read it with image_of"},
+			"a/models/push.sh:1 refers to ghcr.io/oras-project/oras:v1.3.4@sha256:" + strings.Repeat("a", 64) + ", which is not read from toolchains/images.toml. Add the image there and read it with image_of"},
 		"a bare image by digest in a script": {"a/run.sh",
 			"docker run --rm \"alpine@sha256:" + strings.Repeat("b", 64) + "\" true\n",
-			"a/run.sh:1 names alpine@sha256:" + strings.Repeat("b", 64) + ", which is not read from"},
+			"a/run.sh:1 refers to alpine@sha256:" + strings.Repeat("b", 64) + ", which is not read from"},
 		"a copy of a protocol": {"b/src/liken-thing-v1.xml", "<protocol name=\"liken_thing_v1\" version=\"2\"/>\n",
 			"the Wayland protocol liken-thing-v1.xml has 2 versions:"},
 		"a copy of the closure library": {"c/closure.sh", "collect() { true; }\n",
@@ -147,10 +147,10 @@ func TestADriftedPinIsFound(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			findings, err := checkPins(pinsTree(t, map[string]string{c.file: c.text}))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("checking the pins: %v", err)
 			}
 			if !strings.Contains(strings.Join(findings, "\n"), c.wants) {
-				t.Errorf("got:\n%s\nwant a finding with %q", strings.Join(findings, "\n"), c.wants)
+				t.Errorf("the findings are:\n%s\nwant one with %q", strings.Join(findings, "\n"), c.wants)
 			}
 		})
 	}
@@ -167,9 +167,9 @@ func TestThePinsCommandFailsOnDrift(t *testing.T) {
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			root := pinsTree(t, c.changes)
-			w := newWorld(t, &fakeRegistry{})
+			w := newFakeEnv(t, &fakeRegistry{})
 			if err := w.run([]string{"pins", "-root", root}); (err != nil) != c.fails {
-				t.Errorf("got %v", err)
+				t.Errorf("the pins command returned %v, want failure = %v", err, c.fails)
 			}
 		})
 	}
@@ -179,7 +179,7 @@ func TestAPinFileThatDoesNotParseIsAnError(t *testing.T) {
 	for _, file := range []string{"a/Cargo.toml", "a/rust-toolchain.toml", "a/.pre-commit-config.yaml", "toolchains/images.toml"} {
 		t.Run(file, func(t *testing.T) {
 			if _, err := checkPins(pinsTree(t, map[string]string{file: "[[[\n  - :\n"})); err == nil || !strings.Contains(err.Error(), file) {
-				t.Errorf("got %v, want an error that names %s", err, file)
+				t.Errorf("checking an unparsable %s returned %v, want an error that names the file", file, err)
 			}
 		})
 	}

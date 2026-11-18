@@ -23,15 +23,15 @@ func pinnedFixture(t *testing.T) *repo {
 	return r
 }
 
-// pinnedPlanner plans the fixture with a registry that holds each
-// pinned tag in published, with the recipe the tree gives it or, for a
-// tag in stale, another one.
+// pinnedPlanner returns a planner for the fixture. Each pinned tag in
+// published is published with the tree's recipe, and each tag in stale
+// is published with another recipe.
 func (r *repo) pinnedPlanner(published map[string]bool, stale map[string]bool) Planner {
 	r.t.Helper()
 	p := r.planner(map[string][]string{"operator": {"2026.09.28-001"}})
 	recipes, err := Recipes(r.git.Dir, p.Components)
 	if err != nil {
-		r.t.Fatal(err)
+		r.t.Fatalf("computing the recipes: %v", err)
 	}
 	p.Recipes = recipes
 	p.PublishedRecipe = func(c *Component) (string, bool, error) {
@@ -51,15 +51,15 @@ func TestAPublishedPinnedTagWithItsRecipeBuildsNothing(t *testing.T) {
 	e := Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true}
 	decisions, err := r.pinnedPlanner(map[string]bool{"tool": true, "base": true}, nil).Plan(e)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the event: %v", err)
 	}
 	for _, name := range []string{"tool", "base"} {
 		if d := decisions[name]; d.Check || d.Publish != publishNone || d.Version != "20260928-1" {
-			t.Errorf("%s: %+v", name, d)
+			t.Errorf("%s is %+v, want no check, no publish, and version 20260928-1", name, d)
 		}
 	}
 	if d := decisions["operator"]; !d.Check || d.Publish != publishDev {
-		t.Errorf("operator: %+v", d)
+		t.Errorf("operator is %+v, want a check and a development publish", d)
 	}
 }
 
@@ -71,19 +71,18 @@ func TestAPublishedPinnedTagRunsItsJobsWhenItsPathsChange(t *testing.T) {
 	e := Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true}
 	decisions, err := r.pinnedPlanner(map[string]bool{"tool": true, "base": true}, nil).Plan(e)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the event: %v", err)
 	}
 	if d := decisions["base"]; !d.Check || d.Publish != publishNone ||
 		d.Reason != "changed: base/README.md; 20260928-1 is published, and its recipe matches" {
-		t.Errorf("base: %+v", d)
+		t.Errorf("base is %+v, want a check, no publish, and a reason that its tag is published with a matching recipe", d)
 	}
 }
 
-// A published pinned tag whose recipe matches the tree is the build of
-// that recipe, so a check never builds it again from its upstream
-// servers. When a change reaches its images, such as a new workflow,
-// each image with a smoke check is pulled and checked, and every other
-// image runs nothing.
+// A published pinned tag whose recipe matches the tree is never built
+// again from upstream. When a change affects its images, such as a new
+// workflow, each image with a smoke check is pulled and checked, and
+// the other images run nothing.
 func TestAPublishedPinnedImageIsPulledAndCheckedNeverBuilt(t *testing.T) {
 	r := newRepo(t, map[string]string{
 		"tool/package.toml": "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"tool\"\ndescription = \"The tool image.\"\n",
@@ -103,14 +102,14 @@ func TestAPublishedPinnedImageIsPulledAndCheckedNeverBuilt(t *testing.T) {
 	e := Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true}
 	decisions, err := r.pinnedPlanner(map[string]bool{"tool": true, "base": true}, nil).Plan(e)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the event: %v", err)
 	}
 	want := []ImageRun{{Image: "base", Pinned: true, Load: true, Smoke: "base/smoke/base.sh", Published: true}}
 	if d := decisions["base"]; !d.Check || d.Publish != publishNone || !reflect.DeepEqual(d.Images, want) {
-		t.Errorf("base: %+v", d)
+		t.Errorf("base is %+v, want a check, no publish, and images %+v", d, want)
 	}
 	if d := decisions["tool"]; len(d.Images) != 0 {
-		t.Errorf("tool: %+v", d)
+		t.Errorf("tool is %+v, want no images", d)
 	}
 }
 
@@ -133,13 +132,13 @@ func TestAPinnedTagThatIsNotPublishedBuildsAndPublishes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			decisions, err := r.pinnedPlanner(published, nil).Plan(c.event)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("planning the event: %v", err)
 			}
 			if d := decisions["base"]; !d.Check || d.Publish != c.publish || d.Version != "20260928-1" || !strings.HasPrefix(d.Reason, "builds: 20260928-1 is not published yet") {
-				t.Errorf("base: %+v", d)
+				t.Errorf("base is %+v, want a check, publish %q, version 20260928-1, and a reason that starts with \"builds: 20260928-1 is not published yet\"", d, c.publish)
 			}
 			if d := decisions["tool"]; d.Publish != publishNone || d.Version != "20260928-1" {
-				t.Errorf("tool: %+v", d)
+				t.Errorf("tool is %+v, want no publish and version 20260928-1", d)
 			}
 		})
 	}
@@ -149,13 +148,13 @@ func TestARecipeThatChangedWithNoNewRevisionFailsThePlan(t *testing.T) {
 	r := pinnedFixture(t)
 	planner := r.pinnedPlanner(map[string]bool{"tool": true, "base": true}, map[string]bool{"tool": true})
 	_, err := planner.Plan(Event{Name: "push", Ref: "refs/heads/topic", Before: "HEAD", Head: "HEAD"})
-	want := "tool: ghcr.io/liken-sh/tool:20260928-1 was built from the recipe \"sha256:old\", and the tree gives \"" +
-		planner.Recipes["tool"] + "\". Raise revision in tool/package.toml, and in each pinned component that builds on it: base."
-	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Errorf("got %v", err)
+	want := "tool: ghcr.io/liken-sh/tool:20260928-1 was built from the recipe \"sha256:old\""
+	if err == nil || !strings.Contains(err.Error(), want) ||
+		!strings.Contains(err.Error(), "Raise revision in tool/package.toml, and in each pinned component that builds on it: base.") {
+		t.Errorf("the plan returned %v, want an error that contains %q", err, want)
 	}
 	if _, err := planner.Candidates("HEAD"); err == nil {
-		t.Error("the dry run of a release passed")
+		t.Error("Candidates returns no error, want one for the stale recipe of tool")
 	}
 }
 
@@ -182,7 +181,7 @@ func TestTheRecordSaysWhatHappenedToEachPinnedTag(t *testing.T) {
 	}
 	entries, err := Record(p.Components, p.Versions, pinned, "2026.10.02-001")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("recording the release: %v", err)
 	}
 	notes := RecordNotes("2026.10.02-001", entries, "", nil)
 	for _, want := range []string{
@@ -206,14 +205,14 @@ func TestThePinnedTagAtAnEarlierReleaseIsReadFromItsCommit(t *testing.T) {
 	r.commit("raise the tool and add an app")
 	components, err := LoadComponents(r.git.Dir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	cases := map[string]string{"tool": "20260928-1", "base": "20260928-1", "app": ""}
 	for name, want := range cases {
 		t.Run(name, func(t *testing.T) {
 			got, err := r.git.PinnedTagAt("2026.09.28-001", components[name])
 			if err != nil || got != want {
-				t.Errorf("got %q, %v, want %q", got, err, want)
+				t.Errorf("PinnedTagAt returns %q, %v, want %q, nil", got, err, want)
 			}
 		})
 	}

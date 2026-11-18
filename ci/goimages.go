@@ -9,26 +9,26 @@ import (
 	"strings"
 )
 
-// goImageFindings lists each place where a Dockerfile builds or ships
-// a Go program in a way other than the one form that root AGENTS.md
-// states under "Go programs":
+// goImageFindings lists each place where a Dockerfile builds or copies
+// a Go program in a way that the section "Go programs" of the root
+// AGENTS.md does not allow:
 //
-//   - each `go build` sets CGO_ENABLED=0 and -trimpath, so the binary
-//     is static and holds no path of the build machine;
-//   - each `go build` passes -ldflags with "-s -w", which drops the
-//     symbol table and the DWARF data and keeps the build info, the
-//     module list that syft and Trivy read from the binary;
-//   - each `go build` writes its program to /<name>, each COPY of the
-//     program puts it at that same path, and an ENTRYPOINT that runs
-//     it names that path. A person, a manifest, and an operator that
-//     writes a pod's command find every Go program in every image at
-//     the same place;
-//   - no upx, strip, or objcopy runs on the program. upx and objcopy
-//     can hide or remove the build info, and -ldflags "-s -w" already
-//     strips what strip would.
+//   - A `go build` without CGO_ENABLED=0 and -trimpath. Without them
+//     the binary is not static and contains paths of the build machine.
+//   - A `go build` without -ldflags "-s -w". The flags drop the symbol
+//     table and the DWARF data and keep the build info, which is the
+//     module list that syft and Trivy read from the binary.
+//   - A program that is not at /<name>. Each `go build` must write
+//     /<name>, each COPY must copy it to the same path or to /, and an
+//     ENTRYPOINT that runs it must use that path. So a person, a
+//     manifest, or an operator that writes a pod's command finds every
+//     Go program at the same path in every image.
+//   - upx, strip, or objcopy run on the program. upx and objcopy can
+//     hide or remove the build info, and -ldflags "-s -w" already
+//     removes what strip would.
 //
-// The check reads the RUN, COPY, and ENTRYPOINT instructions with
-// patterns, so a build that a script runs is outside it.
+// The check matches patterns in the RUN, COPY, and ENTRYPOINT
+// instructions, so it does not find a build that a script runs.
 func goImageFindings(file, text string) []string {
 	var findings []string
 	outputs := map[string]bool{}
@@ -59,7 +59,7 @@ func goImageFindings(file, text string) []string {
 				continue
 			}
 			if want, ok := byName[path.Base(argv[0])]; ok && argv[0] != want {
-				findings = append(findings, fmt.Sprintf("%s:%d runs %s; the entrypoint of a Go program is %s", file, l.n, argv[0], want))
+				findings = append(findings, fmt.Sprintf("%s:%d runs %s, and the entrypoint of a Go program is %s", file, l.n, argv[0], want))
 			}
 		}
 	}
@@ -70,12 +70,10 @@ func goImageFindings(file, text string) []string {
 // line.
 var shellSeparator = regexp.MustCompile(`&&|\|\||;`)
 
-// shellCommands splits a RUN line into its commands.
 func shellCommands(run string) []string {
 	return shellSeparator.Split(run, -1)
 }
 
-// isGoBuild is true for a command that runs `go build`.
 func isGoBuild(command string) bool {
 	words := strings.Fields(command)
 	for i := 0; i+1 < len(words); i++ {
@@ -90,8 +88,9 @@ func isGoBuild(command string) bool {
 // or not, with = or a space.
 var stripLdflags = regexp.MustCompile(`-ldflags[= ]["']?-s -w\b`)
 
-// goBuildFindings checks one `go build` command and returns its
-// findings and the path it writes, or no path when it names none.
+// goBuildFindings checks one `go build` command. It returns the
+// findings and the path of the -o flag, or "" when the command has no
+// -o flag.
 func goBuildFindings(file string, n int, command string) ([]string, string) {
 	var findings []string
 	words := strings.Fields(command)
@@ -116,7 +115,7 @@ func goBuildFindings(file string, n int, command string) ([]string, string) {
 	case output == "":
 		findings = append(findings, fmt.Sprintf("%s:%d runs go build with no -o /<name>", file, n))
 	case path.Dir(output) != "/":
-		findings = append(findings, fmt.Sprintf("%s:%d builds %s; build the program at /<name>", file, n, output))
+		findings = append(findings, fmt.Sprintf("%s:%d builds %s. Build the program at /<name>", file, n, output))
 	}
 	return findings, output
 }
@@ -138,7 +137,7 @@ func strippers(file string, n int, command string, outputs map[string]bool) []st
 	var findings []string
 	for _, word := range words[1:] {
 		if outputs[word] {
-			findings = append(findings, fmt.Sprintf("%s:%d runs %s on %s; strip a Go program with -ldflags \"-s -w\", which keeps the build info that syft and Trivy read", file, n, tool, word))
+			findings = append(findings, fmt.Sprintf("%s:%d runs %s on %s. Strip a Go program with -ldflags \"-s -w\", which keeps the build info that syft and Trivy read", file, n, tool, word))
 		}
 	}
 	return findings
@@ -163,7 +162,7 @@ func goCopies(file string, n int, rest string, outputs map[string]bool) []string
 	var findings []string
 	for _, source := range args[:len(args)-1] {
 		if outputs[source] && dest != source && dest != "/" {
-			findings = append(findings, fmt.Sprintf("%s:%d copies %s to %s; copy it to %s", file, n, source, dest, source))
+			findings = append(findings, fmt.Sprintf("%s:%d copies %s to %s. Copy it to %s", file, n, source, dest, source))
 		}
 	}
 	return findings

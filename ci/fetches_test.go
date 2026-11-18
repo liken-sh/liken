@@ -8,11 +8,11 @@ import (
 )
 
 // fetchesTree is a repository in which every pin follows the fetch
-// rules: a domain of the OS with its VERSION, fetch.sh, and latest.sh,
-// an image whose Dockerfile downloads under a latest.sh of its
-// component, the library that each fetch.sh and latest.sh sources, and
-// the scripts that read a checksum file at bump time or in a test,
-// which the rules allow.
+// rules. It has an OS domain with a VERSION, fetch.sh, and latest.sh,
+// an image whose Dockerfile downloads under its component's latest.sh,
+// the library that each fetch.sh and latest.sh sources, and scripts
+// that read a checksum file at bump time or in a test, which the rules
+// allow.
 func fetchesTree(t *testing.T, changes map[string]string) string {
 	t.Helper()
 	tree := map[string]string{
@@ -56,7 +56,7 @@ func fetchesTree(t *testing.T, changes map[string]string) string {
 	for name := range tree {
 		if filepath.Base(name) == "latest.sh" {
 			if err := os.Chmod(filepath.Join(root, name), 0o755); err != nil {
-				t.Fatal(err)
+				t.Fatalf("making latest.sh executable: %v", err)
 			}
 		}
 	}
@@ -66,7 +66,7 @@ func fetchesTree(t *testing.T, changes map[string]string) string {
 func TestEveryFetchFollowsTheRules(t *testing.T) {
 	findings, err := checkFetches(fetchesTree(t, nil))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the fetches: %v", err)
 	}
 	if len(findings) > 0 {
 		t.Errorf("the tree breaks a rule:\n%s", strings.Join(findings, "\n"))
@@ -151,7 +151,7 @@ func TestAFetchThatBreaksARuleIsFound(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			findings, err := checkFetches(fetchesTree(t, map[string]string{c.file: c.text}))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("checking the fetches: %v", err)
 			}
 			if !strings.Contains(strings.Join(findings, "\n"), c.wants) {
 				t.Errorf("got:\n%s\nwant a finding with %q", strings.Join(findings, "\n"), c.wants)
@@ -163,11 +163,11 @@ func TestAFetchThatBreaksARuleIsFound(t *testing.T) {
 func TestALatestShThatCannotRunIsFound(t *testing.T) {
 	root := fetchesTree(t, nil)
 	if err := os.Chmod(filepath.Join(root, "liken/k3s/latest.sh"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making latest.sh not executable: %v", err)
 	}
 	findings, err := checkFetches(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the fetches: %v", err)
 	}
 	wants := "liken/k3s/latest.sh is not executable, so versions.sh cannot run it"
 	if !strings.Contains(strings.Join(findings, "\n"), wants) {
@@ -183,7 +183,7 @@ func TestAnAllowCommentExcusesTheLineBelowIt(t *testing.T) {
 			"curl -fsSL \"$base/SHA256SUMS\" -o \"$cache/names\"\n",
 	}))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the fetches: %v", err)
 	}
 	if len(findings) > 0 {
 		t.Errorf("the allowed line is a finding:\n%s", strings.Join(findings, "\n"))
@@ -197,10 +197,10 @@ func TestThePinsCommandFailsOnAFetchThatBreaksARule(t *testing.T) {
 		"liken/k3s/latest.sh": "#!/bin/sh\n",
 	})
 	if err := os.Chmod(filepath.Join(root, "liken/k3s/latest.sh"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making latest.sh executable: %v", err)
 	}
-	w := newWorld(t, &fakeRegistry{})
+	w := newFakeEnv(t, &fakeRegistry{})
 	if err := w.run([]string{"pins", "-root", root}); err == nil {
-		t.Errorf("the pins command passes a curl into the cache")
+		t.Errorf("the pins command accepts a curl into the cache, want an error")
 	}
 }

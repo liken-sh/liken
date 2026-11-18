@@ -34,15 +34,15 @@ func (r *repo) rescanPlanner(operator []string, base bool) Planner {
 	p := r.planner(map[string][]string{"operator": operator})
 	recipes, err := Recipes(r.git.Dir, p.Components)
 	if err != nil {
-		r.t.Fatal(err)
+		r.t.Fatalf("computing the recipes: %v", err)
 	}
 	p.Recipes = recipes
 	p.PublishedRecipe = func(c *Component) (string, bool, error) { return recipes[c.Name()], base, nil }
 	return p
 }
 
-// rescan changes the files, commits, and plans the push with the event,
-// and returns what the trivy job scans and why.
+// rescan writes and commits the files, plans a push of that commit with
+// the event, and returns what the trivy job scans and why.
 func (r *repo) rescan(p Planner, e Event, files map[string]string) ([]ScanRun, string) {
 	r.t.Helper()
 	e.Name, e.Before, e.Head = "push", r.run("rev-parse", "HEAD"), "HEAD"
@@ -52,11 +52,11 @@ func (r *repo) rescan(p Planner, e Event, files map[string]string) ([]ScanRun, s
 	r.commit("the change")
 	decisions, err := p.Plan(e)
 	if err != nil {
-		r.t.Fatal(err)
+		r.t.Fatalf("planning the push: %v", err)
 	}
 	runs, why, err := p.Rescan(e, decisions)
 	if err != nil {
-		r.t.Fatal(err)
+		r.t.Fatalf("planning the rescan: %v", err)
 	}
 	return runs, why
 }
@@ -73,8 +73,8 @@ var everyImage = []ScanRun{
 }
 
 // A change to the Trivy configuration scans every published image
-// again on a push to main. A change to any other file, a push to a
-// branch, and a test of the configuration scan nothing again.
+// again on a push to main. A push to a branch scans nothing again, and
+// so does a change to any other file, including ci/trivy_test.go.
 func TestAPushToMainScansThePublishedImagesAgainWhenTheTrivyConfigurationChanges(t *testing.T) {
 	main := Event{Ref: "refs/heads/main"}
 	cases := []struct {
@@ -86,7 +86,7 @@ func TestAPushToMainScansThePublishedImagesAgainWhenTheTrivyConfigurationChanges
 	}{
 		{"the Trivy version or a scan's arguments", main, "ci/trivy.go", everyImage, "changed: ci/trivy.go"},
 		{"a step that installs Trivy or uploads a scan", main, "ci/templates/trivy.tmpl", everyImage, "changed: ci/templates/trivy.tmpl"},
-		{"every job runs", Event{Ref: "refs/heads/main", Unverified: "the API answered 403"}, "operator/docs/index.md", everyImage, "every job runs"},
+		{"every job runs", Event{Ref: "refs/heads/main", Unverified: "the API returned 403"}, "operator/docs/index.md", everyImage, "every job runs"},
 		{"the publish code", main, "ci/publish.go", nil, "no file of the Trivy configuration changed: ci/trivy.go, ci/templates/trivy.tmpl"},
 		{"a test of the configuration", main, "ci/trivy_test.go", nil, "no file of the Trivy configuration changed: ci/trivy.go, ci/templates/trivy.tmpl"},
 		{"an operator's source", main, "operator/main.go", nil, "no file of the Trivy configuration changed: ci/trivy.go, ci/templates/trivy.tmpl"},
@@ -97,14 +97,15 @@ func TestAPushToMainScansThePublishedImagesAgainWhenTheTrivyConfigurationChanges
 			r := rescanFixture(t)
 			runs, why := r.rescan(r.rescanPlanner(operatorPublished, true), c.event, map[string]string{c.file: "package main // changed\n"})
 			if !reflect.DeepEqual(runs, c.runs) || why != c.why {
-				t.Errorf("scans %v (%s), want %v (%s)", runs, why, c.runs, c.why)
+				t.Errorf("the rescan scans %v (%s), want %v (%s)", runs, why, c.runs, c.why)
 			}
 		})
 	}
 }
 
-// A component that publishes in the run is scanned by its own publish,
-// and a pinned tag that is not published yet has nothing to scan.
+// The publish of a component scans its own images, so the rescan
+// leaves the component out in a run that publishes it. A pinned tag
+// that is not published yet has nothing to scan.
 func TestTheRescanLeavesOutEachComponentThatPublishesInTheRun(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -124,7 +125,7 @@ func TestTheRescanLeavesOutEachComponentThatPublishesInTheRun(t *testing.T) {
 				"operator/main.go": "package main // changed\n",
 			})
 			if !reflect.DeepEqual(runs, c.runs) {
-				t.Errorf("scans %v, want %v", runs, c.runs)
+				t.Errorf("the rescan scans %v, want %v", runs, c.runs)
 			}
 		})
 	}
@@ -135,28 +136,28 @@ func TestARescanThatFindsNothingToScanSaysWhy(t *testing.T) {
 	runs, why := r.rescan(r.rescanPlanner(nil, false), Event{Ref: "refs/heads/main"}, map[string]string{"ci/trivy.go": "package main // changed\n"})
 	note := rescanNote(runs, why)
 	if want := "Trivy scans no published image again: changed: ci/trivy.go, and each image publishes in this run or has no published version."; note != want {
-		t.Errorf("the note is %q", note)
+		t.Errorf("the note is %q, want the sentence that says no image is scanned", note)
 	}
 }
 
-func TestTheRescanNoteNamesEachImageAndItsVersion(t *testing.T) {
+func TestTheRescanNoteListsEachImageAndItsVersion(t *testing.T) {
 	note := rescanNote(everyImage[:2], "changed: ci/trivy.go")
 	want := "Trivy scans 2 published images again, with no build and no push (changed: ci/trivy.go): `base:20260928-1`, `operator:2026.09.27-001-dev-003-abcdef01`."
 	if note != want {
-		t.Errorf("the note is %q", note)
+		t.Errorf("the note is %q, want a sentence that lists both images", note)
 	}
 }
 
 // The plan writes the images that the trivy job scans again as a JSON
 // list, which is [] when it scans none, and says why in the summary.
 func TestThePlanWritesWhatTrivyScansAgain(t *testing.T) {
-	_, err, output, summary := planWorld(t, nil, nil)
+	_, err, output, summary := runPlan(t, nil, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the run: %v", err)
 	}
 	if !strings.Contains(output, "\ntrivy=[]\ntrivy-db=false\n") ||
 		!strings.Contains(summary, "Trivy scans no published image again: only a push to main scans the published images again.") {
-		t.Errorf("the output:\n%s\nthe summary:\n%s", output, summary)
+		t.Errorf("the output is\n%s\nand the summary is\n%s\nwant trivy=[] and the reason that only a push to main scans again", output, summary)
 	}
 }
 
@@ -175,7 +176,7 @@ func TestTheNewestPublishedVersionIsAReleaseOrADevelopmentBuild(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := NewestPublished(c.tags); got != c.want {
-				t.Errorf("got %q, want %q", got, c.want)
+				t.Errorf("the newest version is %q, want %q", got, c.want)
 			}
 		})
 	}
@@ -191,7 +192,7 @@ func TestTheDatabaseDownloadsWhenTheRunScansAnImage(t *testing.T) {
 		"liken/package.toml": "[package]\nname = \"liken\"\n[outputs]\nchannel = true\n",
 	}))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	none := Decision{Publish: publishNone}
 	cases := []struct {
@@ -209,7 +210,7 @@ func TestTheDatabaseDownloadsWhenTheRunScansAnImage(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := ScansImages(components, c.decisions, c.rescan); got != c.want {
-				t.Errorf("got %v, want %v", got, c.want)
+				t.Errorf("ScansImages is %v, want %v", got, c.want)
 			}
 		})
 	}

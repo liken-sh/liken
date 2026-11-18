@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// hookRepository is a repository in the role of the one that runs a
-// pre-commit hook: its GIT_* variables are in the environment, the way
-// git sets them for the hook.
+// hookRepository returns a repository whose GIT_* variables are set in
+// the environment, the way git sets them for a pre-commit hook that it
+// runs in that repository.
 func hookRepository(t *testing.T) *repo {
 	t.Helper()
 	outside := newRepo(t, map[string]string{"kept.txt": "kept\n"})
@@ -25,7 +25,7 @@ func TestAHooksGitVariablesReachNoOtherRepository(t *testing.T) {
 	read := func(name string) string {
 		data, err := os.ReadFile(filepath.Join(outside.git.Dir, ".git", name))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading .git/%s of the hook's repository: %v", name, err)
 		}
 		return string(data)
 	}
@@ -35,19 +35,20 @@ func TestAHooksGitVariablesReachNoOtherRepository(t *testing.T) {
 	r.write("fixture.txt", "changed\n")
 	r.commit("a second commit")
 	if _, err := r.git.Commit("HEAD"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the commit of HEAD: %v", err)
 	}
 
 	if count := r.run("rev-list", "--count", "HEAD"); count != "2" {
-		t.Errorf("the test's repository has %s commits", count)
+		t.Errorf("the test's repository has %s commits, want 2", count)
 	}
 	if read("config") != config || read("index") != index || outside.run("rev-parse", "HEAD") != head {
-		t.Error("a test's git command changed the hook's repository")
+		t.Error("a test's git command changed the config, index, or HEAD of the hook's repository, want them unchanged")
 	}
 }
 
-// The publish dates each output by the committer time of its commit,
-// which every checkout of the commit reads the same.
+// The publish dates each output by the committer time of its commit.
+// The test commit has different author and committer dates, so the
+// test fails when CommitTime reads the author date.
 func TestTheCommitTimeIsTheCommittersTime(t *testing.T) {
 	r := newRepo(t, map[string]string{"fixture.txt": "fixture\n"})
 	r.write("fixture.txt", "changed\n")
@@ -60,6 +61,6 @@ func TestTheCommitTimeIsTheCommittersTime(t *testing.T) {
 	}
 	got, err := r.git.CommitTime("HEAD")
 	if err != nil || !got.Equal(fixtureCreated) {
-		t.Errorf("got %v, %v, want %v", got, err, fixtureCreated)
+		t.Errorf("CommitTime(HEAD) = %v, %v, want %v", got, err, fixtureCreated)
 	}
 }

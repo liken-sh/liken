@@ -18,21 +18,21 @@ func signFixture(t *testing.T) map[string][]byte {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	return files
 }
 
-// id-token: write lets a job ask GitHub for the OIDC token that cosign
-// signs with, so only a publish job that signs holds it: the publish of
-// a component that pushes images, and the OS's publish to the channel.
-// GitHub checks every job of a called workflow against the call,
-// including a job that the call skips, so both calls of that
-// component's workflow grant it.
+// id-token: write lets a job request the OIDC token that cosign signs
+// with, so only the publish jobs that sign get it: the publish of a
+// component that pushes images, and the OS's publish to the channel.
+// GitHub checks the permissions of every job of a called workflow
+// against the call, including a job that the call skips, so both calls
+// of such a component's workflow grant it.
 func TestOnlyAPublishThatSignsIsGrantedIDToken(t *testing.T) {
 	root := workflowJobs(t, signFixture(t)[".github/workflows/ci.yaml"])
 	for name, want := range map[string]any{

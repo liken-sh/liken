@@ -19,30 +19,30 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The templates use {% %} as delimiters, because the workflows are full
-// of GitHub's own ${{ }} expressions.
+// The templates use {% %} as delimiters so that they do not collide
+// with the ${{ }} expressions of GitHub Actions in the workflows.
 //
 //go:embed templates/*.tmpl
 var templateFiles embed.FS
 
-// prekVersion is the prek that every prek job and the repository job
-// run, so a hook behaves the same in each.
+// prekVersion is the version of prek that every prek job and the root
+// workflow's repository job run, so a hook behaves the same in each.
 const prekVersion = "0.5.9"
 
-// prekSHA256 is the digest of prek's x86_64-unknown-linux-gnu archive
-// at prekVersion, the archive that prek-action downloads on an
-// ubuntu-26.04 runner. prek-action checks a download against its own
-// table of checksums, and it runs a version that the table does not
-// name without a check. So every prek step passes this digest as the
-// action's sha256 input, and the action fails on a mismatch.
-// `ci/latest.sh --bump prek` writes it with prekVersion, from the
-// digest that the release publishes, after it verifies the release's
-// GitHub attestation.
+// prekSHA256 is the SHA-256 digest of prek's x86_64-unknown-linux-gnu
+// archive at prekVersion, which prek-action downloads on the
+// ubuntu-26.04 runners. prek-action checks a download only against its
+// own table of checksums, and runs a version that the table lacks with
+// no check. So every prek step passes this digest as the action's
+// sha256 input, and the action fails on a mismatch.
+// `ci/latest.sh --bump prek` writes both constants, after it checks the
+// archive against the release's .sha256 file and its GitHub attestation.
 const prekSHA256 = "2fee13923018dd517c19dba032ddcae8010cadfb81bc47e742ad5e8981a3f126"
 
 // fluxVersionFile holds the flux release that the OS ships. The
-// publish job pushes each deploy artifact with the same flux CLI, so
-// the artifact's format is the one that the cluster's flux reads.
+// publish job pushes each deploy artifact with the flux CLI of that
+// version, so the artifact's format matches what the cluster's flux
+// reads.
 const fluxVersionFile = "liken/flux/VERSION"
 
 var templates = template.Must(template.New("").
@@ -88,7 +88,7 @@ func Workflows(root string, components map[string]*Component) (map[string][]byte
 		if c.Outputs.Deploy != "" {
 			flux, err := os.ReadFile(filepath.Join(root, fluxVersionFile))
 			if err != nil {
-				return nil, fmt.Errorf("%s publishes a deploy artifact with the flux CLI, whose version is in %s: %w", c.Name(), fluxVersionFile, err)
+				return nil, fmt.Errorf("reading the flux CLI version that the deploy artifact of %s needs: %w", c.Name(), err)
 			}
 			data["Flux"] = strings.TrimPrefix(strings.TrimSpace(string(flux)), "v")
 			if err := checkFluxAction(data["Flux"].(string)); err != nil {
@@ -109,29 +109,28 @@ func render(name string, data any) ([]byte, error) {
 	if err := templates.ExecuteTemplate(&out, name, data); err != nil {
 		return nil, fmt.Errorf("rendering %s: %w", name, err)
 	}
-	// A template's last block leaves blank lines behind it, and a file
-	// ends with exactly one newline.
+	// A template's last block leaves trailing blank lines. The file
+	// must end with exactly one newline.
 	return append(bytes.TrimRight(out.Bytes(), "\n"), '\n'), nil
 }
 
 type rootComponent struct {
 	Name, Dir string
-	// Needs are the pinned components that the component depends on:
-	// its images build on their targets, from the layers their jobs
-	// write to the cache, so its checks start after theirs.
+	// Needs lists the pinned components that the component depends on.
+	// Its images build on their bake targets and read the layers that
+	// their jobs write to the build cache, so its checks wait for theirs.
 	Needs []string
-	// PublishNeeds are the other components of its closure, whose
-	// checks must pass before it publishes.
+	// PublishNeeds lists the other components of its closure, whose
+	// checks must pass before the component publishes.
 	PublishNeeds               []string
 	Channel, Images, Publishes bool
 	// SecurityEvents is true when a job of the component's workflow
-	// uploads to code scanning: a CodeQL job, or the publish job, which
-	// uploads the Trivy scan of each image it pushes or the grype scan
-	// of the release it publishes to the channel, or a job with
-	// grype = true, which uploads the grype scan of what it built.
-	// GitHub checks the permissions of every job in a called workflow
-	// against the call, including a job that the call skips, so both
-	// calls grant it.
+	// uploads to code scanning: a CodeQL job, a job with grype = true,
+	// or a publish job, which uploads the Trivy scan of each image it
+	// pushes or the grype scan of the release it publishes to the
+	// channel. GitHub checks the permissions of every job in a called
+	// workflow against the call, even a job that the run skips, so the
+	// call must grant security-events.
 	SecurityEvents bool
 }
 
@@ -173,9 +172,9 @@ func rootData(components map[string]*Component) map[string]any {
 	return map[string]any{"Components": list, "Coverage": coverage, "Sites": sites, "TrivyCache": trivyCache}
 }
 
-// dependencyOrder lists the components so that each one comes after
-// everything it depends on, and by name where the graph does not
-// decide.
+// dependencyOrder lists the components with each one after everything
+// it depends on. Components that the dependencies leave unordered are in
+// name order.
 func dependencyOrder(components map[string]*Component) []*Component {
 	var order []*Component
 	done := map[string]bool{}
@@ -200,32 +199,34 @@ func dependencyOrder(components map[string]*Component) []*Component {
 type jobData struct {
 	Job
 	Component, Dir, WorkDir, ModuleDir string
-	// Go is true when the job sets up Go: a go or hugo job always, and
-	// a prek job when its module directory has a go.mod and a hook
-	// that the job runs calls go or gofmt.
+	// Go is true when the job sets up Go: a go or hugo job always, a
+	// CodeQL job of the Go language, and a prek job when its module
+	// directory has a go.mod and a hook that the job runs calls go or
+	// gofmt.
 	Go bool
 	// Cache is the job's Go cache, when Go is true.
 	Cache goCache
 	// Category is the code scanning category of a CodeQL job.
 	Category string
-	// Select is the name that the plan's list of jobs holds for this
-	// job. The shards of a job run when the job runs, so they select
-	// on the job's name.
+	// Select is the job name that the plan lists. The matrix job of a
+	// sharded job keeps the declared job's name here, so the shards run
+	// whenever the plan selects that job.
 	Select string
-	// Matrix holds the number of each shard, in the shards of a job.
+	// Matrix lists the shard numbers 1 to Shards. Only the matrix job
+	// of a sharded job sets it.
 	Matrix []int
-	// Needs names the shards that a sharded job waits for, and whose
+	// Needs is the matrix job that a sharded job waits for, and whose
 	// coverage files it downloads.
 	Needs string
 }
 
 func componentData(root string, c *Component) (map[string]any, error) {
-	// The hooks in a component's .pre-commit-config.yaml run in CI only
-	// through a prek job: the root workflow's repository job skips
-	// every component's directory.
+	// The root workflow's repository job skips every component's
+	// directory, so the hooks in a component's .pre-commit-config.yaml
+	// run in CI only through a prek job.
 	if _, err := os.Stat(filepath.Join(root, c.Dir, ".pre-commit-config.yaml")); err == nil &&
 		!slices.ContainsFunc(c.Jobs, func(j Job) bool { return j.Toolchain == "prek" }) {
-		return nil, fmt.Errorf("%s has hooks in .pre-commit-config.yaml and no prek job to run them in CI", c.Name())
+		return nil, fmt.Errorf("%s has hooks in .pre-commit-config.yaml and declares no prek job to run them in CI", c.Name())
 	}
 	var jobs []jobData
 	for _, job := range c.Jobs {
@@ -286,7 +287,7 @@ func componentData(root string, c *Component) (map[string]any, error) {
 	if len(images) > 0 {
 		var err error
 		if buildkit, err = readBuildKit(root); err != nil {
-			return nil, fmt.Errorf("%s builds images: %w", c.Name(), err)
+			return nil, fmt.Errorf("reading the BuildKit version for the images of %s: %w", c.Name(), err)
 		}
 	}
 	return map[string]any{
@@ -307,12 +308,12 @@ func componentData(root string, c *Component) (map[string]any, error) {
 // of its own, so that cargo does not match.
 var goCommand = regexp.MustCompile(`(^|[\s'"(;&|])(go|gofmt)(\s|$)`)
 
-// hooksRunGo is true when a hook of the component's
-// .pre-commit-config.yaml that is not in skip runs go or gofmt. A prek
-// job that sets up Go also restores a build cache of about 1 GB, and a
-// job whose Go hooks all run in the go job needs neither. Only a local
-// hook runs the Go of the runner: a hook from a remote repository
-// installs its own language. A component with no hooks runs no Go.
+// hooksRunGo is true when a local hook of the component's
+// .pre-commit-config.yaml that is not in skip runs go or gofmt. A hook
+// from a remote repository installs its own language, so only a local
+// hook uses the runner's Go. The check matters because setting up Go in
+// a prek job also restores a large build cache, which the job does not
+// need when the go job runs its Go hooks.
 func hooksRunGo(root string, c *Component, skip []string) (bool, error) {
 	file := filepath.Join(root, c.Dir, ".pre-commit-config.yaml")
 	data, err := os.ReadFile(file)
@@ -332,7 +333,7 @@ func hooksRunGo(root string, c *Component, skip []string) (bool, error) {
 		} `yaml:"repos"`
 	}
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return false, fmt.Errorf("%s: %w", file, err)
+		return false, fmt.Errorf("parsing %s: %w", file, err)
 	}
 	for _, repo := range config.Repos {
 		if repo.Repo != "local" {
@@ -347,30 +348,31 @@ func hooksRunGo(root string, c *Component, skip []string) (bool, error) {
 	return false, nil
 }
 
-// shardsName names the matrix job of a sharded job. The name starts
-// with shard- and not with the job's name, because the job's build
-// cache restores every key that begins with its name and a dash
-// (checkBuildCachePrefixes).
+// shardsName returns the name of the matrix job of a sharded job. It
+// starts with shard- and not with the job's name, because the job's
+// build cache restores every key that begins with its name and a dash
+// (see checkBuildCachePrefixes).
 func shardsName(job string) string { return "shard-" + job }
 
 // checkBuildCachePrefixes fails when one job's Go build cache would
-// restore another's entries. A restore that misses its key takes the
-// newest entry whose key begins with go-build-...-<job>-, so the entries
-// of a job named <job>-<more> match too, and they hold another build.
+// restore another job's entries. When no entry has the job's exact key,
+// actions/cache restores the newest entry whose key starts with
+// go-build-...-<job>-. That prefix also matches the entries of a job
+// named <job>-<more>, which hold a different build.
 func checkBuildCachePrefixes(c *Component, jobs []jobData) error {
 	for _, a := range jobs {
 		for _, b := range jobs {
 			if a.Go && b.Go && a.Cache.Build && b.Cache.Build && strings.HasPrefix(b.Name, a.Name+"-") {
-				return fmt.Errorf("%s: the job %q restores the build cache of job %q, because its restore takes every key that begins with its name and a dash", c.Name(), a.Name, b.Name)
+				return fmt.Errorf("%s: the job %q restores the build cache of job %q, because its restore-keys prefix matches every key that begins with its name and a dash", c.Name(), a.Name, b.Name)
 			}
 		}
 	}
 	return nil
 }
 
-// shardsOf answers the matrix job that runs a sharded job's ShardRun
-// once for each shard. Each shard keeps the job's toolchain, caches,
-// and timeout, and sets SHARD and SHARDS beside the job's own env.
+// shardsOf returns the matrix job that runs a sharded job's ShardRun
+// once for each shard. It keeps the job's toolchain, caches, and
+// timeout, and sets SHARD and SHARDS in addition to the job's own env.
 func shardsOf(d jobData) jobData {
 	shards := d
 	shards.Name = shardsName(d.Name)
@@ -387,8 +389,8 @@ func shardsOf(d jobData) jobData {
 	return shards
 }
 
-// WriteWorkflows writes the generated workflows under root, and
-// removes a generated workflow whose component no longer exists.
+// WriteWorkflows writes the generated workflows under root and deletes
+// each earlier generated workflow that files does not include.
 func WriteWorkflows(root string, files map[string][]byte) error {
 	stale, err := generatedFiles(root)
 	if err != nil {
@@ -409,7 +411,8 @@ func WriteWorkflows(root string, files map[string][]byte) error {
 }
 
 // CheckWorkflows lists each generated workflow on disk that differs
-// from what the generator writes, and each one that should not exist.
+// from the generator's output, and each one that the generator no
+// longer produces.
 func CheckWorkflows(root string, files map[string][]byte) ([]string, error) {
 	stale, err := generatedFiles(root)
 	if err != nil {

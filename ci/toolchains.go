@@ -13,19 +13,19 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// toolchainsComponent owns the outside images that the repository
-// builds from and runs, in imagesFile. A component whose Dockerfile
-// names one of its build images depends on it, so a change to an
-// entry releases that component.
+// toolchainsComponent owns imagesFile, which lists the outside images
+// that the repository builds from and runs. A component whose
+// Dockerfile uses one of the build images depends on toolchainsComponent,
+// so a change to an entry releases that component.
 const (
 	toolchainsComponent = "toolchains"
 	imagesFile          = "toolchains/images.toml"
 )
 
-// Toolchains is imagesFile. Build maps the bare name that a Dockerfile
-// names, as in FROM golang, to the image reference with its digest.
+// Toolchains is the content of imagesFile. Build maps the bare name that a Dockerfile
+// uses, as in FROM golang, to the image reference with its digest.
 // Run maps a name to the reference, by tag, that the manifests, the
-// guides, the skills, and the tests name.
+// guides, the skills, and the tests use.
 type Toolchains struct {
 	Build map[string]string `toml:"build"`
 	Run   map[string]string `toml:"run"`
@@ -60,17 +60,18 @@ func readToolchains(root string) (Toolchains, error) {
 	}
 	for _, name := range slices.Sorted(maps.Keys(t.Build)) {
 		if ref := parseImageRef(t.Build[name]); ref.Digest == "" || ref.Tag == "" {
-			return t, fmt.Errorf("%s: the build image %s names no digest or no tag; a Dockerfile builds from it by its digest", imagesFile, name)
+			return t, fmt.Errorf("%s: the build image %s must have a tag and a digest, because a Dockerfile builds from it by its digest", imagesFile, name)
 		}
 	}
 	return t, nil
 }
 
 // toolchainContexts maps each name in the Dockerfile that is a build
-// image of imagesFile to the bake context that resolves it. A named
-// directory context of the image keeps its name. The whole file counts,
-// not only the stages that the target reaches, so that a recipe can
-// resolve every name it hashes.
+// image of imagesFile to a docker-image:// bake context with the
+// entry's reference. A name that the image already declares as a
+// directory context is left to that context. It reads every stage of
+// the file, not only the stages that the target builds, so that the
+// recipe hash can resolve every name it covers.
 func toolchainContexts(root string, c *Component, image Image, parsed Dockerfile, producer map[string]string) (map[string]string, error) {
 	tools, err := readToolchains(root)
 	if err != nil {
@@ -83,7 +84,7 @@ func toolchainContexts(root string, c *Component, image Image, parsed Dockerfile
 			continue
 		}
 		if owner, ok := producer[name]; ok {
-			return nil, fmt.Errorf("%s is both an image of the component %s and an entry of %s; a bare name must name one image", name, owner, imagesFile)
+			return nil, fmt.Errorf("%s is both an image of the component %s and an entry of %s, and a bare name must refer to one image", name, owner, imagesFile)
 		}
 		if !slices.Contains(c.Depends.Components, toolchainsComponent) {
 			return nil, fmt.Errorf("%s: the image %s builds on %s from %s, and %s does not depend on %s", c.Name(), image.Name, name, imagesFile, c.Name(), toolchainsComponent)
@@ -109,12 +110,12 @@ func parseImageRef(s string) imageReference {
 	return r
 }
 
-// qualifiedName gives an image name with the registry that Docker
-// reads it from: a name whose first part is no host gets docker.io/,
-// and a name of one part gets library/ too, so debian becomes
-// docker.io/library/debian. The OCI key base.name asks for the fully
-// qualified name, because a short name means another registry to a
-// tool that resolves it some other way.
+// qualifiedName returns an image name with the registry that Docker
+// pulls it from. A name whose first part is not a host gets docker.io/,
+// and a name of one part gets library/ as well, so debian becomes
+// docker.io/library/debian. The OCI key base.name has the fully
+// qualified name, because a tool that resolves a short name by its own
+// default registry could pick another registry.
 func qualifiedName(name string) string {
 	first, _, nested := strings.Cut(name, "/")
 	if nested && (strings.ContainsAny(first, ".:") || first == "localhost") {

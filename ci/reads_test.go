@@ -5,12 +5,11 @@ import (
 	"testing"
 )
 
-// readsFixture is a repository with an operator that has a Go job, a
-// manual, a Rust crate in ui/, and a prek job, and the four components
-// it depends on: kubernetes, a Go module that its go.mod replaces;
-// screen, a crate that its crate takes by path; brand, the theme and a
-// crate of its own; and base, a pinned image that its image builds on.
-// The pinned base is published.
+// readsFixture is a repository with an operator component that has a
+// Go job, a manual, a Rust crate in ui/, and a prek job. The operator's
+// go.mod replaces the kubernetes module, its crate depends on the
+// screen crate by path, its manual uses brand's theme, and its image
+// builds on base, a pinned image.
 func readsFixture(t *testing.T) (*repo, string) {
 	t.Helper()
 	r := newRepo(t, map[string]string{
@@ -74,13 +73,9 @@ description = "The operator image."
 	return r, r.run("rev-parse", "HEAD")
 }
 
-// Each job reads the files its toolchain reads: a Go job reads no Rust
-// source and no page of the manual, a Rust job reads no Go source and
-// no page of the manual, and a manual reads no Rust source. A job reads
-// a dependency only through what its toolchain builds from: a Go
-// module that its go.mod replaces, a crate that its crate takes by path,
-// or brand's theme for a manual. A pinned dependency is an image, and
-// only images read it.
+// A job runs for a file of a dependency only when its toolchain builds
+// from it: a Go module that its go.mod replaces, a crate that its crate
+// depends on by path, or brand's theme for a manual.
 func TestAChangeRunsTheJobsWhoseToolchainReadsIt(t *testing.T) {
 	cases := []struct {
 		name string
@@ -111,7 +106,7 @@ func TestAChangeRunsTheJobsWhoseToolchainReadsIt(t *testing.T) {
 			r.commit("the change")
 			decisions, err := r.pinnedPlanner(map[string]bool{"base": true}, nil).Plan(Event{Name: "push", Ref: "refs/heads/topic", Before: before, Head: "HEAD"})
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("planning the push: %v", err)
 			}
 			if d := decisions["operator"]; !reflect.DeepEqual(d.Jobs, c.jobs) {
 				t.Errorf("operator: jobs %v, want %v", d.Jobs, c.jobs)
@@ -120,9 +115,9 @@ func TestAChangeRunsTheJobsWhoseToolchainReadsIt(t *testing.T) {
 	}
 }
 
-// A crate manifest that does not parse names no dependency the plan can
-// trust, so the Rust job reads every dependency, and it runs and fails
-// on the manifest.
+// When a Cargo.toml does not parse, the planner cannot tell which
+// dependencies the crate uses. So the Rust job reads every dependency,
+// runs, and fails on the manifest.
 func TestAManifestThatDoesNotParseReadsEveryDependency(t *testing.T) {
 	r, _ := readsFixture(t)
 	r.write("operator/ui/Cargo.toml", "[package\n")
@@ -131,15 +126,13 @@ func TestAManifestThatDoesNotParseReadsEveryDependency(t *testing.T) {
 	r.commit("the change")
 	decisions, err := r.pinnedPlanner(map[string]bool{"base": true}, nil).Plan(Event{Name: "push", Ref: "refs/heads/topic", Before: before, Head: "HEAD"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the push: %v", err)
 	}
 	if d := decisions["operator"]; !reflect.DeepEqual(d.Jobs, []string{"go", "docs", "rust", "prek"}) {
-		t.Errorf("operator: jobs %v", d.Jobs)
+		t.Errorf("operator: jobs %v, want go, docs, rust, and prek", d.Jobs)
 	}
 }
 
-// osFixture is an OS component with a manual, the OS build, and the
-// manual's job.
 func osFixture(t *testing.T) (*repo, string) {
 	t.Helper()
 	r := newRepo(t, map[string]string{
@@ -151,8 +144,6 @@ func osFixture(t *testing.T) (*repo, string) {
 	return r, r.run("rev-parse", "HEAD")
 }
 
-// The OS build builds every file of the OS but the manual, which
-// ships on its own path to the site.
 func TestTheOSBuildReadsEveryFileButTheManual(t *testing.T) {
 	cases := []struct {
 		name string
@@ -176,8 +167,8 @@ func TestTheOSBuildReadsEveryFileButTheManual(t *testing.T) {
 }
 
 // sharedCasesFixture is a repository with a rule component whose tests
-// read a file of cases, and a screen component whose Rust job reads the
-// same file by name, although neither depends on the other.
+// read a file of cases, and a screen component whose Rust job lists the
+// same file in reads. Neither component depends on the other.
 func sharedCasesFixture(t *testing.T, reads string) (*repo, string) {
 	t.Helper()
 	r := newRepo(t, map[string]string{
@@ -190,9 +181,10 @@ func sharedCasesFixture(t *testing.T, reads string) (*repo, string) {
 	return r, r.run("rev-parse", "HEAD")
 }
 
-// A file that a job names in reads runs that job, and the component's own
-// jobs, and it releases neither component that reads it from outside,
-// because no output is built from it.
+// A change to a file in a job's reads list runs that job. It also runs
+// the jobs of the file's own component. It does not mark the job's
+// component as changed, because none of its outputs is built from the
+// file.
 func TestAFileAJobReadsByNameRunsThatJob(t *testing.T) {
 	r, before := sharedCasesFixture(t, "rule/testdata/cases.json")
 	r.write("rule/testdata/cases.json", "[1]\n")
@@ -201,12 +193,13 @@ func TestAFileAJobReadsByNameRunsThatJob(t *testing.T) {
 	got := []any{decisions["screen"].Jobs, decisions["screen"].Changed, decisions["rule"].Jobs}
 	want := []any{[]string{"rust"}, false, []string{"go"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
+		t.Errorf("the jobs and changed flag are %v, want %v", got, want)
 	}
 }
 
-// A file of the job's own component runs the job already, and a path that
-// names no file would never run it, so the loader refuses both.
+// The loader accepts a reads entry only when it is an existing file of
+// another component. The job already reads the files of its own
+// component, and an entry that is not a file could never run the job.
 func TestAJobReadsOnlyAFileOfAnotherComponent(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -221,7 +214,7 @@ func TestAJobReadsOnlyAFileOfAnotherComponent(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			r, _ := sharedCasesFixture(t, c.reads)
 			if _, err := LoadComponents(r.git.Dir); err == nil {
-				t.Errorf("LoadComponents accepted reads = %q", c.reads)
+				t.Errorf("LoadComponents accepted reads = %q, want an error", c.reads)
 			}
 		})
 	}

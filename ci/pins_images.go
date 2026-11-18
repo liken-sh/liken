@@ -9,9 +9,10 @@ import (
 	"strings"
 )
 
-// imageDrift lists each reference in the text to an image of
-// images.toml whose tag differs from the entry's. A build image counts
-// by its tag alone, because a guide or a test names it by tag.
+// imageDrift reports each reference in text to an image of imagesFile
+// whose tag differs from the tag in imagesFile. It compares tags only,
+// also for a build image that imagesFile pins by digest, because guides
+// and tests write images by tag.
 func imageDrift(file, text string, tools Toolchains) []string {
 	var findings []string
 	entries := slices.Concat(slices.Collect(maps.Values(tools.Build)), slices.Collect(maps.Values(tools.Run)))
@@ -23,7 +24,7 @@ func imageDrift(file, text string, tools Toolchains) []string {
 			for _, m := range pattern.FindAllStringSubmatch(line, -1) {
 				tag := strings.TrimRight(m[2], ".-")
 				if tag != want.Tag {
-					findings = append(findings, fmt.Sprintf("%s:%d names %s:%s, and %s names %s:%s", file, n+1, m[1], tag, imagesFile, want.Name, want.Tag))
+					findings = append(findings, fmt.Sprintf("%s:%d refers to %s:%s, and %s has %s:%s", file, n+1, m[1], tag, imagesFile, want.Name, want.Tag))
 				}
 			}
 		}
@@ -49,24 +50,22 @@ func imagePattern(name string) *regexp.Regexp {
 	return regexp.MustCompile(`(?:^|[^A-Za-z0-9._/-])(` + strings.Join(names, "|") + `):([A-Za-z0-9_][A-Za-z0-9_.-]*)`)
 }
 
-// isScript is true for a shell script, by its extension.
 func isScript(name string) bool {
 	return path.Ext(name) == ".sh"
 }
 
 // pinnedImageRef matches an image reference that names a digest, such as
 // ghcr.io/oras-project/oras:<tag>@sha256:<hex> or alpine@sha256:<hex>.
-// The reference must start a word, so a URL path or a longer name does
-// not start inside it.
+// The character before the reference must not be part of a name, so a
+// match never begins in the middle of a URL path or a longer name.
 var pinnedImageRef = regexp.MustCompile(`(?:^|[^A-Za-z0-9._/:@-])([a-z0-9][a-z0-9._/-]*(?::[A-Za-z0-9_][A-Za-z0-9_.-]*)?@sha256:[0-9a-f]{64})\b`)
 
-// scriptImages lists each image that a shell script pins by its own
-// digest. A script that runs an outside image, such as a bump that runs
-// cosign or a push that runs oras, reads the reference from images.toml
-// with image_of in toolchains/pin.sh, so that one entry pins the image,
-// toolchains/latest.sh reports it, and a bump moves every user at once.
-// A comment can quote a reference, so the check reads the commands
-// alone.
+// scriptImages reports each image reference with a digest in the
+// commands of a shell script. A script that runs an outside image, such
+// as cosign or oras, reads the reference from imagesFile with image_of
+// from toolchains/pin.sh, so one entry pins the image for every script
+// and toolchains/latest.sh reports and bumps it. Comment lines are
+// skipped, because a comment may quote a reference.
 func scriptImages(file, text string) []string {
 	var findings []string
 	for _, l := range logicalLines(text) {
@@ -74,28 +73,26 @@ func scriptImages(file, text string) []string {
 			continue
 		}
 		for _, m := range pinnedImageRef.FindAllStringSubmatch(l.text, -1) {
-			findings = append(findings, fmt.Sprintf("%s:%d names %s, which is not read from %s; name the image there and read it with image_of", file, l.n, m[1], imagesFile))
+			findings = append(findings, fmt.Sprintf("%s:%d refers to %s, which is not read from %s. Add the image there and read it with image_of", file, l.n, m[1], imagesFile))
 		}
 	}
 	return findings
 }
 
-// isDockerfile is true for a Dockerfile: Dockerfile, or Dockerfile.<name>
-// beside it. A <Dockerfile>.dockerignore is the ignore file of one.
+// isDockerfile is true for Dockerfile and Dockerfile.<name>, and false
+// for Dockerfile.<name>.dockerignore, which is an ignore file.
 func isDockerfile(name string) bool {
 	return name == "Dockerfile" || strings.HasPrefix(name, "Dockerfile.") && !strings.HasSuffix(name, ".dockerignore")
 }
 
-// outsideImages lists each image that a Dockerfile builds from or
-// copies from by a full reference, such as ubuntu:24.04@sha256:... A
-// Dockerfile names an outside image bare, by its key in images.toml, so
-// that one entry pins it for the whole repository, toolchains/latest.sh
-// reports it, and the bake file or the script that builds the file
-// resolves the key to the entry's reference. A bare name is a key of
-// images.toml, an image of the repository, a named build context, or a
-// stage; a name with a registry, a tag, or a digest is none of those. A
-// build argument fills its name at build time, so the check cannot read
-// it.
+// outsideImages reports each FROM and COPY --from in a Dockerfile that
+// uses a full image reference, such as ubuntu:24.04@sha256:... A
+// Dockerfile must use an outside image by its bare key in imagesFile, so
+// one entry pins it for the whole repository, and the bake file or the
+// build script resolves the key to the entry's reference. A name with
+// ":", "/", or "@" cannot be a key, a repository image, a named build
+// context, or a stage. A name with "$" is skipped, because a build
+// argument sets it at build time.
 func outsideImages(file, text string) []string {
 	var findings []string
 	parsed := parseDockerfile(text)
@@ -103,7 +100,7 @@ func outsideImages(file, text string) []string {
 		if strings.Contains(name, "$") || !strings.ContainsAny(name, ":/@") {
 			continue
 		}
-		findings = append(findings, fmt.Sprintf("%s builds from %s, which is not a key of %s; name the image there and build from its key", file, name, imagesFile))
+		findings = append(findings, fmt.Sprintf("%s builds from %s, which is not a key of %s. Name the image there and build from its key", file, name, imagesFile))
 	}
 	return findings
 }

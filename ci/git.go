@@ -30,14 +30,14 @@ func (g Git) run(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// gitEnv is this process's environment without its GIT_* variables,
-// plus the extra variables. git runs a hook with GIT_DIR and
+// gitEnv returns this process's environment without its GIT_*
+// variables, plus extra. git runs a hook with GIT_DIR and
 // GIT_INDEX_FILE set for the repository that runs the hook, and those
-// variables win over the directory a command runs in. A git command
-// that inherits them reads and writes that repository, not the one in
-// Dir: a test run from a pre-commit hook would commit its fixtures into
-// the repository under commit and set its core.worktree. Without the
-// variables, git finds the repository from Dir alone.
+// variables take precedence over the directory that a command runs in.
+// A git command that inherited them would read and write that
+// repository and not the one in Dir. A test run from a pre-commit hook
+// would then commit its fixtures into the repository being committed
+// to, and set its core.worktree.
 func gitEnv(extra ...string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
@@ -49,8 +49,9 @@ func gitEnv(extra ...string) []string {
 }
 
 // Changed lists the files that differ between two commits. Rename
-// detection is off: a rename lists the old path and the new one, so a
-// file that moves from one component to another changes both.
+// detection is off, so a rename lists both the old path and the new
+// one, and a file that moves from one component to another changes
+// both components.
 func (g Git) Changed(from, to string) ([]string, error) {
 	out, err := g.run("diff", "--name-only", "--no-renames", from, to)
 	if err != nil || out == "" {
@@ -98,7 +99,6 @@ func (g Git) MergeBase(a, b string) (string, error) {
 	return g.run("merge-base", a, b)
 }
 
-// HasTag is true when the tag exists.
 func (g Git) HasTag(tag string) bool {
 	_, err := g.run("rev-parse", "--verify", "--quiet", "refs/tags/"+tag)
 	return err == nil
@@ -109,9 +109,9 @@ func (g Git) Commit(rev string) (string, error) {
 	return g.run("rev-parse", rev+"^{commit}")
 }
 
-// CommitTime is the committer time of a revision. A rebase or a merge
-// sets it, so it is the time the commit took its place on the branch,
-// and every checkout of the commit reads the same value.
+// CommitTime returns the committer time of a revision. The commit
+// records it, so every checkout reads the same value. A rebase sets the
+// committer time to the time of the rebase and keeps the author time.
 func (g Git) CommitTime(rev string) (time.Time, error) {
 	out, err := g.run("show", "-s", "--format=%ct", rev+"^{commit}")
 	if err != nil {
@@ -124,10 +124,9 @@ func (g Git) CommitTime(rev string) (time.Time, error) {
 	return time.Unix(seconds, 0).UTC(), nil
 }
 
-// Describe names the commit by the newest release tag before it, the
-// number of commits since that tag, and the commit. A release tag is
-// a bare CalVer version, so the pattern leaves out the tags that the
-// components brought with them from their own repositories, such as
+// Describe returns the newest release tag reachable from the commit and
+// the number of commits since that tag. The match pattern accepts only
+// a bare CalVer tag, so it skips a tag with a component prefix, such as
 // display-operator/2026.09.27-001.
 func (g Git) Describe(rev string) (tag string, count int, err error) {
 	out, err := g.run("describe", "--tags", "--long", "--match", releaseTagGlob, rev)
@@ -147,17 +146,15 @@ func (g Git) Describe(rev string) (tag string, count int, err error) {
 	return rest[:i], count, nil
 }
 
-// PinnedTagAt reads the pinned tag that the component's package.toml
-// states at the revision, or "" when the file is not there or states
-// no version.
+// PinnedTagAt returns the pinned tag from the component's package.toml
+// at the revision, or "" when the file does not exist there or the
+// component is not pinned.
 func (g Git) PinnedTagAt(rev string, c *Component) (string, error) {
 	if !g.HasCommit(rev) {
-		return "", fmt.Errorf("%s names no commit", rev)
+		return "", fmt.Errorf("%s is not a commit in the repository", rev)
 	}
 	text, err := g.run("show", rev+":"+c.Dir+"/package.toml")
 	if err != nil {
-		// A component that did not exist at the revision has no
-		// package.toml there, and so no tag.
 		if _, lsErr := g.run("cat-file", "-e", rev+":"+c.Dir+"/package.toml"); lsErr != nil {
 			return "", nil
 		}

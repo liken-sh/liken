@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// Every image states one line that says what it is, because the
-// publish writes it into org.opencontainers.image.description, which
-// ghcr.io shows on the package page and allows 512 characters of.
+// Every image needs a one-line description, because the publish writes
+// it into org.opencontainers.image.description, which ghcr.io shows on
+// the package page and limits to 512 characters.
 func TestAnImageNeedsADescriptionOfOneLine(t *testing.T) {
 	image := func(description string) string {
 		return "[package]\nname = \"a\"\n[[outputs.images]]\nname = \"a\"\n" + description
@@ -20,14 +20,14 @@ func TestAnImageNeedsADescriptionOfOneLine(t *testing.T) {
 		{"an empty description", image("description = \"\"\n"), "the image \"a\" has no description"},
 		{"two lines", image("description = \"one\\ntwo\"\n"), "the description of the image \"a\" is more than one line"},
 		{"513 characters", image("description = \"" + strings.Repeat("x", 513) + "\"\n"), "the description of the image \"a\" is 513 characters"},
-		{"an em-dash", image("description = \"one \u2014 two\"\n"), "the description of the image \"a\" holds an em-dash"},
+		{"an em-dash", image("description = \"one \u2014 two\"\n"), "the description of the image \"a\" contains an em-dash"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			root := writeTree(t, map[string]string{"a/package.toml": c.toml})
 			_, err := LoadComponents(root)
 			if err == nil || !strings.Contains(err.Error(), c.wants) {
-				t.Fatalf("got %v, want an error with %q", err, c.wants)
+				t.Fatalf("LoadComponents returned %v, want an error with %q", err, c.wants)
 			}
 		})
 	}
@@ -40,17 +40,18 @@ func TestADescriptionOf512CharactersLoads(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	if got := components["a"].Outputs.Images[0].Description; got != description {
-		t.Errorf("the description %q", got)
+		t.Errorf("the description is %q, want %q", got, description)
 	}
 }
 
-// The bake file gives each target its image's description, so
-// `docker buildx bake --list=targets` prints it. The description is
-// plain text, so the bake file quotes it as an HCL string, in which a
-// quote, a backslash, and the start of an interpolation are escaped.
+// The bake file sets each target's description to its image's
+// description, so `docker buildx bake --list=targets` prints it. The
+// description is plain text, so the bake file writes it as an HCL
+// string and escapes quotes, backslashes, and the start of an
+// interpolation.
 func TestTheBakeFileDescribesEachTarget(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"a/package.toml": "[package]\nname = \"a\"\n[[outputs.images]]\nname = \"a\"\ndescription = 'The \"a\" image, with ${HOME}, %{x}, and a \\ in it.'\n",
@@ -58,11 +59,11 @@ func TestTheBakeFileDescribesEachTarget(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	bake, err := Bake(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the bake file: %v", err)
 	}
 	want := "target \"a\" {\n  description = \"The \\\"a\\\" image, with $${HOME}, %%{x}, and a \\\\ in it.\"\n"
 	if !strings.Contains(string(bake), want) {
@@ -71,11 +72,11 @@ func TestTheBakeFileDescribesEachTarget(t *testing.T) {
 }
 
 // A change to an image's description changes what the publish writes
-// on the image, so it releases the component, and a push to main
+// into the image, so it releases the component, and a push to main
 // publishes a development build of it. The description is in the
 // image's bake target, so the images job builds that image and runs its
-// smoke check. The operator's build context leaves out package.toml,
-// so the change reaches no other image of the component.
+// smoke check. The operator image's build context excludes
+// package.toml, so no other image of the component is affected.
 func TestAChangeToADescriptionPublishesTheComponentAndRunsTheImage(t *testing.T) {
 	describe := func(ui string) string {
 		return "[package]\nname = \"operator\"\n[[outputs.images]]\nname = \"operator\"\ndescription = \"The operator.\"\n" +
@@ -92,11 +93,11 @@ func TestAChangeToADescriptionPublishesTheComponentAndRunsTheImage(t *testing.T)
 		t.Helper()
 		components, err := LoadComponents(r.git.Dir)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("loading the components: %v", err)
 		}
 		bake, err := Bake(r.git.Dir, components)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("rendering the bake file: %v", err)
 		}
 		r.write(bakeFile, string(bake))
 	}
@@ -121,7 +122,7 @@ func TestAChangeToADescriptionPublishesTheComponentAndRunsTheImage(t *testing.T)
 		t.Run(c.name, func(t *testing.T) {
 			d := planGate(t, r, published, c.event)["operator"]
 			if d.Publish != c.mode || !d.Check || !reflect.DeepEqual(imageNames(d.Images), []string{"operator-ui"}) {
-				t.Errorf("operator: publish %s, check %v, images %v; want %s and the image operator-ui", d.Publish, d.Check, imageNames(d.Images), c.mode)
+				t.Errorf("the plan for operator has publish %s, check %v, images %v, want publish %s, check true, and the image operator-ui", d.Publish, d.Check, imageNames(d.Images), c.mode)
 			}
 		})
 	}

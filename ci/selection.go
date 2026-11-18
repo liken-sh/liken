@@ -23,7 +23,6 @@ type ImageRun struct {
 	Published bool `json:"published"`
 }
 
-// everything lists every job and every image of the component.
 func everything(c *Component) ([]string, []ImageRun) {
 	var jobs []string
 	for _, job := range c.Jobs {
@@ -36,8 +35,8 @@ func everything(c *Component) ([]string, []ImageRun) {
 	return jobs, images
 }
 
-// A selector decides which of a component's jobs and images a change
-// reaches.
+// A selector works out which of a component's jobs and images a
+// change affects.
 type selector struct {
 	root       string
 	components map[string]*Component
@@ -45,25 +44,24 @@ type selector struct {
 	diff       Diff
 }
 
-// Select lists the jobs and the images that read the change.
+// Select returns the jobs and images that the change affects.
 //
 // A job runs when a changed file is one that its toolchain reads, as
 // reads.go describes.
 //
-// An image reads only what BuildKit sends it: its build contexts, less
-// what their ignore files leave out, its Dockerfile, its bake target,
-// and the images it builds on. Its smoke check tests it too. So an
-// image runs when one of those changed.
+// An image runs when the change touches anything its build receives:
+// its Dockerfile, its build contexts minus the files their ignore files
+// exclude, its bake target or the shared part of the bake file, or an
+// image it builds on. A change to its smoke check, or to a helper file
+// beside the check, also runs it.
 //
-// A run that publishes the component also runs each image that reads
-// the VERSION build argument, because the publish gives it a new
-// version, and a new version is a change to what the image is built
-// from. The image then passes its smoke check at the version that the
-// publish pushes, and the publish builds it from the layers that its
-// run here wrote to the cache. An image that reads neither the version
-// nor any other part of the change has the inputs of the image that an
-// earlier green run built, and the publish builds it again from the
-// layers that run wrote to the cache.
+// When the run publishes the component, Select also returns each image
+// that reads the VERSION build argument, because the publish gives it a
+// new version and so new inputs. The images job then runs its smoke
+// check at the version that the publish pushes, and caches the layers
+// that the publish builds from. An untouched image that does not read
+// VERSION has the same inputs as in an earlier run that passed, so the
+// publish builds it from the layers that run cached.
 func (s selector) Select(c *Component, publishing bool) ([]string, []ImageRun) {
 	var jobs []string
 	for _, job := range c.Jobs {
@@ -85,9 +83,9 @@ func (s selector) Select(c *Component, publishing bool) ([]string, []ImageRun) {
 	return jobs, images
 }
 
-// imageReads is true when the change reaches what the image's build
-// reads. Anything it cannot read, such as a Dockerfile that does not
-// parse, reads as a change, so the image builds and fails there.
+// imageReads returns true when the change touches anything the image's
+// build receives, or when it cannot tell, as with a Dockerfile that does
+// not parse, so that the image builds and the build reports the failure.
 func (s selector) imageReads(c *Component, image Image, seen map[string]bool) bool {
 	if seen[image.Name] {
 		return false
@@ -126,9 +124,9 @@ func (s selector) imageReads(c *Component, image Image, seen map[string]bool) bo
 	return false
 }
 
-// smokeReads is true when a changed file is the image's smoke check, or
-// a file beside it that is no other image's smoke check, such as a
-// helper the check reads.
+// smokeReads returns true when a changed file is the image's smoke check, or
+// is in the same directory and is not another image's smoke check, such
+// as a helper script that the check calls.
 func (s selector) smokeReads(image Image, changed string) bool {
 	if image.Smoke == "" {
 		return false
@@ -149,9 +147,10 @@ func (s selector) smokeReads(image Image, changed string) bool {
 	return true
 }
 
-// contextChanged is true when a changed file is one that Docker sends
-// in the build context: a file under dir that the ignore file keeps,
-// and that an output is built from, or the ignore file itself.
+// contextChanged returns true when a changed file is part of the build
+// context that Docker sends: a file under dir that the ignore file does
+// not exclude and that is an input of its component's outputs, or the
+// ignore file itself.
 func (s selector) contextChanged(dir, ignorePath string) bool {
 	ignore, err := readIgnore(s.root, ignorePath)
 	if err != nil {

@@ -15,13 +15,13 @@ const fixtureBuildKit = "moby/buildkit:v0.34.2@sha256:11111111111111111111111111
 // a fixture whose workflows build images.
 const fixtureBuildKitImages = "[build]\nbuildkit = \"" + fixtureBuildKit + "\"\n"
 
-// buildxStep is a workflow whose one job sets up buildx with the
-// inputs that follow the step's uses: line.
+// buildxStep returns a workflow with one job that sets up buildx. The
+// with argument is the text that follows the step's uses: line.
 func buildxStep(with string) string {
 	return "jobs:\n  images:\n    steps:\n      - uses: " + pinnedText("docker/setup-buildx-action") + "\n" + with
 }
 
-func TestTheChecksRefuseABuilderThatNamesNoPinnedBuildKit(t *testing.T) {
+func TestTheChecksRefuseABuilderWithoutThePinnedBuildKit(t *testing.T) {
 	other := "moby/buildkit:v0.34.2@sha256:" + strings.Repeat("2", 64)
 	cases := []struct {
 		name, workflow string
@@ -41,10 +41,10 @@ func TestTheChecksRefuseABuilderThatNamesNoPinnedBuildKit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			findings, err := unpinnedBuilders("w.yaml", []byte(tc.workflow), fixtureBuildKit)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("finding the unpinned builders: %v", err)
 			}
 			if len(findings) != tc.findings {
-				t.Errorf("findings %v, want %d", findings, tc.findings)
+				t.Errorf("the findings are %v, want %d", findings, tc.findings)
 			}
 		})
 	}
@@ -60,7 +60,7 @@ func TestTheChecksReadTheBuildersOfEveryWorkflowAndCompositeAction(t *testing.T)
 	})
 	findings, err := checkBuildKit(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the BuildKit pin: %v", err)
 	}
 	var files []string
 	for _, f := range findings {
@@ -68,7 +68,7 @@ func TestTheChecksReadTheBuildersOfEveryWorkflowAndCompositeAction(t *testing.T)
 	}
 	want := []string{".github/actions/build-setup/action.yml", ".github/workflows/default.yaml"}
 	if !slices.Equal(files, want) {
-		t.Errorf("findings %v, want one in each of %v", findings, want)
+		t.Errorf("the findings are %v, want one in each of %v", findings, want)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestEveryGeneratedBuilderRunsThePinnedBuildKit(t *testing.T) {
 	root, components := everyJobFixture(t)
 	files, err := Workflows(root, components)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the workflows: %v", err)
 	}
 	text := string(files[".github/workflows/component-app.yaml"])
 	if got := strings.Count(text, "driver-opts: image="+fixtureBuildKit+"\n"); got != 2 {
@@ -85,10 +85,10 @@ func TestEveryGeneratedBuilderRunsThePinnedBuildKit(t *testing.T) {
 	for _, name := range slices.Sorted(maps.Keys(files)) {
 		findings, err := unpinnedBuilders(name, files[name], fixtureBuildKit)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("finding the unpinned builders: %v", err)
 		}
 		for _, f := range findings {
-			t.Error(f)
+			t.Errorf("a generated workflow has an unpinned builder: %s", f)
 		}
 	}
 }
@@ -99,9 +99,9 @@ func TestTheGeneratorRefusesImagesWithNoPinnedBuildKit(t *testing.T) {
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
-	if _, err := Workflows(root, components); err == nil || !strings.Contains(err.Error(), "names no buildkit image") {
-		t.Errorf("got %v", err)
+	if _, err := Workflows(root, components); err == nil || !strings.Contains(err.Error(), "has no buildkit image") {
+		t.Errorf("Workflows returned %v, want an error that says the file has no buildkit image", err)
 	}
 }

@@ -29,10 +29,10 @@ func TestAGoImageInTheFormHasNoFinding(t *testing.T) {
 			"ENTRYPOINT [\"/usr/sbin/daemon\"]\n",
 	}))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the pins: %v", err)
 	}
 	if len(findings) > 0 {
-		t.Errorf("a Go image in the form is a finding:\n%s", strings.Join(findings, "\n"))
+		t.Errorf("the findings are:\n%s", strings.Join(findings, "\n"))
 	}
 }
 
@@ -54,28 +54,28 @@ func TestAGoImageOutOfTheFormIsFound(t *testing.T) {
 		"no output": {build + "RUN CGO_ENABLED=0 go build -trimpath -ldflags \"-s -w\" .\n",
 			"a/Dockerfile.go:2 runs go build with no -o /<name>"},
 		"an output in a directory": {build + "RUN CGO_ENABLED=0 go build -trimpath -ldflags \"-s -w\" -o /usr/local/bin/a .\n",
-			"a/Dockerfile.go:2 builds /usr/local/bin/a; build the program at /<name>"},
+			"a/Dockerfile.go:2 builds /usr/local/bin/a. Build the program at /<name>"},
 		"a copy to another path": {build + "RUN CGO_ENABLED=0 go build -trimpath -ldflags \"-s -w\" -o /a .\nFROM scratch\nCOPY --from=build /a /usr/local/bin/a\n",
-			"a/Dockerfile.go:4 copies /a to /usr/local/bin/a; copy it to /a"},
+			"a/Dockerfile.go:4 copies /a to /usr/local/bin/a. Copy it to /a"},
 		"a copy into a tree": {build + "RUN CGO_ENABLED=0 go build -trimpath -ldflags \"-s -w\" -o /a .\nFROM debian AS tree\nCOPY --from=build /a /out/usr/bin/a\n",
-			"a/Dockerfile.go:4 copies /a to /out/usr/bin/a; copy it to /a"},
+			"a/Dockerfile.go:4 copies /a to /out/usr/bin/a. Copy it to /a"},
 		"an entrypoint at another path": {build + "RUN CGO_ENABLED=0 go build -trimpath -ldflags \"-s -w\" -o /a .\nFROM scratch\nCOPY --from=build /a /a\nENTRYPOINT [\"/usr/local/bin/a\"]\n",
-			"a/Dockerfile.go:5 runs /usr/local/bin/a; the entrypoint of a Go program is /a"},
+			"a/Dockerfile.go:5 runs /usr/local/bin/a, and the entrypoint of a Go program is /a"},
 		"a stripped binary": {build + "RUN CGO_ENABLED=0 go build -trimpath -ldflags \"-s -w\" -o /a . && upx --best /a\n",
-			"a/Dockerfile.go:2 runs upx on /a; strip a Go program with -ldflags \"-s -w\""},
+			"a/Dockerfile.go:2 runs upx on /a. Strip a Go program with -ldflags \"-s -w\""},
 		"a removed section": {build + "RUN CGO_ENABLED=0 go build -trimpath -ldflags \"-s -w\" -o /a .\nRUN objcopy --remove-section .go.buildinfo /a\n",
-			"a/Dockerfile.go:3 runs objcopy on /a; strip a Go program with -ldflags \"-s -w\""},
+			"a/Dockerfile.go:3 runs objcopy on /a. Strip a Go program with -ldflags \"-s -w\""},
 		"a strip": {build + "RUN CGO_ENABLED=0 go build -trimpath -ldflags \"-s -w\" -o /a .\nRUN strip /a\n",
-			"a/Dockerfile.go:3 runs strip on /a; strip a Go program with -ldflags \"-s -w\""},
+			"a/Dockerfile.go:3 runs strip on /a. Strip a Go program with -ldflags \"-s -w\""},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			findings, err := checkPins(pinsTree(t, map[string]string{"a/Dockerfile.go": c.text}))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("checking the pins: %v", err)
 			}
 			if !strings.Contains(strings.Join(findings, "\n"), c.wants) {
-				t.Errorf("got:\n%s\nwant a finding with %q", strings.Join(findings, "\n"), c.wants)
+				t.Errorf("the findings are:\n%s\nwant one with %q", strings.Join(findings, "\n"), c.wants)
 			}
 		})
 	}

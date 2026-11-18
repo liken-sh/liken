@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestADockerfileNamesWhatItBuildsFrom(t *testing.T) {
+func TestParseDockerfileListsTheImagesItBuildsFrom(t *testing.T) {
 	cases := map[string]struct {
 		text          string
 		from, sources []string
@@ -37,13 +37,13 @@ func TestADockerfileNamesWhatItBuildsFrom(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			d := parseDockerfile(c.text)
 			if !reflect.DeepEqual(d.From, c.from) || !reflect.DeepEqual(d.Sources, c.sources) {
-				t.Errorf("from %v, sources %v", d.From, d.Sources)
+				t.Errorf("from %v, sources %v, want from %v, sources %v", d.From, d.Sources, c.from, c.sources)
 			}
 		})
 	}
 }
 
-func TestADockerfileNamesItsBuildArguments(t *testing.T) {
+func TestParseDockerfileListsTheBuildArguments(t *testing.T) {
 	cases := map[string]struct {
 		text string
 		args []string
@@ -67,7 +67,7 @@ func TestTheBasesAreTheImagesOfTheRepository(t *testing.T) {
 	producer := map[string]string{"mpv": "mpv", "vulkan": "vulkan", "media-operator": "media-operator"}
 	image := Image{Contexts: map[string]string{"brand": "brand", "media-operator": "media-operator"}}
 	if got := d.Bases(image, producer); !reflect.DeepEqual(got, []string{"mpv", "vulkan"}) {
-		t.Errorf("bases %v", got)
+		t.Errorf("bases %v, want [mpv vulkan]", got)
 	}
 }
 
@@ -103,17 +103,17 @@ func TestAnInstructionContinuesOverLines(t *testing.T) {
 		"COPY \\\n  --from=vulkan / /\n")
 	if !reflect.DeepEqual(d.From, []string{"debian@sha256:aaa"}) || !reflect.DeepEqual(d.Sources, []string{"busybox:1", "vulkan"}) ||
 		d.Stages[0].Name != "build" {
-		t.Errorf("from %v, sources %v, stages %+v", d.From, d.Sources, d.Stages)
+		t.Errorf("from %v, sources %v, stages %+v, want from [debian@sha256:aaa], sources [busybox:1 vulkan], first stage build", d.From, d.Sources, d.Stages)
 	}
 }
 
-func TestANumberNamesAStage(t *testing.T) {
+func TestANumberInCopyFromRefersToAStage(t *testing.T) {
 	d := parseDockerfile("FROM golang AS build\nFROM weston\nCOPY --from=0 /x /x\nCOPY --from=7 /y /y\n")
 	if !reflect.DeepEqual(d.Sources, []string{"7"}) {
-		t.Errorf("sources %v", d.Sources)
+		t.Errorf("sources %v, want [7]", d.Sources)
 	}
 	if got := d.Reachable(""); !reflect.DeepEqual(got, []string{"weston", "golang", "7"}) {
-		t.Errorf("reachable %v", got)
+		t.Errorf("reachable %v, want [weston golang 7]", got)
 	}
 }
 
@@ -122,14 +122,14 @@ func TestAnAddFromTheNetworkIsARemoteSource(t *testing.T) {
 		"ADD git@github.com:x/y.git /src\nADD --chown=1:1 local.tar other.tar /\nADD [\"https://example.com/z\", \"/z\"]\n")
 	want := []Remote{{"https://example.com/x.tar.gz", "sha256:abc"}, {"git@github.com:x/y.git", ""}, {"https://example.com/z", ""}}
 	if !reflect.DeepEqual(d.Remotes, want) {
-		t.Errorf("remotes %+v", d.Remotes)
+		t.Errorf("remotes %+v, want %+v", d.Remotes, want)
 	}
 }
 
 func TestAnEmptyLineInsideAnInstructionDoesNotEndIt(t *testing.T) {
 	d := parseDockerfile("FROM scratch\nCOPY \\\n\n  --from=debian:trixie-slim / /\n")
 	if !reflect.DeepEqual(d.Sources, []string{"debian:trixie-slim"}) {
-		t.Errorf("sources %v", d.Sources)
+		t.Errorf("sources %v, want [debian:trixie-slim]", d.Sources)
 	}
 }
 
@@ -143,7 +143,7 @@ func TestAnEscapeDirectiveIsRead(t *testing.T) {
 	for text, escape := range cases {
 		t.Run(text, func(t *testing.T) {
 			if got := parseDockerfile(text).Escape; got != escape {
-				t.Errorf("escape %v", got)
+				t.Errorf("Escape is %v, want %v", got, escape)
 			}
 		})
 	}
@@ -164,15 +164,12 @@ func TestEachStageThatRunsAptPointsItAtTheSnapshotFirst(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			err := parseDockerfile(c.text).SnapshotFirst()
 			if c.wants == "" && err != nil || c.wants != "" && (err == nil || !strings.Contains(err.Error(), c.wants)) {
-				t.Errorf("got %v, want %q", err, c.wants)
+				t.Errorf("the error is %v, want one that contains %q", err, c.wants)
 			}
 		})
 	}
 }
 
-// The image that a target starts from is the FROM of its stage, or of
-// the earlier stage that its stage starts from, through the file. Each
-// label of that image passes into the target's config.
 func TestFromImageFollowsTheStagesToAnImage(t *testing.T) {
 	cases := []struct {
 		name, text, target, want string

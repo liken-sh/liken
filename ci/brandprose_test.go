@@ -2,16 +2,15 @@ package main
 
 import "testing"
 
-// brand's prose, the voice rules and the motion rules, goes into no build:
-// the images take only the iced crate, the mark, the stylesheet, and the
-// fonts, and the OS takes the mark and the stylesheet. So an edit to the
-// prose releases none of the components that depend on brand, and an edit
-// to the stylesheet still releases every one of them. The test reads the
-// repository's own package.toml files.
+// brand/package.toml leaves its prose files out of its outputs,
+// because no build reads them. So an edit to the prose releases none
+// of the components that depend on brand, and an edit to the
+// stylesheet releases all of them. The test reads the repository's own
+// package.toml files.
 func TestBrandsProseReleasesNothingAndItsStylesheetReleasesEveryUser(t *testing.T) {
 	components, err := LoadComponents("..")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the components: %v", err)
 	}
 	cases := []struct {
 		file     string

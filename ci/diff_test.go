@@ -43,8 +43,8 @@ func bakeFileText(variable string, targets map[string]string) string {
 
 var everyTarget = map[string]string{"base": "linux/amd64", "operator": "linux/amd64"}
 
-// generatedFixture is planFixture with the generated files at the top
-// of the repository, and a push that follows.
+// generatedFixture is planFixture with the generated files committed.
+// It returns the repository and that commit.
 func generatedFixture(t *testing.T) (*repo, string) {
 	t.Helper()
 	r := planFixture(t)
@@ -64,7 +64,7 @@ func planPush(t *testing.T, r *repo, before string) map[string]Decision {
 	t.Helper()
 	decisions, err := r.planner(fixturePublished).Plan(Event{Name: "push", Ref: "refs/heads/topic", Before: before, Head: "HEAD"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the push: %v", err)
 	}
 	return decisions
 }
@@ -122,7 +122,7 @@ func TestAGeneratedFileRunsOnlyTheComponentsWhosePartChanged(t *testing.T) {
 			c.edit(r)
 			r.commit("the change")
 			if got := checked(planPush(t, r, before)); !reflect.DeepEqual(got, c.check) {
-				t.Errorf("the checks that run: %v, want %v", got, c.check)
+				t.Errorf("the checks that run are %v, want %v", got, c.check)
 			}
 		})
 	}
@@ -134,7 +134,7 @@ func TestARootWorkflowThatWasNotThereRunsEveryCall(t *testing.T) {
 	r.write(".github/workflows/ci.yaml", rootWorkflow(everyCall, "ubuntu"))
 	r.commit("the first root workflow")
 	if got := checked(planPush(t, r, before)); !reflect.DeepEqual(got, []string{"base", "brand", "liken", "operator"}) {
-		t.Errorf("the checks that run: %v", got)
+		t.Errorf("the checks that run are %v, want base, brand, liken, and operator", got)
 	}
 }
 
@@ -145,7 +145,7 @@ func TestACallThatIsNewInTheRootWorkflowRunsItsComponent(t *testing.T) {
 	r.write(".github/workflows/ci.yaml", rootWorkflow(everyCall, "ubuntu"))
 	r.commit("call the base")
 	if got := checked(planPush(t, r, before)); !reflect.DeepEqual(got, []string{"base"}) {
-		t.Errorf("the checks that run: %v", got)
+		t.Errorf("the checks that run are %v, want base", got)
 	}
 }
 
@@ -154,7 +154,7 @@ func TestARootWorkflowThatDoesNotParseRunsEveryCall(t *testing.T) {
 	r.write(".github/workflows/ci.yaml", "jobs: [\n")
 	r.commit("a broken root workflow")
 	if got := checked(planPush(t, r, before)); !reflect.DeepEqual(got, []string{"base", "brand", "liken", "operator"}) {
-		t.Errorf("the checks that run: %v", got)
+		t.Errorf("the checks that run are %v, want base, brand, liken, and operator", got)
 	}
 }
 
@@ -164,10 +164,10 @@ func TestABakeTargetChangeIsAChangeToTheOutputs(t *testing.T) {
 	r.commit("build the base for another platform")
 	decisions, err := r.planner(fixturePublished).Candidates("HEAD")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the candidates: %v", err)
 	}
 	if d := decisions["operator"]; !d.Changed || !strings.HasPrefix(d.Why, "its dependency base changed: the bake target base") {
-		t.Errorf("operator: %+v", d)
+		t.Errorf("the decision for operator is %+v, want a change that says its dependency base changed", d)
 	}
 }
 
@@ -178,21 +178,21 @@ func TestASharedBakeChangeIsNotAChangeToTheOutputs(t *testing.T) {
 	r.commit("change a default")
 	decisions, err := r.planner(map[string][]string{"operator": {"2026.09.29-001"}}).Candidates("HEAD")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the candidates: %v", err)
 	}
 	if d := decisions["operator"]; d.Changed {
-		t.Errorf("operator: %+v", d)
+		t.Errorf("the decision for operator is %+v, want no change", d)
 	}
 }
 
-// A rename shows in a diff under its new name alone unless rename
-// detection is off, and the component that lost the file must run too.
+// With rename detection on, git diff reports a moved file under its new
+// path alone. The component that lost the file must run its checks too.
 func TestAFileMovedBetweenComponentsRunsBoth(t *testing.T) {
 	r, before := generatedFixture(t)
 	r.run("mv", "operator/main.go", "liken/main.go")
 	r.commit("move a file")
 	if got := checked(planPush(t, r, before)); !reflect.DeepEqual(got, []string{"liken", "operator"}) {
-		t.Errorf("the checks that run: %v", got)
+		t.Errorf("the checks that run are %v, want liken and operator", got)
 	}
 }
 
@@ -202,9 +202,8 @@ func operatorWorkflow(check, publish string) string {
 	return "# generated\nname: operator\njobs:\n  go:\n    runs-on: " + check + "\n  publish:\n    runs-on: " + publish + "\n"
 }
 
-// A change to the code that publishes runs a dry run of the publish in
-// the check stage, so broken publish code fails before a release needs
-// it.
+// A change to the publish code runs a dry run of the publish in the
+// check stage, so broken publish code fails before a release runs it.
 func TestAChangeToThePublishCodeRunsADryRunOfThePublish(t *testing.T) {
 	cases := []struct {
 		name string
@@ -252,12 +251,12 @@ func TestAChangeToThePublishCodeRunsADryRunOfThePublish(t *testing.T) {
 				if d.DryRun {
 					dry = append(dry, name)
 					if !d.Check || d.Publish != publishNone || !devVersion.MatchString(d.Version) && name != "liken" {
-						t.Errorf("%s: %+v", name, d)
+						t.Errorf("the decision for %s is %+v, want no dry run of a component that publishes", name, d)
 					}
 				}
 			}
 			if !reflect.DeepEqual(dry, c.dry) {
-				t.Errorf("the dry runs: %v, want %v", dry, c.dry)
+				t.Errorf("the dry runs are %v, want %v", dry, c.dry)
 			}
 		})
 	}
@@ -273,12 +272,12 @@ func TestARunThatPublishesRunsNoDryRun(t *testing.T) {
 	r.commit("change the operator and the publisher")
 	decisions, err := r.planner(fixturePublished).Plan(Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the push: %v", err)
 	}
 	if d := decisions["operator"]; d.Publish != publishDev || d.DryRun {
-		t.Errorf("operator: %+v", d)
+		t.Errorf("the decision for operator is %+v, want a development publish with no dry run", d)
 	}
 	if d := decisions["base"]; d.Publish != publishNone || !d.DryRun {
-		t.Errorf("base: %+v", d)
+		t.Errorf("the decision for base is %+v, want no publish and a dry run", d)
 	}
 }

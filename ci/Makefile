@@ -1,13 +1,9 @@
-# The checks of the program that reads every package.toml. CI runs
-# `make test`, the same target a workstation runs.
-#
-# One run of the tests gives both the race check and the coverage
-# profile, because -race with -covermode=atomic does both.
+# CI runs `make test`, the same target that you run on a workstation.
+# One `go test` run does the race check and writes the coverage
+# profile, because -race works with -covermode=atomic.
 
-# A recipe that fails, or a build that is killed during one, leaves its
-# target partly written and newer than its inputs. make deletes that
-# target, so the next build makes it again and does not take it as
-# current.
+# Delete a target whose recipe fails, so a partly written file is not
+# taken as up to date on the next run.
 .DELETE_ON_ERROR:
 
 .PHONY: test

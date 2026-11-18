@@ -9,16 +9,16 @@ import (
 	"testing"
 )
 
-// A test's server answers at once, so a fetch that asks again does not
-// wait between asks.
+// A test's server responds immediately, so a fetch that retries does
+// not need to wait between requests.
 func init() {
 	fetchPause = 0
 }
 
 // reportTree is a repository of three components with coverage: os,
-// whose manual is the root of the site; app, whose manual is at
-// /app/ and whose report needs a Go and a Rust profile; and lib, which
-// has no manual.
+// whose manual is the root of the site; app, whose manual is at /app/
+// and whose report needs a Go profile and a Rust profile; and lib,
+// which has no manual.
 func reportTree(t *testing.T, profiles map[string]string) string {
 	t.Helper()
 	files := map[string]string{
@@ -37,7 +37,8 @@ func reportTree(t *testing.T, profiles map[string]string) string {
 	return writeTree(t, files)
 }
 
-// servedSite serves the files of a published site, and nothing else.
+// servedSite serves the files of a published site and returns 404 for
+// every other path.
 func servedSite(t *testing.T, files map[string]string) string {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -53,13 +54,14 @@ func servedSite(t *testing.T, files map[string]string) string {
 }
 
 // runReports runs the reports command on the tree against the served
-// files, and returns its world and the directory it published into.
-func runReports(t *testing.T, root string, served map[string]string) (*world, string) {
+// files, and returns its fake environment and the directory that it published
+// into.
+func runReports(t *testing.T, root string, served map[string]string) (*fakeEnv, string) {
 	t.Helper()
-	w := newWorld(t, &fakeRegistry{})
+	w := newFakeEnv(t, &fakeRegistry{})
 	dest := t.TempDir()
 	if err := w.run([]string{"reports", "-root", root, "-site", servedSite(t, served), "-dest", dest}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running reports: %v", err)
 	}
 	return w, dest
 }
@@ -79,11 +81,11 @@ var everyServedProfile = map[string]string{
 	"coverage/untested/coverage.out": "mode: set\n",
 }
 
-// Each line of the output names the directory whose Makefile renders a
-// report, and the report's path in the site. A report renders only
-// when every one of its profiles is at hand: written by this run's
-// job, or served by the site from the run where that job last ran.
-func TestReportsListEachReportWhoseProfilesAreAllAtHand(t *testing.T) {
+// Each line of the output has the directory whose Makefile renders a
+// report and the report's path on the site. A report renders only when
+// all of its profiles are available, either written by this run's job
+// or served by the site from the last run of that job.
+func TestReportsListEachReportWhoseProfilesAreAllAvailable(t *testing.T) {
 	cases := []struct {
 		name   string
 		disk   map[string]string
@@ -125,7 +127,7 @@ func TestReportsTakeTheServedProfileOfAJobThatDidNotRun(t *testing.T) {
 	for file, want := range cases {
 		got, err := os.ReadFile(filepath.Join(root, file))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading %s: %v", file, err)
 		}
 		if string(got) != want {
 			t.Errorf("%s holds %q, want %q", file, got, want)
@@ -133,11 +135,12 @@ func TestReportsTakeTheServedProfileOfAJobThatDidNotRun(t *testing.T) {
 	}
 }
 
-// The site publishes each profile it has, beside the reports, so the
-// next deploy can take the profile of a job that does not run then.
-// A report that cannot render still publishes the profiles it has, so
-// its jobs can fill it one at a time.
-func TestReportsPublishEveryProfileAtHand(t *testing.T) {
+// The site publishes every available profile beside the reports, so
+// the next deploy can reuse the profile of a job that does not run
+// then. A report that cannot render still publishes the profiles that
+// are available, so its jobs can supply the missing ones one at a
+// time.
+func TestReportsPublishEveryAvailableProfile(t *testing.T) {
 	root := reportTree(t, map[string]string{"app/coverage.out": "mode: set\nthis run\n"})
 	_, dest := runReports(t, root, map[string]string{"coverage/lib/coverage.out": "mode: set\nserved\n"})
 	cases := map[string]string{
@@ -147,14 +150,14 @@ func TestReportsPublishEveryProfileAtHand(t *testing.T) {
 	for file, want := range cases {
 		got, err := os.ReadFile(filepath.Join(dest, file))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading %s: %v", file, err)
 		}
 		if string(got) != want {
 			t.Errorf("%s holds %q, want %q", file, got, want)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(dest, "coverage/app/coverage-app.xml")); err == nil {
-		t.Error("the site publishes a profile that no job wrote")
+		t.Error("the site publishes coverage-app.xml, which no job wrote, want it absent")
 	}
 }
 
@@ -167,24 +170,24 @@ func TestReportsNameTheJobWhoseProfileIsMissing(t *testing.T) {
 	}
 }
 
-// Only a 404 means that the site serves no profile yet. Any other
-// failure stops the deploy: a deploy that went on would publish the
-// site without the profile, and the next deploy could not find it.
+// Only a 404 means that the site has no copy of the profile. Any other
+// failure stops the deploy.
 func TestReportsFailWhenTheSiteFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(server.Close)
-	w := newWorld(t, &fakeRegistry{})
+	w := newFakeEnv(t, &fakeRegistry{})
 	err := w.run([]string{"reports", "-root", reportTree(t, nil), "-site", server.URL, "-dest", t.TempDir()})
 	if err == nil {
-		t.Fatal("reports passed while the site failed")
+		t.Fatal("reports returned no error while the site returned 503, want an error")
 	}
 }
 
-// taggedRepo is an OS whose go job writes a coverage profile. The site
-// deployed its first commit, and the tag is a second commit that
-// changes the file named, or the same commit when change is "".
+// taggedRepo is a repository of the `liken` OS whose go job writes a
+// coverage profile. The site deployed the first commit. The tag is a
+// second commit that changes the file named by change, or the first
+// commit when change is empty.
 func taggedRepo(t *testing.T, change string) (root, deployed string) {
 	t.Helper()
 	r := newRepo(t, map[string]string{
@@ -200,7 +203,7 @@ func taggedRepo(t *testing.T, change string) (root, deployed string) {
 	return r.git.Dir, deployed
 }
 
-// A servedFile is one answer of the site: its status, its text, and
+// A servedFile is one response of the site: its status, its body, and
 // its Last-Modified time, which is the time of its deploy.
 type servedFile struct {
 	status         int
@@ -209,8 +212,8 @@ type servedFile struct {
 
 const deployTime = "Wed, 30 Sep 2026 16:45:41 GMT"
 
-// deployedSite serves release.txt from a deploy of the commit, and the
-// OS's profile as given.
+// deployedSite serves a release.txt for a deploy of the commit, and the
+// `liken` OS's profile as the argument describes it.
 func deployedSite(t *testing.T, commit string, profile servedFile) string {
 	t.Helper()
 	files := map[string]servedFile{
@@ -233,10 +236,10 @@ func deployedSite(t *testing.T, commit string, profile servedFile) string {
 	return server.URL
 }
 
-// The OS's publish takes the profile that the site serves only when
-// that profile describes the files at the tag. In every other case the
-// command fails, writes nothing, and the publish runs the tests.
-func TestThePublishTakesTheServedProfileOnlyWhenItDescribesTheTag(t *testing.T) {
+// The publish of the `liken` OS reuses the served profile only when it
+// describes the files at the tag. In every other case the command
+// fails and writes nothing, and the publish runs the tests.
+func TestThePublishReusesTheServedProfileOnlyWhenItMatchesTheTag(t *testing.T) {
 	const profileText = "mode: atomic\nserved\n"
 	cases := []struct {
 		name    string
@@ -255,10 +258,10 @@ func TestThePublishTakesTheServedProfileOnlyWhenItDescribesTheTag(t *testing.T) 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			root, deployed := taggedRepo(t, c.change)
-			w := newWorld(t, &fakeRegistry{})
+			w := newFakeEnv(t, &fakeRegistry{})
 			err := w.run([]string{"profile", "-root", root, "-component", "liken", "-site", deployedSite(t, deployed, c.profile)})
 			if (err == nil) != (c.want != "") {
-				t.Errorf("profile returned %v", err)
+				t.Errorf("profile returned %v, want an error exactly when the profile is not reusable", err)
 			}
 			got, _ := os.ReadFile(filepath.Join(root, "liken/coverage.out"))
 			if string(got) != c.want {
@@ -268,25 +271,22 @@ func TestThePublishTakesTheServedProfileOnlyWhenItDescribesTheTag(t *testing.T) 
 	}
 }
 
-// The site's CDN answers a request with a 5xx now and then, and one such
-// answer failed a build. A fetch asks again after a server error, and a
-// file the site does not serve is still an answer at once.
-func TestAFetchAsksAgainAfterAServerError(t *testing.T) {
+func TestAFetchRetriesAfterAServerError(t *testing.T) {
 	cases := []struct {
-		name    string
-		answers []int
-		want    string
-		tries   int
+		name     string
+		statuses []int
+		want     string
+		tries    int
 	}{
-		{name: "one 503, then the file", answers: []int{503, 200}, want: "profile", tries: 2},
-		{name: "a 404", answers: []int{404}, want: "", tries: 1},
-		{name: "503 on every try", answers: []int{503, 503, 503}, want: "", tries: fetchTries},
+		{name: "one 503, then the file", statuses: []int{503, 200}, want: "profile", tries: 2},
+		{name: "a 404", statuses: []int{404}, want: "", tries: 1},
+		{name: "503 on every try", statuses: []int{503, 503, 503}, want: "", tries: fetchTries},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			tries := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				status := test.answers[min(tries, len(test.answers)-1)]
+				status := test.statuses[min(tries, len(test.statuses)-1)]
 				tries++
 				w.WriteHeader(status)
 				if status == http.StatusOK {

@@ -7,8 +7,8 @@ import (
 
 // selectionFixture is a repository with brand, a base image, and an
 // operator with a Go job, a manual, and two images. The operator image
-// builds on the base with the operator's directory as its context, less
-// ui/ and local/. The ui image has ui/ as its context, reads the base's
+// builds on the base with the operator's directory as its context,
+// excluding ui/ and local/. The ui image has ui/ as its context, reads the base's
 // assets as a named context, and has a smoke check.
 func selectionFixture(t *testing.T) (*repo, string) {
 	t.Helper()
@@ -101,7 +101,7 @@ func TestAChangeRunsTheJobsAndImagesThatReadIt(t *testing.T) {
 			r.commit("the change")
 			d := planGate(t, r, nil, Event{Name: "push", Ref: "refs/heads/topic", Before: before, Head: "HEAD"})["operator"]
 			if !d.Check || !reflect.DeepEqual(d.Jobs, c.jobs) || !reflect.DeepEqual(imageNames(d.Images), c.images) {
-				t.Errorf("operator: check %v, jobs %v, images %v; want jobs %v, images %v", d.Check, d.Jobs, imageNames(d.Images), c.jobs, c.images)
+				t.Errorf("the plan for operator has check %v, jobs %v, images %v, want check true, jobs %v, images %v", d.Check, d.Jobs, imageNames(d.Images), c.jobs, c.images)
 			}
 		})
 	}
@@ -137,15 +137,15 @@ func TestAGeneratedFileRunsTheJobsAndImagesThatReadIt(t *testing.T) {
 			r.commit("the change")
 			d := planGate(t, r, nil, Event{Name: "push", Ref: "refs/heads/topic", Before: before, Head: "HEAD"})["operator"]
 			if !d.Check || !reflect.DeepEqual(d.Jobs, c.jobs) || !reflect.DeepEqual(imageNames(d.Images), c.images) {
-				t.Errorf("operator: check %v, jobs %v, images %v; want jobs %v, images %v", d.Check, d.Jobs, imageNames(d.Images), c.jobs, c.images)
+				t.Errorf("the plan for operator has check %v, jobs %v, images %v, want check true, jobs %v, images %v", d.Check, d.Jobs, imageNames(d.Images), c.jobs, c.images)
 			}
 		})
 	}
 }
 
-// A run that publishes runs what reads the change, and each image that
-// reads the VERSION build argument, because the publish gives it a new
-// version. The operator's image reads it, and the ui's image does not.
+// A run that publishes runs what the change affects, and each image
+// that uses the VERSION build argument, because the publish gives it a
+// new version. The operator image uses it and the ui image does not.
 func TestARunThatPublishesRunsWhatReadsTheChangeAndTheNewVersion(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -169,7 +169,7 @@ func TestARunThatPublishesRunsWhatReadsTheChangeAndTheNewVersion(t *testing.T) {
 			published := map[string][]string{"operator": {"2026.09.27-001"}}
 			d := planGate(t, r, published, Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})["operator"]
 			if d.Publish != publishDev || !reflect.DeepEqual(d.Jobs, c.jobs) || !reflect.DeepEqual(imageNames(d.Images), c.images) {
-				t.Errorf("operator: publish %s, jobs %v, images %v; want jobs %v, images %v", d.Publish, d.Jobs, imageNames(d.Images), c.jobs, c.images)
+				t.Errorf("the plan for operator has publish %s, jobs %v, images %v, want publish %s, jobs %v, images %v", d.Publish, d.Jobs, imageNames(d.Images), publishDev, c.jobs, c.images)
 			}
 		})
 	}
@@ -182,6 +182,6 @@ func TestAChangeThatNoJobOrImageReadsRunsNothing(t *testing.T) {
 	r.write("base/notes.txt", "a note\n")
 	r.commit("a file that the base's image does not read")
 	if d := planGate(t, r, nil, Event{Name: "push", Ref: "refs/heads/topic", Before: before, Head: "HEAD"})["base"]; d.Check || d.Jobs != nil || d.Images != nil {
-		t.Errorf("base: %+v", d)
+		t.Errorf("the plan for base is %+v, want no check, no jobs, and no images", d)
 	}
 }
