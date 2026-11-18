@@ -1,7 +1,5 @@
-# The node plugin. Every node holds a copy of its own, so the plugin
-# runs on every node. The driver container serves the CSI socket and
-# holds the store. The registrar container tells the kubelet where that
-# socket is.
+# The node plugin runs on every node, because each node keeps its own
+# copy of each volume.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -10,8 +8,9 @@ spec:
   selector:
     matchLabels:
       app: per-node-csi-driver-node
-  # One node at a time. A node whose plugin is restarting publishes and
-  # unpublishes nothing, so a pod that starts or stops there waits.
+  # While the plugin restarts on a node, a pod with a volume of this
+  # driver cannot start or stop there, so the rollout restarts one node
+  # at a time.
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
@@ -22,15 +21,15 @@ spec:
         app: per-node-csi-driver-node
     spec:
       serviceAccountName: per-node-csi-driver
-      # The plugin stops last at shutdown, so a pod that is still
-      # stopping keeps its mount until it is gone.
+      # During a graceful node shutdown, the kubelet stops critical pods
+      # after the other pods, so the plugin is still running to unpublish
+      # their volumes.
       priorityClassName: system-node-critical
-      # A node that holds a volume needs the plugin whatever else the
-      # node is marked with, and liken taints a node while it starts.
+      # Every node needs the plugin to publish and unpublish volumes,
+      # whatever taints the node has, including the not-ready taint.
       tolerations:
         - operator: Exists
       containers:
-        # The driver.
         - name: driver
           image: ghcr.io/liken-sh/per-node-csi-driver:latest
           args:
@@ -38,23 +37,21 @@ spec:
             - --node-id=$(NODE_NAME)
             - --store=/var/lib/liken/pod-storage/per-node
             - --metrics=:9200
-          # The metrics are on the pod's own address, not a host
-          # port: a hostPort cannot be held to the node's loopback, and
-          # a scrape reaches the pod through the cluster network. 9200
-          # is the port every process serves metrics on, milestone 65.
+          # Prometheus scrapes the pod's address on the cluster network.
+          # No hostPort, because a hostPort opens the port on every
+          # address of the node. liken components serve metrics on port
+          # 9200 by convention.
           ports:
             - name: metrics
               containerPort: 9200
           env:
-            # NodeGetInfo answers with the node's name, and the manifest
-            # names no machine, so the name comes from the downward API.
+            # NodeGetInfo returns this name as the node ID.
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-          # A bind mount onto a target path under the kubelet's pod
-          # directory needs a privileged container, and so does the
-          # mount propagation below.
+          # The bind mount onto the target path and the Bidirectional
+          # mount propagation below both need a privileged container.
           securityContext:
             privileged: true
           resources:
@@ -66,24 +63,21 @@ spec:
           volumeMounts:
             - name: socket
               mountPath: /csi
-            # A mount this container makes under the pod directory has
-            # to reach the host, or the workload's container never sees
-            # the copy.
+            # Bidirectional, so a mount that the driver makes here
+            # propagates to the host's mount namespace, where the
+            # container runtime binds it into the workload's container.
             - name: pods
               mountPath: /var/lib/kubelet/pods
               mountPropagation: Bidirectional
             - name: store
               mountPath: /var/lib/liken/pod-storage/per-node
-        # The registrar, an upstream sidecar, is the whole registration.
-        # It reads the driver's name over the socket and tells the
-        # kubelet where to find the socket.
+        # The upstream registrar reads the driver's name over the socket
+        # and registers the socket's host path with the kubelet.
         - name: registrar
           image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.18.0
           args:
             - --csi-address=/csi/csi.sock
             - --kubelet-registration-path=/var/lib/kubelet/plugins/per-node.liken.sh/csi.sock
-          # The registrar reads one socket and serves another, so it
-          # needs no privilege.
           securityContext:
             capabilities:
               drop: ["ALL"]
@@ -101,32 +95,27 @@ spec:
             - name: registration
               mountPath: /registration
       volumes:
-        # DirectoryOrCreate on all four, because a node that has never
-        # run this driver has none of these paths.
-        #
-        # The driver's own directory, where it serves the socket the
-        # kubelet and the registrar call.
+        # Each path is DirectoryOrCreate, because a node that has never
+        # run this driver does not have it.
         - name: socket
           hostPath:
             path: /var/lib/kubelet/plugins/per-node.liken.sh
             type: DirectoryOrCreate
-        # Where the kubelet discovers plugins.
         - name: registration
           hostPath:
             path: /var/lib/kubelet/plugins_registry
             type: DirectoryOrCreate
-        # The kubelet's pod directory, where every publish target path
-        # lives. The path is the same on both sides, because the kubelet
-        # names the target path in host terms and the driver mounts
-        # there.
+        # The container path equals the host path, because the kubelet
+        # sends each target path as a host path and the driver mounts at
+        # that path.
         - name: pods
           hostPath:
             path: /var/lib/kubelet/pods
             type: DirectoryOrCreate
-        # The store: one copy per handle under copies/ and one hold per
-        # published target under holds/. On liken, /var/lib/liken/pod-storage
-        # is the partition that holds pod volumes, so a copy is a tenant
-        # of the same disk as every other volume on the node.
+        # The store has one copy per volume handle under copies/ and a
+        # mount record for each published target under holds/. On liken,
+        # /var/lib/liken/pod-storage is the partition for pod volumes, so
+        # the copies share a disk with the node's other pod volumes.
         - name: store
           hostPath:
             path: /var/lib/liken/pod-storage/per-node

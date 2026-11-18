@@ -1,7 +1,6 @@
-# The driver's identity in the cluster. The kubelet and the registrar
-# reach the driver over a socket, not the API. The driver reads the
-# PersistentVolumes to learn which copies a volume still names, and it
-# posts Events where a person reads why a mount was refused.
+# The node plugin's pods run as this account. Only the driver container
+# calls the Kubernetes API. The registrar talks to the kubelet and the
+# driver over Unix sockets.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -12,14 +11,15 @@ kind: ClusterRole
 metadata:
   name: per-node-csi-driver
 rules:
-  # The sweep watches every PersistentVolume. The kubelet never tells a
-  # node plugin that a volume was deleted, so the watch is how a
-  # deletion reaches the copies on the node.
+  # The sweep watches PersistentVolumes, because neither CSI nor the
+  # kubelet calls a node plugin when a PersistentVolume is deleted. The
+  # sweep deletes the copy of a volume whose PersistentVolume is gone.
   - apiGroups: [""]
     resources: [persistentvolumes]
     verbs: [get, list, watch]
-  # An Event on the pod is where a person reads why a mount was
-  # refused. The pod is in any namespace, so the rule is cluster-wide.
+  # The driver posts an Event on the pod whose mount it refused, so
+  # kubectl describe shows the reason. The pod can be in any namespace,
+  # so the rule is cluster-wide.
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]

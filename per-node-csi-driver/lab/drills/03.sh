@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Drill 03: a bad handle is refused. A PersistentVolume names a handle
-# the driver cannot put under the store. The pod never runs, and its
-# events say why.
+# Drill 03: the driver refuses to mount a volume whose handle is invalid.
+# The pod that mounts the volume never runs, and its Events give the
+# reason.
 set -euo pipefail
 
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,8 +10,9 @@ KUBECTL="$LAB/kubectl"
 IMAGE="${IMAGE:-debian:sid-slim}"
 NAMESPACE=drill-03
 VOLUME=drill-03-store
-# A handle with a / in it. One path element under the store can never
-# hold a separator.
+# The driver uses the handle as a directory name in the store, so it
+# accepts only a DNS-1123 subdomain name. A capital letter and a slash
+# both break that rule.
 HANDLE='Bad/Handle'
 
 EVENT_DEADLINE="${EVENT_DEADLINE:-240}"
@@ -99,7 +100,7 @@ spec:
         claimName: store
 YAML
 
-echo "drill 03: the pod's events say why"
+echo "drill 03: the pod's Events give the reason"
 wait_for_event "PerNodeVolumeRefused"
 wait_for_event "DNS-1123 subdomain name"
 

@@ -1,8 +1,11 @@
 package main
 
-// handle.go validates the volume handles the driver accepts. A handle
-// is one path element under the store, so a handle the filesystem
-// would read as a path, or as a step out of the store, is refused.
+// handle.go validates volume handles. The driver uses a handle as the
+// name of a directory under the store. A handle must be a DNS-1123
+// subdomain name, the rule for the name of a PersistentVolume, so that
+// a handle can be the same as its PersistentVolume's name. The rule
+// also refuses a slash, ".", and "..", which would put the directory
+// outside the store.
 
 import (
 	"regexp"
@@ -14,22 +17,20 @@ import (
 // handleLimit is the longest DNS-1123 subdomain name, in characters.
 const handleLimit = 253
 
-// handleShape is the shape of a DNS-1123 subdomain name: segments of
-// lower-case letters, digits, and -, each starting and ending with a
-// letter or a digit, joined by dots. It holds no / and no upper-case
-// letter, and no segment is empty.
+// handleShape matches a DNS-1123 subdomain name: dot-separated segments
+// of lower-case letters, digits, and dashes, where each segment starts
+// and ends with a letter or digit.
 var handleShape = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
 
-// checkHandle returns nil when the handle is a name the driver can put
-// under the store, and an InvalidArgument status that says why when it
-// is not.
+// checkHandle returns nil when the handle is safe to use as a directory
+// name under the store, and an InvalidArgument status otherwise.
 func checkHandle(handle string) error {
 	switch {
 	case handle == "":
-		return status.Error(codes.InvalidArgument, "volume_id: the call names no volume")
+		return status.Error(codes.InvalidArgument, "volume_id is empty")
 	case len(handle) > handleLimit:
 		return status.Errorf(codes.InvalidArgument,
-			"volume_id: %q is %d characters, and a handle takes at most %d",
+			"volume_id: %q is %d characters, and the limit is %d",
 			handle, len(handle), handleLimit)
 	case !handleShape.MatchString(handle):
 		return status.Errorf(codes.InvalidArgument,

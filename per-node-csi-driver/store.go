@@ -1,31 +1,32 @@
 package main
 
-// store.go holds the driver's two directories on the node: one copy per
-// handle under copies/, and one hold per published target under holds/.
+// store.go lays out the driver's directory on the node. copies/ has
+// one directory for each volume handle, which is the volume's copy.
+// holds/ has one directory for each handle that a pod has published,
+// with one mount record file for each target path the handle is
+// published at. The directory keeps the name holds/ because the records
+// on a node's disk must still load after an upgrade.
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"golang.org/x/sys/unix"
 )
 
-// copiesDirectory holds one directory per handle, the copy.
-// holdsDirectory holds one directory per held handle, with one file in
-// it for each target a pod published the handle at.
 const (
-	copiesDirectory = "copies"
-	holdsDirectory  = "holds"
+	copiesDirectory  = "copies"
+	recordsDirectory = "holds"
 )
 
-// copyMode is the mode of every copy. A pod runs as any user and the
-// CSIDriver object sets fsGroupPolicy to None, so the directory itself
-// has to let any user write it.
+// A pod can run as any user, and the CSIDriver sets fsGroupPolicy to
+// None, so the kubelet does not change the copy's group. So every user
+// must be able to write the copy.
 const copyMode = 0o777
 
-// store is the root directory the two subdirectories live under.
 type store struct {
 	root string
 }
@@ -34,37 +35,34 @@ func newStore(root string) *store {
 	return &store{root: root}
 }
 
-// copyPath is the directory the handle names on this node.
 func (s *store) copyPath(handle string) string {
 	return filepath.Join(s.root, copiesDirectory, handle)
 }
 
-// holdsPath is the directory of the handle's holds on this node.
-func (s *store) holdsPath(handle string) string {
-	return filepath.Join(s.root, holdsDirectory, handle)
+func (s *store) recordsPath(handle string) string {
+	return filepath.Join(s.root, recordsDirectory, handle)
 }
 
-// holdPath is the file that records the pod that published the handle
-// at the target. The file is named by a hash of the target, because a
-// target is a path, and a path is not a file name.
-func (s *store) holdPath(handle, target string) string {
+// recordPath names the record file after a hash of the target, because the
+// target is a path and has slashes in it.
+func (s *store) recordPath(handle, target string) string {
 	sum := sha256.Sum256([]byte(target))
-	return filepath.Join(s.holdsPath(handle), hex.EncodeToString(sum[:16]))
+	return filepath.Join(s.recordsPath(handle), hex.EncodeToString(sum[:16]))
 }
 
-// makeCopy creates the handle's directory when it is absent. It sets
-// the mode again after MkdirAll, because the umask removes bits from
-// the mode MkdirAll asks for.
+// makeCopy calls Chmod after MkdirAll, because the umask removes bits
+// from the mode that MkdirAll sets.
 func (s *store) makeCopy(handle string) error {
 	path := s.copyPath(handle)
 	if err := os.MkdirAll(path, copyMode); err != nil {
-		return err
+		return fmt.Errorf("creating the copy directory: %w", err)
 	}
 	return os.Chmod(path, copyMode)
 }
 
-// handles returns every handle that has a copy in the store, and nil
-// when the store has never held one.
+// handles returns the handle of every copy in the store. It returns
+// nil when the copies directory cannot be read, such as when no copy
+// was ever made.
 func (s *store) handles() []string {
 	entries, err := os.ReadDir(filepath.Join(s.root, copiesDirectory))
 	if err != nil {
@@ -77,14 +75,11 @@ func (s *store) handles() []string {
 	return found
 }
 
-// removeCopy removes the handle's directory and everything in it. The
-// sweep is its only caller. An unpublish removes nothing.
 func (s *store) removeCopy(handle string) error {
 	return os.RemoveAll(s.copyPath(handle))
 }
 
-// copySize returns the bytes the copy's regular files hold, which is
-// what NodeGetVolumeStats reports as used.
+// copySize returns the total size of the regular files under dir.
 func copySize(dir string) (int64, error) {
 	var total int64
 	err := filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
@@ -100,7 +95,7 @@ func copySize(dir string) (int64, error) {
 }
 
 // spaceOf returns the available and total bytes of the filesystem that
-// holds the path. Every copy on the node shares that filesystem.
+// contains path. Every copy on the node shares that filesystem.
 func spaceOf(path string) (int64, int64, error) {
 	var filesystem unix.Statfs_t
 	if err := unix.Statfs(path, &filesystem); err != nil {

@@ -7,31 +7,29 @@ This skill is the guide at https://liken.sh/per-node/docs/guides/cache/, emitted
 
 # Give pods a per-node cache
 
-A named cache is a directory that one or more pods fill with items they
-can make again, such as decoded art or fetched files. When a copy lacks
-an item, the pod makes it again. A pod that moves to a new node starts
-with an empty cache and warms it. A pod that comes back to a node it
-ran on before has the items it made there.
+A cache on this driver is a directory that pods fill with items they
+can make again, such as decoded art or fetched files. A pod that moves
+to a new node starts with an empty cache there and fills it. A pod
+that comes back to a node it ran on before finds the items it made
+there.
 
-The objects are the same two as a
+A cache uses the same two objects as a
 [replicated store](https://liken.sh/per-node/docs/guides/replicated-store/): a `PersistentVolume` that
 names the driver and the handle, and a `PersistentVolumeClaim` that
-binds to it. Take the manifests from that guide and give the volume a
-name of its own. The access mode is `ReadWriteMany`, because many nodes
-mount the one volume read-write, and each node holds its own copy.
+binds to it. Copy the manifests from that guide and give the volume
+its own name. Use the access mode `ReadWriteMany`, so that pods on
+any node can mount the cache.
 
-No process keeps cache copies in agreement, and a cache does not need
-agreement. An item made on one node is not on the next, and a pod on the
-next node makes it again. A single-pod cache therefore needs no
-anti-affinity. With several pods, each pod warms the copy on its own
-node, and pods on the same node share that node's copy. Two pods that
-make the same item at once must not write over each other, so write
-each item to a temporary file and rename it into place, or take a lock
-on the item with `flock`.
+Nothing keeps the copies of a cache in agreement. When an item is
+missing on one node, the pod there makes it again. So a cache needs no
+anti-affinity. With several pods, each pod fills the copy on its own
+node, and pods on the same node share that copy. Two pods that make the same item at the same time must not write
+over each other, so write each item to a temporary file and rename it
+into place, or take a lock on the item with `flock`.
 
-The driver keeps no size budget. A cache grows until the workload trims
-it or the filesystem that holds the store fills. Every copy shares that
-filesystem with every other volume on the node, so a cache that grows
-without a trim takes space from them. The
-[gauge](https://liken.sh/per-node/docs/reference/metrics/) reports each copy's bytes, so a person
-can watch a cache grow.
+The driver sets no size limit. A cache grows until the workload trims
+it or the filesystem of the store is full. Every copy on the node
+shares that filesystem with the node's other volumes, so a cache that
+is never trimmed takes space from them. The
+[`per_node_csi_copy_bytes` gauge](https://liken.sh/per-node/docs/reference/metrics/) reports the
+size of each copy, so you can watch a cache grow.

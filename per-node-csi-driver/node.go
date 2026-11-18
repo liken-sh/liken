@@ -1,8 +1,5 @@
 package main
 
-// node.go implements the CSI Node service. The kubelet calls it to mount a
-// volume in a pod and to remove that mount.
-
 import (
 	"context"
 	"log/slog"
@@ -14,71 +11,62 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// node implements the Node service and records this node's published copies.
 type node struct {
 	csi.UnimplementedNodeServer
-	nodeID   string
-	store    *store
-	mounts   mountSyscalls
-	events   *events
-	readings *metrics
-	logger   *slog.Logger
-	// mounted asks the kernel whether a path is still a mount. A restarted
-	// driver asks it about every hold.
-	//
-	// mountinfo is the file mounted reads. It is a field so a test can
-	// name a file of its own.
+	nodeID  string
+	store   *store
+	mounts  mountSyscalls
+	events  *events
+	metrics *metrics
+	logger  *slog.Logger
+	// mounted reports whether a path is a mount point in the mountinfo
+	// file. The file is a field so a test can supply its own mount table.
 	mounted   func(string) bool
 	mountinfo string
-	// space reads the filesystem that NodeGetVolumeStats reports as
-	// available and total. It is a field so a test can drive a driver
-	// whose kernel refused the reading.
+	// space is a field so a test can make it fail.
 	space func(string) (int64, int64, error)
 
-	// holds maps each handle to the holds on it, by target. A pod's
-	// target is unique to the pod, because the kubelet puts the pod's
-	// UID in the path.
-	mu    sync.Mutex
-	holds map[string]map[string]hold
+	// records maps each handle to its mount records, keyed by target
+	// path. The kubelet puts the pod's UID in the target path, so no two
+	// pods share a target.
+	mu      sync.Mutex
+	records map[string]map[string]mountRecord
 }
 
-// newNode builds the Node service around the store the flags named,
-// with the kernel's own mount calls and mount table.
-func newNode(cfg *config, posting *events, readings *metrics, logger *slog.Logger) *node {
-	answering := &node{
+func newNode(cfg *config, events *events, metrics *metrics, logger *slog.Logger) *node {
+	n := &node{
 		nodeID:    cfg.nodeID,
 		store:     newStore(cfg.store),
 		mounts:    kernelMounts{},
-		events:    posting,
-		readings:  readings,
+		events:    events,
+		metrics:   metrics,
 		logger:    logger,
 		mountinfo: mountTable,
 		space:     spaceOf,
-		holds:     map[string]map[string]hold{},
+		records:   map[string]map[string]mountRecord{},
 	}
-	answering.mounted = func(path string) bool { return mountedNow(answering.mountinfo, path) }
-	return answering
+	n.mounted = func(path string) bool { return mountedNow(n.mountinfo, path) }
+	return n
 }
 
-// NodeGetInfo returns the node name and declares no topology. Every node
-// keeps its own copy, so no node is closer to a volume than another.
+// NodeGetInfo returns no topology, so the scheduler can put a pod that
+// uses the volume on any node. Each node makes its own copy.
 func (n *node) NodeGetInfo(
 	context.Context, *csi.NodeGetInfoRequest,
 ) (*csi.NodeGetInfoResponse, error) {
 	return &csi.NodeGetInfoResponse{NodeId: n.nodeID}, nil
 }
 
-// NodeGetCapabilities declares GET_VOLUME_STATS and
-// SINGLE_NODE_MULTI_WRITER. A publish is a mkdir and a bind mount, so
-// there is nothing to stage, and a copy has no size of its own to
-// expand.
+// NodeGetCapabilities lists no STAGE_UNSTAGE_VOLUME, because a publish
+// is only a mkdir and a bind mount, and no EXPAND_VOLUME, because a copy
+// has no size limit.
 //
-// SINGLE_NODE_MULTI_WRITER tells the kubelet to send
-// SINGLE_NODE_SINGLE_WRITER for a ReadWriteOncePod claim, where it
-// otherwise sends SINGLE_NODE_WRITER. NodePublishVolume reads no access
-// mode, so every mode gets the same bind of this node's copy. The
-// scheduler and the kubelet, not the driver, keep a ReadWriteOncePod
-// claim to one pod in the cluster.
+// SINGLE_NODE_MULTI_WRITER makes the kubelet send the CSI access mode
+// that matches the claim: SINGLE_NODE_SINGLE_WRITER for
+// ReadWriteOncePod and SINGLE_NODE_MULTI_WRITER for ReadWriteOnce.
+// Without it, the kubelet sends SINGLE_NODE_WRITER for both.
+// NodePublishVolume ignores the access mode, so every mode gets the same
+// bind mount.
 func (n *node) NodeGetCapabilities(
 	context.Context, *csi.NodeGetCapabilitiesRequest,
 ) (*csi.NodeGetCapabilitiesResponse, error) {
@@ -90,8 +78,6 @@ func (n *node) NodeGetCapabilities(
 	}, nil
 }
 
-// rpcCapability wraps one RPC type in the message NodeGetCapabilities
-// returns.
 func rpcCapability(kind csi.NodeServiceCapability_RPC_Type) *csi.NodeServiceCapability {
 	return &csi.NodeServiceCapability{
 		Type: &csi.NodeServiceCapability_Rpc{
@@ -100,15 +86,15 @@ func rpcCapability(kind csi.NodeServiceCapability_RPC_Type) *csi.NodeServiceCapa
 	}
 }
 
-// NodePublishVolume gives the pod this node's copy of the handle, and
-// makes the directory on the first publish on this node. Every pod on
+// NodePublishVolume bind-mounts this node's copy of the handle at the
+// target path, and creates the copy when it does not exist. Every pod on
 // the node that publishes the handle gets the same copy. The driver
-// reads no access mode and refuses no second pod, because Kubernetes
-// already enforces the mode: ReadWriteOncePod admits one pod in the
-// cluster, and ReadWriteOnce and ReadWriteMany admit any number of pods
-// on a node. A workload whose pods must not share a copy keeps them on
-// different nodes with required pod anti-affinity. The kubelet retries
-// a publish of the same target, and a retry mounts nothing again.
+// ignores the access mode and does not refuse a second pod, because the
+// scheduler and the kubelet enforce the mode: ReadWriteOncePod allows
+// one pod in the cluster, and ReadWriteOnce and ReadWriteMany allow any
+// number of pods on a node. Pods that must not share a copy need required pod
+// anti-affinity to put them on different nodes. A retried publish for a
+// target that already has a mount record succeeds and mounts nothing.
 func (n *node) NodePublishVolume(
 	ctx context.Context, request *csi.NodePublishVolumeRequest,
 ) (*csi.NodePublishVolumeResponse, error) {
@@ -117,38 +103,38 @@ func (n *node) NodePublishVolume(
 	pod := podOf(request.GetVolumeContext())
 
 	if err := checkHandle(handle); err != nil {
-		n.events.refuse(pod, reasonRefused,
-			status.Convert(err).Message())
+		n.events.warn(pod, reasonRefused,
+			"The volume handle cannot be a directory name in the store: "+status.Convert(err).Message())
 		return nil, err
 	}
 	if target == "" {
-		return nil, status.Error(codes.InvalidArgument, "target_path: the call names no path")
+		return nil, status.Error(codes.InvalidArgument, "target_path is empty")
 	}
 
-	if n.holding(handle, target) {
+	if n.published(handle, target) {
 		return &csi.NodePublishVolumeResponse{}, nil
 	}
 
 	if err := n.mount(request, handle, target); err != nil {
-		n.readings.mountFailed()
-		n.events.refuse(pod, reasonMountFailed,
-			status.Convert(err).Message())
+		n.metrics.mountFailed()
+		n.events.warn(pod, reasonMountFailed,
+			"The copy was not mounted into the pod: "+status.Convert(err).Message())
 		return nil, err
 	}
-	n.keepHold(ctx, handle, hold{
+	n.saveRecord(ctx, handle, mountRecord{
 		PodUID:       pod.uid,
 		PodName:      pod.name,
 		PodNamespace: pod.namespace,
 		Target:       target,
 	})
-	n.logger.InfoContext(ctx, "published", "volume", handle, "target", target)
+	n.logger.InfoContext(ctx, "Published the volume", "volume", handle, "target", target)
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
-// mount makes the copy, makes the target, and binds the copy onto the
-// target. Any mount at the target comes away first, because a driver
-// that restarted left its own mount there, and a second bind would
-// stack on top of it.
+// mount unmounts the target before it binds the copy, because a mount
+// from an earlier publish can be at the target with no record for it,
+// such as after a restart that followed a failed write of the record
+// file. A second bind would stack on top of the first.
 func (n *node) mount(
 	request *csi.NodePublishVolumeRequest, handle, target string,
 ) error {
@@ -167,9 +153,9 @@ func (n *node) mount(
 	return nil
 }
 
-// NodeUnpublishVolume removes the mount and releases the hold at its
-// target. Every other pod's hold on the handle stays. It removes nothing
-// under copies/, because the copy outlives its pods.
+// NodeUnpublishVolume unmounts the target and deletes its mount record. It
+// keeps the copy, so a later pod on this node gets the same files. Only
+// the sweep deletes a copy.
 func (n *node) NodeUnpublishVolume(
 	ctx context.Context, request *csi.NodeUnpublishVolumeRequest,
 ) (*csi.NodeUnpublishVolumeResponse, error) {
@@ -177,57 +163,56 @@ func (n *node) NodeUnpublishVolume(
 	target := request.GetTargetPath()
 	switch {
 	case handle == "":
-		return nil, status.Error(codes.InvalidArgument, "volume_id: the call names no volume")
+		return nil, status.Error(codes.InvalidArgument, "volume_id is empty")
 	case target == "":
-		return nil, status.Error(codes.InvalidArgument, "target_path: the call names no path")
+		return nil, status.Error(codes.InvalidArgument, "target_path is empty")
 	}
 
 	if err := unbind(n.mounts, target); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	// os.Remove, never os.RemoveAll. A detached mount leaves an empty
-	// directory, so a target that still holds files is a mount the
-	// kernel did not detach. A recursive delete there would walk into
-	// the copy and destroy the node's data. A target that is already
-	// gone is an unpublish the kubelet repeated.
+	// os.Remove, not os.RemoveAll. After the unmount the target is an
+	// empty directory, so a target that still has files is still a
+	// mount, and a recursive delete would delete the copy's files. A
+	// target that is already gone means the kubelet repeated the call.
 	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	// The copy's bytes leave the gauge only with the last hold, because
-	// NodeGetVolumeStats keeps reading the copy for every pod that still
-	// mounts it.
-	if n.dropHold(ctx, handle, target) {
-		n.readings.forget(handle)
+	// Delete the copy's size series only after its last record, because
+	// the kubelet keeps calling NodeGetVolumeStats for each pod that
+	// still mounts the copy.
+	if n.deleteRecord(ctx, handle, target) {
+		n.metrics.forget(handle)
 	}
-	n.logger.InfoContext(ctx, "unpublished", "volume", handle, "target", target)
+	n.logger.InfoContext(ctx, "Unpublished the volume", "volume", handle, "target", target)
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
 
-// NodeGetVolumeStats reports the copy's bytes as used, and the
-// filesystem that holds the store as available and total. Every copy on
-// the node shares that filesystem with every other volume there, so the
-// available bytes are the node's and not the copy's.
+// NodeGetVolumeStats returns the size of the copy's regular files as
+// used bytes. Available and total are those of the store's filesystem,
+// which every copy on the node shares, so they describe the node and not
+// the copy.
 func (n *node) NodeGetVolumeStats(
 	_ context.Context, request *csi.NodeGetVolumeStatsRequest,
 ) (*csi.NodeGetVolumeStatsResponse, error) {
 	handle := request.GetVolumeId()
 	switch {
 	case handle == "":
-		return nil, status.Error(codes.InvalidArgument, "volume_id: the call names no volume")
+		return nil, status.Error(codes.InvalidArgument, "volume_id is empty")
 	case request.GetVolumePath() == "":
-		return nil, status.Error(codes.InvalidArgument, "volume_path: the call names no path")
+		return nil, status.Error(codes.InvalidArgument, "volume_path is empty")
 	}
 
 	used, err := copySize(n.store.copyPath(handle))
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound,
-			"volume_id: %s has no copy on %s: %s", handle, n.nodeID, err)
+			"volume_id: node %s has no copy of %s: %s", n.nodeID, handle, err)
 	}
 	available, total, err := n.space(n.store.root)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	n.readings.record(handle, used)
+	n.metrics.record(handle, used)
 	return &csi.NodeGetVolumeStatsResponse{
 		Usage: []*csi.VolumeUsage{{
 			Unit:      csi.VolumeUsage_BYTES,
@@ -238,11 +223,11 @@ func (n *node) NodeGetVolumeStats(
 	}, nil
 }
 
-// NodeExpandVolume is not served. A copy takes what the store's
-// filesystem has, and the driver keeps no size limit to raise.
+// NodeExpandVolume returns Unimplemented, because the driver sets no
+// size limit on a copy.
 func (n *node) NodeExpandVolume(
 	context.Context, *csi.NodeExpandVolumeRequest,
 ) (*csi.NodeExpandVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented,
-		"NodeExpandVolume: a copy has no size of its own")
+		"NodeExpandVolume: the driver sets no size limit on a copy")
 }

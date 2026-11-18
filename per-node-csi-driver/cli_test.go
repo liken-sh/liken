@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// stopped is a context that is already over, so run serves and stops
+// stopped is a context that has ended, so run serves and returns
 // without waiting for a signal.
 func stopped(t *testing.T) context.Context {
 	t.Helper()
@@ -21,8 +21,6 @@ func stopped(t *testing.T) context.Context {
 	return ctx
 }
 
-// temporaryFlags puts the socket and the store in a temporary directory
-// of the test's own.
 func temporaryFlags(t *testing.T) []string {
 	t.Helper()
 	dir := t.TempDir()
@@ -30,8 +28,7 @@ func temporaryFlags(t *testing.T) []string {
 		"--node-id", "node-1",
 		"--endpoint", "unix://" + filepath.Join(dir, "csi.sock"),
 		"--store", filepath.Join(dir, "store"),
-		// A test serves no metrics, because two tests would take the same
-		// port.
+		// Serve no metrics, because two tests would use the same port.
 		"--metrics", "",
 	}
 }
@@ -74,7 +71,7 @@ func TestRunExitCodes(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			out := &bytes.Buffer{}
 			if code := run(stopped(t), c.args(t), out); code != c.code {
-				t.Errorf("run answered %d with %q, want %d", code, out, c.code)
+				t.Errorf("run returned %d and printed %q, want %d", code, out, c.code)
 			}
 		})
 	}
@@ -83,17 +80,17 @@ func TestRunExitCodes(t *testing.T) {
 func TestTheVersionIsWhatTheBinaryWasBuiltFrom(t *testing.T) {
 	out := &bytes.Buffer{}
 	if code := run(stopped(t), []string{"--version"}, out); code != 0 {
-		t.Fatalf("run answered %d, want 0", code)
+		t.Fatalf("run returned %d, want 0", code)
 	}
 	if strings.TrimSpace(out.String()) != version {
 		t.Errorf("run printed %q, want %q", out, version)
 	}
 }
 
-func TestTheFlagsCarryTheDefaultsTheManualNames(t *testing.T) {
+func TestTheFlagDefaults(t *testing.T) {
 	cfg, err := parse([]string{"--node-id", "node-1"}, &bytes.Buffer{})
 	if err != nil {
-		t.Fatalf("parse: %v", err)
+		t.Fatalf("parsing the flags: %v", err)
 	}
 	if cfg.endpoint != "unix:///csi/csi.sock" {
 		t.Errorf("--endpoint defaults to %q, want unix:///csi/csi.sock", cfg.endpoint)
@@ -109,7 +106,7 @@ func TestTheFlagsCarryTheDefaultsTheManualNames(t *testing.T) {
 	}
 }
 
-func TestTheFlagsTakeWhatTheCommandLineNames(t *testing.T) {
+func TestTheFlagsReadTheCommandLine(t *testing.T) {
 	cfg, err := parse([]string{
 		"--node-id", "node-2",
 		"--endpoint", "unix:///run/csi.sock",
@@ -118,7 +115,7 @@ func TestTheFlagsTakeWhatTheCommandLineNames(t *testing.T) {
 		"--sweep-every", "15s",
 	}, &bytes.Buffer{})
 	if err != nil {
-		t.Fatalf("parse: %v", err)
+		t.Fatalf("parsing the flags: %v", err)
 	}
 	want := config{
 		endpoint:   "unix:///run/csi.sock",
@@ -128,14 +125,14 @@ func TestTheFlagsTakeWhatTheCommandLineNames(t *testing.T) {
 		sweepEvery: 15 * time.Second,
 	}
 	if *cfg != want {
-		t.Errorf("parse answered %+v, want %+v", *cfg, want)
+		t.Errorf("parse returned %+v, want %+v", *cfg, want)
 	}
 }
 
-func TestACommandLineWithNoNodeIdSaysSo(t *testing.T) {
+func TestACommandLineWithNoNodeIDFails(t *testing.T) {
 	out := &bytes.Buffer{}
 	if _, err := parse([]string{}, out); err == nil {
-		t.Fatal("parse answered no error, want one")
+		t.Fatal("parse returned no error, want one")
 	}
 	if !strings.Contains(out.String(), "--node-id is required") {
 		t.Errorf("parse printed %q, want it to name --node-id", out)
@@ -148,7 +145,7 @@ func TestAServerThatCannotBeBuiltEndsTheRun(t *testing.T) {
 		return nil, errors.New("the socket was taken")
 	}
 	if code := runWith(stopped(t), temporaryFlags(t), out, failing); code != 1 {
-		t.Errorf("runWith answered %d, want 1", code)
+		t.Errorf("runWith returned %d, want 1", code)
 	}
 	if !strings.Contains(out.String(), "the socket was taken") {
 		t.Errorf("runWith printed %q, want the reason in it", out)
@@ -159,14 +156,14 @@ func TestAServeThatFailsEndsTheRun(t *testing.T) {
 	out := &bytes.Buffer{}
 	failing := func(context.Context, *config, *slog.Logger) (*server, error) {
 		return &server{
-			serveOn:  func(listener net.Listener) error { return errors.New("the socket went away") },
-			stop:     func() {},
-			readings: newMetrics(),
-			logger:   quietLogger(),
+			serveOn: func(listener net.Listener) error { return errors.New("the socket went away") },
+			stop:    func() {},
+			metrics: newMetrics(),
+			logger:  quietLogger(),
 		}, nil
 	}
 	if code := runWith(stopped(t), temporaryFlags(t), out, failing); code != 1 {
-		t.Errorf("runWith answered %d, want 1", code)
+		t.Errorf("runWith returned %d, want 1", code)
 	}
 	if !strings.Contains(out.String(), "the socket went away") {
 		t.Errorf("runWith printed %q, want the reason in it", out)

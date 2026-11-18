@@ -19,35 +19,33 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api"
 )
 
-// postingTo builds the driver's clients on a fake API server that
-// holds the Events they post, through the same eventsFrom a driver in
-// a cluster runs. In a synctest bubble the recorder's writes take no
-// real time.
-func postingTo(t *testing.T, logger *slog.Logger) (*events, *eventstest.Events) {
+// fakeClusterEvents builds the driver's clients against a fake API server and
+// returns the fake, so a test can read the Events it stored.
+func fakeClusterEvents(t *testing.T, logger *slog.Logger) (*events, *eventstest.Events) {
 	t.Helper()
 	posted := &eventstest.Events{}
 	server := apiservertest.Start(t, posted.Around(http.NotFoundHandler()))
-	posting := eventsFrom(t.Context(), "node-1", logger,
+	e := eventsFrom(t.Context(), "node-1", logger,
 		func() (*rest.Config, error) { return server.Config(), nil })
-	return posting, posted
+	return e, posted
 }
 
-func TestAnEventLandsOnThePodTheKubeletNamed(t *testing.T) {
+func TestAnEventIsPostedOnThePodTheKubeletNamed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		posting, posted := postingTo(t, quietLogger())
-		posting.refuse(aPod("reader", "pod-uid-1"), reasonRefused, "volume_id: Bad/Handle is not a name the driver can use")
+		e, posted := fakeClusterEvents(t, quietLogger())
+		e.warn(aPod("reader", "pod-uid-1"), reasonRefused, "The volume handle cannot be a directory name in the store: volume_id: \"Bad/Handle\" is not a DNS-1123 subdomain name")
 		synctest.Wait()
 
-		held := posted.About("Pod", "reader")
-		if len(held) != 1 {
-			t.Fatalf("the pod carries %+v, want one Event", posted.List())
+		got := posted.About("Pod", "reader")
+		if len(got) != 1 {
+			t.Fatalf("the pod has %+v, want one Event", posted.List())
 		}
-		event := held[0]
+		event := got[0]
 		if event.InvolvedObject.Namespace != "example" || event.InvolvedObject.UID != "pod-uid-1" {
-			t.Errorf("the Event names %+v, want the pod example/reader", event.InvolvedObject)
+			t.Errorf("the Event is about %+v, want the pod example/reader", event.InvolvedObject)
 		}
 		if event.Type != kevents.TypeWarning || event.Reason != reasonRefused ||
-			event.Message != "volume_id: Bad/Handle is not a name the driver can use" {
+			event.Message != "The volume handle cannot be a directory name in the store: volume_id: \"Bad/Handle\" is not a DNS-1123 subdomain name" {
 			t.Errorf("the Event reads %s %s %q, want the Warning as posted",
 				event.Type, event.Reason, event.Message)
 		}
@@ -59,7 +57,7 @@ func TestAnEventLandsOnThePodTheKubeletNamed(t *testing.T) {
 	})
 }
 
-func TestAPodTheKubeletDidNotNameCarriesNoEvent(t *testing.T) {
+func TestAPodTheKubeletDidNotNameGetsNoEvent(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		pod  podReference
@@ -69,53 +67,52 @@ func TestAPodTheKubeletDidNotNameCarriesNoEvent(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				posting, posted := postingTo(t, quietLogger())
-				posting.refuse(c.pod, reasonRefused, "no")
+				e, posted := fakeClusterEvents(t, quietLogger())
+				e.warn(c.pod, reasonRefused, "no")
 				synctest.Wait()
-				if held := posted.List(); len(held) != 0 {
-					t.Errorf("the API server holds %+v, want no Event", held)
+				if got := posted.List(); len(got) != 0 {
+					t.Errorf("the API server has %+v, want no Event", got)
 				}
 			})
 		})
 	}
 }
 
-// The kubelet retries a refused mount with a backoff that grows to
-// about two minutes, so a pod whose publish fails for an hour is refused
-// about 37 times. The recorder folds each refusal into the first Event,
-// so the pod carries one Event with the count.
+// The kubelet retries a failed publish with a backoff that grows to
+// about two minutes, so a publish that fails for an hour is retried
+// about 37 times.
 func TestAnHourOfRefusalsIsOneEventWithACount(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering := testDriver(t)
-		answering.mounts.mountErr = unix.EPERM
+		d := testDriver(t)
+		d.mounts.mountErr = unix.EPERM
 		retried := publishing("example-store", filepath.Join(t.TempDir(), "mount"),
 			aPod("reader", "pod-uid-1"))
 		for range 37 {
-			answering.mounts.failAt = len(answering.mounts.mounts) + 1
-			if _, err := answering.NodePublishVolume(t.Context(), retried); err == nil {
-				t.Fatal("NodePublishVolume answered no error for a bind that failed")
+			d.mounts.failAt = len(d.mounts.mounts) + 1
+			if _, err := d.NodePublishVolume(t.Context(), retried); err == nil {
+				t.Fatal("NodePublishVolume returned no error for a bind that failed")
 			}
 			time.Sleep(97 * time.Second)
 		}
 		synctest.Wait()
 
-		refused := answering.posted.About("Pod", "reader")
+		refused := d.posted.About("Pod", "reader")
 		if len(refused) != 1 || refused[0].Reason != reasonMountFailed || refused[0].Count != 37 {
-			t.Errorf("the pod carries %+v, want one %s Event with a count of 37", refused, reasonMountFailed)
+			t.Errorf("the pod has %+v, want one %s Event with a count of 37", refused, reasonMountFailed)
 		}
 	})
 }
 
 func TestADriverOutsideAClusterPostsNoEvent(t *testing.T) {
 	written := &bytes.Buffer{}
-	posting := eventsFrom(t.Context(), "node-1", slog.New(slog.NewTextHandler(written, nil)),
+	e := eventsFrom(t.Context(), "node-1", slog.New(slog.NewTextHandler(written, nil)),
 		func() (*rest.Config, error) { return nil, errors.New("no cluster") })
-	if posting.client != nil || posting.recorder != nil {
+	if e.client != nil || e.recorder != nil {
 		t.Error("the driver built a client, want none")
 	}
-	posting.refuse(aPod("reader", "pod-uid-1"), reasonRefused, "no")
-	if !strings.Contains(written.String(), "no events") {
-		t.Errorf("the log reads %q, want it to say there are no events", written)
+	e.warn(aPod("reader", "pod-uid-1"), reasonRefused, "no")
+	if !strings.Contains(written.String(), "posts no Events") {
+		t.Errorf("the log reads %q, want it to say the driver posts no Events", written)
 	}
 }
 
@@ -125,14 +122,13 @@ func TestAClusterCredentialTheDriverCannotUsePostsNoEvent(t *testing.T) {
 		config *rest.Config
 	}{
 		{
-			// A rate the client builder cannot honour: it takes a
-			// queries-per-second with no burst to spend it from.
+			// The client builder rejects a QPS limit with a burst of 0.
 			name:   "a rate with no burst",
 			config: &rest.Config{Host: "https://127.0.0.1:6443", QPS: 1, Burst: 0},
 		},
 		{
-			// client-go builds no transport for two ways of finding a
-			// token at once.
+			// client-go cannot build a transport when both an exec
+			// provider and an auth provider supply the token.
 			name: "two token sources",
 			config: &rest.Config{Host: "https://127.0.0.1:6443", ExecProvider: &api.ExecConfig{},
 				AuthProvider: &api.AuthProviderConfig{Name: "gcp"}},
@@ -140,26 +136,26 @@ func TestAClusterCredentialTheDriverCannotUsePostsNoEvent(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			written := &bytes.Buffer{}
-			posting := eventsFrom(t.Context(), "node-1", slog.New(slog.NewTextHandler(written, nil)),
+			e := eventsFrom(t.Context(), "node-1", slog.New(slog.NewTextHandler(written, nil)),
 				func() (*rest.Config, error) { return c.config, nil })
-			if posting.client != nil || posting.recorder != nil {
+			if e.client != nil || e.recorder != nil {
 				t.Error("the driver built a client, want none")
 			}
-			if !strings.Contains(written.String(), "no events") {
-				t.Errorf("the log reads %q, want it to say there are no events", written)
+			if !strings.Contains(written.String(), "posts no Events") {
+				t.Errorf("the log reads %q, want it to say the driver posts no Events", written)
 			}
 		})
 	}
 }
 
-// The recorder sends a refused Event three times, 10 seconds apart,
-// and then logs it through the driver's own log.
-func TestAnEventTheClusterRefusesIsLoggedAndTheMountStands(t *testing.T) {
+// The recorder tries to post an Event three times, 10 seconds apart,
+// and then logs it as a warning in the driver's log.
+func TestAnEventTheAPIServerRejectsIsLoggedAsAWarning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		written := &bytes.Buffer{}
-		posting, posted := postingTo(t, slog.New(slog.NewTextHandler(written, nil)))
+		e, posted := fakeClusterEvents(t, slog.New(slog.NewTextHandler(written, nil)))
 		posted.Refuse(3)
-		posting.refuse(aPod("reader", "pod-uid-1"), reasonRefused, "no")
+		e.warn(aPod("reader", "pod-uid-1"), reasonRefused, "no")
 		time.Sleep(time.Minute)
 		synctest.Wait()
 
@@ -167,19 +163,19 @@ func TestAnEventTheClusterRefusesIsLoggedAndTheMountStands(t *testing.T) {
 			!strings.Contains(written.String(), "the API server is restarting") {
 			t.Errorf("the log reads %q, want a warning with the refusal", written)
 		}
-		if held := posted.List(); len(held) != 0 {
-			t.Errorf("the API server holds %+v, want no Event", held)
+		if got := posted.List(); len(got) != 0 {
+			t.Errorf("the API server has %+v, want no Event", got)
 		}
 	})
 }
 
-func TestADriverThatFindsNoClusterCredentialSaysSoOnce(t *testing.T) {
+func TestADriverWithNoClusterCredentialLogsThatItPostsNoEvents(t *testing.T) {
 	written := &bytes.Buffer{}
-	posting := newEvents(t.Context(), "node-1", slog.New(slog.NewTextHandler(written, nil)))
-	if posting.client != nil {
+	e := newEvents(t.Context(), "node-1", slog.New(slog.NewTextHandler(written, nil)))
+	if e.client != nil {
 		t.Error("a test process built a cluster client, want none")
 	}
-	if !strings.Contains(written.String(), "no events") {
-		t.Errorf("the log reads %q, want it to say there are no events", written)
+	if !strings.Contains(written.String(), "posts no Events") {
+		t.Errorf("the log reads %q, want it to say the driver posts no Events", written)
 	}
 }

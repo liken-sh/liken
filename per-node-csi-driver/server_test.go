@@ -21,8 +21,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// startServer is the fixture every service test uses: a server on a
-// socket in a temporary directory, and a client connected to it.
+// startServer returns a server on a socket in a temporary directory
+// and a client connected to it.
 func startServer(t *testing.T, logs io.Writer) *grpc.ClientConn {
 	t.Helper()
 	dir := t.TempDir()
@@ -40,7 +40,7 @@ func start(t *testing.T, cfg *config, logs io.Writer) *grpc.ClientConn {
 	t.Helper()
 	server, err := newServer(t.Context(), cfg, slog.New(slog.NewTextHandler(logs, nil)))
 	if err != nil {
-		t.Fatalf("newServer: %v", err)
+		t.Fatalf("building the server: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	served := make(chan error, 1)
@@ -48,26 +48,26 @@ func start(t *testing.T, cfg *config, logs io.Writer) *grpc.ClientConn {
 	t.Cleanup(func() {
 		cancel()
 		if err := <-served; err != nil {
-			t.Errorf("serve: %v", err)
+			t.Errorf("serving: %v", err)
 		}
 	})
 	client, err := grpc.NewClient(cfg.endpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		t.Fatalf("grpc.NewClient: %v", err)
+		t.Fatalf("creating the gRPC client: %v", err)
 	}
 	t.Cleanup(func() { client.Close() })
 	return client
 }
 
-func TestTheServerAnswersOnTheSocket(t *testing.T) {
+func TestTheServerRespondsOnTheSocket(t *testing.T) {
 	client := csi.NewIdentityClient(startServer(t, io.Discard))
 	info, err := client.GetPluginInfo(t.Context(), &csi.GetPluginInfoRequest{})
 	if err != nil {
-		t.Fatalf("GetPluginInfo: %v", err)
+		t.Fatalf("calling GetPluginInfo: %v", err)
 	}
 	if info.GetName() != driverName {
-		t.Errorf("GetPluginInfo named %q, want %q", info.GetName(), driverName)
+		t.Errorf("GetPluginInfo returned the name %q, want %q", info.GetName(), driverName)
 	}
 }
 
@@ -80,7 +80,7 @@ func TestTheServerRegistersTheNodeServiceAndNoControllerService(t *testing.T) {
 	_, err := csi.NewControllerClient(connection).ControllerGetCapabilities(
 		t.Context(), &csi.ControllerGetCapabilitiesRequest{})
 	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("the server answered %v, want Unimplemented from the Controller service", err)
+		t.Errorf("the server returned %v, want Unimplemented from the Controller service", err)
 	}
 }
 
@@ -100,27 +100,27 @@ func TestOperationNameIsTheGRPCMethodAfterItsLastSlash(t *testing.T) {
 }
 
 func TestMetricsInterceptorRecordsTheCallUnderItsOperationName(t *testing.T) {
-	readings := newMetrics()
+	m := newMetrics()
 	call := &grpc.UnaryServerInfo{FullMethod: "/csi.v1.Node/NodePublishVolume"}
-	handle := func(ctx context.Context, request any) (any, error) { return "answer", nil }
-	answer, err := metricsInterceptor(readings)(t.Context(), nil, call, handle)
-	if err != nil || answer != "answer" {
-		t.Fatalf("the interceptor answered (%v, %v), want (answer, nil)", answer, err)
+	handle := func(ctx context.Context, request any) (any, error) { return "response", nil }
+	response, err := metricsInterceptor(m)(t.Context(), nil, call, handle)
+	if err != nil || response != "response" {
+		t.Fatalf("the interceptor returned (%v, %v), want (response, nil)", response, err)
 	}
-	if got := testutil.ToFloat64(readings.reconcileErrors.WithLabelValues("NodePublishVolume")); got != 0 {
+	if got := testutil.ToFloat64(m.reconcileErrors.WithLabelValues("NodePublishVolume")); got != 0 {
 		t.Errorf("per_node_csi_reconcile_errors_total reads %v, want 0 for a call with no error", got)
 	}
 }
 
 func TestMetricsInterceptorCountsAnErrorUnderItsOperationName(t *testing.T) {
-	readings := newMetrics()
+	m := newMetrics()
 	call := &grpc.UnaryServerInfo{FullMethod: "/csi.v1.Node/NodePublishVolume"}
 	failed := errors.New("refused")
 	handle := func(ctx context.Context, request any) (any, error) { return nil, failed }
-	if _, err := metricsInterceptor(readings)(t.Context(), nil, call, handle); !errors.Is(err, failed) {
-		t.Fatalf("the interceptor answered %v, want %v", err, failed)
+	if _, err := metricsInterceptor(m)(t.Context(), nil, call, handle); !errors.Is(err, failed) {
+		t.Fatalf("the interceptor returned %v, want %v", err, failed)
 	}
-	if got := testutil.ToFloat64(readings.reconcileErrors.WithLabelValues("NodePublishVolume")); got != 1 {
+	if got := testutil.ToFloat64(m.reconcileErrors.WithLabelValues("NodePublishVolume")); got != 1 {
 		t.Errorf("per_node_csi_reconcile_errors_total reads %v, want 1", got)
 	}
 }
@@ -136,7 +136,7 @@ func TestTheServerRecordsTheReconcileMetricPerCall(t *testing.T) {
 	}
 	served, err := newServer(t.Context(), cfg, quietLogger())
 	if err != nil {
-		t.Fatalf("newServer: %v", err)
+		t.Fatalf("building the server: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	stopped := make(chan error, 1)
@@ -144,22 +144,22 @@ func TestTheServerRecordsTheReconcileMetricPerCall(t *testing.T) {
 	t.Cleanup(func() {
 		cancel()
 		if err := <-stopped; err != nil {
-			t.Errorf("serve: %v", err)
+			t.Errorf("serving: %v", err)
 		}
 	})
 
 	client, err := grpc.NewClient(cfg.endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		t.Fatalf("grpc.NewClient: %v", err)
+		t.Fatalf("creating the gRPC client: %v", err)
 	}
 	t.Cleanup(func() { client.Close() })
 	if _, err := csi.NewIdentityClient(client).GetPluginInfo(t.Context(), &csi.GetPluginInfoRequest{}); err != nil {
-		t.Fatalf("GetPluginInfo: %v", err)
+		t.Fatalf("calling GetPluginInfo: %v", err)
 	}
 
-	body := fetch(t, "http://"+served.metrics.Addr().String()+"/metrics")
+	body := fetch(t, "http://"+served.metricsListener.Addr().String()+"/metrics")
 	if !strings.Contains(body, `per_node_csi_reconcile_duration_seconds_count{kind="GetPluginInfo"} 1`) {
-		t.Errorf("the metrics listener answered %q, want one observation under GetPluginInfo", body)
+		t.Errorf("the metrics listener responded with %q, want one observation under GetPluginInfo", body)
 	}
 }
 
@@ -167,14 +167,14 @@ func TestTheServerWritesOneLinePerCall(t *testing.T) {
 	written := &bytes.Buffer{}
 	client := csi.NewIdentityClient(startServer(t, written))
 	if _, err := client.GetPluginInfo(t.Context(), &csi.GetPluginInfoRequest{}); err != nil {
-		t.Fatalf("GetPluginInfo: %v", err)
+		t.Fatalf("calling GetPluginInfo: %v", err)
 	}
 	if !strings.Contains(written.String(), "GetPluginInfo") {
 		t.Errorf("the log reads %q, want the call in it", written)
 	}
 }
 
-func TestTheServerTakesTheSocketAKilledPodLeftBehind(t *testing.T) {
+func TestTheServerReplacesTheSocketAKilledPodLeftBehind(t *testing.T) {
 	dir := t.TempDir()
 	socket := filepath.Join(dir, "csi.sock")
 	if err := os.WriteFile(socket, []byte("a dead pod's socket\n"), 0o600); err != nil {
@@ -187,7 +187,7 @@ func TestTheServerTakesTheSocketAKilledPodLeftBehind(t *testing.T) {
 		sweepEvery: time.Hour,
 	}, io.Discard))
 	if _, err := client.GetPluginInfo(t.Context(), &csi.GetPluginInfoRequest{}); err != nil {
-		t.Errorf("GetPluginInfo: %v", err)
+		t.Errorf("calling GetPluginInfo: %v", err)
 	}
 }
 
@@ -201,11 +201,11 @@ func TestTheServerServesTheMetricsListenerBesideTheSocket(t *testing.T) {
 		sweepEvery: time.Hour,
 	}, io.Discard))
 	if _, err := client.GetPluginInfo(t.Context(), &csi.GetPluginInfoRequest{}); err != nil {
-		t.Errorf("GetPluginInfo: %v", err)
+		t.Errorf("calling GetPluginInfo: %v", err)
 	}
 }
 
-func TestAServerThatCannotStartSaysWhy(t *testing.T) {
+func TestAServerThatCannotStartReturnsTheReason(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		make    func(t *testing.T) *config
@@ -268,10 +268,10 @@ func TestAServerThatCannotStartSaysWhy(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := newServer(t.Context(), c.make(t), quietLogger())
 			if err == nil {
-				t.Fatal("newServer answered no error, want one")
+				t.Fatal("newServer returned no error, want one")
 			}
 			if !strings.Contains(err.Error(), c.message) {
-				t.Errorf("newServer answered %q, want it to name %q", err, c.message)
+				t.Errorf("newServer returned %q, want it to name %q", err, c.message)
 			}
 		})
 	}
@@ -280,13 +280,13 @@ func TestAServerThatCannotStartSaysWhy(t *testing.T) {
 func TestServeReportsASocketThatWentAway(t *testing.T) {
 	failed := errors.New("the socket went away")
 	serving := &server{
-		serveOn:  func(net.Listener) error { return failed },
-		stop:     func() {},
-		readings: newMetrics(),
-		logger:   quietLogger(),
+		serveOn: func(net.Listener) error { return failed },
+		stop:    func() {},
+		metrics: newMetrics(),
+		logger:  quietLogger(),
 	}
 	if err := serving.serve(t.Context()); !errors.Is(err, failed) {
-		t.Errorf("serve answered %v, want %v", err, failed)
+		t.Errorf("serve returned %v, want %v", err, failed)
 	}
 }
 
@@ -294,29 +294,29 @@ func TestServeReportsAFailureThatFollowedTheStop(t *testing.T) {
 	failed := errors.New("the socket went away")
 	released := make(chan struct{})
 	serving := &server{
-		serveOn:  func(net.Listener) error { <-released; return failed },
-		stop:     func() { close(released) },
-		readings: newMetrics(),
-		logger:   quietLogger(),
+		serveOn: func(net.Listener) error { <-released; return failed },
+		stop:    func() { close(released) },
+		metrics: newMetrics(),
+		logger:  quietLogger(),
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if err := serving.serve(ctx); !errors.Is(err, failed) {
-		t.Errorf("serve answered %v, want %v", err, failed)
+		t.Errorf("serve returned %v, want %v", err, failed)
 	}
 }
 
-func TestServeTakesTheStopItAskedForAsNoFailure(t *testing.T) {
+func TestServeReturnsNoErrorForARequestedStop(t *testing.T) {
 	released := make(chan struct{})
 	serving := &server{
-		serveOn:  func(net.Listener) error { <-released; return grpc.ErrServerStopped },
-		stop:     func() { close(released) },
-		readings: newMetrics(),
-		logger:   quietLogger(),
+		serveOn: func(net.Listener) error { <-released; return grpc.ErrServerStopped },
+		stop:    func() { close(released) },
+		metrics: newMetrics(),
+		logger:  quietLogger(),
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if err := serving.serve(ctx); err != nil {
-		t.Errorf("serve answered %v, want no error", err)
+		t.Errorf("serve returned %v, want no error", err)
 	}
 }

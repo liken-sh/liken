@@ -1,44 +1,29 @@
-# The image is the binary alone on scratch. The driver runs no other
-# program, so nothing else is in it.
-
 FROM golang AS build
-# proxy.golang.org sometimes drops a module download partway through
-# the stream. With the default comma, `go` tries the origin only when
-# the proxy answers 404 or 410, so a dropped stream fails the build.
-# With a pipe, `go` fetches the module from its origin after any proxy
-# error, with the git that this image includes. `GOSUMDB` keeps its
-# default, so the checksum database still verifies a module that `go`
-# fetched from its origin.
+# proxy.golang.org sometimes drops a module download partway through.
+# With a comma, `go` falls back to the origin only when the proxy
+# returns 404 or 410, so a dropped download fails the build. With a
+# pipe, `go` falls back to the origin after any proxy error. The
+# checksum database still verifies a module fetched from its origin.
 ENV GOPROXY="https://proxy.golang.org|direct"
 WORKDIR /src
-# The module files come first, so a source edit reuses the cached
+# The module files are copied first, so a source edit reuses the cached
 # download layer.
 COPY go.mod go.sum ./
-# go.mod replaces the shared kubernetes module with ../kubernetes, and
-# the build takes that directory as a second build context named
-# kubernetes. It lands at /kubernetes, the same place relative to /src
-# that kubernetes/ has relative to this component. Its module file
-# comes first for the same reason as this module's.
+# go.mod replaces the kubernetes module with ../kubernetes, so the
+# build context kubernetes is copied to /kubernetes, which is
+# ../kubernetes from /src.
 COPY --from=kubernetes go.mod go.sum /kubernetes/
 RUN go mod download
 COPY --from=kubernetes . /kubernetes/
 COPY *.go ./
-# The version reaches the binary through -ldflags, so a running driver
-# names the release it was built from.
 ARG VERSION=dev
-# CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
-# static binary with no paths from the build machine in it.
-#
-# -s -w drops the symbol table and the DWARF data, which are a large
-# part of the binary, and every node that runs the driver pulls the
-# binary. To see that part, build the package once with -ldflags
-# "-s -w" and once without, and compare the sizes of the two files.
-# The driver reports its version through --version and its log, and a
-# panic's stack trace keeps its function names without the symbol
-# table, so nothing this project reads is lost.
+# The flags are the ones every Go image of liken uses: a static binary
+# with no paths of the build machine, no symbol table, and no DWARF
+# data. The driver reports VERSION through --version and in
+# GetPluginInfo.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /per-node-csi-driver .
-# The license files of the Go standard library and of each module that
-# the binary links. notices/go.sh says why the image needs them.
+# The license notices of the Go standard library and of each module
+# that the binary links.
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices .
 

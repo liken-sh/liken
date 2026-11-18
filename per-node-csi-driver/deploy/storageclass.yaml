@@ -1,13 +1,16 @@
-# The class a PersistentVolume and its claim both name to reach this
-# driver. It takes no parameters.
+# A PersistentVolume and its claim both set storageClassName to this
+# class. The driver provisions nothing, so a person creates each
+# PersistentVolume.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: per-node
 provisioner: per-node.liken.sh
-# Retain, because no controller runs a deleter. Deleting the claim
-# leaves the volume Released and every copy in place.
+# Retain, because the driver has no controller that deletes volumes.
+# When the claim is deleted, the PersistentVolume becomes Released, and
+# its copies stay on the nodes until the PersistentVolume is deleted.
 reclaimPolicy: Retain
-# Immediate, because the volume is written up front and no node is
-# closer to it than another.
+# Immediate, because the volume has no node affinity, so the claim can
+# bind before the scheduler places a pod. Each node makes its own copy
+# when a pod on it mounts the volume.
 volumeBindingMode: Immediate

@@ -5,32 +5,36 @@ weight: 10
 
 # A copy on each node
 
-A volume of this driver is a directory on each node, not one shared
-directory. A pod gets the copy on the node where it runs. The copy
-stays on that node when the pod leaves, and a pod that comes back to
-that node finds it again. A pod on a different node gets that node's
-copy, which starts empty. The driver never copies data between nodes.
+A volume of this driver is a separate directory on each node, not one
+shared directory. A pod gets the copy on the node where it runs. The
+copy stays on that node after the pod leaves, and a pod that comes
+back to that node finds it again. A pod on a different node gets that
+node's copy, which starts empty. The driver never copies data between
+nodes.
 
 So the driver fits a workload that can fill an empty copy by itself:
 
-- **A replicated store.** Several pods each hold a full copy of one
+- **A replicated store.** Several pods each keep a full copy of one
   data set, and keep the copies in agreement over the network. A new,
   empty copy catches up from the others.
 - **A cache.** Pods fill the directory with items they can make
-  again, such as decoded art or downloaded files. A copy that lacks an
-  item makes it.
+  again, such as decoded art or downloaded files. When a copy lacks an
+  item, the pod makes it.
 
-For any other workload, a file that one pod writes is missing when the
+For any other workload, a file that a pod writes is missing when the
 pod moves to another node.
 
-The driver has no controller and provisions nothing. You write a
+The driver has no controller and does not create volumes. You write a
 `PersistentVolume` that names the driver and the volume's handle, and a
 `PersistentVolumeClaim` that binds to it. Use the access mode
-`ReadWriteMany` for a volume that pods on many nodes mount, because
-each node writes only its own copy, or `ReadWriteOncePod` for a volume
-that one pod at a time mounts. Every pod on a node that mounts a
-volume shares that node's copy. Each copy is kept under
-`/var/lib/liken/pod-storage`, on the partition that the node's
+`ReadWriteMany` for a volume that pods on many nodes mount, or
+`ReadWriteOncePod` for a volume that only one pod in the whole cluster
+mounts.
+Every pod on a node that mounts the volume shares that node's copy.
+The [volume reference](../../reference/volume/) explains the choice.
+
+Each copy is a directory under `/var/lib/liken/pod-storage`. On a
+`liken` machine, that path is on the partition that the node's
 `Machine` declares for pod storage. A machine that declares no such
-partition keeps it in memory, so the copy is lost when the machine
-reboots.
+partition keeps the directory in memory, so its copies are lost when
+the machine reboots.

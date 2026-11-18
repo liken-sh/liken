@@ -1,12 +1,10 @@
-# node-1, the lab's only machine.
-
 apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:
   name: node-1
 spec:
-  # No person watches this machine, so it reboots itself when a change
-  # needs one.
+  # Nobody is at this machine to reboot it, so it reboots itself when a
+  # change needs a reboot.
   rebootPolicy: Auto
 
   network:
@@ -15,9 +13,9 @@ spec:
       - name: eth1
         address: 10.40.0.1/24
 
-  # Seven storage roles on three virtio disks. The guest boots with
-  # UEFI, so it has no BIOS roles. podStorage is where the driver's
-  # store lands.
+  # The guest boots with UEFI firmware, so the spec has no biosBoot or
+  # bootHome role. The driver's store, /var/lib/liken/pod-storage/per-node,
+  # is on the podStorage role.
   storage:
     systemA:
       device: /dev/vdc

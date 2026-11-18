@@ -1,8 +1,5 @@
 package main
 
-// server.go creates the socket the kubelet connects to, the gRPC server
-// that listens on it, and the log line for each call.
-
 import (
 	"context"
 	"errors"
@@ -19,98 +16,94 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// endpointScheme is the only scheme --endpoint accepts. The kubelet
-// reaches a CSI plugin through a Unix socket in its plugins directory,
-// and nothing else connects to this server.
+// --endpoint accepts only a Unix socket, because that is how the
+// kubelet connects to a CSI plugin.
 const endpointScheme = "unix://"
 
-// server is the listening socket and the gRPC server registered on it.
 type server struct {
 	grpc     *grpc.Server
 	listener net.Listener
-	// serveOn and stop are the gRPC server's own two calls, held
-	// as fields so a test can drive a Serve that fails after the stop.
+	// serveOn and stop are the gRPC server's Serve and GracefulStop. A
+	// test replaces them to make Serve fail.
 	serveOn func(net.Listener) error
 	stop    func()
-	// The gauge and the listener that serves it. An empty --metrics
-	// leaves the listener nil.
-	readings *metrics
-	metrics  net.Listener
-	logger   *slog.Logger
+	// metrics is nil when --metrics is empty.
+	metrics         *metrics
+	metricsListener net.Listener
+	logger          *slog.Logger
 }
 
-// newServer takes the socket and registers the Identity and Node
-// services on it. It makes the store first. A driver that cannot make
-// the store fails before it listens, because it could publish no copy.
-// ctx is the driver's run, and the sweep ends with it.
+// newServer creates the store directory before it listens, so a driver
+// that could publish no copy fails before the kubelet can call it. The
+// sweep runs until ctx ends.
 func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, error) {
 	socket, found := strings.CutPrefix(cfg.endpoint, endpointScheme)
 	if !found {
 		return nil, fmt.Errorf("--endpoint %q does not begin with %s", cfg.endpoint, endpointScheme)
 	}
 	if err := os.MkdirAll(cfg.store, 0o755); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating the store directory: %w", err)
 	}
 
-	// A pod that was killed leaves its socket file on the node, and the
-	// next pod has to bind the same path. The file is removed, not
-	// reported, because no other process ever owns it.
+	// A killed driver pod leaves its socket file on the node, and
+	// net.Listen fails when the file exists.
 	if err := os.Remove(socket); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
+		return nil, fmt.Errorf("removing the old CSI socket: %w", err)
 	}
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listening on the CSI socket: %w", err)
 	}
 
-	readings := newMetrics()
-	posting := newEvents(ctx, cfg.nodeID, logger)
-	answering := newNode(cfg, posting, readings, logger)
-	// The mounts outlive the driver, so a driver that starts takes back
-	// the holds the kernel still carries.
-	answering.resume(ctx)
-	// One watch on PersistentVolumes serves the whole node. The kubelet
-	// never tells a node plugin that a volume was deleted, so the watch
-	// is how a deletion reaches the copies on this node.
-	go newSweeping(answering, posting.client, cfg.sweepEvery, logger).follow(ctx)
+	metrics := newMetrics()
+	events := newEvents(ctx, cfg.nodeID, logger)
+	node := newNode(cfg, events, metrics, logger)
+	// Bind mounts outlive the driver's process, so a starting driver
+	// rebuilds its mount records from the record files and the mount
+	// table.
+	node.loadRecords(ctx)
+	// The kubelet does not tell a node plugin when a PersistentVolume is
+	// deleted, so the sweep watches PersistentVolumes and deletes the
+	// copies that none names.
+	go newSweeper(node, events.client, cfg.sweepEvery, logger).run(ctx)
 
 	registered := grpc.NewServer(
-		grpc.ChainUnaryInterceptor(metricsInterceptor(readings), logCalls(logger)))
+		grpc.ChainUnaryInterceptor(metricsInterceptor(metrics), logCalls(logger)))
 	csi.RegisterIdentityServer(registered, &identity{store: cfg.store})
-	csi.RegisterNodeServer(registered, answering)
+	csi.RegisterNodeServer(registered, node)
 
-	metricsListener, err := readings.listen(cfg.metrics)
+	metricsListener, err := metrics.listen(cfg.metrics)
 	if err != nil {
 		_ = listener.Close()
-		return nil, err
+		return nil, fmt.Errorf("opening the metrics listener: %w", err)
 	}
 	return &server{
-		grpc:     registered,
-		listener: listener,
-		serveOn:  registered.Serve,
-		stop:     registered.GracefulStop,
-		readings: readings,
-		metrics:  metricsListener,
-		logger:   logger,
+		grpc:            registered,
+		listener:        listener,
+		serveOn:         registered.Serve,
+		stop:            registered.GracefulStop,
+		metrics:         metrics,
+		metricsListener: metricsListener,
+		logger:          logger,
 	}, nil
 }
 
-// serve blocks until the context ends, then stops the server and lets
-// a call in flight finish.
+// serve runs the gRPC server until ctx ends, then stops it gracefully,
+// so calls in progress finish. It returns Serve's error when Serve
+// fails first.
 func (s *server) serve(ctx context.Context) error {
 	served := make(chan error, 1)
 	go func() { served <- s.serveOn(s.listener) }()
-	if s.metrics != nil {
-		go serveMetrics(ctx, s.metrics, s.readings, s.logger)
+	if s.metricsListener != nil {
+		go serveMetrics(ctx, s.metricsListener, s.metrics, s.logger)
 	}
 	select {
 	case err := <-served:
 		return err
 	case <-ctx.Done():
 		s.stop()
-		// A context that is over before Serve reaches the socket makes
-		// serve return ErrServerStopped. That is the stop this run asked
-		// for, not a failure.
+		// Serve returns ErrServerStopped when the stop came before it
+		// started.
 		if err := <-served; err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			return err
 		}
@@ -118,10 +111,7 @@ func (s *server) serve(ctx context.Context) error {
 	}
 }
 
-// metricsInterceptor times every RPC and counts the ones that return
-// with an error, under the kind label liken's shared dashboard reads:
-// the CSI operation the kubelet or the registrar called.
-func metricsInterceptor(readings *metrics) grpc.UnaryServerInterceptor {
+func metricsInterceptor(m *metrics) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
 		request any,
@@ -129,15 +119,14 @@ func metricsInterceptor(readings *metrics) grpc.UnaryServerInterceptor {
 		handle grpc.UnaryHandler,
 	) (any, error) {
 		started := time.Now()
-		answer, err := handle(ctx, request)
-		readings.recordCall(operationName(call.FullMethod), time.Since(started), err)
-		return answer, err
+		response, err := handle(ctx, request)
+		m.recordCall(operationName(call.FullMethod), time.Since(started), err)
+		return response, err
 	}
 }
 
-// operationName is the CSI operation a gRPC method name contains, the
-// part after its last slash: NodePublishVolume out of
-// /csi.v1.Node/NodePublishVolume.
+// operationName turns /csi.v1.Node/NodePublishVolume into
+// NodePublishVolume.
 func operationName(fullMethod string) string {
 	if i := strings.LastIndex(fullMethod, "/"); i != -1 {
 		return fullMethod[i+1:]
@@ -145,9 +134,6 @@ func operationName(fullMethod string) string {
 	return fullMethod
 }
 
-// logCalls writes one line per RPC with its name and its status code.
-// The kubelet's calls are the driver's whole input, and a person who
-// reads the log has to see them.
 func logCalls(logger *slog.Logger) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
@@ -155,10 +141,10 @@ func logCalls(logger *slog.Logger) grpc.UnaryServerInterceptor {
 		call *grpc.UnaryServerInfo,
 		handle grpc.UnaryHandler,
 	) (any, error) {
-		answer, err := handle(ctx, request)
-		logger.InfoContext(ctx, "call",
+		response, err := handle(ctx, request)
+		logger.InfoContext(ctx, "Handled a CSI call",
 			"rpc", call.FullMethod,
 			"code", status.Code(err).String())
-		return answer, err
+		return response, err
 	}
 }

@@ -1,17 +1,14 @@
-# The kustomize base for the per-node CSI driver.
-#
-# This base is for the cluster owner to take. liken does not apply it
-# and does not name it. Take it through your own GitOps with patches
-# of your own, or read it and write your own manifests.
+# The kustomize base for the per-node CSI driver. liken does not apply
+# it. Apply it through your own GitOps with your own patches, or use it
+# as a reference for your own manifests.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# The namespace is set with a transformer, not with the top-level
-# namespace field, because unsetOnly keeps an object that states its
-# own namespace where it belongs. The top-level field overwrites a
-# stated namespace, and Flux merges a Kustomization's components into
-# this file, so the field would move the monitoring component's
-# dashboard out of the monitoring namespace.
+# The top-level namespace field overwrites every namespace, and Flux
+# merges a Kustomization's components into this file, so the field would
+# move the monitoring dashboard out of the monitoring namespace. A
+# NamespaceTransformer with unsetOnly sets the namespace only on objects
+# that have none.
 transformers:
   - |-
     apiVersion: builtin

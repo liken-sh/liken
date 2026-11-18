@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Drill 04: a copy dies with its volume. A privileged pod that holds
-# the node's root reads the store. While a pod holds the copy, the
-# sweep leaves it. When the PersistentVolume is deleted, the copy's
-# directory goes within one sweep tick.
+# Drill 04: the sweep deletes a volume's copy from the node after its
+# PersistentVolume is deleted, and does not delete it while a pod mounts
+# the volume.
 set -euo pipefail
 
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,8 +30,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# store_reader runs a privileged pod that holds the node's root, so the
-# drill reads the store the way a person at a console would.
+# store_reader runs a privileged pod with the node's root filesystem
+# mounted at /host, so the drill can look at the store on the node.
 store_reader() {
 	kube apply -f - >/dev/null <<YAML
 apiVersion: v1
@@ -61,12 +60,13 @@ YAML
 	kube wait --for=condition=Ready pod/store-reader --timeout="${READY_DEADLINE}s"
 }
 
-# copy_is_there answers whether the node still holds the handle's copy.
+# copy_is_there succeeds while the volume's copy exists in the store.
 copy_is_there() {
 	kube exec store-reader -- test -d "$STORE/copies/$HANDLE" 2>/dev/null
 }
 
-# wait_for_sweep waits until the copy is gone, or fails on the deadline.
+# wait_for_sweep waits until the copy is gone, and fails after
+# SWEEP_DEADLINE seconds.
 wait_for_sweep() {
 	local deadline
 	deadline=$(($(date +%s) + SWEEP_DEADLINE))
@@ -77,7 +77,7 @@ wait_for_sweep() {
 		fi
 		sleep 3
 	done
-	echo "drill 04: the copy stayed on the node within ${SWEEP_DEADLINE}s" >&2
+	echo "drill 04: the copy is still on the node after ${SWEEP_DEADLINE}s" >&2
 	kube exec store-reader -- ls -l "$STORE/copies" >&2 || true
 	kube logs -n liken-system -l app=per-node-csi-driver-node -c driver --tail=40 >&2 || true
 	echo "drill 04: FAIL" >&2
@@ -87,7 +87,7 @@ wait_for_sweep() {
 echo "drill 04: the node"
 kube get nodes
 
-echo "drill 04: a pod that holds the reader on the node"
+echo "drill 04: a pod on the node that reads the store"
 store_reader
 
 echo "drill 04: the volume, its claim, and a pod that fills it"
@@ -146,21 +146,23 @@ kube exec -n "$NAMESPACE" writer -- sh -c 'echo hello > /data/greeting'
 echo "drill 04: the copy is on the node"
 kube exec store-reader -- ls -l "$STORE/copies/$HANDLE"
 
-echo "drill 04: a copy a pod holds is never swept"
+echo "drill 04: the sweep keeps a copy that a pod mounts"
+# The lab runs the sweep every 15 seconds (lab/sweep-every.yaml), so
+# the copy has been through at least one sweep after 30 seconds.
 sleep 30
 if ! copy_is_there; then
-	echo "drill 04: the copy went while a pod held it" >&2
+	echo "drill 04: the sweep deleted the copy while a pod mounted it" >&2
 	echo "drill 04: FAIL" >&2
 	exit 1
 fi
-echo "drill 04: the held copy stayed"
+echo "drill 04: the mounted copy is still on the node"
 
-echo "drill 04: the pod, the claim, and the volume go"
+echo "drill 04: delete the pod, the claim, and the volume"
 kube delete -n "$NAMESPACE" pod writer --timeout="${GONE_DEADLINE}s"
 kube delete -n "$NAMESPACE" persistentvolumeclaim store --timeout="${GONE_DEADLINE}s"
 kube delete persistentvolume "$HANDLE" --timeout="${GONE_DEADLINE}s"
 
-echo "drill 04: the sweep takes the copy"
+echo "drill 04: the sweep deletes the copy"
 wait_for_sweep
 
 echo "drill 04: PASS"

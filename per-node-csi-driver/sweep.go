@@ -1,7 +1,7 @@
 package main
 
-// sweep.go removes the copies of volumes that are gone. A copy is
-// removed when its PersistentVolume is deleted, and for no other reason.
+// sweep.go deletes a copy when no PersistentVolume of this driver has
+// its handle and no pod on this node mounts it.
 
 import (
 	"context"
@@ -18,49 +18,43 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// watchedKind is the resource kind per_node_csi_watch_restarts_total
-// reports: the one watch the sweep holds, on the PersistentVolumes of
-// this driver.
+// watchedKind is the value of the kind label on
+// per_node_csi_watch_restarts_total.
 const watchedKind = "PersistentVolume"
 
-// sweeping is the watch on PersistentVolumes and the pass it wakes. One
-// watch covers every copy on the node.
-type sweeping struct {
+type sweeper struct {
 	node   *node
 	client kubernetes.Interface
 	every  time.Duration
 	logger *slog.Logger
 }
 
-// newSweeping builds the sweep around the client the driver already
-// holds for Events. A nil client is a driver outside a cluster.
-func newSweeping(answering *node, client kubernetes.Interface,
+// newSweeper is passed the client that the driver posts Events with,
+// which is nil when the driver runs outside a cluster.
+func newSweeper(n *node, client kubernetes.Interface,
 	every time.Duration, logger *slog.Logger,
-) *sweeping {
-	return &sweeping{
-		node:   answering,
+) *sweeper {
+	return &sweeper{
+		node:   n,
 		client: client,
 		every:  every,
 		logger: logger,
 	}
 }
 
-// follow keeps the watch for the driver's whole run. A driver outside a
-// cluster, and one whose store never holds the first read, sweeps
-// nothing. Without the list of volumes every copy would look like an
-// orphan.
+// run runs the sweep until ctx is done. It sweeps nothing when the
+// client is nil, or when ctx ends before the informer has listed the
+// PersistentVolumes. Without that list, the sweep would delete every
+// copy that no pod mounts.
 //
-// client-go's reflector runs the watch. It reads every
-// PersistentVolume first, then watches from the version that read
-// returned, resumes a watch the API server closed, and reads the
-// collection again after a 410 Gone. Upstream maintains and tests that
-// loop. The informer is built with tools/cache over the typed client,
-// which the driver already links for Events. It takes no resync: a
-// resync replays the store to the handlers as updates and reads nothing
-// from the API server, and the only handler here acts on a delete.
-func (s *sweeping) follow(ctx context.Context) {
+// A client-go informer keeps the list current. Its reflector lists the
+// PersistentVolumes, watches from the version of that list, reopens a
+// closed watch, and lists again after a 410 Gone. The informer has no
+// resync period, because a resync only replays cached objects to the
+// handler as updates, and the handler acts only on deletes.
+func (s *sweeper) run(ctx context.Context) {
 	if s.client == nil {
-		s.logger.WarnContext(ctx, "no sweep", "reason", "the driver reached no cluster")
+		s.logger.WarnContext(ctx, "Not sweeping the copies", "reason", "the driver has no Kubernetes client")
 		return
 	}
 	deleted := make(chan struct{}, 1)
@@ -72,25 +66,24 @@ func (s *sweeping) follow(ctx context.Context) {
 		},
 		Transform: dropManagedFields,
 	})
-	// RunWithContext returns after the last handler call, so the sweep
-	// returns only when nothing of the watch still runs.
+	// RunWithContext returns after its last handler call, so waiting for
+	// it means no informer goroutine outlives run.
 	var watching sync.WaitGroup
 	defer watching.Wait()
 	watching.Go(func() { informer.RunWithContext(ctx) })
 	select {
 	case <-ctx.Done():
-		s.logger.WarnContext(ctx, "no sweep", "reason", "the volumes did not sync")
+		s.logger.WarnContext(ctx, "Not sweeping the copies", "reason", "the PersistentVolume list did not sync before the driver stopped")
 		return
 	case <-informer.HasSyncedChecker().Done():
 	}
 
-	// The ticker is a backstop for two failures that no event follows.
-	// A removeCopy that fails leaves the copy, and nothing wakes a pass
-	// to try it again. A copy that a pod still holds when its
-	// PersistentVolume is deleted stays, and the unpublish that later
-	// drops the hold does not wake a pass. A watch that closes is not
-	// one of the two: the reflector lists again and hands every
-	// deletion it missed to the delete handler.
+	// The ticker sweeps in the cases that send no event: a copy that
+	// removeCopy failed to delete, and a copy that a pod still mounted
+	// when its PersistentVolume was deleted, because the pod's later
+	// unpublish does not start a sweep. A closed watch needs no ticker,
+	// because the reflector lists again and calls the delete handler for
+	// each deletion it missed.
 	ticker := time.NewTicker(s.every)
 	defer ticker.Stop()
 	s.sweep(ctx, handlesOf(store.List()))
@@ -106,18 +99,16 @@ func (s *sweeping) follow(ctx context.Context) {
 	}
 }
 
-// volumes is the list and the watch of every PersistentVolume. A field
-// selector cannot reach spec.csi.driver, so the watch takes every
-// driver's PersistentVolumes, and handlesOf keeps this driver's.
+// volumes lists and watches all PersistentVolumes. A field selector
+// cannot match spec.csi.driver, so the watch includes other drivers'
+// volumes and handlesOf filters them out.
 //
-// Every watch the API server accepts after the first counts as one
-// restart on per_node_csi_watch_restarts_total. The reflector asks the
-// API server to close each watch after 5 to 10 minutes, so a healthy
-// watch counts 6 to 12 restarts an hour. A refused watch is not
-// counted. The reflector opens one watch at a time, and the flag is
-// atomic all the same, so a change in client-go that opens watches
-// from two goroutines makes no data race here.
-func (s *sweeping) volumes() *cache.ListWatch {
+// Each successful watch after the first increments
+// per_node_csi_watch_restarts_total, and a failed watch request does
+// not. The reflector sets a random server timeout of 5 to 10 minutes on
+// each watch, so a restart is routine. The flag is atomic so that
+// concurrent watch calls cannot race.
+func (s *sweeper) volumes() *cache.ListWatch {
 	volumes := s.client.CoreV1().PersistentVolumes()
 	var opened atomic.Bool
 	return &cache.ListWatch{
@@ -127,28 +118,25 @@ func (s *sweeping) volumes() *cache.ListWatch {
 		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
 			watching, err := volumes.Watch(ctx, options)
 			if err == nil && opened.Swap(true) {
-				s.node.readings.watchRestarted(watchedKind)
+				s.node.metrics.watchRestarted(watchedKind)
 			}
 			return watching, err
 		},
 	}
 }
 
-// wake sends on a channel with one slot and never blocks, so a burst of
-// deletes costs one pass, and a copy leaves the node in seconds and not
-// on the next tick.
-func wake(pass chan<- struct{}) {
+// wake signals a sweep without blocking. The channel holds one pending
+// signal, so a burst of deletes causes one sweep.
+func wake(pending chan<- struct{}) {
 	select {
-	case pass <- struct{}{}:
+	case pending <- struct{}{}:
 	default:
 	}
 }
 
-// dropManagedFields removes metadata.managedFields from each object
-// before the informer stores it. The field records which client set
-// each field of the object. The driver never reads it, and without the
-// transform the store holds a copy of it for every PersistentVolume in
-// the cluster.
+// dropManagedFields clears metadata.managedFields before the informer
+// caches the object, because the driver never reads the field and the
+// cache would only spend memory on it.
 func dropManagedFields(object any) (any, error) {
 	if item, ok := object.(metav1.Object); ok {
 		item.SetManagedFields(nil)
@@ -156,17 +144,14 @@ func dropManagedFields(object any) (any, error) {
 	return object, nil
 }
 
-// handlesOf returns the handles that this driver's PersistentVolumes
-// name, out of everything in the informer's cache. The filter is here
-// because a field selector cannot reach spec.csi.driver.
 func handlesOf(objects []any) map[string]bool {
 	named := map[string]bool{}
 	for _, object := range objects {
-		held, isVolume := object.(*corev1.PersistentVolume)
+		volume, isVolume := object.(*corev1.PersistentVolume)
 		if !isVolume {
 			continue
 		}
-		source := held.Spec.CSI
+		source := volume.Spec.CSI
 		if source == nil || source.Driver != driverName {
 			continue
 		}
@@ -175,19 +160,17 @@ func handlesOf(objects []any) map[string]bool {
 	return named
 }
 
-// sweep removes every copy that no PersistentVolume names and no pod on
-// this node holds.
-func (s *sweeping) sweep(ctx context.Context, named map[string]bool) {
-	held := s.node.heldHandles()
+func (s *sweeper) sweep(ctx context.Context, named map[string]bool) {
+	mounted := s.node.publishedHandles()
 	for _, handle := range s.node.store.handles() {
-		if named[handle] || held[handle] {
+		if named[handle] || mounted[handle] {
 			continue
 		}
 		if err := s.node.store.removeCopy(handle); err != nil {
-			s.logger.WarnContext(ctx, "the copy stayed", "volume", handle, "error", err)
+			s.logger.WarnContext(ctx, "Could not delete the copy, and the next sweep retries", "volume", handle, "error", err)
 			continue
 		}
-		s.node.readings.forget(handle)
-		s.logger.InfoContext(ctx, "swept the copy", "volume", handle)
+		s.node.metrics.forget(handle)
+		s.logger.InfoContext(ctx, "Deleted the copy of a volume that no PersistentVolume names", "volume", handle)
 	}
 }

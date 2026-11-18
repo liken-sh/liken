@@ -1,25 +1,23 @@
 ---
 title: Run a replicated store
 weight: 20
-description: "Run a replicated store as a Deployment on one per-node claim with anti-affinity across nodes and a PodDisruptionBudget. Use when several pods each hold a full copy of one data set and keep the copies in agreement over the network."
+description: "Run a replicated store as a Deployment on one per-node claim with anti-affinity across nodes and a PodDisruptionBudget. Use when several pods each keep a full copy of one data set and keep the copies in agreement over the network."
 ---
 
 # Run a replicated store
 
-A replicated store is several pods that each hold a full copy of one
-data set and keep the copies in agreement over the network. Each pod
-runs the store beside its program, the copies exchange changes, and a
-fresh copy catches up from the others. On this driver the whole
-workload is a `Deployment` with one `per-node` claim, required
-anti-affinity across nodes, and a `PodDisruptionBudget`. It needs no
-`StatefulSet`, because no copy is first and the copies start in any
-order.
+A replicated store is several pods that each keep a full copy of one
+data set and keep the copies in agreement over the network, so a new
+copy catches up from the others. On this driver the workload is a
+`Deployment` with one `per-node` claim, required anti-affinity across
+nodes, and a `PodDisruptionBudget`. It needs no `StatefulSet`, because
+no copy has to start before the others.
 
-Write the `PersistentVolume` and the claim up front, because the driver
-provisions nothing. The handle is the volume's name. The capacity is a
-hint, not a limit. The `claimRef` binds the volume to one claim and no
-other. The access mode is `ReadWriteMany`, because many nodes mount
-this one volume read-write, and each node holds its own copy.
+The driver does not create volumes, so write the `PersistentVolume`
+and the claim before you start the pods. Make the handle the same as
+the volume's name. The driver does not enforce the capacity. The
+`claimRef` binds the volume to this claim and no other. Use the access
+mode `ReadWriteMany`, so that pods on many nodes can mount the volume.
 
 ```yaml
 apiVersion: v1
@@ -67,10 +65,10 @@ spec:
         app: store
     spec:
       # Required anti-affinity allows at most one store pod on each
-      # node, so each pod has a copy of its own. Two pods on one node
-      # would share that node's copy. The scheduler counts a
-      # terminating pod until it is gone, so a replacement pod does not
-      # start on a node where the old pod still writes the copy.
+      # node, so each pod has its own copy. Two pods on one node would
+      # share that node's copy. The scheduler counts a terminating pod
+      # until it is gone, so a replacement pod does not start on a node
+      # where the old pod can still write the copy.
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -95,22 +93,23 @@ metadata:
   name: store
   namespace: example
 spec:
-  # A fresh copy catches up from its peers. Limiting a drain to one pod
-  # leaves at least two existing copies to serve and seed replacements.
+  # A new copy catches up from the other copies. When a drain stops
+  # only one pod at a time, two of the three copies stay up to serve
+  # requests and to bring the replacement up to date.
   maxUnavailable: 1
   selector:
     matchLabels:
       app: store
 ```
 
-When a pod moves, one of two things happens. It starts on a node that
-holds a copy from an earlier pod, and that copy's data is under
-`/data`. Or it starts on a node that has never held this volume, and
-the directory there is empty, so the pod catches up from its peers.
-Whether a copy has caught up is the workload's fact, and the
-workload's readiness probe is where it belongs. The driver has no
-caught-up signal.
+When a pod moves to a node that had a pod of this volume before,
+`/data` has the data that the earlier pod left there. On a node that
+has never mounted this volume, `/data` is empty, and the pod catches
+up from the other pods. The driver cannot tell whether a copy has
+caught up, so put that check in the readiness probe of the store
+container.
 
 Each node keeps its copy after the pod leaves. To remove every copy,
-delete the `PersistentVolume`. The [volume reference](../../reference/volume/)
-says what deleting removes.
+delete the `PersistentVolume`. The
+[volume reference](../../reference/volume/) describes what deleting
+removes.

@@ -38,7 +38,7 @@ func TestTheDriverAcceptsADNSSubdomainAndRefusesEverythingElse(t *testing.T) {
 				t.Fatalf("checkHandle(%q): %v, want it accepted", c.handle, err)
 			}
 			if !c.accepted && status.Code(err) != codes.InvalidArgument {
-				t.Fatalf("checkHandle(%q) answered %v, want InvalidArgument", c.handle, err)
+				t.Fatalf("checkHandle(%q) returned %v, want InvalidArgument", c.handle, err)
 			}
 		})
 	}

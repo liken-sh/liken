@@ -6,20 +6,19 @@ import (
 	"testing"
 )
 
-// aStore is a store in a directory of the test's own.
 func aStore(t *testing.T) *store {
 	t.Helper()
 	return newStore(t.TempDir())
 }
 
 func TestAFreshCopyIsWriteableByAnyUser(t *testing.T) {
-	held := aStore(t)
-	if err := held.makeCopy("example-store"); err != nil {
-		t.Fatalf("makeCopy: %v", err)
+	s := aStore(t)
+	if err := s.makeCopy("example-store"); err != nil {
+		t.Fatalf("making the copy: %v", err)
 	}
-	info, err := os.Stat(held.copyPath("example-store"))
+	info, err := os.Stat(s.copyPath("example-store"))
 	if err != nil {
-		t.Fatalf("stat: %v", err)
+		t.Fatalf("reading the mode of the copy: %v", err)
 	}
 	if info.Mode().Perm() != copyMode {
 		t.Errorf("the copy has mode %o, want %o", info.Mode().Perm(), copyMode)
@@ -32,48 +31,48 @@ func TestAStoreThatIsAFileMakesNoCopy(t *testing.T) {
 		t.Fatalf("writing the file: %v", err)
 	}
 	if err := newStore(path).makeCopy("example-store"); err == nil {
-		t.Error("makeCopy answered no error, want one")
+		t.Error("makeCopy returned no error, want one")
 	}
 }
 
-func TestTheStoreNamesEveryCopyItHolds(t *testing.T) {
-	held := aStore(t)
-	if got := held.handles(); len(got) != 0 {
-		t.Errorf("a store with no copies named %v, want none", got)
+func TestHandlesReturnsEveryCopy(t *testing.T) {
+	s := aStore(t)
+	if got := s.handles(); len(got) != 0 {
+		t.Errorf("a store with no copies lists %v, want none", got)
 	}
 	for _, handle := range []string{"example-store", "some-cache"} {
-		if err := held.makeCopy(handle); err != nil {
-			t.Fatalf("makeCopy: %v", err)
+		if err := s.makeCopy(handle); err != nil {
+			t.Fatalf("making the copy: %v", err)
 		}
 	}
-	got := held.handles()
+	got := s.handles()
 	if len(got) != 2 || got[0] != "example-store" || got[1] != "some-cache" {
-		t.Errorf("the store named %v, want example-store and some-cache", got)
+		t.Errorf("the store lists %v, want example-store and some-cache", got)
 	}
 }
 
 func TestRemovingACopyLeavesTheOtherCopiesAlone(t *testing.T) {
-	held := aStore(t)
+	s := aStore(t)
 	for _, handle := range []string{"example-store", "some-cache"} {
-		if err := held.makeCopy(handle); err != nil {
-			t.Fatalf("makeCopy: %v", err)
+		if err := s.makeCopy(handle); err != nil {
+			t.Fatalf("making the copy: %v", err)
 		}
 	}
-	if err := held.removeCopy("some-cache"); err != nil {
-		t.Fatalf("removeCopy: %v", err)
+	if err := s.removeCopy("some-cache"); err != nil {
+		t.Fatalf("removing the copy: %v", err)
 	}
-	got := held.handles()
+	got := s.handles()
 	if len(got) != 1 || got[0] != "example-store" {
-		t.Errorf("the store named %v, want example-store alone", got)
+		t.Errorf("the store lists %v, want example-store alone", got)
 	}
 }
 
-func TestACopysSizeIsTheBytesItsFilesHold(t *testing.T) {
-	held := aStore(t)
-	if err := held.makeCopy("example-store"); err != nil {
-		t.Fatalf("makeCopy: %v", err)
+func TestCopySizeSumsTheRegularFiles(t *testing.T) {
+	s := aStore(t)
+	if err := s.makeCopy("example-store"); err != nil {
+		t.Fatalf("making the copy: %v", err)
 	}
-	copyPath := held.copyPath("example-store")
+	copyPath := s.copyPath("example-store")
 	if err := os.MkdirAll(filepath.Join(copyPath, "inner"), 0o755); err != nil {
 		t.Fatalf("making the inner directory: %v", err)
 	}
@@ -85,34 +84,34 @@ func TestACopysSizeIsTheBytesItsFilesHold(t *testing.T) {
 	}
 	size, err := copySize(copyPath)
 	if err != nil {
-		t.Fatalf("copySize: %v", err)
+		t.Fatalf("measuring the copy: %v", err)
 	}
 	if size != 6 {
-		t.Errorf("copySize answered %d, want 6", size)
+		t.Errorf("copySize returned %d, want 6", size)
 	}
 }
 
 func TestACopyThatIsNotThereHasNoSize(t *testing.T) {
 	if _, err := copySize(filepath.Join(t.TempDir(), "absent")); err == nil {
-		t.Error("copySize answered no error, want one")
+		t.Error("copySize returned no error, want one")
 	}
 }
 
 func TestTheStoresFilesystemReportsFreeAndTotalBytes(t *testing.T) {
 	available, total, err := spaceOf(t.TempDir())
 	if err != nil {
-		t.Fatalf("spaceOf: %v", err)
+		t.Fatalf("reading the space of the store: %v", err)
 	}
 	if total <= 0 {
-		t.Errorf("spaceOf answered a total of %d, want more than zero", total)
+		t.Errorf("spaceOf returned a total of %d, want more than zero", total)
 	}
 	if available > total {
-		t.Errorf("spaceOf answered %d available of %d total", available, total)
+		t.Errorf("spaceOf returned %d available of %d total", available, total)
 	}
 }
 
 func TestAPathThatIsNotThereHasNoFilesystem(t *testing.T) {
 	if _, _, err := spaceOf(filepath.Join(t.TempDir(), "absent")); err == nil {
-		t.Error("spaceOf answered no error, want one")
+		t.Error("spaceOf returned no error, want one")
 	}
 }

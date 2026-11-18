@@ -1,20 +1,18 @@
-# The lab's Cluster: one leader, the public release channel, no GitOps
-# engine, and a registry mirror that points the guest at the container
-# registry on the host. Manifests reach the lab with kubectl from the
-# host.
+# The lab's Cluster has no GitOps engine, so the lab Makefile applies
+# manifests with kubectl from the host.
 
 apiVersion: liken.sh/v1alpha1
 kind: Cluster
 metadata:
   name: lab
 spec:
-  # One leader, so k3s keeps its state in sqlite.
+  # With one leader, k3s keeps its state in SQLite.
   leaders: [node-1]
 
-  # First contact is node-1's address on the cluster segment. This lab
-  # uses 10.40.0.0/24. liken's dev cluster uses 10.10.0.0/24, its GitOps
-  # lab uses 10.20.0.0/24, and the git CSI driver's lab uses
-  # 10.30.0.0/24, so an address in a log names its lab.
+  # node-1's address on the cluster segment. Each liken lab has its own
+  # subnet: 10.10.0.0/24 for the dev cluster, 10.20.0.0/24 for the
+  # GitOps lab, 10.30.0.0/24 for the git CSI driver's lab, and
+  # 10.40.0.0/24 for this lab. So an address in a log shows its lab.
   endpoint: https://10.40.0.1:6443
 
   network:
@@ -27,21 +25,19 @@ spec:
   time:
     upstreams: [time.cloudflare.com, time.nist.gov]
 
-  # The registry this repository's image comes from. 10.0.2.2 is the
-  # user-mode network's gateway, which is the host, so the guest never
-  # asks a public registry for this image.
+  # The guest pulls lab.registry:5000 images from the registry on the
+  # host, which QEMU's user-mode network makes reachable at 10.0.2.2.
   registries:
     mirrors:
       "lab.registry:5000":
         - http://10.0.2.2:5000
 
-  # The Go runtime settings that hold k3s inside the 1 GiB envelope,
-  # from liken's dev cluster.
+  # These Go runtime settings, from liken's dev cluster, keep k3s within
+  # the guest's 1 GiB of memory.
   runtime:
     k3s:
       goMemoryLimit: "25%"
       goGC: 50
 
   releases:
-    # The public channel, the same one a person installs from.
     source: https://releases.liken.sh

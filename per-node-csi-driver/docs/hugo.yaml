@@ -1,43 +1,33 @@
-# The site's configuration. The site is the manual for the per-node CSI
-# driver, served at https://liken.sh/per-node/. The path is the first
-# label of the CSI driver name, `per-node.liken.sh`, so the name a volume
-# names also leads to the page where a reader learns what it does.
-#
-# The theme is brand/, the brand component at the top of this
-# repository. It provides the page shell, the top nav, the mark,
-# and the stylesheet that every liken site uses, so this site reads
-# as part of the same family as liken.sh.
+# The manual of the per-node CSI driver. Its path is the first label of
+# the driver name `per-node.liken.sh`, so a reader who sees the driver
+# name in a volume can find the manual.
 baseURL: https://liken.sh/per-node/
 title: per-node-csi-driver
-# Hugo looks for a theme by name under themesDir, and the repository
-# root holds brand/, so the site and the theme it builds with are
-# always the same commit.
+# The theme is brand/ at the top of the repository, so the site always
+# builds with the theme of the same commit.
 themesDir: ../..
 theme: brand
 
-# The theme's nav renders a repository entry from this, and the
-# sidebar heads the manual with the project's name, taken from the
-# last segment of this URL.
+# The theme links to the repository from the nav, and titles the
+# sidebar with the last segment of this URL.
 params:
   repository: https://github.com/liken-sh/liken/tree/main/per-node-csi-driver
-  # The site serves the test coverage report at /coverage.html. This
-  # parameter puts the footer link to it on every page.
+  # Puts a footer link to the coverage report, /coverage.html, on every
+  # page.
   coverage: true
 
-# No taxonomies and no feeds: the site is a manual, not a blog. The
-# sitemap stays, because it is free and crawlers use it.
+# The manual has no taxonomies and no feed. It keeps the sitemap for
+# crawlers.
 disableKinds: [taxonomy, term, rss]
 
-# Every page renders twice, once as HTML for people and once as the
-# authored Markdown for agents and scripts. The two files land side
-# by side, so the Markdown twin of / is /index.md. The theme renders
-# the twin only when the site declares this format. Without it, the
-# site builds as HTML alone (brand/README.md).
+# Every page renders as HTML and also as its Markdown source, for agents
+# and scripts. The Markdown file is next to the HTML file, so the
+# Markdown of / is /index.md. The theme writes the Markdown only when
+# the site declares this format (brand/README.md).
 outputFormats:
   markdown:
-    # text/markdown is a media type Hugo already has, with the md
-    # suffix. baseName index makes the output index.md, beside
-    # index.html in the same pretty-URL directory.
+    # With baseName index and the md suffix of Hugo's text/markdown
+    # type, the file is index.md, next to index.html.
     baseName: index
     isPlainText: true
     mediaType: text/markdown
@@ -47,17 +37,12 @@ outputs:
   section: [html, markdown]
   page: [html, markdown]
 
-# The site serves the repository's deploy/ manifests whole, as raw
-# YAML, at /deploy/<file>.yaml. A reader reads the real manifests in
-# place, `kubectl apply -f` takes the URLs directly, and a
-# Kustomization can name them as resources, so an install needs no
-# clone. The mount publishes the files the repository holds: there is
-# no copy to drift.
+# The site serves the files of deploy/ unchanged at /deploy/<file>.yaml,
+# so `kubectl apply -f` and a Kustomization can use the URLs and an
+# install needs no clone.
 #
-# Declaring any mount replaces every default mount for the site, so
-# the content mount comes back explicitly. The theme's own mounts,
-# which provide the favicon and the brand images, are the theme's and
-# stay as they are.
+# A mount list replaces the site's default mounts, so the content mount
+# is listed too. The theme's own mounts are not affected.
 module:
   mounts:
     - source: content

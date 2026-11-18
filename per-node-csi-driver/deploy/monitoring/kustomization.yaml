@@ -1,7 +1,6 @@
-# The monitoring component, liken's shared contract for connecting a
-# Prometheus to a process, milestone 65. The base in deploy/ applies on
-# a cluster with no monitoring at all. A cluster owner who runs the
-# prometheus-operator adds this component beside the base:
+# The monitoring component adds a PodMonitor and a Grafana dashboard
+# for a cluster that runs the prometheus-operator. Add it beside the
+# base:
 #
 # resources:
 #   - https://github.com/liken-sh/liken//per-node-csi-driver/deploy?ref=<tag>
@@ -13,11 +12,10 @@ kind: Component
 resources:
   - podmonitor.yaml
 
-# The dashboard ConfigMap belongs in the monitoring namespace, where the
-# kube-prometheus-stack sidecar watches for the grafana_dashboard label,
-# not in liken-system beside the driver's own resources. A Component
-# cannot set namespace: per resource, so podmonitor.yaml carries its own
-# metadata.namespace instead of inheriting one from this file.
+# The dashboard ConfigMap is in the monitoring namespace, where the
+# Grafana sidecar of kube-prometheus-stack watches for the
+# grafana_dashboard label. A Component has no namespace field, so
+# podmonitor.yaml sets its own namespace, liken-system.
 configMapGenerator:
   - name: per-node-csi-driver-dashboard
     namespace: monitoring

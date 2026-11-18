@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
-# Drill 01: the copy outlives its pod. A pod writes a file into a
-# per-node volume and is deleted. A second pod on the same node, with
-# the same claim, reads the file back.
+# Drill 01: data in a per-node volume survives the deletion of the pod
+# that wrote it. A pod writes a file into the volume and is deleted. A
+# second pod on the same node mounts the same claim and reads the file.
 set -euo pipefail
 
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 KUBECTL="$LAB/kubectl"
 
-# The writer image is one the lab already pulled, so no drill waits on
-# a registry.
 IMAGE="${IMAGE:-debian:sid-slim}"
 NAMESPACE=drill-01
 HANDLE=drill-01-store
 
-# Every wait in this drill has a deadline, in seconds.
+# The deadlines are in seconds. CALL_TIMEOUT limits each kubectl request.
 READY_DEADLINE="${READY_DEADLINE:-240}"
 GONE_DEADLINE="${GONE_DEADLINE:-180}"
 CALL_TIMEOUT="${CALL_TIMEOUT:-30s}"
@@ -22,8 +20,8 @@ kube() {
 	"$KUBECTL" --request-timeout="$CALL_TIMEOUT" "$@"
 }
 
-# cleanup leaves the cluster as the drill found it, however the drill
-# ends.
+# cleanup deletes the drill's namespace and PersistentVolume on every
+# exit, so a failed run leaves nothing behind.
 cleanup() {
 	local status=$?
 	kube delete namespace "$NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
@@ -32,7 +30,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# volume writes the PersistentVolume and the claim that binds it.
 volume() {
 	kube apply -f - >/dev/null <<YAML
 apiVersion: v1
@@ -63,8 +60,8 @@ spec:
 YAML
 }
 
-# holder is one pod that mounts the claim and waits.
-holder() {
+# start_pod starts a pod that mounts the claim and waits until it is Ready.
+start_pod() {
 	local name="$1"
 	kube apply -n "$NAMESPACE" -f - >/dev/null <<YAML
 apiVersion: v1
@@ -76,7 +73,7 @@ spec:
   tolerations:
     - operator: Exists
   containers:
-    - name: holder
+    - name: sleeper
       image: $IMAGE
       command: ["sh", "-c", "sleep infinity"]
       volumeMounts:
@@ -98,14 +95,14 @@ kube create namespace "$NAMESPACE" >/dev/null 2>&1 || true
 volume
 
 echo "drill 01: the first pod writes hello"
-holder writer
+start_pod writer
 kube exec -n "$NAMESPACE" writer -- sh -c 'echo hello > /data/greeting'
 
-echo "drill 01: the first pod goes"
+echo "drill 01: the first pod is deleted"
 kube delete -n "$NAMESPACE" pod writer --timeout="${GONE_DEADLINE}s"
 
 echo "drill 01: the second pod reads hello back"
-holder reader
+start_pod reader
 read_back="$(kube exec -n "$NAMESPACE" reader -- cat /data/greeting)"
 if [ "$read_back" != "hello" ]; then
 	echo "drill 01: the second pod read '$read_back', want hello" >&2

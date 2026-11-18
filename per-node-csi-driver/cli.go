@@ -1,8 +1,5 @@
 package main
 
-// cli.go holds the command line and the run that serves the socket
-// until the pod stops.
-
 import (
 	"context"
 	"errors"
@@ -15,24 +12,17 @@ import (
 	"time"
 )
 
-// version is the release the binary was built from. The Dockerfile sets
-// it with -ldflags "-X main.version=...", and every other build reports
-// dev.
+// The Dockerfile sets version with -ldflags "-X main.version=...".
 var version = "dev"
 
-// builder is how run makes the server. It is a parameter so a test can
-// drive a serve that fails.
+// builder is a parameter of runWith so a test can pass a server that
+// fails.
 type builder func(context.Context, *config, *slog.Logger) (*server, error)
 
-// run parses the command line, serves the socket, and returns the exit
-// code. The context is the run's life: a signal ends it in the pod, and
-// a test ends it the same way.
 func run(ctx context.Context, args []string, out io.Writer) int {
 	return runWith(ctx, args, out, newServer)
 }
 
-// runWith is run with the server's construction named, which is
-// the seam a test takes.
 func runWith(ctx context.Context, args []string, out io.Writer, build builder) int {
 	cfg, err := parse(args, out)
 	if err != nil {
@@ -57,45 +47,36 @@ func runWith(ctx context.Context, args []string, out io.Writer, build builder) i
 	return 0
 }
 
-// config is what the command line resolves to.
 type config struct {
-	endpoint string
-	nodeID   string
-	store    string
-	metrics  string
-	// sweepEvery is the interval between two passes that look for a copy
-	// no PersistentVolume names. A deletion wakes a pass at once, so the
-	// tick retries a removal that failed and removes a copy whose pod
-	// held it when its PersistentVolume was deleted.
+	endpoint   string
+	nodeID     string
+	store      string
+	metrics    string
 	sweepEvery time.Duration
 }
 
-// defaultStore is where the node plugin keeps the copies and the holds.
 const defaultStore = "/var/lib/liken/pod-storage/per-node"
 
-// defaultSweepEvery is the interval between two sweeps when the command
-// line does not set --sweep-every.
 const defaultSweepEvery = 10 * time.Minute
 
-// parse reads the command line and writes every problem to out. After
-// --version it returns a nil config and no error, because the version
-// is printed and nothing is left to run.
+// parse writes flag errors and the version to out. With --version it
+// returns a nil config and a nil error, which means there is nothing to
+// run.
 func parse(args []string, out io.Writer) (*config, error) {
 	flags := flag.NewFlagSet("per-node-csi-driver", flag.ContinueOnError)
 	flags.SetOutput(out)
 
 	endpoint := flags.String("endpoint", "unix:///csi/csi.sock",
-		"the address the CSI socket listens on")
+		"the address of the CSI socket, in the form unix:///path")
 	nodeID := flags.String("node-id", "",
-		"the name of the node this plugin runs on")
+		"the name of the node this driver runs on")
 	store := flags.String("store", defaultStore,
-		"the directory that holds this node's copies")
-	// An empty --metrics serves no metrics. 9200 is the port every
-	// process serves metrics on, milestone 65.
+		"the directory of this node's copies and mount records")
+	// liken components serve their metrics on port 9200 by convention.
 	metrics := flags.String("metrics", ":9200",
-		"the address the metrics listener takes, or empty to serve none")
+		"the address the metrics listener binds, or empty to serve no metrics")
 	sweepEvery := flags.Duration("sweep-every", defaultSweepEvery,
-		"how often the driver looks for a copy no PersistentVolume names")
+		"how often the driver deletes copies that no PersistentVolume names")
 	showVersion := flags.Bool("version", false, "print the version and exit")
 
 	if err := flags.Parse(args); err != nil {
@@ -106,7 +87,7 @@ func parse(args []string, out io.Writer) (*config, error) {
 		return nil, nil
 	}
 	if *nodeID == "" {
-		return nil, report(out, errors.New("--node-id is required"))
+		return nil, report(out, errors.New("--node-id is required: set it to the name of the node this driver runs on"))
 	}
 	return &config{
 		endpoint:   *endpoint,
@@ -117,8 +98,6 @@ func parse(args []string, out io.Writer) (*config, error) {
 	}, nil
 }
 
-// report writes the problem where the person who ran the command sees
-// it, and hands it back so the exit code says it too.
 func report(out io.Writer, err error) error {
 	fmt.Fprintln(out, err)
 	return err

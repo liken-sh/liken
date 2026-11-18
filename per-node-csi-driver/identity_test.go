@@ -13,13 +13,13 @@ func TestGetPluginInfoNamesTheDriverAndTheVersion(t *testing.T) {
 	client := csi.NewIdentityClient(startServer(t, io.Discard))
 	info, err := client.GetPluginInfo(t.Context(), &csi.GetPluginInfoRequest{})
 	if err != nil {
-		t.Fatalf("GetPluginInfo: %v", err)
+		t.Fatalf("getting the plugin info: %v", err)
 	}
 	if info.GetName() != "per-node.liken.sh" {
-		t.Errorf("GetPluginInfo named %q, want %q", info.GetName(), "per-node.liken.sh")
+		t.Errorf("the plugin name is %q, want %q", info.GetName(), "per-node.liken.sh")
 	}
 	if info.GetVendorVersion() != version {
-		t.Errorf("GetPluginInfo answered version %q, want %q", info.GetVendorVersion(), version)
+		t.Errorf("the plugin version is %q, want %q", info.GetVendorVersion(), version)
 	}
 }
 
@@ -28,10 +28,10 @@ func TestGetPluginCapabilitiesDeclaresNoControllerService(t *testing.T) {
 	capabilities, err := client.GetPluginCapabilities(t.Context(),
 		&csi.GetPluginCapabilitiesRequest{})
 	if err != nil {
-		t.Fatalf("GetPluginCapabilities: %v", err)
+		t.Fatalf("getting the plugin capabilities: %v", err)
 	}
 	if got := capabilities.GetCapabilities(); len(got) != 0 {
-		t.Errorf("GetPluginCapabilities answered %v, want none", got)
+		t.Errorf("the plugin capabilities are %v, want none", got)
 	}
 }
 
@@ -39,10 +39,10 @@ func TestProbeIsReadyWhenTheStoreIsWriteable(t *testing.T) {
 	client := csi.NewIdentityClient(startServer(t, io.Discard))
 	probe, err := client.Probe(t.Context(), &csi.ProbeRequest{})
 	if err != nil {
-		t.Fatalf("Probe: %v", err)
+		t.Fatalf("probing the driver: %v", err)
 	}
 	if !probe.GetReady().GetValue() {
-		t.Error("Probe answered not ready, want ready")
+		t.Error("Probe reports not ready, want ready")
 	}
 }
 
@@ -59,9 +59,9 @@ func TestProbeIsNotReadyWhenTheStoreIsGone(t *testing.T) {
 	}
 	probe, err := client.Probe(t.Context(), &csi.ProbeRequest{})
 	if err != nil {
-		t.Fatalf("Probe: %v", err)
+		t.Fatalf("probing the driver: %v", err)
 	}
 	if probe.GetReady().GetValue() {
-		t.Error("Probe answered ready, want not ready")
+		t.Error("Probe reports ready, want not ready after the store is removed")
 	}
 }

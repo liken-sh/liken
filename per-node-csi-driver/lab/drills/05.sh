@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Drill 05: the driver reports its bytes. The kubelet's summary carries
-# the copy's used bytes, because the driver answers NodeGetVolumeStats,
-# and the plugin's metrics port answers per_node_csi_copy_bytes for the
-# same volume.
+# Drill 05: the driver reports how many bytes a volume uses. The
+# kubelet's stats summary includes the volume's used bytes, because the
+# driver implements NodeGetVolumeStats, and the node plugin's metrics
+# port serves per_node_csi_copy_bytes for the same volume.
 set -euo pipefail
 
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,8 +15,8 @@ NAMESPACE=drill-05
 HANDLE=drill-05-store
 
 READY_DEADLINE="${READY_DEADLINE:-240}"
-# The kubelet polls a driver's volume stats about once a minute, so
-# this deadline is minutes, not seconds.
+# The kubelet refreshes a volume's stats about once a minute, so the
+# deadline is several minutes.
 STATS_DEADLINE="${STATS_DEADLINE:-360}"
 CALL_TIMEOUT="${CALL_TIMEOUT:-30s}"
 
@@ -32,8 +32,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# used_bytes is what the kubelet's summary says the claim holds, and 0
-# when the summary does not carry it yet.
+# used_bytes prints the used bytes that the kubelet's stats summary
+# reports for the claim, or 0 when the summary has no entry for it yet.
 used_bytes() {
 	kube get --raw "/api/v1/nodes/$NODE/proxy/stats/summary" 2>/dev/null |
 		python3 -c '
@@ -48,7 +48,8 @@ print(0)
 '
 }
 
-# wait_for_stats waits until the summary reports bytes for the claim.
+# wait_for_stats waits until used_bytes is above 0, and fails at the
+# deadline.
 wait_for_stats() {
 	local deadline used
 	deadline=$(($(date +%s) + STATS_DEADLINE))
@@ -124,16 +125,16 @@ echo "drill 05: the pod writes a megabyte"
 kube exec -n "$NAMESPACE" writer -- \
 	dd if=/dev/zero of=/data/block bs=1024 count=1024 status=none
 
-echo "drill 05: the kubelet's summary carries the copy"
+echo "drill 05: the kubelet's stats summary reports the copy"
 wait_for_stats
 
-echo "drill 05: the plugin's metrics port answers"
+echo "drill 05: the plugin's metrics port responds"
 plugin="$(kube get pods -n "$DRIVER_NAMESPACE" -l app=per-node-csi-driver-node \
 	-o jsonpath='{.items[0].metadata.name}')"
 metrics="$(kube get --raw \
 	"/api/v1/namespaces/$DRIVER_NAMESPACE/pods/$plugin:9200/proxy/metrics")"
 if ! echo "$metrics" | grep -q "per_node_csi_copy_bytes{volume=\"$HANDLE\"}"; then
-	echo "drill 05: the metrics port carries no gauge for $HANDLE" >&2
+	echo "drill 05: the metrics port serves no per_node_csi_copy_bytes series for $HANDLE" >&2
 	echo "$metrics" | grep per_node_csi_copy_bytes >&2 || true
 	echo "drill 05: FAIL" >&2
 	exit 1
