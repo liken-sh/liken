@@ -202,7 +202,14 @@ func (s *captureServer) feed(ctx context.Context, session *captureSession, encod
 		}
 		if !now.Before(begins) {
 			stride, crop := strideAndCrop(session, chosen)
+			// A failed write to the pipe means that ffmpeg exited or
+			// the caller hung up, and stream reports the encoder's own
+			// exit status. A crop outside the frame is the capture's
+			// fault, and no other part reports it.
 			if err := writeCropped(writer, frame, stride, crop); err != nil {
+				if errors.Is(err, errCropOutsideFrame) {
+					return err
+				}
 				return nil
 			}
 		}
@@ -237,6 +244,10 @@ func seconds(value float64) time.Duration {
 	return time.Duration(value * float64(time.Second))
 }
 
+// errCropOutsideFrame is the error of a crop that reads past the end
+// of the frame.
+var errCropOutsideFrame = errors.New("the crop reads past the end of the frame")
+
 // writeCropped writes only the crop region of the frame to the
 // encoder, one row at a time, so the ffmpeg command needs no crop
 // filter.
@@ -245,7 +256,7 @@ func writeCropped(to *bufio.Writer, frame []byte, stride int, crop cropRect) err
 		start := y*stride + crop.X*capturePixelBytes
 		end := start + crop.W*capturePixelBytes
 		if end > len(frame) {
-			return fmt.Errorf("the frame holds %d bytes and the crop reads %d", len(frame), end)
+			return fmt.Errorf("%w: the frame holds %d bytes and the crop reads %d", errCropOutsideFrame, len(frame), end)
 		}
 		if _, err := to.Write(frame[start:end]); err != nil {
 			return err

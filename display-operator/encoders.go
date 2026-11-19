@@ -269,6 +269,13 @@ type encoder struct {
 	frames io.WriteCloser
 	body   io.ReadCloser
 	stderr *stderrTail
+
+	// exec.Cmd.Wait returns the exit only once, and a second call
+	// returns "Wait was already called". stream waits before it asks
+	// for the failure of an empty body, and end waits again, so each
+	// reads the exit that the first call recorded.
+	waited sync.Once
+	exit   error
 }
 
 // startEncoder starts ffmpeg for the plan. ffmpeg's stderr goes to
@@ -305,7 +312,8 @@ func (e *encoder) failure() error {
 // wait waits for ffmpeg to exit. A nonzero exit returns an error that
 // quotes lastLine.
 func (e *encoder) wait() error {
-	err := e.cmd.Wait()
+	e.waited.Do(func() { e.exit = e.cmd.Wait() })
+	err := e.exit
 	if err == nil {
 		return nil
 	}
@@ -318,7 +326,7 @@ func (e *encoder) end() {
 	if e.cmd.Process != nil {
 		_ = e.cmd.Process.Kill()
 	}
-	_ = e.cmd.Wait()
+	_ = e.wait()
 }
 
 // stderrTail keeps the last stderrTailSize bytes of ffmpeg's stderr.

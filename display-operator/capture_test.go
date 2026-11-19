@@ -31,7 +31,7 @@ func newCaptureFixture(t *testing.T) *captureServer {
 		socketPath: t.TempDir() + "/wayland-capture",
 		perOutput:  1,
 		now:        time.Now,
-		running:    map[string][]runningCapture{},
+		running:    map[string][]*runningCapture{},
 	}
 }
 
@@ -169,6 +169,29 @@ func TestOneCapturePerOutput(t *testing.T) {
 	}
 	if _, f := server.take("HDMI-A-2", time.Time{}); f != nil {
 		t.Errorf("a capture of a second output was refused: %v", f)
+	}
+}
+
+// The 503 names the end of a capture that still runs. A clip that has
+// ended no longer holds a slot, so its end is not in the detail.
+func TestTheBusyDetailNamesACaptureThatStillRuns(t *testing.T) {
+	server := newCaptureFixture(t)
+	server.perOutput = 2
+	if _, f := server.take("HDMI-A-1", time.Time{}); f != nil {
+		t.Fatalf("the stream was refused: %v", f)
+	}
+	releaseClip, f := server.take("HDMI-A-1", time.Date(2026, 11, 18, 10, 5, 0, 0, time.UTC))
+	if f != nil {
+		t.Fatalf("the clip was refused: %v", f)
+	}
+	releaseClip()
+	if _, f := server.take("HDMI-A-1", time.Time{}); f != nil {
+		t.Fatalf("a second stream was refused after the clip ended: %v", f)
+	}
+
+	_, f = server.take("HDMI-A-1", time.Time{})
+	if f == nil || !strings.Contains(f.detail, "until its client closes") {
+		t.Errorf("the busy fault is %+v, want a detail that says the running streams end when their clients close", f)
 	}
 }
 

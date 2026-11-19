@@ -227,13 +227,26 @@ func loadOwnersLeaf(secret *Secret, holder *certificateHolder, metrics *apiMetri
 func keepSidecarLeaf(ctx context.Context, c *apiclient.Client, watcher dynamic.Interface, namespace string, ca *certificateAuthority) {
 	sidecarSecret := informer.One{Resource: secretResource, Namespace: namespace, Name: sidecarTLSSecret, What: "the Secret " + sidecarTLSSecret}
 	<-informer.WatchOne(ctx, watcher, sidecarSecret, func(secret *Secret) {
-		if secret != nil && sidecarLeafUsable(secret, sidecarName, time.Now()) {
+		if secret != nil && sidecarLeafUsable(secret, ca, sidecarName, time.Now()) {
 			return
 		}
 		if err := ensureSidecarLeaf(c, namespace, sidecarTLSSecret, ca, sidecarName, time.Now()); err != nil {
 			fmt.Fprintf(os.Stderr, "minting the sidecar certificate: %v\n", err)
 		}
 	}, nil).Done()
+}
+
+// readFailures returns the error of each read that failed, on one
+// line, because the log prints the error as one line.
+func readFailures(certErr, keyErr error) error {
+	switch {
+	case certErr != nil && keyErr != nil:
+		return fmt.Errorf("%w, and %w", certErr, keyErr)
+	case certErr != nil:
+		return certErr
+	default:
+		return keyErr
+	}
 }
 
 // loadCaptureLeaf loads the sidecar's certificate from the files in
@@ -254,7 +267,9 @@ func loadCaptureLeaf(dir string, holder *certificateHolder, now time.Time) error
 		return holder.set(certPEM, keyPEM, false)
 	}
 	if holder.verifiable() {
-		return fmt.Errorf("reloading the API's leaf, which stays in use: %v", certErr)
+		// Either file can fail alone, so the error names each read
+		// that failed.
+		return fmt.Errorf("reloading the API's leaf, which stays in use: %w", readFailures(certErr, keyErr))
 	}
 	if holder.expiry().After(now) {
 		return nil

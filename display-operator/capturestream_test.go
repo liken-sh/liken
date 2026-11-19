@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -45,6 +46,25 @@ func TestACropOutsideTheFrameIsReported(t *testing.T) {
 	err := writeCropped(writer, make([]byte, 16), 4*capturePixelBytes, cropRect{W: 4, H: 4})
 	if err == nil {
 		t.Fatal("a crop past the end of the frame was written")
+	}
+}
+
+// discardFrames stands in for ffmpeg's stdin.
+type discardFrames struct{}
+
+func (discardFrames) Write(p []byte) (int, error) { return len(p), nil }
+func (discardFrames) Close() error                { return nil }
+
+// A frame shorter than the crop ends a clip with errCropOutsideFrame.
+func TestAClipReturnsTheErrorOfACropOutsideTheFrame(t *testing.T) {
+	server := newCaptureFixture(t)
+	session := &captureSession{info: captureScreen{Width: 4, Height: 4}}
+	chosen := captureSelection{Framerate: 30}
+
+	err := server.feed(t.Context(), session, &encoder{frames: discardFrames{}},
+		make([]byte, 16), chosen, time.Now(), false, "video/mp4")
+	if !errors.Is(err, errCropOutsideFrame) {
+		t.Errorf("feed returned %v for a 16-byte frame of a 4x4 screen, want errCropOutsideFrame", err)
 	}
 }
 

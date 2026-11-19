@@ -363,3 +363,37 @@ func TestAFourKScreenClipsAtTheScaledSize(t *testing.T) {
 		t.Errorf("a 4K screen's clip names %q, want a 1080p clip's codec", got)
 	}
 }
+
+// emptyFfmpeg writes a stand-in for an ffmpeg that exits 0 with no
+// output and one line on stderr.
+func emptyFfmpeg(t *testing.T) string {
+	t.Helper()
+	path := t.TempDir() + "/ffmpeg"
+	script := "#!/bin/sh\necho 'Output file is empty, nothing was encoded' >&2\nexit 0\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the fake ffmpeg: %v", err)
+	}
+	return path
+}
+
+// stream waits for the encoder before it asks for the failure of an
+// empty body, so the failure reads the exit that the first wait
+// returned.
+func TestTheFailureOfAnEmptyEncodeAfterAWaitSaysThatFfmpegWroteNothing(t *testing.T) {
+	held := ffmpegProgram
+	ffmpegProgram = emptyFfmpeg(t)
+	defer func() { ffmpegProgram = held }()
+	encoder, err := startEncoder(t.Context(), encodePlan{mediaType: "video/mp4", width: 4, height: 4, framerate: 30})
+	if err != nil {
+		t.Fatalf("starting the fake ffmpeg: %v", err)
+	}
+	if err := encoder.wait(); err != nil {
+		t.Fatalf("waiting for the fake ffmpeg: %v", err)
+	}
+
+	got := encoder.failure()
+	want := ffmpegProgram + " exited with no error and wrote no bytes: Output file is empty, nothing was encoded"
+	if got == nil || got.Error() != want {
+		t.Errorf("the failure is %v, want %q", got, want)
+	}
+}

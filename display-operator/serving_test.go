@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +100,28 @@ func TestTheSidecarLoadsTheLeafOnceItAppears(t *testing.T) {
 	}
 	if len(pair.Leaf.DNSNames) != 1 || pair.Leaf.DNSNames[0] != sidecarName {
 		t.Errorf("the sidecar leaf has DNS names %v, want [%s], the name the API verifies", pair.Leaf.DNSNames, sidecarName)
+	}
+}
+
+// After the API's leaf has loaded, a read of the key that fails is the
+// cause that the error names, even when the certificate reads.
+func TestAFailedReloadOfTheKeyNamesTheKey(t *testing.T) {
+	directory := t.TempDir()
+	holder := &certificateHolder{}
+	certPEM, keyPEM, err := testAuthority(t).mintLeaf(sidecarName, []string{sidecarName}, mintTime)
+	if err != nil {
+		t.Fatalf("minting the sidecar leaf: %v", err)
+	}
+	if err := holder.set(certPEM, keyPEM, false); err != nil {
+		t.Fatalf("storing the API's leaf in the holder: %v", err)
+	}
+	if err := os.WriteFile(directory+"/"+tlsCertFile, certPEM, 0o600); err != nil {
+		t.Fatalf("writing the certificate file: %v", err)
+	}
+
+	err = loadCaptureLeaf(directory, holder, mintTime)
+	if err == nil || !strings.Contains(err.Error(), tlsKeyFile) {
+		t.Errorf("the error is %v, want one that names the missing %s", err, tlsKeyFile)
 	}
 }
 
@@ -364,7 +387,7 @@ func TestTheAPICreatesTheSidecarSecretAgainWhenItIsDeleted(t *testing.T) {
 	go keepSidecarLeaf(t.Context(), api.client(), api.watcher(), testNamespace, ca)
 	minted := func() bool {
 		held, err := apiclient.Get[Secret](api.client(), secretsPath(testNamespace)+"/"+sidecarTLSSecret)
-		return err == nil && sidecarLeafUsable(held, sidecarName, time.Now())
+		return err == nil && sidecarLeafUsable(held, ca, sidecarName, time.Now())
 	}
 	eventually(t, "the first mint", minted)
 

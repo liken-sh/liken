@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -474,12 +475,18 @@ func TestEnsureSidecarLeafReplacesAnUnusableLeaf(t *testing.T) {
 	if err != nil {
 		t.Fatalf("minting the leaf: %v", err)
 	}
+	// A CA that the API minted before its own Secret was deleted.
+	replacedPEM, _, err := testAuthority(t).mintLeaf(sidecarName, []string{sidecarName}, mintTime)
+	if err != nil {
+		t.Fatalf("minting the leaf of the replaced CA: %v", err)
+	}
 	cases := []struct {
 		name string
 		data map[string][]byte
 	}{
 		{"a certificate that does not read", map[string][]byte{tlsCertKey: []byte("not a certificate")}},
 		{"a leaf under another name", map[string][]byte{tlsCertKey: wrongPEM}},
+		{"a leaf that another CA signed", map[string][]byte{tlsCertKey: replacedPEM}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -503,6 +510,50 @@ func TestEnsureSidecarLeafReplacesAnUnusableLeaf(t *testing.T) {
 				t.Errorf("the leaf's SANs are %v, want [%s]", got, sidecarName)
 			}
 		})
+	}
+}
+
+// authorityWithoutCAConstraints is a CA that an owner wrote into
+// display-api-tls with a ca.key, from a certificate that is not marked
+// as a CA and has no certSign key usage.
+func authorityWithoutCAConstraints(t *testing.T) *certificateAuthority {
+	t.Helper()
+	ca := testAuthority(t)
+	template := &x509.Certificate{
+		SerialNumber: ca.certificate.SerialNumber,
+		Subject:      ca.certificate.Subject,
+		NotBefore:    mintTime,
+		NotAfter:     mintTime.Add(authorityLife),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, ca.key.Public(), ca.key)
+	if err != nil {
+		t.Fatalf("signing the authority certificate without CA constraints: %v", err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	held, err := readAuthority(certPEM, ca.keyPEM)
+	if err != nil {
+		t.Fatalf("reading the authority without CA constraints: %v", err)
+	}
+	return held
+}
+
+// A leaf that the CA signed stays, so the watch of keepSidecarLeaf does
+// not write the Secret again on each event of its own write.
+func TestEnsureSidecarLeafKeepsALeafOfACAWithoutCAConstraints(t *testing.T) {
+	ca := authorityWithoutCAConstraints(t)
+	api := newObjectAPI()
+	client := objectClient(t, api)
+	path := secretsPath(testNamespace) + "/" + testSidecar
+	if err := ensureSidecarLeaf(client, testNamespace, testSidecar, ca, sidecarName, mintTime); err != nil {
+		t.Fatalf("ensuring the sidecar leaf: %v", err)
+	}
+
+	if err := ensureSidecarLeaf(client, testNamespace, testSidecar, ca, sidecarName, mintTime.Add(time.Minute)); err != nil {
+		t.Fatalf("ensuring the sidecar leaf again: %v", err)
+	}
+	if _, updated := api.counts(path); updated != 0 {
+		t.Errorf("updated the Secret %d times a minute after the first leaf, want 0", updated)
 	}
 }
 

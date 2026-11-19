@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -87,7 +88,7 @@ type captureServer struct {
 	now        func() time.Time
 
 	mu       sync.Mutex
-	running  map[string][]runningCapture
+	running  map[string][]*runningCapture
 	software bool
 }
 
@@ -136,7 +137,7 @@ func serveCaptureSidecar() {
 		device:     device,
 		perOutput:  perOutputLimit(),
 		now:        time.Now,
-		running:    map[string][]runningCapture{},
+		running:    map[string][]*runningCapture{},
 		software:   chooseConversion(ctx, device),
 	}
 	readings.converting(server.usesSoftwareConversion())
@@ -314,19 +315,23 @@ func (s *captureServer) take(connector string, ends time.Time) (func(), *fault) 
 		return nil, unavailable(problemCaptureBusy, fmt.Sprintf(
 			"%s is being captured %s", connector, until(held[0].ends)))
 	}
-	s.running[connector] = append(held, runningCapture{ends: ends})
-	return func() { s.release(connector) }, nil
+	capture := &runningCapture{ends: ends}
+	s.running[connector] = append(held, capture)
+	return func() { s.release(connector, capture) }, nil
 }
 
-func (s *captureServer) release(connector string) {
+// release removes the capture's own entry. Captures end in any order,
+// and an entry left behind for an ended clip would put its past end
+// time in the 503 detail.
+func (s *captureServer) release(connector string, capture *runningCapture) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	held := s.running[connector]
-	if len(held) <= 1 {
+	held := slices.DeleteFunc(s.running[connector], func(c *runningCapture) bool { return c == capture })
+	if len(held) == 0 {
 		delete(s.running, connector)
 		return
 	}
-	s.running[connector] = held[1:]
+	s.running[connector] = held
 }
 
 // until returns the end of a capture for the 503 detail.

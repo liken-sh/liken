@@ -9,6 +9,7 @@ package main
 // certificate and mints nothing.
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -319,14 +320,16 @@ func parsePEM(certPEM []byte) (*x509.Certificate, error) {
 // ensureSidecarLeaf writes the sidecar's leaf to its own Secret, which
 // the operator's pod on each node mounts as an optional volume. It
 // creates the Secret when it is missing, and replaces the leaf when the
-// leaf does not parse, has another SAN, or is due for renewal.
+// leaf does not parse, was not signed by ca, has another SAN, or is due
+// for renewal. A leaf that an earlier CA signed must go, because the
+// API's client to the sidecar trusts only ca.
 func ensureSidecarLeaf(c *apiclient.Client, namespace, secretName string, ca *certificateAuthority, sanName string, now time.Time) error {
 	path := secretsPath(namespace) + "/" + secretName
 	held, err := apiclient.Get[Secret](c, path)
 	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		return err
 	}
-	if err == nil && sidecarLeafUsable(held, sanName, now) {
+	if err == nil && sidecarLeafUsable(held, ca, sanName, now) {
 		return nil
 	}
 
@@ -390,11 +393,22 @@ func renewServingMaterial(c *apiclient.Client, namespace, secretName string,
 }
 
 // sidecarLeafUsable reports whether the sidecar's Secret has a usable
-// leaf: one whose only SAN is sanName and that is not due for renewal.
-// It does not check which CA signed the leaf.
-func sidecarLeafUsable(secret *Secret, sanName string, now time.Time) bool {
+// leaf: one that ca signed, whose only SAN is sanName, and that is not
+// due for renewal. The API's client to the sidecar trusts only ca, so a
+// leaf that an earlier CA signed fails every capture until it is
+// replaced.
+//
+// The check reads the issuer and the signature only. CheckSignatureFrom
+// also refuses a CA certificate that is not marked as a CA, and with
+// such a CA no leaf would pass, so each write of the Secret would
+// trigger another write through keepSidecarLeaf's watch.
+func sidecarLeafUsable(secret *Secret, ca *certificateAuthority, sanName string, now time.Time) bool {
 	leaf, err := leafOf(secret)
 	if err != nil {
+		return false
+	}
+	if !bytes.Equal(leaf.RawIssuer, ca.certificate.RawSubject) ||
+		ca.certificate.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature) != nil {
 		return false
 	}
 	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != sanName {
