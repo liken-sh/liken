@@ -250,6 +250,24 @@ func TestTheRefreshWithNoDirectoryDoesNothing(t *testing.T) {
 	}
 }
 
+// A CDI directory that exists and cannot be read hides every prepared
+// claim from the refresh, so an unplugged device gets no taint. The pass
+// must record the failure so that it retries.
+func TestTheRefreshReportsADirectoryItCannotRead(t *testing.T) {
+	isolatePass(t)
+	cdiDir = filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(cdiDir, nil, 0o644); err != nil {
+		t.Fatalf("writing a regular file at the CDI directory: %v", err)
+	}
+	out := &passOutcome{}
+
+	refreshCDISpecs(t.TempDir(), out, machineEvents{})
+
+	if out.failureCount() != 1 {
+		t.Errorf("the refresh recorded %d failures for a CDI directory that is a regular file, want 1", out.failureCount())
+	}
+}
+
 // A spec path that cannot be read is a failure of the refresh. A device
 // whose name does not start with its claim's UID is left unchanged.
 func TestTheRefreshReportsASpecItCannotRead(t *testing.T) {

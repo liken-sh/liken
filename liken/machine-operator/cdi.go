@@ -174,8 +174,16 @@ func cdiSpecPath(claimUID string) string {
 // nodes of later containers.
 func refreshCDISpecs(sysRoot string, out *passOutcome, notes machineEvents) {
 	entries, err := os.ReadDir(cdiDir)
-	if err != nil {
+	if errors.Is(err, fs.ErrNotExist) {
 		// The directory is missing until the first prepare of this boot.
+		return
+	}
+	if err != nil {
+		// Without the list, no unplugged device of a prepared claim is
+		// marked, so the slice does not taint it. The failure makes the
+		// pass retry.
+		fmt.Fprintf(os.Stderr, "device inventory: reading the CDI directory: %v\n", err)
+		out.fail("reading the CDI directory", err)
 		return
 	}
 	var byName map[string]hardware.Device
