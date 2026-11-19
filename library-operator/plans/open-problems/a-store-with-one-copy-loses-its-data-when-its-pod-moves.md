@@ -78,10 +78,31 @@ data, or ask for more than one copy?
 - **Make more than one copy the default.** Two copies of each store on
   two nodes survive the move of one pod, because the new copy syncs
   from the other. It costs a second pod and a second directory for each
-  store, on every namespace with a `Catalog`, and a one-node cluster
-  cannot place the second copy: it stays `Pending`, and
-  `status.replicas` of the `Catalog` reports fewer ready copies than it
-  asks for.
+  store, on every namespace with a `Catalog`. A reading of the code on
+  2026-11-19 found that a plain default of 2 leaves many `Catalog`s
+  never `Ready`, so the default needs conditions:
+  - A one-node cluster cannot place the second copy, because the
+    anti-affinity is required (`storereplicas.go:59`). `Ready` needs
+    every catalog copy (`catalogPodsBlocker` in
+    `catalogreconcile.go`), so the `Catalog` stays `PodPending`.
+  - `liken`'s default storage class is `local-path`, which is not
+    per-node. With a count above 1 on such a class, `storeCopies`
+    (`storereplicas.go:132`) runs one copy and sets `Ready` to `False`
+    with `ClassNotPerNode`. So a `Catalog` that names no class would
+    never be `Ready`.
+  - The CRD's schema has `default: 1` for both counts
+    (`deploy/catalogs-crd.yaml`), and the API server saves that value
+    into each object it writes. So an existing `Catalog` keeps one
+    copy, and a new default in the operator's code reaches only an
+    object with no count, which needs the schema default removed.
+
+  A default that works is 2 only on a per-node class, and no more than
+  the number of nodes that can run a copy. An existing one-copy
+  `Catalog` stays at one copy until a person raises its count.
+- **Make `Ready` depend on the first copy alone.** A separate
+  condition reports the copies that are missing, so a second copy that
+  cannot start does not make the `Catalog` not ready. This changes
+  what `Ready` means for every `Catalog`.
 - **Document it and leave it.** The manual says that a one-copy store
   on a per-node class loses its rows when the pod moves, and tells a
   person to set `spec.storage.replicas` and `spec.progress.replicas`
