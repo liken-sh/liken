@@ -296,11 +296,15 @@ func TestBusResendsSubscriptionsAfterAReconnect(t *testing.T) {
 	})
 }
 
-// Publish on a client that never connected does not panic.
+// Publish on a client that never connected drops the payload and
+// returns false, so a caller such as publishDerived sends it again on
+// its next pass.
 func TestBusDropsAPublishWhileDisconnected(t *testing.T) {
 	bus := newBus("pipe", "media-operator", nil, nil, nil)
 	// The client never ran, so out is nil.
-	bus.Publish("liken/media/plays/house/movie/status", []byte("x"), true)
+	if bus.Publish("liken/media/plays/house/movie/status", []byte("x"), true) {
+		t.Error("Publish on a bus that never connected = true, want false because nothing queued the payload")
+	}
 }
 
 // Nothing listens on port 1, so a TCP dial there fails.

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // gpuDevice is the `liken` device of a GPU's render node, as `liken`
@@ -64,6 +67,27 @@ func TestALongDriverNameIsCutToTheAPIsLimit(t *testing.T) {
 	facts := report{Vendor: "Mesa Gallium driver 26.0.0 for AMD Radeon Graphics (radeonsi, gfx1103_r1, LLVM 20.1.8, DRM 3.64, 7.0.0)"}
 	if got := mediaDevice(gpuDevice("pci-0000-03-00-0", "0000:03:00.0"), facts).stringAttribute(vaDriverAttribute); len(got) != maxAttributeString {
 		t.Errorf("%s has %d characters, want %d", vaDriverAttribute, len(got), maxAttributeString)
+	}
+}
+
+// The cut keeps whole characters. A cut through a character would leave
+// a byte that is not UTF-8, which encoding/json writes as the three
+// bytes of U+FFFD, so the ResourceSlice would carry more than the
+// API's limit of 64 bytes and the API server would refuse it.
+func TestALongDriverNameIsCutAtACharacterBoundary(t *testing.T) {
+	facts := report{Vendor: strings.Repeat("a", maxAttributeString-1) + "é driver"}
+	device := mediaDevice(gpuDevice("pci-0000-03-00-0", "0000:03:00.0"), facts)
+
+	encoded, err := json.Marshal(device.Attributes[vaDriverAttribute])
+	if err != nil {
+		t.Fatalf("encoding the %s attribute: %v", vaDriverAttribute, err)
+	}
+	var sent DeviceAttribute
+	if err := json.Unmarshal(encoded, &sent); err != nil {
+		t.Fatalf("decoding the %s attribute: %v", vaDriverAttribute, err)
+	}
+	if got := *sent.String; len(got) > maxAttributeString || !utf8.ValidString(got) {
+		t.Errorf("%s reaches the API server as %d bytes %q, want at most %d bytes of valid UTF-8", vaDriverAttribute, len(got), got, maxAttributeString)
 	}
 }
 

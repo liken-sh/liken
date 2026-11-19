@@ -28,8 +28,10 @@ func parseNext(value string) json.RawMessage {
 	if value == "" {
 		return nil
 	}
-	var block PlayNext
-	if err := json.Unmarshal([]byte(value), &block); err != nil {
+	// A JSON null decodes into a struct with no error, so the value
+	// decodes into a pointer, which null leaves nil.
+	var block *PlayNext
+	if err := json.Unmarshal([]byte(value), &block); err != nil || block == nil {
 		return nil
 	}
 	return json.RawMessage(value)

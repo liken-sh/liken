@@ -574,8 +574,10 @@ impl Art {
                 }
             }
             // The decode finished. When the newest request is for a
-            // different tile, start its decode now.
-            Kind::Trickplay => {
+            // different tile, start its decode now. An answer that is not
+            // for the running decode started before a resize, so it has
+            // the old size, and the decode at the new size still runs.
+            Kind::Trickplay if self.inflight.as_ref() == Some(&answer.key) => {
                 self.inflight = None;
                 self.tile.bitmap = answer.bitmap;
                 let newest = self
@@ -1117,6 +1119,32 @@ mod tests {
         assert!(
             more.is_empty(),
             "the answer started another decode, want none"
+        );
+    }
+
+    /// The answer of a thumbnail decode that started before a resize is
+    /// for the old size. It is not drawn, and it does not start the
+    /// new-size decode a second time.
+    #[test]
+    fn a_tile_answer_from_before_a_resize_is_dropped() {
+        let mut art = Art::default();
+        let item = block(r#"{"trickplay":"/art/tiles"}"#);
+        art.on_item(&item, &canvas());
+        let before = art.sync(&item, &film(), &canvas(), Some(10.0), None, &[]);
+        let after = art.sync(&item, &film(), &wide(), Some(10.0), None, &[]);
+        assert_eq!(boxes(&before), [(Kind::Trickplay, 360, 220)]);
+        assert_eq!(boxes(&after), [(Kind::Trickplay, 720, 440)]);
+
+        let (_, more) = art.on_answer(answer(&before[0], picture(360, 220)));
+
+        assert!(
+            art.tile().is_none(),
+            "the scrubber has the old-size tile, want none until the new-size decode answers"
+        );
+        assert!(
+            more.is_empty(),
+            "the old-size answer started {:?}, want no decode because the new-size decode runs",
+            boxes(&more)
         );
     }
 

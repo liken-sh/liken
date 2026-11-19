@@ -267,7 +267,6 @@ func newAPIFixture(t *testing.T) *apiFixture {
 		},
 		display:         display.url,
 		audio:           audio.url,
-		version:         "test",
 		ffmpeg:          "ffmpeg",
 		maxCompositions: 4,
 		now:             func() time.Time { return testAPIClock },

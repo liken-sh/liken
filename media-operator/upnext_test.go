@@ -33,6 +33,7 @@ func TestParseNextReadsOneObject(t *testing.T) {
 		{name: "nothing at all", value: "", want: ""},
 		{name: "a value that does not decode", value: "not json", want: ""},
 		{name: "a value that is not an object", value: `["E05"]`, want: ""},
+		{name: "a JSON null", value: "null", want: ""},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {

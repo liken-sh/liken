@@ -34,12 +34,16 @@ pub struct Bitmap {
 impl Bitmap {
     /// Builds a bitmap from straight-alpha RGBA pixels in row-major order.
     /// Returns `None` when a dimension is zero or `pixels` is shorter than
-    /// `width * height * 4`.
-    pub fn from_rgba(width: u32, height: u32, pixels: Vec<u8>) -> Option<Self> {
+    /// `width * height * 4`, and drops the bytes past that length.
+    pub fn from_rgba(width: u32, height: u32, mut pixels: Vec<u8>) -> Option<Self> {
         let (rows, row) = (height as usize, width as usize * 4);
         if width == 0 || height == 0 || pixels.len() < row * rows {
             return None;
         }
+        // A one-band picture hands `pixels` to the toolkit as it is, so
+        // without the cut its handle would hold the extra bytes of a
+        // longer buffer. The bands of a larger picture take exact slices.
+        pixels.truncate(row * rows);
 
         let per_band = ((MAX_SYNC - 1) / row).max(1);
         // A picture under the limit is one band, which takes `pixels`
@@ -141,6 +145,20 @@ mod tests {
         assert_eq!(bitmap.width, 3);
         assert_eq!(bitmap.height, 1);
         assert_eq!(read_back(&bitmap.bands[0].handle), pixels.to_vec());
+    }
+
+    /// A buffer longer than its size gives the toolkit only the bytes of
+    /// the picture, the same as a picture in several bands takes.
+    #[test]
+    fn a_buffer_longer_than_its_size_keeps_only_the_picture() {
+        let pixels = [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 9, 9, 9, 9];
+        let bitmap = Bitmap::from_rgba(3, 1, pixels.to_vec())
+            .expect("from_rgba accepts a 3x1 buffer of 16 bytes");
+        assert_eq!(
+            read_back(&bitmap.bands[0].handle),
+            pixels[..12].to_vec(),
+            "the band holds the 4 extra bytes, want only the 12 bytes of a 3x1 picture"
+        );
     }
 
     #[test]

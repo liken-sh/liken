@@ -83,7 +83,6 @@ type apiServer struct {
 
 	display    string
 	audio      string
-	version    string
 	publicBase string
 	ffmpeg     string
 
@@ -320,7 +319,6 @@ func runAPI() {
 		},
 		display:         environmentOr(apiDisplayURLVariable, defaultDisplayURL),
 		audio:           environmentOr(apiAudioURLVariable, defaultAudioURL),
-		version:         version,
 		publicBase:      os.Getenv(apiPublicBaseVariable),
 		ffmpeg:          "ffmpeg",
 		maxCompositions: compositionLimit(),

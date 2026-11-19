@@ -63,8 +63,7 @@ spec:
               value: "4"
             # The API reads its own pod for the image tag of the
             # container named api, which is the release it runs.
-            # liken_build_info reports that release, and the discovery
-            # and OpenAPI documents use it as their ETag. The namespace
+            # liken_build_info reports that release. The namespace
             # is also where the TLS Secret and the CA ConfigMaps are.
             - name: POD_NAME
               valueFrom:

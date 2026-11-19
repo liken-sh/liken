@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"sort"
@@ -160,12 +161,43 @@ func TestADocumentRouteRespondsToIfNoneMatch(t *testing.T) {
 	}
 }
 
-func TestTheDiscoveryAndOpenAPIDocumentsUseTheBuildVersionAsETag(t *testing.T) {
+// The discovery document copies the siblings' lists, so a sibling that
+// adds a form changes the body without a release. A client that sends
+// the first ETag then gets the new body and not 304.
+func TestTheDiscoveryDocumentIsValidatedByItsOwnBody(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
+		fixture.display.contentType = jsonDocumentType
+		fixture.display.body = siblingDiscovery(t, "displays", "screen", []string{"image/png"}, []string{"png"})
 
-		for _, route := range []string{apiBasePath, apiBasePath + "/openapi.json"} {
-			mustMatch(t, fixture.get(route).Header().Get("ETag"), `"test"`)
+		tag := fixture.get(apiBasePath).Header().Get("ETag")
+		fixture.display.body = siblingDiscovery(t, "displays", "screen",
+			[]string{"image/png", "image/avif"}, []string{"png", "avif"})
+		changed := fixture.call(http.MethodGet, apiBasePath, http.Header{"If-None-Match": {tag}})
+
+		if changed.Code != http.StatusOK {
+			t.Errorf("a read with the first ETag %s after the display API added avif answered %d, want 200 with the new list", tag, changed.Code)
+		}
+	})
+}
+
+// With no public base URL, the OpenAPI document names the origin of the
+// request, so a read from another origin gets its own body and not 304.
+func TestTheOpenAPIDocumentIsValidatedByItsOwnBody(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		route := apiBasePath + "/openapi.json"
+
+		tag := fixture.get(route).Header().Get("ETag")
+		request := httptest.NewRequest(http.MethodGet, route, nil)
+		request.Host = "media-api.example.org"
+		request.Header.Set("Authorization", "Bearer "+testAPIToken)
+		request.Header.Set("If-None-Match", tag)
+		other := httptest.NewRecorder()
+		fixture.server.handler().ServeHTTP(other, request)
+
+		if other.Code != http.StatusOK {
+			t.Errorf("a read from another origin with the ETag %s answered %d, want 200 with that origin in servers", tag, other.Code)
 		}
 	})
 }

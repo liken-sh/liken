@@ -220,23 +220,25 @@ mod tests {
         assert_eq!(Options::default().size, (1920, 1080));
     }
 
-    #[test]
-    fn the_help_lists_every_flag() {
-        for flag in [
-            "--script",
-            "--capture",
-            "--capture-at",
-            "--stats",
-            "--quit-after",
-            "--size",
-            "--help",
-        ] {
-            // Each flag starts a line, indented two spaces.
+    /// Each flag starts a line of the help, indented two spaces.
+    fn assert_the_help_lists(flags: &[&str]) {
+        for flag in flags {
             assert!(
                 help().contains(&format!("\n  {flag} ")),
                 "the help does not list {flag}"
             );
         }
+    }
+
+    #[test]
+    fn the_help_lists_every_flag() {
+        assert_the_help_lists(&["--script", "--quit-after", "--size", "--help"]);
+    }
+
+    #[cfg(feature = "measure")]
+    #[test]
+    fn the_help_lists_every_flag_of_the_measure_feature() {
+        assert_the_help_lists(&["--capture", "--capture-at", "--stats"]);
     }
 
     #[test]
@@ -259,6 +261,15 @@ mod tests {
     #[test]
     fn a_flag_without_its_value_is_an_error() {
         assert_eq!(
+            Options::parse(args("--size")),
+            Err("--size needs a value".to_string())
+        );
+    }
+
+    #[cfg(feature = "measure")]
+    #[test]
+    fn a_flag_of_the_measure_feature_without_its_value_is_an_error() {
+        assert_eq!(
             Options::parse(args("--stats")),
             Err("--stats needs a value".to_string())
         );
@@ -266,19 +277,29 @@ mod tests {
 
     #[test]
     fn each_flag_sets_its_option() {
-        let Ok(Invocation::Run(options)) = Options::parse(args(
-            "--script 1.0:p --capture /frames --capture-at 0.5 \
-             --stats /stats.json --quit-after 3 --size 1280x720",
-        )) else {
+        let Ok(Invocation::Run(options)) =
+            Options::parse(args("--script 1.0:p --quit-after 3 --size 1280x720"))
+        else {
             panic!("the flags parse");
         };
 
         assert_eq!(options.script, vec![(1.0, "p".to_string())]);
+        assert_eq!(options.quit_after, Some(3.0));
+        assert_eq!(options.size, (1280, 720));
+    }
+
+    #[cfg(feature = "measure")]
+    #[test]
+    fn each_flag_of_the_measure_feature_sets_its_option() {
+        let Ok(Invocation::Run(options)) = Options::parse(args(
+            "--capture /frames --capture-at 0.5 --stats /stats.json",
+        )) else {
+            panic!("the flags parse");
+        };
+
         assert_eq!(options.capture_dir, Some(PathBuf::from("/frames")));
         assert_eq!(options.capture_at, vec![0.5]);
         assert_eq!(options.stats, Some(PathBuf::from("/stats.json")));
-        assert_eq!(options.quit_after, Some(3.0));
-        assert_eq!(options.size, (1280, 720));
     }
 
     #[test]
@@ -315,11 +336,13 @@ mod tests {
         assert!(parse_script("1.0:").is_err(), "a step with no key");
     }
 
+    #[cfg(feature = "measure")]
     #[test]
     fn capture_times_sort() {
         assert_eq!(parse_times("3.2, 0.5 ,1"), Ok(vec![0.5, 1.0, 3.2]));
     }
 
+    #[cfg(feature = "measure")]
     #[test]
     fn a_capture_time_must_be_a_number() {
         assert_eq!(

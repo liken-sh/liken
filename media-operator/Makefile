@@ -177,10 +177,13 @@ DISPLAY_COVERAGE_FLOOR := 90
 test-rust:
 	cargo fmt --check
 	cargo clippy --workspace --all-targets -- -D warnings
-# The image builds with the `measure` feature off, so this lint run
-# covers that build too. It lints only the library and the binaries,
-# because the test targets need the code that the feature enables.
-	cargo clippy -p idle-screen --no-default-features --lib --bins -- -D warnings
+# The image builds with the `measure` feature off, so these lines lint
+# and test that build too. Without them, a test that names a flag of
+# the feature compiles only in the default build, and the shipped build
+# goes untested. The headless test requires the feature, so cargo skips
+# it here.
+	cargo clippy -p idle-screen --no-default-features --all-targets -- -D warnings
+	cargo test -p idle-screen --no-default-features
 # One instrumented build runs the tests of both crates, and a report
 # for each crate applies its floor. The build uses the whole
 # workspace's features, the same set that the first clippy run lints,

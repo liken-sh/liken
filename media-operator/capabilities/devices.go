@@ -1,5 +1,7 @@
 package main
 
+import "unicode/utf8"
+
 // This driver publishes one device for each render node. The device
 // describes what the GPU's media driver can decode, encode, and scale.
 // It has no device node, and any number of claims can allocate it at
@@ -26,7 +28,7 @@ const vaDriverAttribute = "vaDriver"
 var identityAttributes = []string{"address", "driver", "vendor", "product", "name"}
 
 // maxAttributeString is the longest string value that the API accepts
-// in a device attribute.
+// in a device attribute, counted in bytes.
 const maxAttributeString = 64
 
 // mediaDevice builds the media device for one GPU from the `liken`
@@ -56,9 +58,17 @@ func mediaDevice(gpu SliceDevice, facts report) SliceDevice {
 	return SliceDevice{Name: gpu.Name, Attributes: attrs, AllowMultipleAllocations: &shared}
 }
 
+// truncate cuts s to at most limit bytes, at a character boundary. The
+// API server counts the bytes of an attribute, and encoding/json writes a
+// byte that is not UTF-8 as the three bytes of U+FFFD, so a cut through a
+// character would make the value longer than the limit.
 func truncate(s string, limit int) string {
 	if len(s) <= limit {
 		return s
 	}
-	return s[:limit]
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }

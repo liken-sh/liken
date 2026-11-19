@@ -52,7 +52,8 @@ func (s *apiServer) serveDiscovery(e *apiExchange) {
 	if _, ok := e.authenticate(); !ok {
 		return
 	}
-	e.document(marshaled(s.discovery(e.request.Context())), jsonDocumentType, e.buildTag())
+	body := marshaled(s.discovery(e.request.Context()))
+	e.document(body, jsonDocumentType, bodyTag(body))
 }
 
 // discovery builds the discovery document. A screen or audio request
@@ -144,7 +145,8 @@ func (s *apiServer) serveOpenAPI(e *apiExchange) {
 	if _, ok := e.authenticate(); !ok {
 		return
 	}
-	e.document(servedOpenAPI(s.origin(e)), openAPIDocumentType, e.buildTag())
+	body := servedOpenAPI(s.origin(e))
+	e.document(body, openAPIDocumentType, bodyTag(body))
 }
 
 // playerInfoDocument is what a client can read before it requests a
@@ -196,19 +198,15 @@ func (s *apiServer) serveInfo(e *apiExchange) {
 	e.document(body, jsonDocumentType, bodyTag(body))
 }
 
-// bodyTag is the ETag of the info document: a SHA-256 digest of its body,
-// because the document changes with the Player's status.
+// bodyTag is the ETag of every document: a SHA-256 digest of its body.
+// The info document changes with the Player's status, the discovery
+// document copies the sibling APIs' lists, and the OpenAPI document
+// names the origin of the request when no public base is set. So each
+// body can change without a release, and a tag from the build version
+// would answer 304 for a body that the client does not have.
 func bodyTag(body []byte) string {
 	digest := sha256.Sum256(body)
 	return `"` + hex.EncodeToString(digest[:]) + `"`
-}
-
-// buildTag is the ETag of the discovery and OpenAPI documents: the build
-// version. The committed OpenAPI document changes only with a release.
-// The discovery document's screen and audio lists come from the sibling
-// APIs, so it can change without a release while its ETag stays the same.
-func (e *apiExchange) buildTag() string {
-	return `"` + e.server.version + `"`
 }
 
 // marshaled encodes a document as JSON. The documents hold only strings,
