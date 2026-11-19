@@ -91,6 +91,9 @@ func TestPathAboveTheTreeGets404WithTheSitesNotFoundPage(t *testing.T) {
 	if response.StatusCode != http.StatusNotFound {
 		t.Fatalf("the status is %d, want 404", response.StatusCode)
 	}
+	if got := body(t, response); !strings.Contains(got, "<title>Not found</title>") {
+		t.Fatalf("the body is %q, want the site's 404.html and not the file above the tree", got)
+	}
 }
 
 func TestRefusesACommandLineWithNoDirectory(t *testing.T) {

@@ -325,13 +325,18 @@ fn a_dark_panel_arms_no_second_off_timer() {
     screen.tick(now + Duration::from_secs(1800));
     assert_eq!(screen.panel_request, Some(crate::panel::OFF));
 
-    // A focus message that names another `Player` changes nothing on this one.
+    // A press of the cycle key keeps the screen asleep and arms the timers
+    // again, so it reaches the check that a dark panel needs no off timer.
     screen.deliver(
-        FIRST_REMOTE_FOCUS,
-        b"cinema",
+        FIRST_REMOTE_EVENTS,
+        &key(keys::CYCLE, 1),
         false,
         now + Duration::from_secs(1900),
     );
 
+    assert!(
+        screen.asleep,
+        "the screen woke on the cycle key, want it asleep"
+    );
     assert_eq!(screen.next_deadline(), None);
 }
