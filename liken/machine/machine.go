@@ -1,38 +1,30 @@
-// Package machine is the Machine API. It defines liken's one
-// configuration document as Go types.
+// Package machine defines the Machine API: the Go types of the
+// document that configures one liken machine.
 //
-// A Machine has the same shape as a Kubernetes resource. Kubelet's
-// KubeletConfiguration, k0s's config, and Talos's machine config also
-// use this shape. This design lets one schema-validated document
-// reach the machine in two ways. At boot, init reads the document
-// from a file baked into the image, because no API server exists yet
-// at that point. After the cluster starts, the same document exists
-// in the cluster as a custom resource. There, the liken operator
-// publishes the machine's live facts into the document's status. The
-// file that a person writes by hand and the object that the command
-// `kubectl get machine -o yaml` returns are the same document.
+// A Machine has the shape of a Kubernetes resource, like
+// KubeletConfiguration and Talos's machine config, so the same
+// document works before and after the cluster exists. At boot, init
+// reads it from a file in the image, because no API server runs yet.
+// Once the cluster runs, the document is also a custom resource, and
+// the operator writes the machine's state into its status. A manifest
+// that a person writes by hand and the output of `kubectl get machine
+// -o yaml` are the same document.
 //
-// Two programs use this API, and this package is what they share.
-// Init reads the spec and applies the network settings and the
-// sysctls at boot. Init also produces the facts. The operator reads
-// the facts and reconciles the spec for as long as the machine runs.
-// This division is deliberate. Init never talks to Kubernetes. The
-// operator never touches boot-time state. The facts tree under
-// `/run/liken/facts` is the one-way channel between the two programs
-// (see factstree.go, which defines the tree and its grammar).
+// Init and the operator both import this package. Init reads the spec,
+// applies it at boot, and writes the facts that become the Machine's
+// status to the tree under /run/liken/facts (factstree.go). The
+// operator reads those facts and reconciles the spec while the machine
+// runs. Init never talks to Kubernetes, and the operator never changes
+// a boot-time setting on a running machine. It stages the change for
+// the next boot.
 //
-// The api package defines the document's shape: the group and
-// version it declares, its metadata, and the condition and phase
-// vocabulary that its status uses. Every other liken document shares
-// this same shape.
+// The api package defines what every liken document shares: the group
+// and version, the metadata, and the conditions and phases of a
+// status.
 //
-// A note on naming: the names `machine.MachineSpec` and
-// `machine.MachineStatus` repeat the package name. Go's naming advice
-// warns against this repetition, but this package repeats it on
-// purpose. The types mirror the CRD kind, `Machine`, and Kubernetes'
-// `XxxSpec`/`XxxStatus` convention. Matching what the command
-// `kubectl explain machine.spec` shows is worth more than avoiding
-// this repetition.
+// MachineSpec and MachineStatus repeat the package name so that they
+// match the CRD kind and the Kubernetes XxxSpec and XxxStatus
+// convention that `kubectl explain machine.spec` shows.
 package machine
 
 import (
@@ -48,49 +40,44 @@ import (
 )
 
 const (
-	// MachineManifestDir is the directory where the image carries
-	// Machine manifests, one file for each machine (<name>.yaml). One
-	// image boots a whole fleet of machines, so the image carries
-	// every machine's manifest. Each boot selects its own manifest by
-	// the liken.machine=<name> kernel parameter. On a machine with
-	// exactly one manifest, that manifest is the only choice, and the
-	// boot uses it automatically.
+	// MachineManifestDir is the directory in the image with one
+	// manifest for each machine, named <name>.yaml, so one image boots
+	// a whole fleet. A boot uses the manifest that the
+	// liken.machine=<name> kernel parameter selects, or the only
+	// manifest when the image has one.
 	MachineManifestDir = "/etc/liken/machines"
 
-	// BootManifestPath is the file where init publishes the manifest
-	// that this boot actually ran under. This manifest is the staged
-	// or proven copy from machineState, or, on a first boot, the
-	// image's seed manifest. The operator reads this file through a
-	// hostPath mount. The operator uses the file to identify the
-	// Machine it manages, and to seed the in-cluster Machine on the first
-	// boot. Like the facts tree, this file lives under /run because it
-	// describes only the current boot. It stays one whole file, so the
-	// operator reads the manifest's exact bytes, not a rendering.
+	// BootManifestPath is where init writes the manifest that this
+	// boot runs under: a staged manifest on its proving boot, the last
+	// manifest that booted successfully, or, on the machine's first
+	// boot, the manifest from the image. The operator reads it through
+	// a hostPath mount to find which Machine it manages, and creates
+	// that Machine in the cluster from it on the first boot. Init
+	// writes the bytes it read, so the operator receives the manifest
+	// as the person wrote it, not a re-serialized copy. The file is
+	// under /run because it describes only the current boot.
 	BootManifestPath = "/run/liken/machine.yaml"
 
-	// SysctlDir is the kernel's tuning interface: one file for each
-	// parameter. The sysctl helper functions take the directory as a
-	// parameter, so tests can point them at a small copy of the
-	// directory. Real callers pass this constant.
+	// SysctlDir is the kernel's sysctl tree. The sysctl functions take
+	// the directory as an argument so that a test can pass a temporary
+	// one.
 	SysctlDir = "/proc/sys"
 )
 
-// Version is the liken version that this binary was built as. The
-// build process stamps this value using -ldflags -X. When the
-// releases domain builds the binary, the value is a release name. For
-// a development build, the value is the git-described commit
-// (liken/version.mk explains this mechanism). This value
-// reaches the cluster as status.version.liken. The operator compares
-// this value against the Cluster's spec.version target to determine
-// whether this machine needs an upgrade.
+// Version is the liken version of this binary, which the build sets
+// with -ldflags -X: a release name, or for a development build the
+// output of git describe (liken/version.mk). Init reports its value as
+// status.version.liken, and the operator compares that with the
+// Cluster's spec.version to decide whether the machine needs an
+// upgrade.
 var Version = "dev"
 
-// The struct tags are json, not yaml, because parsing goes through
-// sigs.k8s.io/yaml, the same converter that Kubernetes tooling uses.
-// This converter turns YAML into JSON before it unmarshals the data.
-// This step gives Kubernetes documents their camelCase convention. It
-// also means these structs serialize the same way, whether the data
-// comes from a file or from the API server.
+// Machine is the document that configures one machine, as a manifest
+// file or as a custom resource.
+//
+// The struct tags are json because sigs.k8s.io/yaml converts YAML to
+// JSON before it unmarshals, so the same structs read a file and an
+// API server response.
 type Machine struct {
 	APIVersion string         `json:"apiVersion"`
 	Kind       string         `json:"kind"`
@@ -99,166 +86,122 @@ type Machine struct {
 	Status     MachineStatus  `json:"status,omitzero"`
 }
 
-// GetObjectMeta answers the metadata that a watch's store and the
-// operators' memo read (api.Meta).
+// GetObjectMeta returns the metadata, for the watch store and the
+// operators, which read every liken object through api.Meta.
 func (m *Machine) GetObjectMeta() api.Meta { return m.Metadata }
 
-// MachineSpec is the declared half of a Machine. It states what a
-// person asks this machine to be. A git repository can also declare
-// this, through the cluster's flux feature. Each
-// field notes who acts on it and when, because the actuators differ.
-// Some state can only be set while the machine is being built. Some
-// state can be reconciled live.
+// MachineSpec is the desired state of a Machine. The comment on each
+// field says whether init applies it at boot, the operator applies it
+// on the running machine, or both, because an edit to a field that
+// only a boot applies waits for a reboot.
 type MachineSpec struct {
-	// Network is applied by init at boot. The cluster cannot reconcile
-	// most of this field live, because the cluster reaches this
-	// machine over the addresses that an edit changes: re-addressing a
-	// running machine would cut the connection that carries the next
-	// instruction. So an edit converges the same way a storage edit
-	// does. The operator stages it to the machineState filesystem, and
-	// the next boot applies it. RebootPolicy says who starts that
-	// boot. HostEntries is the one exception: it names no address of
-	// this machine's own, so an edit to it cannot cut the connection,
-	// and it reconciles live instead (see its own comment below).
+	// Network is applied by init at boot. The cluster reaches the
+	// machine over the addresses that a network edit changes, so
+	// applying the edit live would cut the machine off from the API
+	// server. The operator stages the edit on the machineState
+	// filesystem instead, and the next boot applies it. RebootPolicy
+	// decides who starts that boot. HostEntries changes no address,
+	// so the operator applies an edit to it live.
 	Network NetworkSpec `json:"network,omitzero"`
 
-	// Sysctls is kernel tuning: it maps a parameter name to its
-	// desired value, for example "vm.overcommit_memory": "1". The
-	// system applies sysctls twice, by design. Init sets them at boot,
-	// so they hold their values before k3s starts. The operator then
-	// reconciles them live, so a kubectl edit takes effect without a
-	// reboot.
+	// Sysctls maps a kernel parameter to its value, for example
+	// "vm.overcommit_memory": "1". Init sets them at boot, before k3s
+	// starts, and the operator reconciles them on the running machine,
+	// so an edit applies without a reboot.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
-	// Rlimits is per-process resource tuning: it maps a resource to
-	// its desired limit, for example "nofile": "1048576". Init applies
-	// the limits every liken machine holds (machine.OSRlimits) and
-	// then these, to itself, before it starts k3s. Every process on
-	// the machine inherits the result.
-	//
-	// Unlike sysctls, these cannot reconcile live. The kernel fixes a
-	// process's limits when it forks, so no edit can reach a k3s that
-	// is already running. An edit stages to the machineState
-	// filesystem and applies at the next boot, the way storage and
-	// network do. RebootPolicy says who starts that boot.
+	// Rlimits maps a per-process resource to its limit, for example
+	// "nofile": "1048576". Before init starts k3s, it sets on itself
+	// the limits in OSRlimits and then these, and every process on the
+	// machine inherits them. A process inherits its limits when it
+	// starts, so an edit cannot change the k3s that is running. The
+	// operator stages the edit for the next boot.
 	Rlimits map[string]string `json:"rlimits,omitempty"`
 
-	// Modules names extra kernel modules that this machine loads at
-	// boot, beyond the fixed list that the OS itself needs (the
-	// image's modules.conf). These extra modules are the drivers for
-	// whatever hardware this machine's workloads use. Init loads them
-	// only after it reads the boot's manifest, so these modules cannot
-	// serve the boot path itself. A driver that the boot depends on
-	// must belong in the fixed list instead.
+	// Modules lists the kernel modules that this machine loads in
+	// addition to the ones that the OS always loads (the image's
+	// /etc/liken/modules.conf), usually the drivers for hardware that
+	// workloads use. Init loads them after it reads the manifest, so a
+	// driver that the boot itself needs belongs in modules.conf.
 	//
-	// The image carries the kernel build's whole module tree, so any
-	// name that kernel has is loadable here, whatever manifests
-	// existed when the image was built. status.modules reports the
-	// outcome for each name, including the name this kernel has no
-	// module for.
+	// The image has the kernel's whole module tree, so any module of
+	// this kernel can be listed. status.modules reports the result for
+	// each name, including a name that this kernel has no module for.
 	//
-	// A name added here converges without a reboot: loading a driver
-	// is live-capable, and the kernel binds a resident driver to
-	// hardware that is already plugged in. Removing a name needs a
-	// boot, because unloading is not part of that path.
+	// The operator loads an added module without a reboot, and the
+	// kernel binds it to hardware that is already plugged in. A
+	// removed module stays loaded until the next boot, because the
+	// operator never unloads a module.
 	Modules []string `json:"modules,omitempty"`
 
-	// ModuleParameters sets how a declared module loads: a flat map
-	// from "<module>.<parameter>" to the value, in the kernel's own
-	// spelling, the same form the kernel command line uses and
-	// /sys/module mirrors. Each key must name a module that Modules
-	// declares, spelled the same way. A parameter applies once, at
-	// the load, because a loaded module never reads its parameters
-	// again; so a value added with its module converges live, and a
-	// change on a module this boot already loaded stages for the
-	// next boot like every other reboot-class edit.
+	// ModuleParameters sets parameters for the modules in Modules. A
+	// key is "<module>.<parameter>", as on the kernel command line,
+	// and its module must be spelled as in Modules. A module reads its
+	// parameters only when it loads, so a parameter added together
+	// with its module applies without a reboot, and a change for a
+	// module that is already loaded waits for the next boot.
 	ModuleParameters map[string]string `json:"moduleParameters,omitempty"`
 
-	// Serio names the serial-line devices whose kernel driver binds
-	// only after a program attaches the line to the serio layer, such
-	// as a USB-CEC adapter (serio.go). Init holds each attachment for
-	// the life of the boot. An entry loads no module for itself: the
-	// line driver, serport, and the protocol's driver belong in
-	// Modules, the same as every other driver.
+	// Serio lists the serial lines whose kernel driver binds only
+	// after a program attaches the line to the serio layer, such as a
+	// USB-CEC adapter (serio.go). Init keeps each attachment open
+	// until the machine reboots. An entry loads no module, so the
+	// serial driver, the serport line discipline, and the protocol's
+	// driver belong in Modules.
 	//
-	// The field converges on the terms Modules does. An added entry
-	// attaches without a reboot, through the same live load that
-	// loads an added module. A removed entry stages for the next
-	// boot, because the holder keeps the port for any pod that holds
-	// the devices the port created.
+	// An added entry attaches without a reboot. A removed entry stays
+	// attached until the next boot, because pods can hold the devices
+	// that the attachment created.
 	Serio []SerioAttachment `json:"serio,omitempty"`
 
-	// NodeLabels is this machine's scheduling identity: the labels
-	// that its Kubernetes Node object carries. Workloads select
-	// machines using these labels, for example to find which machine
-	// has the GPU, or which machine runs on battery-backed power. The
-	// system applies node labels twice, like sysctls. Init renders the
-	// labels into the k3s boot drop-in, so the node already carries
-	// them when it registers. The operator then reconciles the labels
-	// live afterward. The operator also removes a label that this spec
-	// once declared but no longer declares. The kubelet applies
-	// registration labels but never removes stale ones, so without
-	// this removal step, a retracted label would remain until someone
-	// noticed it. The operator never touches labels applied outside
-	// this spec, such as labels set by kubectl label or by other
-	// controllers.
+	// NodeLabels are labels on this machine's Node, for example to let
+	// workloads find the machine with the GPU. Init writes them into
+	// the k3s boot drop-in, so the Node has them when it registers,
+	// and the operator reconciles them after that. The kubelet never
+	// removes a registration label, so the operator removes a label
+	// that this spec declared before and no longer declares. It leaves
+	// alone every label that this spec never declared, such as one
+	// from `kubectl label`.
 	NodeLabels map[string]string `json:"nodeLabels,omitempty"`
 
-	// NodeTaints is the repelling half of that same scheduling
-	// identity. A label draws a workload in; a taint keeps out every
-	// pod that does not tolerate it, which is how a machine dedicated
-	// to one job stays dedicated to it. A taint's identity is its key
-	// together with its effect, and one key can carry two effects at
-	// once, so this is a list where NodeLabels is a map.
+	// NodeTaints are the taints on this machine's Node, for example to
+	// reserve the machine for one workload. A taint is identified by
+	// its key and effect together, and one key can have two effects,
+	// so this is a list where NodeLabels is a map.
 	//
-	// Init renders these taints into the k3s boot drop-in, so a node
-	// that registers for the first time is born repelling and never
-	// accepts, in its first minutes, the pods that the taint exists to
-	// keep out. The kubelet applies registration taints only when it
-	// creates the Node object, on a first boot or after a reinstall. On
-	// every later boot the Node object already exists and the setting
-	// does nothing, so the operator's live reconciliation is the only
-	// mechanism from then on. The operator also removes a taint that
-	// this spec once declared and no longer declares, and it never
-	// touches a taint applied outside this spec, such as one set by
-	// kubectl taint or by another controller.
+	// Init writes the taints into the k3s boot drop-in, so a new Node
+	// has them when it registers and never runs a pod that they keep
+	// out. The kubelet applies registration taints only when it
+	// creates the Node, so on every later boot only the operator
+	// applies a change. As with NodeLabels, the operator removes a
+	// taint that this spec no longer declares and leaves alone one
+	// that it never declared.
 	NodeTaints []NodeTaint `json:"nodeTaints,omitempty"`
 
-	// Storage assigns storage roles to disks (see storage.go). Init
-	// applies this field at boot, before k3s starts, because a
-	// filesystem cannot be swapped while a cluster is running. Edits
-	// are staged to the machineState filesystem and take effect at the
-	// next boot. RebootPolicy says who starts that boot.
+	// Storage assigns storage roles to disks (storage.go). Init
+	// applies it at boot, before k3s starts, because a filesystem
+	// cannot be replaced while the cluster runs on it. The operator
+	// stages an edit for the next boot.
 	Storage StorageSpec `json:"storage,omitzero"`
 
-	// RebootPolicy states what the operator may do when applying the
-	// spec requires a reboot. A storage change requires one, a network
-	// change requires one, and so does retracting a module. Manual,
-	// the default, stages the change and reports it;
-	// the next boot, whenever it happens, applies the change. Auto
-	// lets the operator reboot the machine itself. Manual is the
-	// default because a reboot on a single-node cluster is a total
-	// outage, and a mistyped edit should never reboot the machine
-	// automatically.
+	// RebootPolicy decides what the operator does when a spec change
+	// needs a reboot, such as a change to storage or network or a
+	// removed module. With Manual, the default, the operator stages
+	// the change and reports it, and the change applies at the next
+	// boot. With Auto, the operator reboots the machine. Manual is the
+	// default because a reboot of a single-node cluster is an outage,
+	// and a mistyped edit must not cause one.
 	RebootPolicy RebootPolicy `json:"rebootPolicy,omitempty"`
 }
 
-// NodeTaint is one taint on this machine's Node object. A pod
-// tolerates a taint by naming its key and its effect, so those two
-// fields together are the taint's identity. The value is optional: a
-// taint often needs none, because the key and the effect alone already
-// say to stay off this machine.
+// NodeTaint is one taint on this machine's Node. Value is optional.
 type NodeTaint struct {
 	Key    string      `json:"key"`
 	Value  string      `json:"value,omitempty"`
 	Effect TaintEffect `json:"effect"`
 }
 
-// TaintEffect states what happens to a pod that does not tolerate the
-// taint. NoSchedule keeps a new pod off the node and leaves the pods
-// already running there alone. PreferNoSchedule asks the scheduler to
-// avoid the node but permits it when no other node fits. NoExecute
-// keeps new pods off and evicts the running ones as well.
+// TaintEffect is a Kubernetes taint effect.
 type TaintEffect string
 
 const (
@@ -267,9 +210,9 @@ const (
 	TaintNoExecute        TaintEffect = "NoExecute"
 )
 
-// RebootPolicy states who starts the reboot that a staged change
-// waits on. The system treats any unrecognized value as Manual, so an
-// unrecognized value can never cause an automatic reboot.
+// RebootPolicy chooses who starts the reboot that a staged change waits
+// for. Any value other than Auto counts as Manual, so an unknown value
+// never causes an automatic reboot.
 type RebootPolicy string
 
 const (
@@ -277,6 +220,8 @@ const (
 	RebootManual RebootPolicy = "Manual"
 )
 
+// RebootPolicyOrDefault returns RebootAuto when the spec sets Auto, and
+// RebootManual for every other value, including an empty one.
 func (s MachineSpec) RebootPolicyOrDefault() RebootPolicy {
 	if s.RebootPolicy == RebootAuto {
 		return RebootAuto
@@ -284,64 +229,48 @@ func (s MachineSpec) RebootPolicyOrDefault() RebootPolicy {
 	return RebootManual
 }
 
-// NetworkSpec is deliberately almost empty. The default is zero
-// configuration: DHCP on the first physical interface, the hostname
-// from the manifest, and DNS from the DHCP lease. Fields exist here
-// only for machines that need to differ from this default.
+// NetworkSpec is the network configuration of a machine whose network differs
+// from the default: DHCP on the first physical interface, the hostname
+// from the manifest, and DNS from the DHCP lease.
 type NetworkSpec struct {
-	// Interfaces configures the machine's interfaces explicitly, each
-	// by name. An empty value means the zero-configuration default
-	// described above. A machine in a cluster typically declares two
-	// interfaces. One is an uplink that still uses DHCP. The other is
-	// the cluster-facing interface, which uses the static address
-	// that other machines were configured to use when they contact
-	// it.
+	// Interfaces configures the named interfaces. When it is empty,
+	// the machine uses the default. A clustered machine often declares
+	// two: an uplink on DHCP, and a cluster interface with the static
+	// address that the other machines connect to.
 	Interfaces []InterfaceSpec `json:"interfaces,omitempty"`
 
-	// HostEntries names addresses that resolve with no DNS lookup.
-	// Init writes each one as a line in /etc/hosts, below the three
-	// fixed lines that define localhost and this machine's own name,
-	// so an entry can add a name but never override those two. Init
-	// also writes /etc/nsswitch.conf on every boot, so that the hosts
-	// file wins over DNS on every resolver the machine runs. This
-	// gives a program that resolves a name from the host's own files,
-	// such as the NFS mount helper, an answer that does not depend on
-	// cluster DNS being up.
+	// HostEntries adds lines to /etc/hosts, below the fixed lines for
+	// localhost and this machine's own name, so an entry can add a
+	// name but cannot override those. Init also writes
+	// /etc/nsswitch.conf so that every resolver reads /etc/hosts
+	// before DNS. So a program that resolves names from local files,
+	// such as the NFS mount helper, works while cluster DNS is down.
 	//
-	// Unlike the rest of network, an edit here applies live: init
-	// writes the file at every boot, so the entries prove the cold
-	// start on their own, and the machine operator then reconciles
-	// the same file on every pass, so a later edit lands within one
-	// reconcile pass, with no reboot.
+	// Init writes the file at every boot, and the operator reconciles
+	// it on every pass, so an edit applies without a reboot.
 	HostEntries []HostEntry `json:"hostEntries,omitempty"`
 }
 
-// Validate checks the spec's internal consistency. It catches the
-// errors that a person can fix in the manifest, before the code
-// touches any link.
+// Validate checks the spec for errors that a person can fix in the
+// manifest, before init configures any link.
 //
-// The API server enforces every one of these rules on any spec
-// applied through it: the interface list is keyed by name, the host
-// entry list is keyed by address, an address matches a pattern, a
-// name list holds at least one item, and a CEL rule refuses the name
-// localhost. This check exists for the specs that reach a machine
-// another way: init also reads manifests that a person wrote by hand
-// and carried in on a stick, and no API server ever saw those.
+// The CRD schema enforces the same rules for a spec applied through
+// the API server: unique interface names, unique host entry addresses,
+// address patterns, at least one name in each host entry, and no entry
+// for localhost. Validate covers a manifest that never reaches the API
+// server, such as one on an install stick.
 //
-// Whether the machine really has a port with a declared name is a
-// question only the machine can answer, so init answers that one
-// against the links that exist.
+// Validate does not check that the machine has an interface with each
+// declared name. Init checks that against the machine's links.
 func (s NetworkSpec) Validate() error {
 	claimed := map[string]int{}
 	for i, ifc := range s.Interfaces {
 		if ifc.Name == "" {
-			return fmt.Errorf("interface %d declares no name; the name is how an entry says which port it means", i)
+			return fmt.Errorf("spec.network.interfaces[%d] has no name, so init cannot tell which interface it configures", i)
 		}
-		// Two entries that name the same port are a manifest bug,
-		// because the second entry's addressing would land on a link
-		// the first already configured.
+		// Init would apply the second entry over the first.
 		if first, seen := claimed[ifc.Name]; seen {
-			return fmt.Errorf("interfaces %d and %d both declare %s; declare each port once", first, i, ifc.Name)
+			return fmt.Errorf("spec.network.interfaces[%d] and spec.network.interfaces[%d] both declare %s, so remove one of them", first, i, ifc.Name)
 		}
 		claimed[ifc.Name] = i
 		if ifc.Wireless != nil {
@@ -353,96 +282,80 @@ func (s NetworkSpec) Validate() error {
 
 	claimedAddresses := map[string]int{}
 	for i, entry := range s.HostEntries {
-		// A hosts file line takes one literal address, not a hostname
-		// or a CIDR block. init writes this value straight into
-		// /etc/hosts with no lookup step, so a value that does not
-		// parse as an address would write a line that resolves
+		// Init writes the address into /etc/hosts as it is, so a
+		// hostname or a CIDR block would write a line that resolves
 		// nothing.
 		if net.ParseIP(entry.Address) == nil {
-			return fmt.Errorf("host entry %d declares %q as its address, which is not a literal address", i, entry.Address)
+			return fmt.Errorf("spec.network.hostEntries[%d] has the address %q, which is not a literal IP address", i, entry.Address)
 		}
-		// One address is one line of the file, and the facts record
-		// keys entries by address. Two entries that declare the same
-		// address would collide on both, so a manifest declares each
-		// address once, with all of its names.
+		// The hosts file has one line for each address, and the facts
+		// key the entries by address.
 		if first, seen := claimedAddresses[entry.Address]; seen {
-			return fmt.Errorf("host entries %d and %d both declare %s; declare each address once", first, i, entry.Address)
+			return fmt.Errorf("spec.network.hostEntries[%d] and spec.network.hostEntries[%d] both have the address %s, so put all of its names in one entry", first, i, entry.Address)
 		}
 		claimedAddresses[entry.Address] = i
 		if len(entry.Names) == 0 {
-			return fmt.Errorf("host entry %d (%s) declares no names; an entry with no name resolves nothing", i, entry.Address)
+			return fmt.Errorf("spec.network.hostEntries[%d] (%s) has no names, so it resolves nothing", i, entry.Address)
 		}
-		// The fixed lines that init writes first already define
-		// localhost. An entry that names it again could only shadow
-		// or contradict a fixed line, never add to it.
 		if slices.Contains(entry.Names, "localhost") {
-			return fmt.Errorf("host entry %d (%s) names localhost; the fixed lines already define localhost, ahead of any entry", i, entry.Address)
+			return fmt.Errorf("spec.network.hostEntries[%d] (%s) lists localhost, which the fixed lines of /etc/hosts already define", i, entry.Address)
 		}
 	}
 	return nil
 }
 
-// InterfaceSpec configures one interface. Beyond Name, the zero value
-// means DHCP. Static addressing is the deviation from the default, so
-// a person must spell it out explicitly.
+// InterfaceSpec configures one interface. When only Name is set, the
+// interface uses DHCP.
 type InterfaceSpec struct {
-	// Name is the interface to configure (for example, "eth1"), using
-	// the name that the kernel gives it. Because no udev process
-	// renames interfaces, kernel names follow the hardware enumeration
-	// order, which stays stable for fixed hardware.
+	// Name is the interface's kernel name, for example "eth1". The
+	// machine runs no udev to rename interfaces, so the names follow
+	// the order in which the kernel finds the hardware, which does not
+	// change on fixed hardware.
 	Name string `json:"name"`
 
-	// Address is a static address in CIDR form (for example,
-	// "10.10.0.1/24"). The prefix length tells the kernel the subnet,
-	// so the prefix length is not optional. An empty value means DHCP
-	// on this interface.
+	// Address is a static address in CIDR form, for example
+	// "10.10.0.1/24". The prefix length sets the subnet, so it is
+	// required. An empty value means DHCP.
 	Address string `json:"address,omitempty"`
 
-	// Gateway makes this interface the default route. This field is
-	// optional, even for static addresses. A cluster segment with
-	// nothing to route to declares no gateway, and the uplink's DHCP
-	// lease supplies the real default route.
+	// Gateway is the default route through this interface, and is
+	// optional with a static address. A cluster interface that routes
+	// nowhere else sets none, and the uplink's DHCP lease supplies the
+	// default route.
 	Gateway string `json:"gateway,omitempty"`
 
-	// Nameservers lists nameservers to use in addition to any that
-	// DHCP leases supply.
+	// Nameservers are used in addition to the nameservers from a DHCP
+	// lease.
 	Nameservers []string `json:"nameservers,omitempty"`
 
-	// Wireless names the network this interface joins before any of
-	// the addressing above applies. An absent value means the
-	// interface is wired.
+	// Wireless is the network that this interface joins before it is
+	// addressed. When it is nil, the interface is wired.
 	Wireless *WirelessSpec `json:"wireless,omitempty"`
 }
 
-// HostEntry is one static line for /etc/hosts: one address and the
-// names that resolve to it. Address is a literal IP address, not a
-// CIDR block or a hostname, because a hosts file line answers with
-// one address, and Names is the list of names that get that answer.
+// HostEntry is one line of /etc/hosts: a literal IP address, not a CIDR
+// block or a hostname, and the names that resolve to it.
 type HostEntry struct {
 	Address string   `json:"address"`
 	Names   []string `json:"names"`
 }
 
-// Parse reads a Machine manifest from its bytes. Parsing is strict,
-// because a misspelled field name in a manifest should produce an
-// error that someone sees. Without strict parsing, a misspelled field
-// would become a setting that silently never applies.
+// Parse reads a Machine manifest. Parsing is strict, so a misspelled
+// field is an error instead of a setting that never applies.
 func Parse(raw []byte) (*Machine, error) {
 	m := &Machine{}
 	if err := yaml.UnmarshalStrict(raw, m); err != nil {
 		return nil, err
 	}
 	if m.Kind != "Machine" {
-		return nil, fmt.Errorf("expected kind Machine, got %q", m.Kind)
+		return nil, fmt.Errorf("the manifest has kind %q, want Machine", m.Kind)
 	}
 	return m, nil
 }
 
-// Load reads a Machine manifest from a file. A machine with no
-// manifest is still a valid machine, because every field defaults.
-// But a manifest that exists and does not parse, or that declares
-// some other kind, is a configuration error. Load reports this error
-// as a configuration error.
+// Load reads a Machine manifest from a file. A missing file returns an
+// empty Machine, because every field has a default. A file that does
+// not parse, or that declares another kind, is an error.
 func Load(path string) (*Machine, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -453,7 +366,7 @@ func Load(path string) (*Machine, error) {
 	}
 	m, err := Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 	return m, nil
 }

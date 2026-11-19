@@ -1,21 +1,16 @@
 package machine
 
-// A manifest that this machine already proved can name fields that
-// this release does not know. A person sets a field that a newer
-// release added, the field applies, and the manifest that holds it
-// becomes the proven manifest. A rollback then boots the older
-// release, whose strict parse cannot tell that field from a typo.
-// Without the proven manifest, init falls back to the seed from the
-// install: the machine boots its install-time storage and network,
-// or, when the seed names the newer field too, it powers off.
+// A newer release can write fields into a machine's proven manifest
+// that an older release does not have. After a rollback to the older
+// release, a strict parse rejects that manifest as if each new field
+// were a typo, and init falls back to the install's seed manifest.
+// The machine then boots with its install-time storage and network,
+// or powers off when the seed uses a newer field too.
 //
-// So the readers of a manifest that a boot already proved parse it
-// with ParseKnown. The strict parse runs first. When it fails only
-// because of fields this release does not know, ParseKnown parses the
-// manifest again without them and names each field it skipped, so the
-// console says what the rollback leaves out. A staged manifest and a
-// seed still parse strictly, because those are where a typo must fail
-// before anything boots it.
+// So init and machine-operator read a proven manifest with ParseKnown,
+// which skips the unknown fields and returns their paths for the
+// console. A staged manifest and a seed still parse strictly, because
+// a typo in them must fail before anything boots from them.
 
 import (
 	"encoding"
@@ -31,10 +26,10 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// ParseKnown reads a Machine manifest that a boot already proved. It
-// answers the manifest and the path of each field it skipped, sorted.
-// A manifest that fails the strict parse for any other reason, such
-// as a known field with the wrong type, fails here too.
+// ParseKnown parses a proven Machine manifest and returns the sorted
+// paths of the fields it ignored. A manifest that fails the strict
+// parse for another reason, such as a known field with the wrong
+// type, fails here too.
 func ParseKnown(raw []byte) (*Machine, []string, error) {
 	m, strictErr := Parse(raw)
 	if strictErr == nil {
@@ -53,15 +48,14 @@ func ParseKnown(raw []byte) (*Machine, []string, error) {
 		return nil, nil, strictErr
 	}
 	if m.Kind != "Machine" {
-		return nil, nil, fmt.Errorf("expected kind Machine, got %q", m.Kind)
+		return nil, nil, fmt.Errorf("the kind is %q, and a machine manifest must have kind Machine", m.Kind)
 	}
 	slices.Sort(unknown)
 	return m, unknown, nil
 }
 
-// LoadKnown reads a manifest file that a boot already proved, with
-// ParseKnown. A missing file is a machine with every field at its
-// default, as it is for Load.
+// LoadKnown reads a proven manifest file with ParseKnown. A missing
+// file returns an empty Machine, as Load does.
 func LoadKnown(path string) (*Machine, []string, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -72,16 +66,15 @@ func LoadKnown(path string) (*Machine, []string, error) {
 	}
 	m, ignored, err := ParseKnown(raw)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: %w", path, err)
+		return nil, nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 	return m, ignored, nil
 }
 
 // unknownFields walks a decoded document beside the Go type it
-// decodes into, and answers the path of each key that the type has
-// no field for. It matches names the way encoding/json does, without
-// regard to case, so it agrees with the strict parse about which
-// fields are known.
+// decodes into, and returns the path of each key that the type has no
+// field for. It matches names without regard to case, as
+// encoding/json does, so it agrees with the strict parse.
 func unknownFields(t reflect.Type, value any, path string) []string {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -117,16 +110,17 @@ func unknownFields(t reflect.Type, value any, path string) []string {
 	return unknown
 }
 
-// decodesItself reports whether a type decodes its own JSON, so its
-// keys are its own business.
+// decodesItself reports whether a type has its own JSON or text
+// decoder. The walk cannot tell which keys such a type accepts, so it
+// skips the type.
 func decodesItself(t reflect.Type) bool {
 	pointer := reflect.PointerTo(t)
 	return pointer.Implements(reflect.TypeFor[json.Unmarshaler]()) ||
 		pointer.Implements(reflect.TypeFor[encoding.TextUnmarshaler]())
 }
 
-// jsonField finds the field of a struct that a JSON key decodes into,
-// including the fields that an embedded struct promotes.
+// jsonField finds the struct field that a JSON key decodes into,
+// including fields promoted from an embedded struct.
 func jsonField(t reflect.Type, key string) (reflect.StructField, bool) {
 	for i := range t.NumField() {
 		field := t.Field(i)

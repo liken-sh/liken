@@ -1,10 +1,10 @@
 package machine
 
-// The read side of the boot subtree. Boot holds the configuration this
-// boot ran under: the four manifest records, the actuated storage and
-// network, and the four standing rejections. It is the half of drift
-// detection that only init can supply, so the operator reads it here
-// and compares it against the cluster's copies.
+// Init writes boot/ with the configuration that this boot ran under:
+// which Machine manifest, Cluster manifest, credentials, and imports
+// it chose, the storage and network it applied, and each document it
+// rejected. Only init records these choices, so machine-operator reads
+// them here to compare them with what the cluster declares.
 
 import (
 	"errors"
@@ -93,9 +93,8 @@ func (t FactsTree) readBoot() (BootStatus, error) {
 	return b, nil
 }
 
-// readBootStorage reads the actuated storage spec, one directory for
-// each declared role. A role directory that is absent means the spec
-// did not declare that role, so its pointer stays nil.
+// readBootStorage reads the storage spec that init applied. A role
+// with no directory was not declared, so its pointer stays nil.
 func (t FactsTree) readBootStorage() (StorageSpec, error) {
 	spec := StorageSpec{}
 	roleFields := map[StorageRoleName]**StorageRole{
@@ -130,16 +129,10 @@ func (t FactsTree) readBootStorage() (StorageSpec, error) {
 	return spec, nil
 }
 
-// readBootNetwork reads the network spec the boot actuated. The
-// boot/network directory is the record's presence, so a tree without
-// it comes from a boot that reported nothing about its network, and
-// the pointer stays nil. A record that holds no interface directory
-// is a spec that declared no interface, which is a different fact.
-//
-// The interfaces are read by position, in order, until a position is
-// absent. Reading them this way keeps the declared order, which
-// sorted directory names would lose as soon as a machine declared ten
-// of them.
+// readBootNetwork reads the network spec that init applied. It
+// returns nil when the boot recorded no network, and an empty spec
+// when the boot declared no interface (factstree.go). It reads the
+// interfaces by position, as readPositionalRecords does.
 func (t FactsTree) readBootNetwork() (*NetworkSpec, error) {
 	base := filepath.Join("boot", "network")
 	if _, err := os.Stat(filepath.Join(t.Dir, base)); err != nil {
@@ -178,10 +171,8 @@ func (t FactsTree) readBootNetwork() (*NetworkSpec, error) {
 	}
 }
 
-// readBootWireless reads the wireless half of one interface's boot
-// record. The ssid file is the record's presence, so an interface
-// that came up wired reads back as a nil pointer, not as an empty
-// spec.
+// readBootWireless returns nil for a wired interface, which has no
+// ssid file.
 func (t FactsTree) readBootWireless(dir string) (*WirelessSpec, error) {
 	base := filepath.Join(dir, "wireless")
 	ssid, err := t.readFact(filepath.Join(base, "ssid"))
@@ -195,9 +186,8 @@ func (t FactsTree) readBootWireless(dir string) (*WirelessSpec, error) {
 	return &WirelessSpec{SSID: ssid, Security: WirelessSecurity(security)}, nil
 }
 
-// readRejection reads one standing quarantine record. A record
-// directory that is absent means the document has no standing
-// rejection, so the pointer stays nil.
+// readRejection returns nil when no document of the kind is
+// rejected.
 func (t FactsTree) readRejection(kind RejectionKind) (*Rejection, error) {
 	base := filepath.Join("boot", string(kind))
 	if _, err := os.Stat(filepath.Join(t.Dir, base)); err != nil {

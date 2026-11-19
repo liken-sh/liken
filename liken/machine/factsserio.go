@@ -1,19 +1,17 @@
 package machine
 
-// The serio subtrees of the facts tree: serio/, the standing of each
-// attachment, and boot/serio/, the entries the boot declared.
+// The facts tree has two serio lists: serio/ has the state of each
+// attachment, and boot/serio/ has the spec.serio entries of the
+// boot. Each element is a file named by its position from zero, as in
+// boot/network/interfaces, because serio/ mixes entries that match a
+// declared attachment with entries that match none, and so has no key
+// to name them by.
 //
-// Both are lists keyed by position, counted from zero, the way
-// boot/network/interfaces is. A status list mixes matched lines with
-// entries that match none, so no single field is a natural key, and
-// the position keeps the order init reported them in.
-//
-// Each element is one record file, by rule 5, because both lists
-// change while the machine runs: the serio watch rewrites serio/ when
-// an adapter is plugged in or unplugged, and the module loader
-// rewrites boot/serio/ when a live load adds an entry. A rename
-// replaces one element's record in one step, so a reader never reads
-// a record that names one tty and another tty's state.
+// Each element is one record file of key=value lines, because both
+// lists change while the machine runs: the serio watch rewrites
+// serio/ when an adapter is plugged in or unplugged, and a live module
+// load rewrites boot/serio/. A record is replaced by one rename, so a
+// reader never reads one tty's name with another tty's state.
 
 import (
 	"path/filepath"
@@ -21,8 +19,8 @@ import (
 	"strings"
 )
 
-// WriteSerio publishes the standing of every attachment. The serio
-// watch owns this subtree (init/serio.go).
+// WriteSerio writes serio/. Only the serio watch in init/serio.go
+// calls it.
 func (t FactsTree) WriteSerio(statuses []SerioStatus) error {
 	records := make([][][2]string, 0, len(statuses))
 	for _, s := range statuses {
@@ -35,17 +33,13 @@ func (t FactsTree) WriteSerio(statuses []SerioStatus) error {
 			{"port", s.Port},
 			{"state", string(s.State)},
 			{"message", s.Message},
-			// A node path comes from a DEVNAME, which holds no space,
-			// so one space separates the list on its one line.
+			// A node path comes from a DEVNAME, which has no space.
 			{"nodes", strings.Join(s.Nodes, " ")},
 		})
 	}
 	return t.report(t.writePositionalRecords("serio", records))
 }
 
-// WriteBootSerio publishes the spec.serio list the boot declared. The
-// boot writes it, and the module loader rewrites it when a live load
-// adds an entry.
 func (t FactsTree) WriteBootSerio(entries []SerioAttachment) error {
 	records := make([][][2]string, 0, len(entries))
 	for _, a := range entries {
@@ -60,8 +54,14 @@ func (t FactsTree) WriteBootSerio(entries []SerioAttachment) error {
 }
 
 // writePositionalRecords writes one record file for each element,
-// named by its position, and removes the files of the positions the
-// list no longer reaches.
+// named by its position, and removes the files at positions past the
+// end of the list.
+//
+// writeRecordFact deletes the file of a record whose fields are all
+// empty, and readPositionalRecords stops at the first position with no
+// file. So such a record would hide itself and every element after it.
+// Neither serio list writes one, because every element has the
+// protocol of its spec.serio entry, and the schema requires protocol.
 func (t FactsTree) writePositionalRecords(dir string, records [][][2]string) error {
 	want := map[string]bool{}
 	for i, record := range records {
@@ -74,8 +74,6 @@ func (t FactsTree) writePositionalRecords(dir string, records [][][2]string) err
 	return syncEntryFiles(filepath.Join(t.Dir, dir), want)
 }
 
-// readSerio reads serio/ back into the status list, in position
-// order.
 func (t FactsTree) readSerio() ([]SerioStatus, error) {
 	records, err := t.readPositionalRecords("serio")
 	if err != nil {
@@ -99,7 +97,6 @@ func (t FactsTree) readSerio() ([]SerioStatus, error) {
 	return statuses, nil
 }
 
-// readBootSerio reads boot/serio/ back into the declared list.
 func (t FactsTree) readBootSerio() ([]SerioAttachment, error) {
 	records, err := t.readPositionalRecords(filepath.Join("boot", "serio"))
 	if err != nil {
@@ -115,9 +112,9 @@ func (t FactsTree) readBootSerio() ([]SerioAttachment, error) {
 	return entries, nil
 }
 
-// readPositionalRecords reads the records at positions 0, 1, 2, and on,
-// until a position has no file. Reading by position keeps the list's
-// order, which sorted file names would lose at the tenth element.
+// readPositionalRecords reads the records at positions 0, 1, 2, and so
+// on, until a position has no file. Sorting the file names instead
+// would put "10" before "2".
 func (t FactsTree) readPositionalRecords(dir string) ([]map[string]string, error) {
 	var records []map[string]string
 	for i := 0; ; i++ {

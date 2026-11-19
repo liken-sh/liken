@@ -1,19 +1,13 @@
 package machine
 
-// The two ways a machine's clock is observed.
-//
-// init measures the clock every ClockPollInterval and keeps two
-// records of it. The standing, which is the state, the source, the
-// stratum, and a bound on the offset, goes into the facts tree, and
-// machine-operator copies it into status.time. It changes rarely, and
-// each change is news, so each change is worth a status write. The
-// reading, which is the exact offset of each poll, changes every poll
-// and means nothing without its history. It goes to a file outside
-// the facts tree, and machine-operator reads that file only when
-// Prometheus scrapes it. machine-operator watches the whole facts tree
-// with inotify, so a file written every poll inside the tree would
-// wake a reconcile pass every poll, and each pass would cost the API
-// server for a number that status does not hold.
+// init measures the clock every ClockPollInterval and writes two
+// records. The sync state, source, stratum, and an OffsetBound go into
+// the facts tree, and machine-operator copies them to status.time.
+// The exact offset of each poll goes into a ClockReading file outside
+// the facts tree, and machine-operator reads it only when Prometheus
+// scrapes. machine-operator watches the whole facts tree with inotify,
+// so a file in the tree that changed on every poll would start a
+// reconcile pass and a status write on every poll.
 
 import (
 	"fmt"
@@ -22,35 +16,32 @@ import (
 )
 
 // ClockPollInterval is how often init measures the clock. 64 seconds
-// is NTP's classic starting interval (minpoll 6, or 2^6 seconds). It
-// is frequent enough to catch drift measured in parts per million,
-// and infrequent enough that it does not burden an upstream source.
+// is NTP's default minimum poll interval (minpoll 6, or 2^6 seconds).
 const ClockPollInterval = 64 * time.Second
 
-// ClockStaleAfter is how long a measurement stays current. A source
-// that misses one poll is busy, and a source that misses three is
-// gone. init reports Unsynchronized past this age, and
-// machine-operator stops publishing the offset of a reading this old.
+// ClockStaleAfter is the age after which a measurement is out of date:
+// one missed poll can be a busy source, but three mean the source is
+// gone. Past this age, init reports the state Unsynchronized, and
+// machine-operator stops publishing the offset of a reading that
+// old.
 const ClockStaleAfter = 3 * ClockPollInterval
 
-// ClockDir holds the reading. It is on /run, which is tmpfs, beside
-// the facts tree and not inside it.
+// ClockDir is the directory of the ClockReading file, on the /run tmpfs
+// beside the facts tree.
 const ClockDir = "/run/liken/clock"
 
-// An OffsetBound is the smallest of a fixed set of bounds that a
-// clock's offset fits inside. Status publishes the bound instead of
-// the exact offset, because the exact offset moves on every poll and
-// each status write costs a raft round on every leader. A bound moves
-// only when the clock's quality changes.
+// An OffsetBound is the smallest limit in offsetBounds that the
+// clock's offset does not exceed. status.time holds the bound and not
+// the exact offset, so the status changes only when the clock gets
+// better or worse, not on every poll.
 type OffsetBound int
 
-// offsetBounds are the limits, each chosen for what it means. 1ms is
-// a follower on a quiet LAN, syncing from a leader. 5ms is a leader on
-// a good internet upstream. 25ms is a noisy path, such as wifi. 128ms
-// is the line ntpd draws between slewing and stepping, so past it
-// drift outruns the slew. 1s is a clock that is badly wrong, but still
-// inside what TLS and leases tolerate. An offset past the last limit
-// takes the bound one past the end of the table.
+// offsetBounds are the limits. 1ms is a follower syncing from a leader
+// on a quiet LAN. 5ms is a leader on a good internet upstream. 25ms is
+// a noisy path, such as wifi. 128ms is ntpd's step threshold: ntpd
+// slews a smaller offset and steps a larger one. 1s is a badly wrong
+// clock that TLS and leases still tolerate. An offset above the last
+// limit gets the bound len(offsetBounds), which prints as ">1s".
 var offsetBounds = []time.Duration{
 	time.Millisecond,
 	5 * time.Millisecond,
@@ -59,12 +50,10 @@ var offsetBounds = []time.Duration{
 	time.Second,
 }
 
-// slewLimit is the bound of the step threshold. A worse bound means
-// the slew cannot keep up with the clock's error.
-const slewLimit OffsetBound = 3
+// stepThreshold is the bound of 128ms, ntpd's step threshold.
+const stepThreshold OffsetBound = 3
 
-// OffsetBoundOf answers the smallest bound that offset fits inside, in
-// either direction.
+// OffsetBoundOf returns the bound of an offset, positive or negative.
 func OffsetBoundOf(offset time.Duration) OffsetBound {
 	for i, limit := range offsetBounds {
 		if offset.Abs() <= limit {
@@ -74,8 +63,8 @@ func OffsetBoundOf(offset time.Duration) OffsetBound {
 	return OffsetBound(len(offsetBounds))
 }
 
-// String answers the bound as status shows it: "±5ms", or ">1s" past
-// the last limit.
+// String formats the bound as status shows it, such as "±5ms", or
+// ">1s" for a bound above the last limit.
 func (b OffsetBound) String() string {
 	if int(b) >= len(offsetBounds) {
 		return ">" + offsetBounds[len(offsetBounds)-1].String()
@@ -83,9 +72,8 @@ func (b OffsetBound) String() string {
 	return "±" + offsetBounds[b].String()
 }
 
-// ParseOffsetBound reads a bound that String wrote. It refuses any
-// other text, such as the exact offset that an older release
-// published, so a reader never takes a measurement for a bound.
+// ParseOffsetBound parses text that String wrote. It returns false for
+// any other text, such as an exact offset.
 func ParseOffsetBound(text string) (OffsetBound, bool) {
 	for b := OffsetBound(0); int(b) <= len(offsetBounds); b++ {
 		if b.String() == text {
@@ -95,15 +83,15 @@ func ParseOffsetBound(text string) (OffsetBound, bool) {
 	return 0, false
 }
 
-// OutrunsSlew reports whether the bound is past the step threshold,
-// where the clock's error grows faster than a slew removes it.
+// OutrunsSlew reports whether the bound is above ntpd's step
+// threshold of 128ms.
 func (b OffsetBound) OutrunsSlew() bool {
-	return b > slewLimit
+	return b > stepThreshold
 }
 
-// A ClockReading is one poll's measurement, after init's clock filter:
+// A ClockReading is the result of one poll, after init's clock filter:
 // the offset of the selected sample, its round-trip delay, the source
-// that answered, and the time of the poll.
+// that replied, and the time of the poll.
 type ClockReading struct {
 	Offset time.Duration
 	Delay  time.Duration
@@ -111,10 +99,10 @@ type ClockReading struct {
 	At     time.Time
 }
 
-// WriteClockReading replaces the reading under dir in one rename, so a
-// scrape that reads it at the same moment sees the old reading or the
-// new one, never half of each. The file is a record of key=value
-// lines, in the grammar of the facts tree's record files.
+// WriteClockReading replaces the reading file under dir with a
+// rename, so a scrape at the same time reads the old reading or the
+// new one, never a mix. The file has the key=value format of the
+// facts tree's record files.
 func WriteClockReading(dir string, r ClockReading) error {
 	return FactsTree{Dir: dir}.writeRecordFact("reading", [][2]string{
 		{"offset", r.Offset.String()},
@@ -124,10 +112,9 @@ func WriteClockReading(dir string, r ClockReading) error {
 	})
 }
 
-// ReadClockReading reads the reading under dir. A missing file is the
-// zero reading, whose zero At means that no poll has been answered
-// this boot. A field that does not parse is an error that names the
-// file.
+// ReadClockReading reads the reading file under dir. When the file
+// does not exist, because no poll has had a reply since boot, it
+// returns the zero reading with no error.
 func ReadClockReading(dir string) (ClockReading, error) {
 	path := filepath.Join(dir, "reading")
 	record, err := FactsTree{Dir: dir}.readRecordFact("reading")
@@ -136,13 +123,13 @@ func ReadClockReading(dir string) (ClockReading, error) {
 	}
 	r := ClockReading{Source: record["source"]}
 	if r.Offset, err = time.ParseDuration(record["offset"]); err != nil {
-		return ClockReading{}, fmt.Errorf("%s: offset: %w", path, err)
+		return ClockReading{}, fmt.Errorf("parsing the offset in %s: %w", path, err)
 	}
 	if r.Delay, err = time.ParseDuration(record["delay"]); err != nil {
-		return ClockReading{}, fmt.Errorf("%s: delay: %w", path, err)
+		return ClockReading{}, fmt.Errorf("parsing the delay in %s: %w", path, err)
 	}
 	if r.At, err = time.Parse(time.RFC3339Nano, record["at"]); err != nil {
-		return ClockReading{}, fmt.Errorf("%s: at: %w", path, err)
+		return ClockReading{}, fmt.Errorf("parsing the time in %s: %w", path, err)
 	}
 	return r, nil
 }

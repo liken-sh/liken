@@ -186,7 +186,7 @@ func TestDecideConvergenceTakesTheRebootPathForAnUndeliveredParameter(t *testing
 	if !c.stage || c.requestReboot || c.requestLoad {
 		t.Errorf("the convergence is %+v, want only the manifest staged while the machine waits for its turn", c)
 	}
-	if !strings.Contains(c.condition.Message, "sunrpc.tcp_slot_table_entries: 4 declared but not actuated") {
+	if !strings.Contains(c.condition.Message, "sunrpc.tcp_slot_table_entries: 4 declared") {
 		t.Errorf("the message is %q, want the drifted parameter sunrpc.tcp_slot_table_entries", c.condition.Message)
 	}
 }

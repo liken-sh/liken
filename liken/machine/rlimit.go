@@ -1,35 +1,18 @@
 package machine
 
-// Resource limits are the kernel's per-process ceilings: how many
-// files one process may hold open, how many processes one user may
-// run. The kernel gives PID 1 a fixed pair of numbers at boot and
-// every process inherits its parent's pair across fork and exec.
-// There is no /proc file to write and no way to change a process
-// that is already running. Whoever starts a process is the only one
-// who can decide its limits, and only before it starts.
+// A child process inherits its parent's resource limits across fork
+// and exec, and no process can change the limits of another running
+// process. On a distribution with systemd, each unit sets its limits
+// with directives such as LimitNOFILE. liken has no systemd, so without
+// help k3s, containerd, and every container would run with the
+// kernel's default nofile limit of 1024 soft and 4096 hard. So init
+// sets the limits on itself before it starts anything, and every
+// process on the machine inherits them.
 //
-// That inheritance rule is why this matters on liken. A stock
-// distribution sets these per service, in each unit's Limit*
-// directives, and systemd applies them when it forks the service.
-// liken runs no systemd, so nothing applies them, and k3s, containerd,
-// the shims, and every container run under the kernel's own defaults
-// of 1024 soft and 4096 hard. rlimitdefaults.go is the table that
-// answers this, and init applies it to itself before it starts
-// anything, because inheritance is the only transport available.
-//
-// The value syntax is systemd's, so an operator writes into
-// spec.rlimits what a unit file writes in LimitNOFILE. A bare number
-// sets both halves, the word "infinity" means no limit, and a
-// "soft:hard" pair sets the halves separately. Reusing that grammar
-// costs nothing and means the value in a Machine manifest can be
-// compared to the unit it replaces without translation.
-//
-// A resource is named by its ulimit short name, again systemd's
-// vocabulary: "nofile" is RLIMIT_NOFILE, "nproc" is RLIMIT_NPROC.
-// Only the names in rlimitResources exist. An unknown name is an
-// error rather than a silent no-op, for the same reason ApplySysctl
-// refuses to create a parameter file: a typo that applies nothing
-// must be visible.
+// spec.rlimits uses systemd's syntax, so a value reads like the same
+// setting in a unit file, and the ulimit short names, such as "nofile"
+// for RLIMIT_NOFILE. A name that is not in rlimitResources is an
+// error, because a typo that applied nothing would be hard to find.
 
 import (
 	"fmt"
@@ -41,19 +24,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// RlimitInfinity is the word an operator writes, and the word the
-// status reports back, for a limit the kernel does not enforce. The
-// kernel's own value is the largest unsigned 64-bit integer, which is
-// not a number anybody should have to read or type.
+// RlimitInfinity is the spec and status value for no limit. The
+// kernel's value for it is RLIM_INFINITY, the largest uint64.
 const RlimitInfinity = "infinity"
 
-// rlimitResources maps liken's spelling of a resource to the kernel's
-// constant. The list is deliberately short. Every entry here is a
-// limit that liken has a reason to set, or that a deployment has a
-// reason to override, and adding a name is how that reason gets
-// recorded. "core" appears here although OSRlimits does not set it,
-// because a deployment that wants core dumps must be able to ask for
-// them; rlimitdefaults.go explains why liken does not ask by default.
+// rlimitResources lists the limits that liken sets or that a
+// deployment has a reason to override. The CRD's validation rule for
+// spec.rlimits lists the same names. "core" is here although
+// OSRlimits does not set it, so a deployment can turn on core dumps.
 var rlimitResources = map[string]int{
 	"nofile":  unix.RLIMIT_NOFILE,
 	"nproc":   unix.RLIMIT_NPROC,
@@ -64,9 +42,7 @@ var rlimitResources = map[string]int{
 	"nice":    unix.RLIMIT_NICE,
 }
 
-// RlimitResourceNames lists every resource liken accepts, in sorted
-// order. Error messages and the CRD's own description read from this
-// list, so the accepted set is stated in one place.
+// RlimitResourceNames returns the accepted resource names, sorted.
 func RlimitResourceNames() []string {
 	names := make([]string, 0, len(rlimitResources))
 	for name := range rlimitResources {
@@ -76,16 +52,16 @@ func RlimitResourceNames() []string {
 	return names
 }
 
-// ParseRlimit turns one spec value into the pair of numbers
-// setrlimit(2) takes. The three accepted forms are systemd's:
+// ParseRlimit converts one spec value into the soft and hard limits
+// that setrlimit(2) takes. It accepts these forms:
 //
-//	"1048576"          both halves
-//	"infinity"         both halves, unlimited
+//	"1048576"          the same soft and hard limit
+//	"infinity"         no soft or hard limit
 //	"1024:1048576"     soft, then hard
 //
-// A soft limit above the hard limit is rejected here rather than at
-// the syscall, because the syscall's EINVAL says nothing about which
-// half was wrong.
+// ParseRlimit refuses a soft limit above the hard limit itself,
+// because setrlimit returns a bare EINVAL that names neither value.
+// The CRD's pattern does not check this.
 func ParseRlimit(value string) (unix.Rlimit, error) {
 	soft, hard, found := strings.Cut(value, ":")
 	if !found {
@@ -101,38 +77,30 @@ func ParseRlimit(value string) (unix.Rlimit, error) {
 	}
 	if softN > hardN {
 		return unix.Rlimit{}, fmt.Errorf(
-			"soft limit %s is above hard limit %s; a process may never exceed its hard limit", soft, hard)
+			"the soft limit %s is above the hard limit %s, and a process cannot exceed its hard limit", soft, hard)
 	}
 	return unix.Rlimit{Cur: softN, Max: hardN}, nil
 }
 
-// parseRlimitHalf reads one half of a value. An empty half is
-// rejected, so "1024:" and ":4096" are errors rather than a half
-// silently taken as zero. A limit of zero is a real setting, and it
-// must be spelled out.
+// parseRlimitHalf parses the soft or the hard limit of a value. An
+// empty string is an error, so "1024:" is not read as a hard limit of
+// zero.
 func parseRlimitHalf(half string) (uint64, error) {
 	if half == RlimitInfinity {
 		return unix.RLIM_INFINITY, nil
 	}
 	if half == "" {
-		return 0, fmt.Errorf("empty limit; write a number, %q, or \"soft:hard\"", RlimitInfinity)
+		return 0, fmt.Errorf("a limit is empty, and must be a number, %q, or soft:hard", RlimitInfinity)
 	}
 	n, err := strconv.ParseUint(half, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("limit %q is not a number or %q", half, RlimitInfinity)
+		return 0, fmt.Errorf("the limit %q is neither a number nor %q", half, RlimitInfinity)
 	}
-	// The largest unsigned 64-bit value is what the kernel uses for
-	// RLIM_INFINITY. A spec that spells that number out gets the word
-	// back from FormatRlimit, so refusing it here would make a value
-	// that the status reports impossible to declare.
 	return n, nil
 }
 
-// FormatRlimit renders a pair of numbers back into the spec's own
-// syntax. The status reports what the kernel holds, and it reports it
-// in the grammar the spec is written in, so a person comparing the
-// two is comparing like with like. Equal halves collapse to one
-// number, the same way a person would write them.
+// FormatRlimit writes a limit in the spec's syntax, so a status value
+// can be compared with a spec value as a string.
 func FormatRlimit(lim unix.Rlimit) string {
 	soft := formatRlimitHalf(lim.Cur)
 	hard := formatRlimitHalf(lim.Max)
@@ -149,57 +117,44 @@ func formatRlimitHalf(n uint64) string {
 	return strconv.FormatUint(n, 10)
 }
 
-// RlimitResource translates a resource name to the kernel's constant.
+// RlimitResource returns the kernel's constant for a resource name.
 func RlimitResource(name string) (int, error) {
 	resource, ok := rlimitResources[name]
 	if !ok {
-		return 0, fmt.Errorf("unknown resource %q; liken accepts %s",
+		return 0, fmt.Errorf("unknown resource %q, want one of %s",
 			name, strings.Join(RlimitResourceNames(), ", "))
 	}
 	return resource, nil
 }
 
-// ValidateRlimits checks that every entry names a resource this
-// machine has and carries a value that parses. It catches the errors a
-// person can fix in the manifest, before a reboot spends itself
-// finding them out.
+// ValidateRlimits returns an error for the first entry, in name order,
+// whose resource is unknown or whose value does not parse.
 //
-// The API server enforces the same rules on any spec applied through
-// it, from the CRD's own schema. This check exists for the specs that
-// reach a machine another way: init also reads manifests that a person
-// wrote by hand and carried in on a stick, and no API server ever saw
-// those. It is the same reasoning NetworkSpec.Validate states.
-//
-// Init does not call this. A limit it cannot apply is skipped with a
-// message, because OSRlimits ships with the release and one bad entry
-// must never cost a fleet its boot. The operator calls it, where the
-// cost of a wrong answer is a condition rather than an outage.
+// machine-operator calls it before it stages a spec, and refuses a bad
+// spec with a SpecConverged condition. Without this check the error
+// would show only on the console after a reboot, because init skips a
+// limit that it cannot apply so that one bad entry in OSRlimits cannot
+// stop a whole fleet from booting.
 func ValidateRlimits(rlimits map[string]string) error {
 	for _, name := range slices.Sorted(maps.Keys(rlimits)) {
 		if _, err := RlimitResource(name); err != nil {
-			return fmt.Errorf("rlimit %s: %w", name, err)
+			return fmt.Errorf("spec.rlimits: %w", err)
 		}
 		if _, err := ParseRlimit(rlimits[name]); err != nil {
-			return fmt.Errorf("rlimit %s = %s: %w", name, rlimits[name], err)
+			return fmt.Errorf("spec.rlimits.%s: %w", name, err)
 		}
 	}
 	return nil
 }
 
-// ApplyRlimit sets one resource limit on the calling process, and
-// therefore on every process it starts afterward.
+// ApplyRlimit sets one resource limit on the calling process.
 //
-// The call goes through golang.org/x/sys/unix rather than the raw
-// syscall for a reason that is easy to miss. Go's runtime raises its
-// own soft RLIMIT_NOFILE to the hard limit at startup, and remembers
-// the original so that os/exec can restore it in each child, sparing
-// old programs that use select(2) and its fixed-size descriptor set.
-// A child that inherits the restored value inherits the limit liken
-// was trying to replace. unix.Setrlimit delegates to syscall.Setrlimit,
-// which discards that remembered value, so children inherit what this
-// function set. A direct syscall would not, and the machine would look
-// correct in /proc/1/limits while every process below it kept the old
-// ceiling.
+// It must call unix.Setrlimit and not the raw syscall. At startup the
+// Go runtime raises its soft RLIMIT_NOFILE to the hard limit and saves
+// the original, and os/exec restores the saved limit in each child.
+// unix.Setrlimit calls syscall.Setrlimit, which clears the saved
+// limit. With the raw syscall, init would have the new limit and
+// every child would start with the old one.
 func ApplyRlimit(name, value string) error {
 	resource, err := RlimitResource(name)
 	if err != nil {
@@ -207,19 +162,18 @@ func ApplyRlimit(name, value string) error {
 	}
 	lim, err := ParseRlimit(value)
 	if err != nil {
-		return fmt.Errorf("rlimit %s = %s: %w", name, value, err)
+		return fmt.Errorf("rlimit %s: %w", name, err)
 	}
 	if err := unix.Setrlimit(resource, &lim); err != nil {
-		return fmt.Errorf("rlimit %s = %s: %w", name, value, err)
+		return fmt.Errorf("setting rlimit %s to %s: %w", name, value, err)
 	}
 	return nil
 }
 
-// ReadRlimit reads one resource limit back from the calling process.
-// Init builds its report from these reads rather than from what it
-// wrote, for the same reason ReadSysctl exists: the report must say
-// what the kernel holds, not what somebody asked for. A limit the
-// kernel clamped or refused shows its real value here.
+// ReadRlimit returns one resource limit of the calling process, in the
+// spec's syntax. Init reports these reads and not the values it wrote,
+// so status.rlimits shows a limit that the kernel refused at its real
+// value.
 func ReadRlimit(name string) (string, error) {
 	resource, err := RlimitResource(name)
 	if err != nil {
@@ -227,7 +181,7 @@ func ReadRlimit(name string) (string, error) {
 	}
 	var lim unix.Rlimit
 	if err := unix.Getrlimit(resource, &lim); err != nil {
-		return "", fmt.Errorf("rlimit %s: %w", name, err)
+		return "", fmt.Errorf("reading rlimit %s: %w", name, err)
 	}
 	return FormatRlimit(lim), nil
 }

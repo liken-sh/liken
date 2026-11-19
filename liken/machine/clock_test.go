@@ -24,7 +24,7 @@ func TestOffsetBoundForEachOffset(t *testing.T) {
 	for offset, want := range cases {
 		t.Run(offset.String(), func(t *testing.T) {
 			if got := OffsetBoundOf(offset).String(); got != want {
-				t.Errorf("got %s, want %s", got, want)
+				t.Errorf("OffsetBoundOf(%v) = %s, want %s", offset, got, want)
 			}
 		})
 	}
@@ -35,19 +35,19 @@ func TestOffsetBoundParsesWhatItPrints(t *testing.T) {
 		t.Run(text, func(t *testing.T) {
 			bound, ok := ParseOffsetBound(text)
 			if !ok || bound.String() != text {
-				t.Errorf("got %v %v", bound, ok)
+				t.Errorf("ParseOffsetBound(%q) = %v, %v, want %q and true", text, bound, ok, text)
 			}
 		})
 	}
 }
 
-// An exact offset from an older release, or an empty field, is not a
-// bound, so a reader never mistakes it for one.
+// An exact offset or an empty field is not a bound, so
+// ParseOffsetBound rejects it.
 func TestOffsetBoundRefusesAnythingElse(t *testing.T) {
 	for _, text := range []string{"", "3.21ms", "±2ms", "5ms"} {
 		t.Run(text, func(t *testing.T) {
 			if _, ok := ParseOffsetBound(text); ok {
-				t.Errorf("%q parsed as a bound", text)
+				t.Errorf("ParseOffsetBound(%q) returned a bound, want none", text)
 			}
 		})
 	}
@@ -59,7 +59,7 @@ func TestOffsetBoundOutrunsTheSlewPastTheStepThreshold(t *testing.T) {
 		t.Run(text, func(t *testing.T) {
 			bound, _ := ParseOffsetBound(text)
 			if got := bound.OutrunsSlew(); got != want {
-				t.Errorf("got %v, want %v", got, want)
+				t.Errorf("OutrunsSlew of %s = %v, want %v", text, got, want)
 			}
 		})
 	}
@@ -74,32 +74,32 @@ func TestClockReadingRoundTrips(t *testing.T) {
 		At:     time.Date(2026, 10, 11, 14, 0, 0, 123, time.UTC),
 	}
 	if err := WriteClockReading(dir, written); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the clock reading: %v", err)
 	}
 	read, err := ReadClockReading(dir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the clock reading back: %v", err)
 	}
 	if read != written {
-		t.Errorf("got %+v, want %+v", read, written)
+		t.Errorf("ReadClockReading = %+v, want %+v", read, written)
 	}
 }
 
-// Before the first answered poll there is no file, and the reading
-// is the zero value, which a reader takes as no reading at all.
+// Before the first poll has a reply there is no file, and
+// ReadClockReading returns the zero reading.
 func TestClockReadingIsZeroBeforeTheFirstPoll(t *testing.T) {
 	read, err := ReadClockReading(t.TempDir())
 	if err != nil || !read.At.IsZero() {
-		t.Errorf("got %+v, %v", read, err)
+		t.Errorf("ReadClockReading of an empty directory = %+v, %v, want the zero reading and no error", read, err)
 	}
 }
 
 func TestClockReadingNamesAnUnparseableFile(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "reading"), []byte("offset=lots\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the reading file: %v", err)
 	}
 	if _, err := ReadClockReading(dir); err == nil {
-		t.Error("a bad offset should be an error")
+		t.Error("ReadClockReading returned no error for offset=lots, want an error")
 	}
 }

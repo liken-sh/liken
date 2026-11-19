@@ -1,288 +1,174 @@
 package machine
 
-// The kernel settings every liken machine holds.
+// OSSysctls is the table of kernel settings that every liken machine
+// applies, whatever it runs. A setting that depends on the workload belongs in
+// the Machine's spec.sysctls.
 //
-// A stock Linux distribution does not run on the kernel's own
-// defaults. It ships a set of sysctl files, usually under
-// /usr/lib/sysctl.d, and systemd applies them at boot. liken runs no
-// systemd, so nothing applies those files and the machine keeps the
-// kernel's defaults for every one of them. Some of those defaults are
-// decades old and were chosen for a single-user machine with one
-// network interface. This table is liken's answer: the values a server
-// should hold, applied by liken itself.
+// A stock distribution sets these from files under /usr/lib/sysctl.d,
+// which systemd applies at boot. liken runs no systemd, so without this
+// table a machine keeps the kernel's defaults.
 //
-// Two programs apply this table, on two cadences. Init applies it at
-// boot, before k3s starts, so every value is set by the time anything
-// reads it. The liken operator applies it again on every reconcile
-// pass, so a value that something else changed returns within one
-// pass. Both apply this table first and spec.sysctls second, so a name
-// in a Machine's spec always wins: the last write is the one that
-// holds. status.sysctls reports the union of both, read back from the
-// kernel, so an operator sees every parameter liken sets and its
-// actual value in one place.
+// init applies the table before it brings up the network and before k3s
+// starts. machine-operator applies it again on every reconcile pass, so
+// a value that something else changed is written back. Both apply
+// spec.sysctls after the table, so the spec overrides an entry.
 //
-// A parameter earns a place here when every liken machine should hold
-// it whatever it runs. A value that depends on the workload belongs in
-// spec.sysctls instead, where the person who knows the workload can
-// set it.
+// A net.ipv4.conf parameter exists under all, under default, and for
+// each interface. The kernel copies default into an interface when the
+// interface registers. The network card registers when its driver
+// loads, before init applies this table, so a default entry reaches only
+// interfaces that CNI creates later, and the network card needs the all
+// entry too. TestEveryDefaultEntryHasAnAllEntry fails on a default entry
+// without it.
 //
-// Two rules for anyone adding an entry.
+// Do not add net.ipv6.conf.all.forwarding. The kernel copies it to every
+// interface, and an interface that forwards ignores router
+// advertisements unless its accept_ra is 2, so the machine would lose
+// the addresses and routes that router advertisements configure.
 //
-// First, the three-way scope. A net.ipv4.conf parameter exists three
-// times: once under all, once under default, and once per interface.
-// The kernel copies default into an interface when that interface
-// registers, and interfaces register when their driver loads, which
-// happens before any of these values are applied. So default reaches
-// the interfaces that CNI creates later and never reaches the
-// machine's own network card. Reaching that card takes the all entry,
-// and how all combines with the per-interface value differs by
-// parameter: rp_filter takes the larger of the two, accept_source_route
-// requires both, and promote_secondaries takes either. An entry under
-// default alone is usually a mistake. sysctldefaults_test.go checks
-// for the missing twin.
-//
-// Second, no IPv6 forwarding entry. Writing
-// net.ipv6.conf.all.forwarding stops the machine accepting router
-// advertisements, and at this point in boot that would land before any
-// interface comes up.
-//
-// One extension this table does not have: every entry is advisory. A
-// value that fails to apply leaves the machine Ready and reports
-// DefaultsIncomplete, because this table ships with the release, so a
-// bad entry would otherwise take a whole fleet out at once. If some
-// entry ever has to be load-bearing, the shape for that is a named set
-// of required parameters, not a second table.
+// When an entry fails to apply, the machine stays Ready, and the
+// SysctlsApplied condition stays True with the reason
+// DefaultsIncomplete. Every machine of a release applies the same
+// table, so a bad entry that made a machine Degraded would make the
+// whole fleet Degraded at once.
 var OSSysctls = map[string]string{
-	// The gap between the memory watermarks that start and stop
-	// kswapd, the kernel's background reclaimer, in units of 0.01% of
-	// the machine's memory. At the default gap of 0.1%, kswapd on a
-	// small machine runs rarely, only once allocation is close to
-	// failing. When that happens, many allocations stall in direct
-	// reclaim at once. This is the worst possible moment for a stall,
-	// because it produces the kind of latency spike that makes k3s's
-	// datastore miss its IO deadlines under load. A gap of one percent
-	// makes reclaim run steadily in the background instead: pages that
-	// the boot touched once are freed while the machine is calm, so a
-	// burst of activity finds free memory waiting. The cost is a
-	// somewhat smaller page cache and a little more background CPU
-	// use. A gap of two percent, twice this value, kept kswapd visibly
-	// busy even on a well-filled machine, reclaiming pages that
-	// nothing needed yet.
+	// kswapd, the background reclaimer, starts when free memory falls
+	// below a low watermark and stops at a high one. This sets the gap
+	// between them, in units of 0.01% of memory. With the default gap of
+	// 0.1%, kswapd on a small machine starts only when allocations are
+	// about to fail, and many allocations then stall in direct reclaim at
+	// once, which can make the k3s datastore miss its IO deadlines. With
+	// a gap of 1%, kswapd starts earlier, so a burst finds free memory,
+	// at the cost of a slightly smaller page cache.
 	"vm.watermark_scale_factor": "100",
 
-	// The two inotify limits raise the kernel's defaults so that init
-	// and the operator always have watches to spend. inotify limits
-	// are per-uid, and every inotify user on the machine runs as root
-	// and draws from the one root quota: kubelet's watches on config
-	// and secrets, containerd's watches, k3s's own watches, init's
-	// watch on the operator's intent directory, and the operator's
-	// watch on the facts tree. The ceiling on instances rises from the
-	// kernel's 128 to the value a Kubernetes node commonly runs with,
-	// because kubelet and containerd alone can open dozens and the
-	// machine plane needs two more that never contend with them. The
-	// ceiling on watched inodes rises for the same reason.
-	//
-	// These numbers are caps, not allocations. An unused cap costs no
-	// memory. A single watch costs about a kilobyte of unswappable
-	// kernel memory, but only once something registers it, so raising
-	// the ceiling on a machine that watches little changes nothing
-	// about its memory use. The cap's job is to never be the thing
-	// that fails when a legitimate watcher asks for a watch, while it
-	// still stands as a backstop against a runaway watcher.
-	//
-	// The consequence matters more than the numbers. With this
-	// headroom guaranteed at boot, a watch that fails to start is a
-	// real fault, not an expected shortage to paper over. This is why
-	// init has no polling fallback for its intent watch: a failed
-	// watch surfaces on the console and the component plane retries
-	// it, rather than degrading to a poll that hides the fault.
+	// Inotify limits are per uid. Everything on a liken machine runs as
+	// root, so kubelet, containerd, k3s, init, and machine-operator share
+	// one quota, and the kernel default of 128 instances is too few for
+	// kubelet and containerd alone. A watch uses about a kilobyte of
+	// kernel memory only while it exists, so a high limit costs nothing.
 	"fs.inotify.max_user_instances": "8192",
 	"fs.inotify.max_user_watches":   "524288",
 
-	// A node that cannot forward packets cannot route pod traffic.
-	// Every Kubernetes networking layer assumes this old parameter is
-	// on. It belongs in this table rather than in the code that
-	// prepares the machine for k3s, because a value liken sets should
-	// be a value an operator can see in status and override in a
-	// spec, and a value written straight to /proc is neither.
+	// Kubernetes networking needs the node to forward packets. The value
+	// is in this table, and not written by the code that starts k3s, so
+	// that status.sysctls shows it and spec.sysctls can override it.
 	"net.ipv4.ip_forward": "1",
 
-	// The queueing discipline a network interface gets when it comes
-	// up. The kernel's default, pfifo_fast, is one queue with three
-	// priority bands and no queue management: a bulk transfer fills
-	// it, and every later packet waits out the whole backlog. fq_codel
-	// gives each flow a queue of its own and drops from the head of a
-	// queue that stays full, so a large transfer cannot delay a small
-	// request. This is the value every systemd distribution sets, and
-	// the reason bufferbloat has a name.
+	// The kernel default, pfifo_fast, has no queue management, so a bulk
+	// transfer fills the queue and delays every later packet. fq_codel
+	// gives each flow its own queue and drops from the head of a queue
+	// that stays full.
 	//
-	// The scheduler must be registered before anything can name it, so
-	// sch_fq_codel is in the image's module list and loads earlier in
-	// boot than this table applies. Init applies this table before it
-	// brings interfaces up, which is what puts fq_codel on the
-	// machine's own network card. The operator's later writes reach
-	// only interfaces created after them, because the kernel reads
-	// this parameter when an interface comes up and not again.
+	// The kernel reads this value only when an interface comes up, and
+	// accepts only a scheduler that is registered. So
+	// image/etc/liken/modules.conf loads sch_fq_codel before init applies
+	// this table, and init applies it before it brings up the network
+	// card. A later write by machine-operator affects only interfaces
+	// that come up after it.
 	"net.core.default_qdisc": "fq_codel",
 
-	// Whether a TCP connection that has gone idle resets its
-	// congestion window and starts slow again. The kernel does this by
-	// default, on the reasoning that the path may have changed while
-	// the connection was quiet. A Kubernetes machine's own traffic is
-	// the worst case for it: an API server watch or a gRPC stream
-	// stays open for hours and carries a burst, a silence, and another
-	// burst, so every burst after a pause pays the slow start again on
-	// a path that did not change. Turning it off is standard practice
-	// on a server that holds long connections.
+	// By default the kernel restarts slow start on a TCP connection that
+	// was idle, because the path may have changed. An API server watch or
+	// a gRPC stream stays open for hours and sends bursts between
+	// silences, so with the default every burst starts slow.
 	"net.ipv4.tcp_slow_start_after_idle": "0",
 
-	// Whether TCP probes for the largest packet a path will carry.
-	// Some paths drop a packet that needs fragmenting without sending
-	// back the message that says so, and a connection across one of
-	// them stalls rather than fails. flannel's VXLAN encapsulation
-	// makes every pod-to-pod path smaller than the interface it
-	// travels on, which is exactly the shape that produces this. This
-	// value starts probing once a connection looks stalled, which
-	// costs nothing on a path that works.
+	// Some paths drop a packet that is too large and send no ICMP
+	// message back, so a TCP connection across them stalls instead of
+	// failing. flannel's VXLAN encapsulation adds a header to each
+	// packet between pods on different nodes, so the largest packet that
+	// such a path carries is smaller than the MTU of the host's network
+	// interface. With 1, TCP probes for a smaller packet size only after
+	// it detects such a stall.
 	"net.ipv4.tcp_mtu_probing": "1",
 
-	// The queue depth of a Unix domain datagram socket. The kernel's
-	// default of 10 dates from a time when this was a rare kind of
-	// socket, and every systemd distribution raises it, because a
-	// sender that fills the queue blocks. liken has no systemd to
-	// raise it.
+	// The queue length of a Unix domain datagram socket. A sender blocks
+	// when the queue is full, and the kernel default of 10 is low. Stock
+	// distributions raise it.
 	"net.unix.max_dgram_qlen": "512",
 
-	// The ceiling on process IDs before the kernel wraps around and
-	// reuses the low numbers. The kernel's default of 32768 predates
-	// the container, and a machine running many short-lived
-	// containers reaches it. This value is the largest a 64-bit kernel
-	// accepts, and every stock distribution sets it. A 32-bit kernel
-	// caps at 32768 and would refuse this value, which matters only if
-	// liken ever builds for one.
-	//
-	// This is a ceiling, not an allocation. It costs nothing until the
-	// processes exist.
+	// The highest process ID before the kernel wraps around. The default
+	// of 32768 is low for a machine that runs many short-lived
+	// containers. 4194304 is the largest value a 64-bit kernel accepts,
+	// and the value stock distributions set.
 	"kernel.pid_max": "4194304",
 
-	// The number of distinct memory mappings one process may hold.
-	// Every mmap, every shared library, and every guard page costs
-	// one. A container runtime, a JVM, or anything that maps many
-	// small files reaches the kernel's default of 65530, and the
-	// failure is confusing: mmap refuses with an out-of-memory error
-	// on a machine with free memory.
-	//
-	// No distribution sets this. The justification is the workload
-	// liken exists to run, not parity with anything else: before this
-	// value moved here, every liken deployment wrote the same number
-	// into its own spec.sysctls by hand.
+	// The number of memory mappings one process may have. Every mmap,
+	// shared library, and guard page uses one. A container runtime, a
+	// JVM, or a program that maps many small files can reach the default
+	// of 65530, and then mmap fails with ENOMEM on a machine that has
+	// free memory. Fedora, Arch, and Ubuntu raise it to 1048576.
 	"vm.max_map_count": "262144",
 
-	// Four restrictions on following a link or opening a file in a
-	// directory that anyone may write to, which on this machine means
-	// /tmp. Without them, one user can leave a symbolic link, a hard
-	// link to a file they cannot read, or a file of their own where a
-	// program expects to create its own, and a program that follows it
-	// acts on the wrong file. The kernel leaves all four off for
-	// compatibility with programs written before the checks existed.
-	// Every distribution turns them on.
-	//
-	// Everything on a liken host runs as root, and root opening a file
-	// root owns never trips these checks, so the exposure they close
-	// is narrow: a pod running as a normal user that shares a
-	// directory with the host. The value for regular files is the
-	// stricter of the two the kernel offers, which extends the check
-	// to a world-writable directory that is not marked sticky.
+	// Protections against a file that one user plants for another user's
+	// program to open, mostly in a world-writable sticky directory such
+	// as /tmp: a symbolic link, a hard link to a file the user cannot
+	// write, a FIFO, or a regular file. The kernel leaves them off so
+	// that old programs keep working, and stock distributions turn them
+	// on. Everything on a liken host runs as root, so they matter for a
+	// pod that runs as a non-root user and shares a directory with the
+	// host. The value 2 for fs.protected_regular also applies the check
+	// in group-writable sticky directories.
 	"fs.protected_symlinks":  "1",
 	"fs.protected_hardlinks": "1",
 	"fs.protected_regular":   "2",
 	"fs.protected_fifos":     "1",
 
-	// Whether an unprivileged reader sees real kernel addresses in
-	// /proc and other interfaces. Real addresses tell an exploit where
-	// the kernel loaded, which is the one thing address randomisation
-	// exists to hide. This value replaces them with zeros for a reader
-	// without the capability to see them. Every distribution sets it.
+	// Kernel addresses in /proc tell an exploit where the kernel loaded,
+	// which address randomization hides. With 1, the kernel prints zeros
+	// to a reader without CAP_SYSLOG. Stock distributions set it.
 	"kernel.kptr_restrict": "1",
 
-	// Whether a kernel bug that did not kill the machine outright
-	// becomes a panic. An oops leaves the kernel running in a state it
-	// does not understand, and a machine in that state can corrupt
-	// what it writes. liken has somewhere better to go: a panic
-	// reboots after ten seconds through the panic= parameter on the
-	// command line, the firmware boots the slot it already proved, and
-	// the pstore journal carries the log across the reboot so the next
-	// boot reports the crash. Continuing past an oops throws all of
-	// that away.
+	// After an oops the kernel keeps running in an unknown state and can
+	// corrupt what it writes. A panic is better on a liken machine: the
+	// panic=10 kernel argument reboots ten seconds later, and pstore keeps
+	// the kernel log across the reboot, so the next boot reports the
+	// crash. When the panic happens in the trial boot of a new release,
+	// the one-shot trial is already used, so the firmware boots the
+	// proven slot (init/proving.go).
 	//
-	// kubelet writes this same value once k3s starts, so what liken
-	// adds is the window before that and the machine that never
-	// reaches k3s at all.
+	// kubelet also sets this when k3s starts, so this entry covers the
+	// time before that, and a machine that never starts k3s.
 	"kernel.panic_on_oops": "1",
 
-	// Whether a lockup becomes a panic. The kernel's two lockup
-	// detectors print a warning by default, and the machine keeps its
-	// hang: its pods stop, it answers nothing, and it stays that way
-	// until a person cuts its power. A soft lockup is a CPU that stays
-	// in kernel mode for more than twice kernel.watchdog_thresh, which
-	// is 20 seconds, and a hard lockup is a CPU that runs with
-	// interrupts off. A panic is the better end for both, for the
-	// reason kernel.panic_on_oops gives: the machine reboots into the
-	// slot it proved, and the next boot reports the crash.
+	// By default the lockup detectors only print a warning, and a hung
+	// machine stays hung until someone cuts its power. A soft lockup is a
+	// CPU that stays in kernel mode for more than twice
+	// kernel.watchdog_thresh, 20 seconds by default. A hard lockup is a
+	// CPU that runs with interrupts off. A panic is better for both, for
+	// the reason at kernel.panic_on_oops.
 	//
-	// kernel.hung_task_panic stays off. A task that waits on a slow
-	// iSCSI or NFS server trips it, and a storage outage would then
+	// kernel.hung_task_panic stays off, because a task that waits on a
+	// slow iSCSI or NFS server trips it, and a storage outage would then
 	// reboot every machine that mounts from that server.
-	//
-	// These two cover a hang that the kernel can still see. A CPU that
-	// stops completely runs no detector, and only a timer outside the
-	// CPU resets that machine.
 	"kernel.softlockup_panic": "1",
 	"kernel.hardlockup_panic": "1",
 
-	// Whether the machine checks that a packet arrived on the
-	// interface it would use to reply, and drops it if not. liken
-	// does no such check at all today. The loose form, this value,
-	// drops a packet only when no interface at all would route back to
-	// its source, which catches a forged source address without
-	// assuming traffic is symmetric.
-	//
-	// The strict form, one lower, drops a packet that arrived on any
-	// interface other than the best return path, and it breaks
-	// Kubernetes: pod traffic routinely arrives asymmetrically across
-	// an overlay. Because the kernel takes the larger of the all value
-	// and the per-interface value, setting all to the loose form
-	// prevents the strict form anywhere on the machine, including on
-	// an interface a CNI configures for itself. That is a deliberate
-	// commitment and not a neutral default: liken chooses working pod
-	// networking over the stricter check.
+	// Reverse path filtering drops a packet whose source address has no
+	// route back. The strict mode, 1, also drops a packet that arrives on
+	// an interface other than the one the route back uses. Pod traffic
+	// across an overlay often arrives that way, so strict mode breaks
+	// Kubernetes. The loose mode, 2, still drops a forged source address
+	// that no interface routes to. The kernel uses the larger of the all
+	// value and the interface's value, so all=2 also turns strict mode
+	// into loose mode on an interface that a CNI sets to 1.
 	"net.ipv4.conf.all.rp_filter":     "2",
 	"net.ipv4.conf.default.rp_filter": "2",
 
-	// Whether the machine honours a packet that carries its own route.
-	// Source routing lets a sender choose the path its reply takes,
-	// which is a way to reach an address that ordinary routing
-	// protects. Nothing legitimate on a server uses it.
-	//
-	// The kernel requires both the all value and the per-interface
-	// value to be on, so the all entry is what turns this off
-	// everywhere. Distributions set only the default entry, which
-	// reaches interfaces created later and leaves the machine's own
-	// network card as the kernel left it.
+	// A source-routed packet names the path that it and its reply take,
+	// which can reach an address that normal routing protects. Nothing
+	// legitimate on a server uses it. The kernel accepts source routes
+	// only when both the all value and the interface's value are on, so
+	// all=0 turns it off everywhere.
 	"net.ipv4.conf.all.accept_source_route":     "0",
 	"net.ipv4.conf.default.accept_source_route": "0",
 
-	// Whether removing an interface's primary address promotes a
-	// secondary address to take its place. The kernel's default is to
-	// delete every secondary address on that interface instead, so a
-	// machine that renews a lease or renumbers loses addresses it
-	// still holds.
-	//
-	// The kernel takes either the all value or the per-interface
-	// value, so the all entry is what reaches the machine's own
-	// network card. That card is the interface that has secondary
-	// addresses in the first place, which makes the default entry on
-	// its own worth nothing here.
+	// By default, when an interface's primary address is removed, the
+	// kernel deletes its secondary addresses too, so a machine that
+	// renews a lease or renumbers loses addresses it still uses. With 1,
+	// the kernel promotes a secondary address instead. It promotes when
+	// either the all value or the interface's value is on.
 	"net.ipv4.conf.all.promote_secondaries":     "1",
 	"net.ipv4.conf.default.promote_secondaries": "1",
 }

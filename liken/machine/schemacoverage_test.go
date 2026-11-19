@@ -1,13 +1,11 @@
 package machine
 
-// The API server prunes every field that a structural schema does not
-// declare. A field the operator writes into status and the schema
-// lacks is dropped on each write, so the operator reads back a status
-// without it, finds its own status different, and writes again on
-// every pass. That write stores nothing new and changes no
-// resourceVersion, so nothing reports it but the backstop. This test
-// walks the Go types and requires a schema property for every field
-// they can write.
+// The API server drops every field that the CRD's structural schema
+// does not declare. When the schema lacks a status field that the
+// operator writes, the operator reads back a status that differs from
+// what it wrote, and it writes again on every pass. The write changes
+// nothing, so no watch event shows the loop. This test walks the Go
+// types and requires a schema property for each of their fields.
 
 import (
 	"os"
@@ -19,24 +17,24 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// readMachineSchema answers the schema of one top-level property of the
-// Machine, spec or status, as plain maps.
+// readMachineSchema returns the CRD schema of the spec or the status
+// property of a Machine, as plain maps.
 func readMachineSchema(t *testing.T, property string) map[string]any {
 	t.Helper()
 	raw, err := os.ReadFile("manifests/machines-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Machine CRD: %v", err)
 	}
 	var crd map[string]any
 	if err := yaml.Unmarshal(raw, &crd); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the Machine CRD: %v", err)
 	}
 	version := crd["spec"].(map[string]any)["versions"].([]any)[0].(map[string]any)
 	root := version["schema"].(map[string]any)["openAPIV3Schema"].(map[string]any)
 	return root["properties"].(map[string]any)[property].(map[string]any)
 }
 
-// undeclaredFields answers the JSON path of each field of t that the
+// undeclaredFields returns the JSON path of each field of t that the
 // schema s does not declare.
 func undeclaredFields(t reflect.Type, s map[string]any, path string) []string {
 	for {
@@ -81,9 +79,6 @@ func undeclaredFields(t reflect.Type, s map[string]any, path string) []string {
 	return missing
 }
 
-// Every field that MachineStatus and MachineSpec can hold has a
-// property in the CRD's schema, so the API server keeps what the
-// operator writes.
 func TestTheSchemaDeclaresEveryField(t *testing.T) {
 	cases := []struct {
 		property string
@@ -95,7 +90,7 @@ func TestTheSchemaDeclaresEveryField(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.property, func(t *testing.T) {
 			if missing := undeclaredFields(c.of, readMachineSchema(t, c.property), c.property); len(missing) > 0 {
-				t.Errorf("the schema does not declare %s, so the API server drops them", strings.Join(missing, ", "))
+				t.Errorf("the schema does not declare %s, so the API server drops those fields", strings.Join(missing, ", "))
 			}
 		})
 	}

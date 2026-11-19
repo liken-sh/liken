@@ -10,9 +10,6 @@ import (
 	"github.com/liken-sh/liken/liken/api"
 )
 
-// writeManifest writes a manifest into a fresh directory and returns
-// its path, so each test can describe a machine in a few lines of
-// YAML.
 func writeManifest(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "machine.yaml")
@@ -25,10 +22,10 @@ func writeManifest(t *testing.T, content string) string {
 func TestLoadMissingFileIsAValidMachine(t *testing.T) {
 	m, err := Load(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
 	if err != nil {
-		t.Fatalf("expected defaults, got error: %v", err)
+		t.Fatalf("loading a missing file: %v, want an empty Machine", err)
 	}
 	if m.Metadata.Name != "" {
-		t.Errorf("expected empty name, got %q", m.Metadata.Name)
+		t.Errorf("name is %q, want empty", m.Metadata.Name)
 	}
 }
 
@@ -54,26 +51,26 @@ spec:
 		t.Fatal(err)
 	}
 	if m.Metadata.Name != "liken-dev" {
-		t.Errorf("name: got %q", m.Metadata.Name)
+		t.Errorf("name is %q, want liken-dev", m.Metadata.Name)
 	}
 	interfaces := m.Spec.Network.Interfaces
 	if len(interfaces) != 2 {
-		t.Fatalf("interfaces: got %v", interfaces)
+		t.Fatalf("interfaces are %v, want 2", interfaces)
 	}
 	if interfaces[0].Name != "eth0" || interfaces[0].Address != "" {
-		t.Errorf("eth0 should default to DHCP: got %+v", interfaces[0])
+		t.Errorf("eth0 is %+v, want a name and no address, which means DHCP", interfaces[0])
 	}
 	if interfaces[1].Address != "10.10.0.1/24" {
-		t.Errorf("eth1 address: got %q", interfaces[1].Address)
+		t.Errorf("eth1 address is %q, want 10.10.0.1/24", interfaces[1].Address)
 	}
 	if interfaces[1].Gateway != "10.10.0.254" {
-		t.Errorf("eth1 gateway: got %q", interfaces[1].Gateway)
+		t.Errorf("eth1 gateway is %q, want 10.10.0.254", interfaces[1].Gateway)
 	}
 	if len(interfaces[1].Nameservers) != 1 || interfaces[1].Nameservers[0] != "9.9.9.9" {
-		t.Errorf("eth1 nameservers: got %v", interfaces[1].Nameservers)
+		t.Errorf("eth1 nameservers are %v, want [9.9.9.9]", interfaces[1].Nameservers)
 	}
 	if got := m.Spec.Sysctls["vm.overcommit_memory"]; got != "1" {
-		t.Errorf("sysctl: got %q", got)
+		t.Errorf("sysctl vm.overcommit_memory is %q, want 1", got)
 	}
 }
 
@@ -91,7 +88,7 @@ spec:
 		t.Fatal(err)
 	}
 	if len(m.Spec.Modules) != 2 || m.Spec.Modules[0] != "nvidia" || m.Spec.Modules[1] != "v4l2loopback" {
-		t.Errorf("modules: got %v", m.Spec.Modules)
+		t.Errorf("modules are %v, want [nvidia v4l2loopback]", m.Spec.Modules)
 	}
 }
 
@@ -111,17 +108,15 @@ spec:
 		t.Fatal(err)
 	}
 	if got := m.Spec.NodeLabels["guid.foo/gpu"]; got != "true" {
-		t.Errorf("nodeLabels: got %q", got)
+		t.Errorf("nodeLabels guid.foo/gpu is %q, want true", got)
 	}
 	if got := m.Spec.NodeLabels["topology.kubernetes.io/zone"]; got != "closet" {
-		t.Errorf("nodeLabels: got %q", got)
+		t.Errorf("nodeLabels topology.kubernetes.io/zone is %q, want closet", got)
 	}
 }
 
 func TestLoadParsesNodeTaints(t *testing.T) {
-	// A taint carries a value or leaves it empty, and the empty one is
-	// the common case: the key and the effect alone say to stay off
-	// this machine.
+	// The second taint has no value, which is optional.
 	path := writeManifest(t, `
 apiVersion: liken.sh/v1alpha1
 kind: Machine
@@ -141,15 +136,15 @@ spec:
 	}
 	taints := m.Spec.NodeTaints
 	if len(taints) != 2 {
-		t.Fatalf("nodeTaints: got %v", taints)
+		t.Fatalf("nodeTaints are %v, want 2", taints)
 	}
 	want := NodeTaint{Key: "guid.foo/drill", Value: "node-taints", Effect: TaintPreferNoSchedule}
 	if taints[0] != want {
-		t.Errorf("nodeTaints[0]: got %+v, want %+v", taints[0], want)
+		t.Errorf("nodeTaints[0] is %+v, want %+v", taints[0], want)
 	}
 	want = NodeTaint{Key: "node-role.kubernetes.io/database", Effect: TaintNoSchedule}
 	if taints[1] != want {
-		t.Errorf("nodeTaints[1]: got %+v, want %+v", taints[1], want)
+		t.Errorf("nodeTaints[1] is %+v, want %+v", taints[1], want)
 	}
 }
 
@@ -161,7 +156,7 @@ metadata:
   name: liken-dev
 `)
 	if _, err := Load(path); err == nil {
-		t.Fatal("expected an error for kind Toaster")
+		t.Fatal("Load accepted kind Toaster, want an error")
 	}
 }
 
@@ -175,20 +170,18 @@ spec:
   networkk: {}
 `)
 	if _, err := Load(path); err == nil {
-		t.Fatal("expected an error for the misspelled field")
+		t.Fatal("Load accepted the misspelled field networkk, want an error")
 	}
 }
 
 func TestLoadReportsAnUnreadableFile(t *testing.T) {
 	path := unreadableFile(t, filepath.Join(t.TempDir(), "machine.yaml"))
 	if _, err := Load(path); err == nil {
-		t.Error("a manifest that exists but can't be read is an error, not a default machine")
+		t.Error("Load of a manifest that exists but cannot be read returned no error, want an error and not a default Machine")
 	}
 }
 
 func TestNetworkValidateAcceptsATypicalClusterMachine(t *testing.T) {
-	// The shape a clustered machine declares: a DHCP uplink and a
-	// cluster segment with a fixed address on it.
 	spec := NetworkSpec{Interfaces: []InterfaceSpec{
 		{Name: "eth0"},
 		{Name: "eth1", Address: "10.10.0.1/24"},
@@ -198,36 +191,33 @@ func TestNetworkValidateAcceptsATypicalClusterMachine(t *testing.T) {
 	}
 }
 
-func TestNetworkValidateRejectsAnInterfaceThatNamesNoPort(t *testing.T) {
-	// An entry with no name configures nothing. Left to the boot, it
-	// would be a silent no-op on a machine with no shell.
+func TestNetworkValidateRejectsAnInterfaceWithNoName(t *testing.T) {
+	// Without a name, init cannot tell which interface the entry
+	// configures.
 	spec := NetworkSpec{Interfaces: []InterfaceSpec{{Address: "10.0.0.1/24"}}}
 	if err := spec.Validate(); err == nil {
-		t.Error("expected an error for an interface with no name")
+		t.Error("Validate accepted an interface with no name, want an error")
 	}
 }
 
 func TestNetworkValidateRejectsTwoEntriesForOnePort(t *testing.T) {
-	// The API server enforces this for a spec applied through it,
-	// because the list is keyed by name. A manifest carried in on a
-	// stick reaches init without that check, and two entries for one
-	// port would configure the second over the first.
+	// The API server rejects this through the list's name key, but a
+	// manifest on an install stick never reaches the API server.
 	spec := NetworkSpec{Interfaces: []InterfaceSpec{
 		{Name: "eth0"},
 		{Name: "eth0", Address: "10.0.0.1/24"},
 	}}
 	err := spec.Validate()
 	if err == nil {
-		t.Fatal("expected an error for two entries naming eth0")
+		t.Fatal("Validate accepted two entries for eth0, want an error")
 	}
 	if !strings.Contains(err.Error(), "eth0") {
-		t.Errorf("the error must name the port declared twice: %v", err)
+		t.Errorf("the error is %q, want it to name eth0", err)
 	}
 }
 
 func TestNetworkValidateAcceptsNoInterfacesAtAll(t *testing.T) {
-	// An empty spec is the zero-configuration default, not a
-	// mistake.
+	// An empty spec is the default configuration, not an error.
 	if err := (NetworkSpec{}).Validate(); err != nil {
 		t.Error(err)
 	}
@@ -251,11 +241,11 @@ spec:
 	}
 	entries := m.Spec.Network.HostEntries
 	if len(entries) != 1 {
-		t.Fatalf("hostEntries: got %v", entries)
+		t.Fatalf("hostEntries are %v, want 1", entries)
 	}
 	want := HostEntry{Address: "10.10.0.20", Names: []string{"nas", "nas.home.arpa"}}
 	if !reflect.DeepEqual(entries[0], want) {
-		t.Errorf("hostEntries[0]: got %+v, want %+v", entries[0], want)
+		t.Errorf("hostEntries[0] is %+v, want %+v", entries[0], want)
 	}
 }
 
@@ -269,14 +259,11 @@ func TestNetworkValidateAcceptsAHostEntry(t *testing.T) {
 }
 
 func TestNetworkValidateRejectsAHostEntryThatIsNotALiteralAddress(t *testing.T) {
-	// A hostname or a CIDR block has no place in a hosts file line:
-	// init writes the value straight into the file, with no lookup
-	// step to resolve it first.
 	spec := NetworkSpec{HostEntries: []HostEntry{
 		{Address: "nas.example.com", Names: []string{"nas"}},
 	}}
 	if err := spec.Validate(); err == nil {
-		t.Error("expected an error for an address that is not a literal address")
+		t.Error("Validate accepted a hostname as an address, want an error")
 	}
 }
 
@@ -287,33 +274,30 @@ func TestNetworkValidateRejectsTwoHostEntriesForOneAddress(t *testing.T) {
 	}}
 	err := spec.Validate()
 	if err == nil {
-		t.Fatal("expected an error for two entries declaring 10.10.0.20")
+		t.Fatal("Validate accepted two entries for 10.10.0.20, want an error")
 	}
 	if !strings.Contains(err.Error(), "10.10.0.20") {
-		t.Errorf("the error must name the address declared twice: %v", err)
+		t.Errorf("the error is %q, want it to name 10.10.0.20", err)
 	}
 }
 
 func TestNetworkValidateRejectsAHostEntryWithNoNames(t *testing.T) {
 	spec := NetworkSpec{HostEntries: []HostEntry{{Address: "10.10.0.20"}}}
 	if err := spec.Validate(); err == nil {
-		t.Error("expected an error for a host entry with no names")
+		t.Error("Validate accepted a host entry with no names, want an error")
 	}
 }
 
 func TestNetworkValidateRejectsAHostEntryNamedLocalhost(t *testing.T) {
-	// The fixed lines that init writes first already define
-	// localhost. An entry cannot redefine it.
 	spec := NetworkSpec{HostEntries: []HostEntry{
 		{Address: "10.10.0.20", Names: []string{"localhost"}},
 	}}
 	if err := spec.Validate(); err == nil {
-		t.Error("expected an error for an entry that names localhost")
+		t.Error("Validate accepted an entry that lists localhost, want an error")
 	}
 }
 
-// A Machine answers its own metadata to a watch's store and the memo.
-func TestAMachineAnswersItsMetadata(t *testing.T) {
+func TestMachineReturnsItsMetadata(t *testing.T) {
 	m := &Machine{Metadata: api.ObjectMeta{Name: "node-1", ResourceVersion: "42"}}
 	if meta := m.GetObjectMeta(); meta.GetName() != "node-1" || meta.GetResourceVersion() != "42" {
 		t.Errorf("GetObjectMeta = %q at %q, want node-1 at 42", meta.GetName(), meta.GetResourceVersion())

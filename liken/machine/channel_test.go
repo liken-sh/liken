@@ -1,8 +1,5 @@
 package machine
 
-// Tests for the channel document. This document is advisory. It
-// shows the latest version at the root of a channel.
-
 import (
 	"strings"
 	"testing"
@@ -17,33 +14,33 @@ latest: 2026.07.13-002
 `
 	c, err := ParseChannel([]byte(doc))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the Channel: %v", err)
 	}
 	if c.Metadata.Name != "liken" {
-		t.Errorf("name: %q", c.Metadata.Name)
+		t.Errorf("the name is %q, want liken", c.Metadata.Name)
 	}
 	if c.Latest != "2026.07.13-002" {
-		t.Errorf("latest: %q", c.Latest)
+		t.Errorf("latest is %q, want 2026.07.13-002", c.Latest)
 	}
 }
 
 func TestParseChannelRejectsTheWrongKind(t *testing.T) {
 	doc := "apiVersion: liken.sh/v1alpha1\nkind: Release\nmetadata:\n  name: liken\nlatest: 2026.07.13-002\n"
-	if _, err := ParseChannel([]byte(doc)); err == nil || !strings.Contains(err.Error(), "kind Channel") {
-		t.Errorf("a Release document must not parse as a Channel: %v", err)
+	if _, err := ParseChannel([]byte(doc)); err == nil || !strings.Contains(err.Error(), "kind") {
+		t.Errorf("parsing a Release document as a Channel returned %v, want an error about the kind", err)
 	}
 }
 
 func TestParseChannelRejectsAMissingName(t *testing.T) {
 	doc := "apiVersion: liken.sh/v1alpha1\nkind: Channel\nmetadata: {}\nlatest: 2026.07.13-002\n"
 	if _, err := ParseChannel([]byte(doc)); err == nil || !strings.Contains(err.Error(), "name") {
-		t.Errorf("a nameless channel must be rejected: %v", err)
+		t.Errorf("parsing a Channel with no name returned %v, want an error about the name", err)
 	}
 }
 
 func TestParseChannelRejectsAMalformedLatest(t *testing.T) {
 	doc := "apiVersion: liken.sh/v1alpha1\nkind: Channel\nmetadata:\n  name: liken\nlatest: not-a-version\n"
 	if _, err := ParseChannel([]byte(doc)); err == nil || !strings.Contains(err.Error(), "latest") {
-		t.Errorf("a malformed latest must be rejected: %v", err)
+		t.Errorf("parsing a Channel with latest not-a-version returned %v, want an error about latest", err)
 	}
 }

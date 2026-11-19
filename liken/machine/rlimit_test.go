@@ -23,10 +23,10 @@ func TestParseRlimitReadsSystemdsThreeForms(t *testing.T) {
 		t.Run(c.value, func(t *testing.T) {
 			got, err := ParseRlimit(c.value)
 			if err != nil {
-				t.Fatalf("ParseRlimit(%q): %v", c.value, err)
+				t.Fatalf("parsing %q: %v", c.value, err)
 			}
 			if got != c.want {
-				t.Errorf("ParseRlimit(%q) = %+v, want %+v", c.value, got, c.want)
+				t.Errorf("ParseRlimit(%q) is %+v, want %+v", c.value, got, c.want)
 			}
 		})
 	}
@@ -46,22 +46,22 @@ func TestParseRlimitRefusesValuesThatWouldApplyNothing(t *testing.T) {
 	for _, value := range cases {
 		t.Run(value, func(t *testing.T) {
 			if got, err := ParseRlimit(value); err == nil {
-				t.Errorf("ParseRlimit(%q) = %+v, want an error", value, got)
+				t.Errorf("ParseRlimit(%q) is %+v, want an error", value, got)
 			}
 		})
 	}
 }
 
-// A soft limit above the hard limit is the one error the syscall
-// would report as a bare EINVAL, so the message must name both halves.
-func TestParseRlimitSaysWhichHalfIsWrong(t *testing.T) {
+// The syscall reports a soft limit above the hard limit as a bare
+// EINVAL, so the error message must show both values.
+func TestParseRlimitErrorShowsBothLimitsWhenSoftIsAboveHard(t *testing.T) {
 	_, err := ParseRlimit("1048576:1024")
 	if err == nil {
-		t.Fatal("ParseRlimit accepted a soft limit above the hard limit")
+		t.Fatal("ParseRlimit accepted a soft limit above the hard limit, want an error")
 	}
 	for _, want := range []string{"1048576", "1024", "hard limit"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not mention %q", err, want)
+			t.Errorf("the error is %q, want it to mention %q", err, want)
 		}
 	}
 }
@@ -79,44 +79,42 @@ func TestFormatRlimitRendersTheSpecsOwnSyntax(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.want, func(t *testing.T) {
 			if got := FormatRlimit(c.lim); got != c.want {
-				t.Errorf("FormatRlimit(%+v) = %q, want %q", c.lim, got, c.want)
+				t.Errorf("FormatRlimit(%+v) is %q, want %q", c.lim, got, c.want)
 			}
 		})
 	}
 }
 
-// The status reports in the spec's grammar, so every value the status
-// can print must be a value the spec can declare.
+// Every value that the status can report must be valid in a spec.
 func TestFormatRlimitRoundTripsThroughParseRlimit(t *testing.T) {
 	for _, value := range []string{"1048576", "infinity", "1024:4096", "0", "0:infinity"} {
 		t.Run(value, func(t *testing.T) {
 			lim, err := ParseRlimit(value)
 			if err != nil {
-				t.Fatalf("ParseRlimit(%q): %v", value, err)
+				t.Fatalf("parsing %q: %v", value, err)
 			}
 			if got := FormatRlimit(lim); got != value {
-				t.Errorf("round trip of %q gave %q", value, got)
+				t.Errorf("the round trip of %q gives %q, want the same value", value, got)
 			}
 		})
 	}
 }
 
-// keepNofile restores RLIMIT_NOFILE when the test ends. A test may
-// lower a soft limit and raise it again, but an unprivileged process
-// can never raise a hard limit it lowered, so these tests leave the
-// hard limit exactly where they found it.
+// keepNofile restores RLIMIT_NOFILE when the test ends. An
+// unprivileged process cannot raise a hard limit that it lowered, so
+// the tests change only the soft limit.
 func keepNofile(t *testing.T) unix.Rlimit {
 	t.Helper()
 	var saved unix.Rlimit
 	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &saved); err != nil {
-		t.Fatalf("reading nofile: %v", err)
+		t.Fatalf("reading the nofile limit: %v", err)
 	}
 	if saved.Max != unix.RLIM_INFINITY && saved.Max < 512 {
 		t.Skipf("hard nofile limit is %d, too low to test against", saved.Max)
 	}
 	t.Cleanup(func() {
 		if err := unix.Setrlimit(unix.RLIMIT_NOFILE, &saved); err != nil {
-			t.Errorf("restoring nofile: %v", err)
+			t.Errorf("restoring the nofile limit: %v", err)
 		}
 	})
 	return saved
@@ -127,21 +125,20 @@ func TestApplyRlimitSetsTheLimitAndReadRlimitReportsIt(t *testing.T) {
 	want := "256:" + formatRlimitHalf(saved.Max)
 
 	if err := ApplyRlimit("nofile", want); err != nil {
-		t.Fatalf("ApplyRlimit: %v", err)
+		t.Fatalf("applying the limit: %v", err)
 	}
 
 	got, err := ReadRlimit("nofile")
 	if err != nil {
-		t.Fatalf("ReadRlimit: %v", err)
+		t.Fatalf("reading the limit: %v", err)
 	}
 	if got != want {
-		t.Errorf("ReadRlimit = %q, want %q", got, want)
+		t.Errorf("ReadRlimit is %q, want %q", got, want)
 	}
 }
 
-// A limit the kernel clamped or refused must show its real value,
-// because status.rlimits is the list of limits that hold rather than
-// the list somebody asked for.
+// status.rlimits reports what ReadRlimit reads, so a refused change
+// must leave the value that it reads unchanged.
 func TestApplyRlimitRefusesToRaiseAHardLimit(t *testing.T) {
 	saved := keepNofile(t)
 	if saved.Max == unix.RLIM_INFINITY {
@@ -149,90 +146,90 @@ func TestApplyRlimitRefusesToRaiseAHardLimit(t *testing.T) {
 	}
 	before, err := ReadRlimit("nofile")
 	if err != nil {
-		t.Fatalf("ReadRlimit: %v", err)
+		t.Fatalf("reading the limit: %v", err)
 	}
 
-	// Raising a hard limit needs CAP_SYS_RESOURCE, which a test does
-	// not have. The refusal must be reported, not swallowed.
+	// Raising a hard limit needs CAP_SYS_RESOURCE, which the test does
+	// not have.
 	if err := ApplyRlimit("nofile", formatRlimitHalf(saved.Max+1)); err == nil {
-		t.Error("ApplyRlimit raised a hard limit without the capability to do it")
+		t.Error("ApplyRlimit raised a hard limit without CAP_SYS_RESOURCE, want an error")
 	}
 
 	after, err := ReadRlimit("nofile")
 	if err != nil {
-		t.Fatalf("ReadRlimit: %v", err)
+		t.Fatalf("reading the limit: %v", err)
 	}
 	if after != before {
-		t.Errorf("a refused ApplyRlimit changed the limit from %s to %s", before, after)
+		t.Errorf("the limit is %s after a refused ApplyRlimit, want %s", after, before)
 	}
 }
 
 func TestApplyRlimitRefusesAnUnknownResource(t *testing.T) {
 	if err := ApplyRlimit("nofiles", "1048576"); err == nil {
-		t.Error("ApplyRlimit accepted a resource the kernel does not have")
+		t.Error("ApplyRlimit accepted a resource the kernel does not have, want an error")
 	}
 }
 
 func TestApplyRlimitRefusesAValueThatWillNotParse(t *testing.T) {
 	if err := ApplyRlimit("nofile", "lots"); err == nil {
-		t.Error("ApplyRlimit accepted a value that is not a number")
+		t.Error("ApplyRlimit accepted a value that is not a number, want an error")
 	}
 }
 
 func TestReadRlimitRefusesAnUnknownResource(t *testing.T) {
 	if _, err := ReadRlimit("nofiles"); err == nil {
-		t.Error("ReadRlimit accepted a resource the kernel does not have")
+		t.Error("ReadRlimit accepted a resource the kernel does not have, want an error")
 	}
 }
 
 func TestRlimitResourceRefusesAnUnknownName(t *testing.T) {
 	_, err := RlimitResource("nofiles")
 	if err == nil {
-		t.Fatal("RlimitResource accepted a name the kernel has no limit for")
+		t.Fatal("RlimitResource accepted a name the kernel has no limit for, want an error")
 	}
-	// The message must list what is accepted, because the failure a
-	// person hits here is a typo and the fix is the correct spelling.
+	// The usual cause is a typo, so the message lists the valid names.
 	if !strings.Contains(err.Error(), "nofile") {
-		t.Errorf("error %q does not list the accepted names", err)
+		t.Errorf("the error is %q, want it to list the accepted names", err)
 	}
 }
 
-// OSRlimits ships with the release, so a bad entry would reach a whole
-// fleet at once. Every entry must name a real resource and parse.
+// OSRlimits ships with every release, so each entry must name a known
+// resource and have a value that parses.
 func TestOSRlimitsAreAllApplicable(t *testing.T) {
 	for name, value := range OSRlimits {
 		t.Run(name, func(t *testing.T) {
 			if _, err := RlimitResource(name); err != nil {
-				t.Errorf("OSRlimits names %s: %v", name, err)
+				t.Errorf("OSRlimits has the resource %s: %v", name, err)
 			}
 			if _, err := ParseRlimit(value); err != nil {
-				t.Errorf("OSRlimits sets %s = %s: %v", name, value, err)
+				t.Errorf("OSRlimits has the value %s = %s: %v", name, value, err)
 			}
 		})
 	}
 }
 
-// The three values k3s's own systemd unit sets, and liken's standing
-// on each. A change to any of these is a change to the parity claim
-// that rlimitdefaults.go makes, so it should have to change this test.
-func TestOSRlimitsMatchK3sUnitWhereLikenClaimsParity(t *testing.T) {
+// OSRlimits matches the limits in k3s's own systemd unit, except for
+// core. A change here changes the claim that rlimitdefaults.go makes,
+// so this test must change with it.
+func TestOSRlimitsMatchTheLimitsOfTheK3sUnit(t *testing.T) {
 	if got := OSRlimits["nofile"]; got != "1048576" {
-		t.Errorf("nofile = %q, want 1048576, which is LimitNOFILE in k3s's unit", got)
+		t.Errorf("nofile is %q, want 1048576, which is LimitNOFILE in k3s's unit", got)
 	}
 	if got := OSRlimits["nproc"]; got != "infinity" {
-		t.Errorf("nproc = %q, want infinity, which is LimitNPROC in k3s's unit", got)
+		t.Errorf("nproc is %q, want infinity, which is LimitNPROC in k3s's unit", got)
 	}
-	// LimitCORE=infinity is the deliberate deviation. liken has no
-	// collector to bound a dump, so the soft limit stays at the
-	// kernel's 0 and a crashing container writes no core beside etcd.
+	// The k3s unit sets LimitCORE=infinity. liken keeps the kernel's
+	// soft core limit of 0, because nothing on the machine collects or
+	// bounds core dumps, and a dump would fill the filesystem that
+	// holds etcd.
 	if got, ok := OSRlimits["core"]; ok {
-		t.Errorf("core = %q, want no entry; rlimitdefaults.go explains the deviation", got)
+		t.Errorf("core is %q, want no entry, as rlimitdefaults.go explains", got)
 	}
 }
 
-// nofile cannot exceed fs.nr_open, which the kernel defaults to
-// 1048576. A larger value would fail to apply rather than clamp, and
-// liken sets no sysctl that raises nr_open.
+// The kernel refuses a nofile limit above fs.nr_open, which defaults
+// to 1048576, and does not clamp it. liken sets no sysctl that raises
+// nr_open, so the default nofile must not exceed that value.
 func TestOSRlimitsNofileFitsUnderTheKernelsNrOpenDefault(t *testing.T) {
 	lim, err := ParseRlimit(OSRlimits["nofile"])
 	if err != nil {
@@ -244,6 +241,6 @@ func TestOSRlimitsNofileFitsUnderTheKernelsNrOpenDefault(t *testing.T) {
 			lim.Max, nrOpenDefault)
 	}
 	if _, raises := OSSysctls["fs.nr_open"]; raises {
-		t.Error("OSSysctls now raises fs.nr_open; this test's ceiling is stale")
+		t.Error("OSSysctls sets fs.nr_open, so the ceiling of this test is out of date")
 	}
 }

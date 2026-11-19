@@ -1,29 +1,18 @@
 package machine
 
-// This file covers the deployment layer and its sidecar file. The
-// deployment layer is the part of the OS that belongs to one
-// cluster. The sidecar file lets a machine confirm the layer's
-// integrity.
+// The deployment layer, deployment.cpio, is the part of the OS that
+// belongs to one cluster. A boot slot holds it beside the release's
+// public artifacts. The release document names those artifacts, but it
+// cannot name the layer, because the layer is private to one
+// cluster and is never downloaded. At each upgrade, machine-operator
+// copies the layer from the active slot to the new one.
 //
-// A boot slot carries the release's public artifacts. The release
-// document names these artifacts, and the catalog's digest chain
-// carries their integrity. A boot slot also carries one file that
-// belongs to no release: the deployment layer (deployment.cpio). The
-// deployment layer is private to one cluster, and it never travels
-// over the network. So the release document cannot name it. Instead,
-// a machine carries its own deployment layer forward from slot to
-// slot at every upgrade.
-//
-// The sidecar file makes that carry safe. It is a one-line file that
-// names the layer's sha256 digest. The machine writes the sidecar
-// file durably at install time, from bytes it has just verified. The
-// machine checks the sidecar file again before it trusts any copy of
-// the layer.
-//
-// The sidecar's format matches sha256sum's own format:
-// "<digest>  <name>". So a person at a rescue prompt can check a
-// slot with a tool that exists everywhere: `sha256sum -c
-// deployment.cpio.sha256`.
+// The sidecar file, deployment.cpio.sha256, holds the layer's sha256
+// so that each copy can be verified. The install image carries it.
+// The installer and each upgrade verify the layer against it before
+// and after the copy, and write the sidecar last. The sidecar uses the
+// format of sha256sum, so a person at a rescue prompt can check a slot
+// with `sha256sum -c deployment.cpio.sha256`.
 
 import (
 	"crypto/sha256"
@@ -32,21 +21,20 @@ import (
 	"io"
 )
 
-// LayerName is the deployment layer's file name, on install media
-// and on every boot slot. Boot entries name LayerName as their
-// second initrd= parameter, after the generic archive. The kernel
-// unpacks initrd parameters in order, and each later entry overrides
-// the entries before it.
+// LayerName is the file name of the deployment layer on install media
+// and in every boot slot. Boot entries load it as the last initrd,
+// after microcode.cpio and boot.cpio. The kernel unpacks the initrd
+// archives in order, so a file in the layer replaces the file at the
+// same path in boot.cpio.
 const LayerName = "deployment.cpio"
 
-// LayerSidecarName is the sidecar's file name. The sidecar file sits
-// beside the layer, wherever the layer is.
+// LayerSidecarName is the file name of the sidecar, in the directory
+// of the layer.
 const LayerSidecarName = LayerName + ".sha256"
 
-// DigestLayer streams a layer through sha256 and returns the hex
-// digest. A caller must digest the bytes that actually landed on
-// disk, by rereading them. A caller must never digest the bytes it
-// meant to write instead.
+// DigestLayer returns the hex sha256 of a layer. To verify a copy,
+// pass a reader of the file on disk, not of the bytes that were
+// written.
 func DigestLayer(r io.Reader) (string, error) {
 	h := sha256.New()
 	if _, err := io.Copy(h, r); err != nil {
@@ -55,18 +43,14 @@ func DigestLayer(r io.Reader) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// FormatLayerSidecar writes the sidecar's single line for a layer
-// digest.
 func FormatLayerSidecar(digest string) []byte {
 	return []byte(digest + "  " + LayerName + "\n")
 }
 
-// ParseLayerSidecar reads a sidecar file back, with strict checks.
-// The file must hold exactly one well-formed line that names the
-// layer. Anything else counts as damage: truncation, a torn write,
-// or the wrong file. When ParseLayerSidecar finds damage, the caller
-// must treat the layer as unverifiable. The caller must not guess at
-// the layer's digest.
+// ParseLayerSidecar returns the digest in a sidecar file. It returns
+// an error for anything but the exact line that FormatLayerSidecar
+// writes, such as a truncated file or a sidecar for another file, and
+// the caller must then treat the layer as unverified.
 func ParseLayerSidecar(raw []byte) (string, error) {
 	want := FormatLayerSidecar("")
 	if len(raw) != 64+len(want) {
@@ -77,20 +61,18 @@ func ParseLayerSidecar(raw []byte) (string, error) {
 		return "", fmt.Errorf("the layer sidecar's digest is not hex: %w", err)
 	}
 	if string(raw[64:]) != string(want) {
-		return "", fmt.Errorf("the layer sidecar names %q, want %q", string(raw[64:]), string(want))
+		return "", fmt.Errorf("the layer sidecar ends with %q, want %q", string(raw[64:]), string(want))
 	}
 	return digest, nil
 }
 
-// VerifyLayer streams a layer through sha256 and compares the result
-// against the digest that a sidecar file named.
 func VerifyLayer(digest string, r io.Reader) error {
 	got, err := DigestLayer(r)
 	if err != nil {
 		return err
 	}
 	if got != digest {
-		return fmt.Errorf("%s digest mismatch: got %s, want %s", LayerName, got, digest)
+		return fmt.Errorf("the digest of %s is %s, want %s", LayerName, got, digest)
 	}
 	return nil
 }

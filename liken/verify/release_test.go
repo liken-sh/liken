@@ -41,7 +41,7 @@ func TestReleaseSBOMRefuses(t *testing.T) {
 		reason string
 	}{
 		{"a changed byte in the SBOM", func(f map[string][]byte) { f["sbom.cdx.json"] = verifytest.Tampered(f["sbom.cdx.json"]) }, "",
-			"sbom.cdx.json digest mismatch"},
+			"artifact sbom.cdx.json has sha256"},
 		{"the SBOM's bundle swapped for release.yaml's", func(f map[string][]byte) { f["sbom.cdx.json.sigstore.json"] = f["release.yaml.sigstore.json"] }, "",
 			"sbom.cdx.json: the signature"},
 		{"release.yaml's bundle swapped for the SBOM's", func(f map[string][]byte) { f["release.yaml.sigstore.json"] = f["sbom.cdx.json.sigstore.json"] }, "",

@@ -20,7 +20,7 @@ func TestParseSize(t *testing.T) {
 		t.Run(c.in, func(t *testing.T) {
 			got, err := ParseSize(c.in)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("ParseSize(%q): %v", c.in, err)
 			}
 			if got != c.want {
 				t.Errorf("ParseSize(%q) = %d, want %d", c.in, got, c.want)
@@ -33,7 +33,7 @@ func TestParseSizeRejectsNonsense(t *testing.T) {
 	for _, in := range []string{"", "Gi", "2GB", "2G", "-1Gi", "0x10", "2.5Gi", "0", "0Gi"} {
 		t.Run(in, func(t *testing.T) {
 			if _, err := ParseSize(in); err == nil {
-				t.Errorf("ParseSize(%q) succeeded, want error", in)
+				t.Errorf("ParseSize(%q) returned no error, want one", in)
 			}
 		})
 	}
@@ -62,16 +62,13 @@ func TestSizeTextRendersTheLargestExactUnit(t *testing.T) {
 }
 
 func TestSizeTextRoundTripsThroughParseSize(t *testing.T) {
-	// A size the system prints back to a person is a size they can
-	// paste into a spec, so every rendering must parse to what it came
-	// from.
 	for _, bytes := range []uint64{1 << 20, 1536 << 20, 6 << 30, 59 << 30, 1 << 40, 700} {
 		got, err := ParseSize(SizeText(bytes))
 		if err != nil {
 			t.Fatalf("SizeText(%d) does not parse: %v", bytes, err)
 		}
 		if got != bytes {
-			t.Errorf("SizeText(%d) parsed back as %d", bytes, got)
+			t.Errorf("ParseSize(SizeText(%d)) = %d, want %d", bytes, got, bytes)
 		}
 	}
 }
@@ -83,19 +80,13 @@ func TestRolesAreOrderedAndSkipUndeclared(t *testing.T) {
 	}
 	roles := spec.Roles()
 	if len(roles) != 2 {
-		t.Fatalf("got %d roles", len(roles))
+		t.Fatalf("Roles() has %d roles, want 2", len(roles))
 	}
 	if roles[0].Name != "clusterState" || roles[1].Name != "podEphemeral" {
-		t.Errorf("wrong order: %s, %s", roles[0].Name, roles[1].Name)
+		t.Errorf("Roles() is ordered %s, %s, want the order of StorageRoleNames", roles[0].Name, roles[1].Name)
 	}
 }
 
-// The canonical order matters in two ways. It is the partition
-// layout when roles share a disk, and it puts the earliest readers
-// first. The boot roles lead so the firmware can find them: the BIOS
-// boot code comes earliest of all. machineState comes before the
-// data roles, because a boot must find that partition before it has
-// read any spec.
 func TestRolesCanonicalOrder(t *testing.T) {
 	one := &StorageRole{Device: "/dev/vda"}
 	spec := StorageSpec{
@@ -112,7 +103,7 @@ func TestRolesCanonicalOrder(t *testing.T) {
 	want := StorageRoleNames
 	roles := spec.Roles()
 	if len(roles) != len(want) {
-		t.Fatalf("got %d roles, want %d", len(roles), len(want))
+		t.Fatalf("Roles() has %d roles, want %d", len(roles), len(want))
 	}
 	for i, w := range want {
 		if roles[i].Name != w {
@@ -124,7 +115,7 @@ func TestRolesCanonicalOrder(t *testing.T) {
 func TestPartitionNames(t *testing.T) {
 	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/vda"}}
 	if got := spec.Roles()[0].PartitionName(); got != "liken:clusterState" {
-		t.Errorf("partition name: %q", got)
+		t.Errorf("PartitionName() = %q, want %q", got, "liken:clusterState")
 	}
 }
 
@@ -137,14 +128,14 @@ func TestValidateAcceptsTheLabMachine(t *testing.T) {
 		PodEphemeral:     &StorageRole{Device: "/dev/vdb"},
 	}
 	if err := spec.Validate(); err != nil {
-		t.Error(err)
+		t.Errorf("Validate() = %v, want nil", err)
 	}
 }
 
 func TestValidateRequiresADevice(t *testing.T) {
 	spec := StorageSpec{ClusterState: &StorageRole{}}
 	if err := spec.Validate(); err == nil {
-		t.Error("expected an error for a role with no device")
+		t.Error("Validate accepted a role with no device, want an error")
 	}
 }
 
@@ -152,10 +143,10 @@ func TestValidateRejectsByUUIDDevices(t *testing.T) {
 	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/disk/by-uuid/1234-5678", Size: "1Gi"}}
 	err := spec.Validate()
 	if err == nil {
-		t.Fatal("expected an error for a by-uuid device")
+		t.Fatal("Validate accepted a by-uuid device, want an error")
 	}
 	if !strings.Contains(err.Error(), "clusterState") || !strings.Contains(err.Error(), "/dev/disk/by-uuid/1234-5678") {
-		t.Errorf("error should name the role and the device: %v", err)
+		t.Errorf("the error is %q, want it to name clusterState and the device", err)
 	}
 }
 
@@ -163,10 +154,10 @@ func TestValidateRejectsUnsupportedDiskTrees(t *testing.T) {
 	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/disk/by-partlabel/x", Size: "1Gi"}}
 	err := spec.Validate()
 	if err == nil {
-		t.Fatal("expected an error for a by-partlabel device")
+		t.Fatal("Validate accepted a by-partlabel device, want an error")
 	}
 	if !strings.Contains(err.Error(), "clusterState") || !strings.Contains(err.Error(), "/dev/disk/by-partlabel/x") {
-		t.Errorf("error should name the role and the device: %v", err)
+		t.Errorf("the error is %q, want it to name clusterState and the device", err)
 	}
 }
 
@@ -176,10 +167,10 @@ func TestValidateRejectsATreeWithNoDiskName(t *testing.T) {
 			spec := StorageSpec{ClusterState: &StorageRole{Device: device, Size: "1Gi"}}
 			err := spec.Validate()
 			if err == nil {
-				t.Fatal("expected an error for a tree with no disk name")
+				t.Fatal("Validate accepted a disk tree with no disk name, want an error")
 			}
 			if !strings.Contains(err.Error(), "clusterState") || !strings.Contains(err.Error(), device) {
-				t.Errorf("error should name the role and the device: %v", err)
+				t.Errorf("the error is %q, want it to name clusterState and the device", err)
 			}
 		})
 	}
@@ -204,14 +195,14 @@ func TestValidateAcceptsStableDiskNames(t *testing.T) {
 func TestValidateRejectsUnparseableSizes(t *testing.T) {
 	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/vda", Size: "lots"}}
 	if err := spec.Validate(); err == nil {
-		t.Error("expected an error for an unparseable size")
+		t.Error("Validate accepted the size \"lots\", want an error")
 	}
 }
 
 func TestValidateRejectsZeroSizes(t *testing.T) {
 	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/vda", Size: "0Gi"}}
 	if err := spec.Validate(); err == nil {
-		t.Error("expected an error for a zero size")
+		t.Error("Validate accepted the size 0Gi, want an error")
 	}
 }
 
@@ -222,19 +213,19 @@ func TestValidateAllowsOnlyOneRemainderPerDevice(t *testing.T) {
 	}
 	err := spec.Validate()
 	if err == nil {
-		t.Fatal("expected an error for two sizeless roles on one device")
+		t.Fatal("Validate accepted two roles with no size on /dev/vdb, want an error")
 	}
 	if !strings.Contains(err.Error(), "/dev/vdb") {
-		t.Errorf("error should name the device: %v", err)
+		t.Errorf("the error is %q, want it to name /dev/vdb", err)
 	}
 }
 
 func TestSystemSlotDirs(t *testing.T) {
 	if got := SystemSlotDir("A"); got != "/var/lib/liken/system/a" {
-		t.Errorf("slot A: %q", got)
+		t.Errorf("SystemSlotDir(\"A\") = %q, want /var/lib/liken/system/a", got)
 	}
 	if got := SystemSlotDir("B"); got != "/var/lib/liken/system/b" {
-		t.Errorf("slot B: %q", got)
+		t.Errorf("SystemSlotDir(\"B\") = %q, want /var/lib/liken/system/b", got)
 	}
 }
 
@@ -242,7 +233,7 @@ func TestInactiveSlot(t *testing.T) {
 	cases := map[string]string{"A": "B", "B": "A", "": ""}
 	for running, want := range cases {
 		if got := InactiveSlot(running); got != want {
-			t.Errorf("InactiveSlot(%q): got %q, want %q", running, got, want)
+			t.Errorf("InactiveSlot(%q) = %q, want %q", running, got, want)
 		}
 	}
 }
@@ -250,6 +241,6 @@ func TestInactiveSlot(t *testing.T) {
 func TestSpecRoleUnknownNameIsNil(t *testing.T) {
 	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/vda"}}
 	if role := spec.Role("bogus"); role != nil {
-		t.Errorf("a name outside the vocabulary has no role, got %+v", role)
+		t.Errorf("Role of a name outside StorageRoleNames is %+v, want nil", role)
 	}
 }

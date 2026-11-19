@@ -17,16 +17,15 @@ import (
 	"github.com/liken-sh/liken/liken/api"
 )
 
-// writeAll drives every per-subtree writer with the matching fields of
-// a status, so a round-trip test can prove the codec whole. It lives in
-// the test only, because production code must never gain a whole-tree
-// writer: the tree exists so each fact has one owner.
+// writeAll calls each subtree's writer with the matching fields of a
+// status, so a round-trip test covers the whole tree. It is a test
+// helper only, because in production each subtree has one owner.
 func writeAll(t *testing.T, tree FactsTree, s *MachineStatus) {
 	t.Helper()
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the facts tree: %v", err)
 		}
 	}
 	must(tree.WriteRole(s.Role))
@@ -66,10 +65,9 @@ func writeAll(t *testing.T, tree FactsTree, s *MachineStatus) {
 	must(tree.WriteRejection(RejectCredentials, s.Boot.CredentialsRejection))
 }
 
-// sortCollections sorts the directory-keyed collections by their key. A
-// directory-keyed collection has no order on disk, so a reader returns
-// its elements in sorted-key order. A fixture built in any order must
-// match that, so the comparison sorts both sides the same way.
+// sortCollections sorts each collection that the tree stores as a
+// directory by its key. A directory has no order on disk, so the test
+// sorts both sides and a fixture can list its elements in any order.
 func sortCollections(s *MachineStatus) {
 	slices.SortFunc(s.Hardware.BlockDevices, func(a, b BlockDevice) int {
 		return strings.Compare(a.Name, b.Name)
@@ -92,7 +90,7 @@ func jsonBytes(t *testing.T, v any) string {
 	t.Helper()
 	raw, err := json.Marshal(v)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("marshaling the facts: %v", err)
 	}
 	return string(raw)
 }
@@ -108,8 +106,7 @@ func everythingSet() *MachineStatus {
 		Backing: BackingPartition, Device: "vda1",
 		Partition: "liken:clusterState", CapacityBytes: 2_146_435_072,
 	}
-	// A FAT role that the last stop did not release, so the round trip
-	// covers the one storage fact that is a boolean.
+	// A role on a FAT partition that the last stop did not release.
 	storage.SystemB = StorageRoleStatus{
 		Backing: BackingPartition, Device: "vdc4",
 		Partition: "liken:systemB", CapacityBytes: 1_073_741_824,
@@ -145,9 +142,8 @@ func everythingSet() *MachineStatus {
 					Nameservers: []string{"10.0.2.3"}, LeaseExpires: &lease,
 				},
 				{Name: "eth1", MAC: "52:54:00:ab:cd:ef", Address: "192.168.1.10/24", Method: MethodStatic},
-				// A radio that joined, and one that did not. The second
-				// is the case the tree has to carry whole: an interface
-				// with no address at all, whose only fact is why.
+				// wlan0 joined its network. wlan1 did not, so it has no
+				// address, and its Message gives the reason.
 				{
 					Name: "wlan0", MAC: "04:4a:2c:11:22:33", Address: "192.168.1.11/24", Method: MethodStatic,
 					Wireless: &WirelessStatus{
@@ -195,24 +191,24 @@ func everythingSet() *MachineStatus {
 		Firmware: FirmwareStatus{
 			Mode: FirmwareUEFI, BootCurrent: "Boot0001", BootNext: "Boot0002",
 			BootOrder: []string{"Boot0001", "Boot0002"},
-			// False, not absent: a firmware that lost the order is the
-			// answer a requester most needs to read.
+			// False is a different fact from absent: the firmware lost
+			// the boot order.
 			BootOrderKept: new(bool),
 		},
 		Storage: storage,
 		Modules: []ModuleStatus{
 			{Name: "nvme", State: ModuleLoaded},
 			{Name: "e1000e", State: ModuleMissing, Message: "not in image"},
-			// One module carries a readback and the residency mark, so
-			// the round trip covers both halves of a parameter report.
+			// A module with parameters read back from the kernel, and
+			// already resident before init loaded it.
 			{
 				Name: "snd_hda_intel", State: ModuleLoaded, AlreadyResident: true,
 				Parameters: map[string]string{"power_save": "1", "enable_msi": "Y"},
 			},
 		},
-		// An attached adapter with its nodes, one whose attach the
-		// kernel refused, and an entry no line matches, so the round
-		// trip covers every state and the node list.
+		// An attached adapter with its device nodes, an adapter that
+		// the kernel refused to attach, and an entry that no serial
+		// line matches.
 		Serio: []SerioStatus{
 			{
 				Protocol: "pulse8-cec", USB: SerioUSB{Vendor: "2548", Product: "1002"},
@@ -250,23 +246,22 @@ func everythingSet() *MachineStatus {
 			CredentialsSource: ManifestSourceProven, CredentialsHash: "ccc",
 			ImportsSource: ManifestSourceStaged, ImportsHash: "ddd", ImportsDiscarded: true,
 			Slot: "A", Restarts: 2,
-			// A real command line, spaces and all, because it goes into
-			// a scalar fact and a space is not a separator there.
+			// A scalar fact is one line, so the spaces in a command line
+			// must not split it.
 			CommandLine: "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A panic=10",
 			Modules:     []string{"nvme", "e1000e", "snd_hda_intel"},
 			Serio: []SerioAttachment{
 				{Protocol: "pulse8-cec", USB: SerioUSB{Vendor: "2548", Product: "1002"}},
 				{Protocol: "rainshadow-cec", USB: SerioUSB{Vendor: "0000", Product: "0001", Serial: "RS-7"}},
 			},
-			// The declared map as the manifest wrote it: the dotted key
-			// the kernel uses, and a value the kernel renders differently
-			// when it is read back.
+			// The declared parameters, keyed module.parameter. The
+			// kernel reads back a boolean declared as "1" as "Y".
 			ModuleParameters: map[string]string{
 				"snd_hda_intel.power_save": "1",
 				"snd_hda_intel.enable_msi": "1",
 			},
-			// One limit in each of the spec's three forms, so the round
-			// trip covers a bare number, the word, and a pair.
+			// One limit in each form that the spec accepts: a number,
+			// the word infinity, and a soft:hard pair.
 			Rlimits: map[string]string{
 				"nofile": "1048576",
 				"core":   "infinity",
@@ -302,9 +297,9 @@ func sparseFacts() *MachineStatus {
 	return &MachineStatus{
 		Role:    api.RoleFollower,
 		Version: VersionStatus{Liken: "0.1.0", Kernel: "6.15.4"},
-		// A machine that declares no limits still holds the ones that
-		// ship with the release, so status.rlimits is populated on a
-		// machine whose boot record carries none.
+		// A machine that declares no limits still has the limits that
+		// ship with the release, so status.rlimits is not empty when
+		// the boot record has none.
 		Rlimits: map[string]string{"nofile": "1048576", "nproc": "infinity"},
 		Network: NetworkStatus{
 			Interface: "eth0", MAC: "52:54:00:12:34:56",
@@ -321,9 +316,8 @@ func sparseFacts() *MachineStatus {
 		Storage: AllRolesInMemory(),
 		Boot: BootStatus{
 			Time: &booted, ManifestSource: ManifestSourceSeed, ManifestHash: "seed", Slot: "A",
-			// A machine that declares no interface and takes the
-			// zero-configuration default still records that it made
-			// that choice.
+			// A machine that declares no interface uses the default
+			// network setup, and the boot still records that.
 			Network: &NetworkSpec{},
 		},
 	}
@@ -349,7 +343,7 @@ func TestFactsTreeRoundTrip(t *testing.T) {
 			writeAll(t, tree, want)
 			got, err := tree.Read()
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the facts tree: %v", err)
 			}
 			sortCollections(want)
 			sortCollections(got)
@@ -361,14 +355,11 @@ func TestFactsTreeRoundTrip(t *testing.T) {
 	}
 }
 
-// WriteVersion and readVersion each name their fields by hand, so a
-// new component reaches the Machine only when both lists grow. A
-// field that one list forgot fails quietly: init reads the pin from
-// the components record, the tree drops it, and the operator
-// publishes a status that is missing a component with no error
-// anywhere. This fills every field with a distinct value and demands
-// all of them back.
-func TestEveryVersionFieldSurvivesTheFactsTree(t *testing.T) {
+// WriteVersion and readVersion list the fields of VersionStatus by
+// hand. A field missing from either list drops that component's
+// version from the Machine's status with no error, so this test sets
+// every field and requires each one back.
+func TestEveryVersionFieldReadsBackFromTheFactsTree(t *testing.T) {
 	var want VersionStatus
 	fields := reflect.ValueOf(&want).Elem()
 	for i := range fields.NumField() {
@@ -377,110 +368,102 @@ func TestEveryVersionFieldSurvivesTheFactsTree(t *testing.T) {
 
 	tree := FactsTree{Dir: t.TempDir()}
 	if err := tree.WriteVersion(want); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the version: %v", err)
 	}
 	got, err := tree.readVersion()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the version: %v", err)
 	}
 	if got != want {
 		t.Errorf("round trip changed the version:\nwant %+v\ngot  %+v", want, got)
 	}
 }
 
-// The boot's network record must tell two states apart that every
-// other fact in the tree is allowed to blur: a boot that declared no
-// interface, and a boot that reported no network at all. The operator
-// converges the first one and refuses to judge the second, so the
-// tree has to carry the difference.
-func TestBootNetworkTellsAnEmptySpecFromAnAbsentRecord(t *testing.T) {
+// A boot that declared no interface and a boot that recorded no
+// network must read back differently. The operator converges the
+// network of the first and reports no drift for the second.
+func TestBootNetworkDistinguishesAnEmptySpecFromAnAbsentRecord(t *testing.T) {
 	declaredNothing := FactsTree{Dir: t.TempDir()}
 	if err := declaredNothing.WriteBootNetwork(&NetworkSpec{}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot network: %v", err)
 	}
 	facts, err := declaredNothing.Read()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the facts tree: %v", err)
 	}
 	if facts.Boot.Network == nil {
-		t.Error("a boot that declared no interface still recorded a network")
+		t.Error("Boot.Network is nil, want a network recorded for a boot that declared no interface")
 	}
 
 	recordedNothing := FactsTree{Dir: t.TempDir()}
 	if err := recordedNothing.WriteBootNetwork(nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot network: %v", err)
 	}
 	facts, err = recordedNothing.Read()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the facts tree: %v", err)
 	}
 	if facts.Boot.Network != nil {
-		t.Errorf("a boot that recorded nothing must read as nothing: %+v", facts.Boot.Network)
+		t.Errorf("Boot.Network is %+v, want nil for a boot that recorded nothing", facts.Boot.Network)
 	}
 }
 
-// A rewrite of the boot record drops a radio when the spec that
-// replaces it declares none, so no stale SSID survives a respec.
+// When the new spec declares no radio, rewriting the boot record
+// removes the old radio's record, so the old SSID does not remain.
 func TestBootNetworkDropsAWirelessRecordThatIsNoLongerDeclared(t *testing.T) {
 	tree := FactsTree{Dir: t.TempDir()}
 	wireless := &NetworkSpec{Interfaces: []InterfaceSpec{
 		{Name: "wlan0", Wireless: &WirelessSpec{SSID: "homenet", Security: WirelessOpen}},
 	}}
 	if err := tree.WriteBootNetwork(wireless); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot network: %v", err)
 	}
 	if err := tree.WriteBootNetwork(&NetworkSpec{Interfaces: []InterfaceSpec{{Name: "wlan0"}}}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot network: %v", err)
 	}
 	facts, err := tree.Read()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the facts tree: %v", err)
 	}
 	if got := facts.Boot.Network.Interfaces[0].Wireless; got != nil {
-		t.Errorf("the record must hold no radio: %+v", got)
+		t.Errorf("the record is %+v, want no radio", got)
 	}
 	if _, err := os.Stat(filepath.Join(tree.Dir, "boot", "network", "interfaces", "0", "wireless")); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("the wireless directory must be gone: %v", err)
+		t.Errorf("the wireless directory exists (stat error %v), want it removed", err)
 	}
 }
 
-// A goGC file that does not hold an integer is a corrupt fact, and
-// Read reports it as an error that names the path, rather than reading
-// a silent zero. This is the same contract every integer fact holds.
 func TestReadRejectsACorruptRuntimeGoGC(t *testing.T) {
 	tree := FactsTree{Dir: t.TempDir()}
 	writeAll(t, tree, sparseFacts())
 	if err := os.MkdirAll(filepath.Join(tree.Dir, "runtime", "k3s"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the runtime directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(tree.Dir, "runtime", "k3s", "goGC"), []byte("banana\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the goGC file: %v", err)
 	}
 	if _, err := tree.Read(); err == nil {
-		t.Error("a non-integer goGC must be an error, not a silent zero")
+		t.Error("Read accepted a goGC that is not an integer, want an error")
 	}
 }
 
-// The image collection policy holds the same contract: a threshold
-// file that does not hold an integer is corrupt, and Read reports it
-// rather than reading a percent of zero.
 func TestReadRejectsACorruptImageGCThreshold(t *testing.T) {
 	tree := FactsTree{Dir: t.TempDir()}
 	writeAll(t, tree, sparseFacts())
 	dir := filepath.Join(tree.Dir, "runtime", "kubelet", "imageGC")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the imageGC directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "highThresholdPercent"), []byte("most\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the threshold file: %v", err)
 	}
 	if _, err := tree.Read(); err == nil {
-		t.Error("a non-integer threshold must be an error, not a silent zero")
+		t.Error("Read accepted a highThresholdPercent that is not an integer, want an error")
 	}
 }
 
-// listFiles returns the sorted relative paths of every regular file
-// under root. The golden test uses it to pin the tree's shape.
+// listFiles returns the sorted paths of the files under root, relative
+// to root.
 func listFiles(t *testing.T, root string) []string {
 	t.Helper()
 	var files []string
@@ -499,7 +482,7 @@ func listFiles(t *testing.T, root string) []string {
 		return nil
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("walking the facts tree: %v", err)
 	}
 	sort.Strings(files)
 	return files
@@ -533,16 +516,15 @@ func TestFactsTreeGoldenLayout(t *testing.T) {
 	contents := map[string]string{
 		"boot/manifest": "source=Proven\nhash=abc\n",
 		"role":          "leader\n",
-		// The boot's interfaces are keyed by position, counted from
-		// zero, because the order of the declared list is part of
-		// what the spec asks for.
+		// The boot's interfaces are keyed by their position in the
+		// declared list, because the order of that list matters.
 		"boot/network/interfaces/0/name": "eth1\n",
 		"network/addresses":              "10.0.2.15/24\n",
 	}
 	for rel, expected := range contents {
 		raw, err := os.ReadFile(filepath.Join(tree.Dir, rel))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the file: %v", err)
 		}
 		if string(raw) != expected {
 			t.Errorf("%s:\nwant %q\ngot  %q", rel, expected, string(raw))

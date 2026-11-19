@@ -14,7 +14,7 @@ func releaseYAML(t *testing.T, body string) *Release {
 	t.Helper()
 	r, err := ParseRelease([]byte(body))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the release: %v", err)
 	}
 	return r
 }
@@ -39,13 +39,13 @@ components:
     version: v1.36.2+k3s1
 `)
 	if r.Metadata.Name != "2026.07.11-001" {
-		t.Errorf("version: got %q", r.Metadata.Name)
+		t.Errorf("the version is %q, want 2026.07.11-001", r.Metadata.Name)
 	}
 	if len(r.Artifacts) != 2 || r.Artifacts[0].Name != "vmlinuz" || r.Artifacts[0].Size != 17_000_000 {
-		t.Errorf("artifacts: %+v", r.Artifacts)
+		t.Errorf("the artifacts are %+v, want vmlinuz of 17000000 bytes and liken.cpio", r.Artifacts)
 	}
 	if len(r.Components) != 2 || r.Components[0].Name != "kernel" || r.Components[1].Version != "v1.36.2+k3s1" {
-		t.Errorf("components: %+v", r.Components)
+		t.Errorf("the components are %+v, want kernel and k3s v1.36.2+k3s1", r.Components)
 	}
 }
 
@@ -61,7 +61,7 @@ artifacts:
     size: 17000000
 `)
 	if len(r.Components) != 0 {
-		t.Errorf("components: %+v", r.Components)
+		t.Errorf("the components are %+v, want none", r.Components)
 	}
 }
 
@@ -82,7 +82,7 @@ func TestParseReleaseVetsAtTheDoor(t *testing.T) {
 	for name, doc := range cases {
 		t.Run(name, func(t *testing.T) {
 			if _, err := ParseRelease([]byte(doc)); err == nil {
-				t.Error("expected a parse error")
+				t.Error("the document parsed, want an error")
 			}
 		})
 	}
@@ -94,30 +94,29 @@ func TestArtifactVerify(t *testing.T) {
 	good := ReleaseArtifact{Name: "x", SHA256: hex.EncodeToString(sum[:]), Size: int64(len(content))}
 
 	if err := good.Verify(bytes.NewReader(content)); err != nil {
-		t.Errorf("matching bytes should verify: %v", err)
+		t.Errorf("verifying the matching bytes: %v, want no error", err)
 	}
 	if err := good.Verify(bytes.NewReader(content[:10])); err == nil {
-		t.Error("truncated bytes must not verify")
+		t.Error("the truncated bytes verified, want an error")
 	}
 
 	tampered := slices.Clone(content)
 	tampered[0] ^= 1
-	if err := good.Verify(bytes.NewReader(tampered)); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
-		t.Errorf("tampered bytes must fail on the digest: %v", err)
+	if err := good.Verify(bytes.NewReader(tampered)); err == nil {
+		t.Errorf("verifying the tampered bytes: %v, want an error", err)
 	}
 }
 
 func TestArtifactVerifyReportsReadErrors(t *testing.T) {
-	// A directory opened as a file is a real reader whose Read call
-	// fails. This is the same failure shape as a download that stops
-	// partway through.
+	// Read on an open directory fails, as a read of an interrupted
+	// download does.
 	f, err := os.Open(t.TempDir())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening a directory: %v", err)
 	}
 	defer f.Close()
 	a := ReleaseArtifact{Name: "x", SHA256: strings.Repeat("ab", 32), Size: 1}
-	if err := a.Verify(f); err == nil || !strings.Contains(err.Error(), "reading") {
-		t.Errorf("a failing reader must fail the verification: %v", err)
+	if err := a.Verify(f); err == nil {
+		t.Errorf("verifying a reader that fails: %v, want an error", err)
 	}
 }

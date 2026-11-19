@@ -1,25 +1,17 @@
 package machine
 
-// The record a machine leaves behind when it refuses to boot.
+// This file reads and writes the record of the last boot that init
+// refused.
 //
-// Init stops a boot for two failures, identity and storage
-// (init/main.go's failBoot states both). The stop prints its reason
-// and powers the machine off. The power-off is what makes that reason
-// hard to keep: it ends the boot long before k3s starts, so no log
-// relay carries the console anywhere, and a powered-off machine has no
-// console to read. A person who was not sitting at the serial port at
-// that moment has nothing to go on.
+// When init refuses to boot (failBoot in init/main.go), it prints the
+// reason and powers the machine off. k3s has not started, so no log
+// relay has sent the console output anywhere, and the reason is lost
+// unless someone watched the serial port. So init writes the reason to
+// a file on machineState before the power-off, and the next boot
+// prints it and publishes it as status.lastFailStop.
 //
-// So the reason goes into one small file on machineState before the
-// power-off. The next boot reads the file, prints it, and publishes it
-// as status.lastFailStop. The question "why did this machine refuse"
-// then takes one kubectl get, rather than a source read of init.
-//
-// The record is never cleared. It answers one question, the last time
-// this machine refused to boot and why, and that answer stays true
-// until the next refusal replaces it. A machine that boots cleanly for
-// months still reports the refusal it had before that, the same way
-// status.lastCrash keeps reporting an old panic.
+// Nothing clears the record. Each refusal overwrites the previous one,
+// as status.lastCrash keeps the last panic.
 
 import (
 	"errors"
@@ -31,33 +23,23 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// failStopRecord is the record's file name under the machineState
-// root. It sits at the root rather than in a directory of its own,
-// because there is only ever one of these: each refusal replaces the
-// last.
+// failStopRecord is the record's file name at the machineState root.
 const failStopRecord = "failstop.yaml"
 
-// FailStop is one refused boot: what init would not run with, and
-// when. One type serves as both the file's schema and the status
-// field, so the console message, the record on disk, and the cluster's
-// status all carry the same words.
+// FailStop is one refused boot. The same type is the file on disk and
+// the status field, so both have the text that the console showed.
 type FailStop struct {
-	// Reason is failBoot's own message, the text the console printed
-	// before the machine powered off.
+	// Reason is the error that failBoot printed to the console.
 	Reason string `json:"reason"`
 
-	// Time is the machine's clock at the refusal. A boot stops well
-	// before its first clock synchronization, so this is the hardware
-	// clock's reading, reported as recorded.
+	// Time is the machine's clock at the refusal. The boot stops before
+	// the clock synchronizes, so the time comes from the hardware clock.
 	Time time.Time `json:"time"`
 }
 
-// WriteFailStop records a refusal under the machineState root. The
-// write is durable and not merely atomic, in the same way as every
-// other machineState write (staging.go explains the four steps). The
-// whole purpose of this record is to survive the power-off that
-// follows it, and a rename that never reached the disk would leave
-// nothing behind.
+// WriteFailStop records a refusal under the machineState root. It
+// writes through WriteDurable because the machine powers off right
+// after, and the record must be on the disk by then.
 func WriteFailStop(root string, f FailStop) error {
 	raw, err := yaml.Marshal(f)
 	if err != nil {
@@ -69,9 +51,8 @@ func WriteFailStop(root string, f FailStop) error {
 	return WriteDurable(filepath.Join(root, failStopRecord), raw)
 }
 
-// ReadFailStop reads the standing record. A root with no record is the
-// ordinary case, a machine that has never refused a boot, so it
-// returns nothing and no error.
+// ReadFailStop returns the record under the machineState root, or nil
+// and no error when there is none.
 func ReadFailStop(root string) (*FailStop, error) {
 	raw, err := os.ReadFile(filepath.Join(root, failStopRecord))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -84,14 +65,9 @@ func ReadFailStop(root string) (*FailStop, error) {
 	if err := yaml.UnmarshalStrict(raw, f); err != nil {
 		return nil, err
 	}
-	// A record with no reason is not a refusal. An empty file
-	// unmarshals into an empty struct and reports no error, so without
-	// this test a truncated record would read back as a refusal that
-	// happened in the year one and gave no reason. The write is durable
-	// precisely so this does not happen, and a machine can still lose
-	// the file's contents to hardware that acknowledges a flush it did
-	// not make. Nothing beats no news here, because the field's whole
-	// job is to say something a person can act on.
+	// An empty file unmarshals without an error into a refusal with no
+	// reason, dated to the year one. WriteDurable should prevent an empty
+	// file, but a disk can acknowledge a flush that it did not perform.
 	if f.Reason == "" {
 		return nil, nil
 	}

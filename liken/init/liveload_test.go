@@ -339,7 +339,7 @@ func TestLiveLoadLeavesAnUndeliveredParameterAsDrift(t *testing.T) {
 	boot := bootManifestRecord(t, loader)
 	diffs := machine.ModuleParameterDrift(staged.Modules, boot.Modules,
 		staged.ModuleParameters, boot.ModuleParameters)
-	want := []string{"module parameter aardvark.mode: 3 declared but not actuated"}
+	want := []string{"module parameter aardvark.mode: 3 declared but this boot ran without it"}
 	if !slices.Equal(diffs, want) {
 		t.Errorf("parameter drift is %v, want %v", diffs, want)
 	}

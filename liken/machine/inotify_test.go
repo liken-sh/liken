@@ -1,9 +1,8 @@
 package machine
 
-// These tests drive the inotify helpers against a real kernel, because
-// the whole point of the helpers is the kernel's own notifications. The
-// one exception is the record parser, which runs on a crafted buffer so
-// a test can pin the byte layout without a kernel producing it.
+// These tests run the inotify helpers against the real kernel. The
+// record parser is the exception: its tests use a buffer built by hand,
+// so they check the byte layout without the kernel.
 
 import (
 	"context"
@@ -19,10 +18,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// testCtx returns a context that a test's cleanup cancels, so every
-// watch goroutine a test starts stops before the next test runs. A
-// leaked reader would keep a descriptor open and watch a directory that
-// the next test reuses.
+// testCtx returns a context that is cancelled when the test ends, so
+// the reader goroutines of the test stop.
 func testCtx(t *testing.T) context.Context {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -30,44 +27,39 @@ func testCtx(t *testing.T) context.Context {
 	return ctx
 }
 
-// mustWatchDir starts a directory watch or fails the test.
 func mustWatchDir(t *testing.T, ctx context.Context, dir string) <-chan struct{} {
 	t.Helper()
 	ch, err := WatchDir(ctx, dir)
 	if err != nil {
-		t.Fatalf("WatchDir(%q): %v", dir, err)
+		t.Fatalf("watching %s: %v", dir, err)
 	}
 	return ch
 }
 
-// renameInto writes a file into dir the way writeAtomic does: a temp
-// file in the same directory, then a rename. The rename is the event
-// that a normal fact write produces.
+// renameInto writes a file into dir the way writeAtomic does: it
+// creates a temporary file in dir and renames it to name.
 func renameInto(t *testing.T, dir, name string) {
 	t.Helper()
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the temporary file: %v", err)
 	}
 	tmp.WriteString("x")
 	tmp.Close()
 	if err := os.Rename(tmp.Name(), filepath.Join(dir, name)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("renaming the file into place: %v", err)
 	}
 }
 
-// writeClose writes a file into dir with an open, a write, and a close,
-// the way a person does at the console. This ends in a close, not a
-// rename.
+// writeClose writes a file into dir directly, the way a person does at
+// the console. The write ends with a close and has no rename.
 func writeClose(t *testing.T, dir, name string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the file: %v", err)
 	}
 }
 
-// burstRenames writes n files into dir in a tight loop, to prove that a
-// burst of events collapses into a small number of wakes.
 func burstRenames(t *testing.T, dir string, n int) {
 	t.Helper()
 	for i := range n {
@@ -75,31 +67,26 @@ func burstRenames(t *testing.T, dir string, n int) {
 	}
 }
 
-// awaitWake fails the test if no wake arrives within a generous limit.
-// The limit is long for a test, because the machine that runs it may be
-// under load, and a false failure is worse than a slow pass.
+// awaitWake fails the test if no wake arrives within 2 seconds. The
+// limit is long so that a loaded machine does not fail the test.
 func awaitWake(t *testing.T, ch <-chan struct{}) {
 	t.Helper()
 	select {
 	case <-ch:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for a wake")
+		t.Fatal("no wake arrived before the timeout, want one")
 	}
 }
 
-// refuteWake fails the test if any wake arrives within a short window.
-// It proves silence, so it does not wait long.
-func refuteWake(t *testing.T, ch <-chan struct{}) {
+func requireNoWake(t *testing.T, ch <-chan struct{}) {
 	t.Helper()
 	select {
 	case <-ch:
-		t.Fatal("got a wake, wanted silence")
+		t.Fatal("the channel got a wake, want silence")
 	case <-time.After(500 * time.Millisecond):
 	}
 }
 
-// drainWake clears a pending wake so a later assertion starts from a
-// known-empty channel. The channel holds one wake at most.
 func drainWake(ch <-chan struct{}) {
 	select {
 	case <-ch:
@@ -107,9 +94,8 @@ func drainWake(ch <-chan struct{}) {
 	}
 }
 
-// countWakes receives wakes until the channel stays quiet for the given
-// window, then returns how many it received. It is how a coalescing
-// test counts the wakes a whole burst produced.
+// countWakes receives wakes until the channel is quiet for the given
+// duration, and returns how many it received.
 func countWakes(ch <-chan struct{}, quiet time.Duration) int {
 	count := 0
 	for {
@@ -125,14 +111,14 @@ func countWakes(ch <-chan struct{}, quiet time.Duration) int {
 func assertAtLeast(t *testing.T, got, min int) {
 	t.Helper()
 	if got < min {
-		t.Fatalf("got %d, want at least %d", got, min)
+		t.Fatalf("the watch sent %d wakes, want at least %d", got, min)
 	}
 }
 
 func assertAtMost(t *testing.T, got, max int) {
 	t.Helper()
 	if got > max {
-		t.Fatalf("got %d, want at most %d", got, max)
+		t.Fatalf("the watch sent %d wakes, want at most %d", got, max)
 	}
 }
 
@@ -150,9 +136,6 @@ func TestWatchDirWakesOnDirectWrite(t *testing.T) {
 	awaitWake(t, ch)
 }
 
-// TestWatchDirCoalescesBurst proves the wake channel collapses a burst.
-// Sixty-four writes cannot produce sixty-four wakes, because the reader
-// re-reads the whole state and one read serves the whole burst.
 func TestWatchDirCoalescesBurst(t *testing.T) {
 	dir := t.TempDir()
 	ch := mustWatchDir(t, testCtx(t), dir)
@@ -167,14 +150,11 @@ func TestWatchDirMissingDirectory(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope")
 	_, err := WatchDir(testCtx(t), missing)
 	if err == nil {
-		t.Fatal("WatchDir on a missing directory should fail")
+		t.Fatal("WatchDir on a missing directory returned no error, want one")
 	}
 }
 
-// TestWatchDirStopsAfterCancel proves the reader goroutine exits when
-// its context is done. After the cancel settles, a write produces no
-// wake, because no reader is draining the descriptor anymore.
-func TestWatchDirStopsAfterCancel(t *testing.T) {
+func TestWatchDirSendsNoWakeAfterCancel(t *testing.T) {
 	dir := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := mustWatchDir(t, ctx, dir)
@@ -183,25 +163,21 @@ func TestWatchDirStopsAfterCancel(t *testing.T) {
 	awaitWake(t, ch)
 
 	cancel()
-	// The reader exits on the next scheduler turn. Allow a bounded grace
-	// for it, then demand silence under a write that a live reader would
-	// have reported.
+	// Give the reader time to return before the write.
 	time.Sleep(100 * time.Millisecond)
 	drainWake(ch)
 	renameInto(t, dir, "after")
-	refuteWake(t, ch)
+	requireNoWake(t, ch)
 }
 
-// TestWatchClosesItsChannelWhenTheReaderFails proves a reader that
-// cannot go on closes its wake channel, so the caller learns the watch
-// died instead of hearing silence. The descriptor is a number the
-// process never opened, which poll reports with POLLNVAL and a read
-// refuses with EBADF, the same end a real reader meets when the
-// kernel refuses its read.
+// The test replaces the inotify descriptor with a number that the
+// process never opened, so poll reports POLLNVAL and read fails with
+// EBADF. The reader must treat a failed read as the end of the watch
+// and close the channel.
 func TestWatchClosesItsChannelWhenTheReaderFails(t *testing.T) {
 	w, err := newWatch()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the watch: %v", err)
 	}
 	unix.Close(w.fd)
 	w.fd = 1 << 20
@@ -220,15 +196,12 @@ func TestWatchClosesItsChannelWhenTheReaderFails(t *testing.T) {
 	}
 }
 
-// TestWatchKeepsItsChannelOpenAfterCancel proves the end of the context
-// does not close the channel. A closed channel means the watch failed,
-// and a caller that is shutting down must not read it as one. The test
-// runs the reader itself, so it can wait for the reader to return
-// before it looks at the channel.
+// The test runs the reader itself, so it can wait for the reader to
+// return before it checks the channel.
 func TestWatchKeepsItsChannelOpenAfterCancel(t *testing.T) {
 	w, err := newWatch()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the watch: %v", err)
 	}
 	done := make(chan struct{})
 	go func() {
@@ -255,29 +228,27 @@ func TestWatchFactsTreeMissingRoot(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "facts")
 	_, err := WatchFactsTree(testCtx(t), missing)
 	if err == nil {
-		t.Fatal("WatchFactsTree on a missing root should fail")
+		t.Fatal("WatchFactsTree on a missing root returned no error, want one")
 	}
 }
 
-// TestWatchFactsTreeSeesNewSubdir proves the recursive watch grows. A
-// new subdirectory wakes the watch on its parent, and after a Sync the
-// watch also covers the new subdirectory, so a write inside it wakes
-// too.
-func TestWatchFactsTreeSeesNewSubdir(t *testing.T) {
+// A new subdirectory wakes the watch on its parent. After a Sync, a
+// write inside the new subdirectory wakes the watch too.
+func TestWatchFactsTreeWakesForANewSubdirectory(t *testing.T) {
 	root := t.TempDir()
 	tw, err := WatchFactsTree(testCtx(t), root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("watching the facts tree: %v", err)
 	}
 
 	sub := filepath.Join(root, "hardware")
 	if err := os.Mkdir(sub, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	awaitWake(t, tw.Wake)
 
 	if err := tw.Sync(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("syncing the watches: %v", err)
 	}
 	drainWake(tw.Wake)
 
@@ -285,79 +256,71 @@ func TestWatchFactsTreeSeesNewSubdir(t *testing.T) {
 	awaitWake(t, tw.Wake)
 }
 
-// TestTreeWatchSyncDropsVanishedDir proves Sync forgets a directory
-// that is gone. The kernel already removed the watch when the directory
-// vanished, so Sync only has to drop the bookkeeping.
 func TestTreeWatchSyncDropsVanishedDir(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "modules")
 	if err := os.Mkdir(sub, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	tw, err := WatchFactsTree(testCtx(t), root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("watching the facts tree: %v", err)
 	}
 	if _, ok := tw.wds[sub]; !ok {
-		t.Fatalf("the initial watch set should hold %q", sub)
+		t.Fatalf("the initial watch set lacks %q, want it", sub)
 	}
 
 	if err := os.RemoveAll(sub); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the directory: %v", err)
 	}
 	if err := tw.Sync(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("syncing the watches: %v", err)
 	}
 	if _, ok := tw.wds[sub]; ok {
-		t.Fatalf("Sync should have dropped the vanished %q", sub)
+		t.Fatalf("the watch set still holds the removed directory %q, want it dropped", sub)
 	}
 }
 
-// TestTreeWatchSyncNestedAndFiles proves Sync walks a nested tree, adds
-// a watch for every directory, skips the regular files, and stays
-// idempotent when nothing changed. A second Sync over the same tree
-// returns the same watch set.
 func TestTreeWatchSyncNestedAndFiles(t *testing.T) {
 	root := t.TempDir()
 	nested := filepath.Join(root, "hardware", "blockDevices", "sda")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	writeClose(t, root, "role")
 	writeClose(t, nested, "sizeBytes")
 
 	tw, err := WatchFactsTree(testCtx(t), root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("watching the facts tree: %v", err)
 	}
 	if _, ok := tw.wds[nested]; !ok {
-		t.Fatalf("Sync should watch the nested directory %q", nested)
+		t.Fatalf("the watch set lacks the nested directory %q, want it", nested)
 	}
 	if _, ok := tw.wds[filepath.Join(root, "role")]; ok {
-		t.Fatal("Sync should not watch a regular file")
+		t.Fatal("the watch set holds a regular file, want only directories")
 	}
 
 	before := len(tw.wds)
 	if err := tw.Sync(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("syncing the watches: %v", err)
 	}
 	if len(tw.wds) != before {
-		t.Fatalf("a no-op Sync changed the watch set: %d then %d", before, len(tw.wds))
+		t.Fatalf("a Sync with no changes took the watch set from %d to %d entries, want no change", before, len(tw.wds))
 	}
 }
 
-// event is one decoded record, so a parser test can compare what the
-// parser walked against what the crafted buffer held.
+// event is one record that parseInotifyEvents passed to its callback.
 type event struct {
 	wd   int32
 	mask uint32
 	name string
 }
 
-// encodeEvent builds one inotify record: the sixteen-byte header in the
+// encodeEvent builds one inotify record: the 16-byte header in the
 // host's byte order, then the name padded with null bytes to padTo
-// bytes. A record with no name has a zero-length name field, the shape
-// of an IN_Q_OVERFLOW record.
+// bytes. An empty name gives a zero-length name field, as in an
+// IN_Q_OVERFLOW record.
 func encodeEvent(wd int32, mask, cookie uint32, name string, padTo int) []byte {
 	header := make([]byte, unix.SizeofInotifyEvent)
 	binary.NativeEndian.PutUint32(header[0:4], uint32(wd))
@@ -372,10 +335,8 @@ func encodeEvent(wd int32, mask, cookie uint32, name string, padTo int) []byte {
 	return append(header, nameField...)
 }
 
-// TestParseInotifyEvents pins the record walk. The buffer holds two
-// records back to back: an IN_Q_OVERFLOW with a descriptor of -1 and no
-// name, then a normal event whose name is padded past its own length.
-// The parser must walk both and trim the padding.
+// The buffer holds an IN_Q_OVERFLOW record with a watch descriptor of -1
+// and no name, then a record whose name has null padding after it.
 func TestParseInotifyEvents(t *testing.T) {
 	buf := encodeEvent(-1, unix.IN_Q_OVERFLOW, 0, "", 0)
 	buf = append(buf, encodeEvent(3, unix.IN_MOVED_TO, 0, "systemA", 12)...)
@@ -390,13 +351,10 @@ func TestParseInotifyEvents(t *testing.T) {
 		{wd: 3, mask: unix.IN_MOVED_TO, name: "systemA"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("parsed events:\nwant %+v\ngot  %+v", want, got)
+		t.Errorf("parsed events are %+v, want %+v", got, want)
 	}
 }
 
-// TestParseInotifyEventsTruncated proves a record whose name runs past
-// the buffer ends the walk instead of reading out of bounds. A short
-// kernel read can leave a partial trailing record.
 func TestParseInotifyEventsTruncated(t *testing.T) {
 	buf := encodeEvent(1, unix.IN_MOVED_TO, 0, "whole", 8)
 	// Claim a name longer than the bytes that follow.
@@ -405,49 +363,47 @@ func TestParseInotifyEventsTruncated(t *testing.T) {
 	var count int
 	parseInotifyEvents(buf, func(int32, uint32, string) { count++ })
 	if count != 0 {
-		t.Errorf("a truncated record should walk to nothing, got %d", count)
+		t.Errorf("a truncated record gave %d visits, want 0", count)
 	}
 }
 
-// mustWatchName starts a watch on one name or fails the test.
 func mustWatchName(t *testing.T, dir, name string) <-chan struct{} {
 	t.Helper()
 	ch, err := WatchName(testCtx(t), dir, name)
 	if err != nil {
-		t.Fatalf("WatchName(%q, %q): %v", dir, name, err)
+		t.Fatalf("watching %s in %s: %v", name, dir, err)
 	}
 	return ch
 }
 
-// A rename onto the watched name wakes the channel. The temporary
-// file the rename starts from has another name, so its create and its
-// close wake nothing, and the one wake is the rename's.
+// The temporary file that renameInto creates has another name, so only
+// the rename onto the watched name sends a wake.
 func TestWatchNameWakesOnARenameOntoTheName(t *testing.T) {
 	dir := t.TempDir()
 	ch := mustWatchName(t, dir, "hosts")
 	renameInto(t, dir, "hosts")
 	awaitWake(t, ch)
-	refuteWake(t, ch)
+	requireNoWake(t, ch)
 }
 
-// A write to another file in the same directory wakes nothing. init
-// writes resolv.conf beside the hosts file in the host's /etc.
+// init writes resolv.conf in the same directory as hosts, and that must
+// not wake a watch on hosts.
 func TestWatchNameIgnoresTheOtherNamesInTheDirectory(t *testing.T) {
 	dir := t.TempDir()
 	ch := mustWatchName(t, dir, "hosts")
 	writeClose(t, dir, "resolv.conf")
 	renameInto(t, dir, "resolv.conf")
-	refuteWake(t, ch)
+	requireNoWake(t, ch)
 }
 
-// A delete of the watched name wakes the channel, because a pass must
-// write the file back.
+// When someone deletes /etc/hosts, the wake starts a machine-operator
+// pass, and the pass writes the file again.
 func TestWatchNameWakesWhenTheNameLeaves(t *testing.T) {
 	dir := t.TempDir()
 	writeClose(t, dir, "hosts")
 	ch := mustWatchName(t, dir, "hosts")
 	if err := os.Remove(filepath.Join(dir, "hosts")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the hosts file: %v", err)
 	}
 	awaitWake(t, ch)
 }
@@ -458,9 +414,8 @@ func TestWatchNameMissingDirectory(t *testing.T) {
 	}
 }
 
-// awaitClosed fails the test if the channel does not close within the
-// same generous limit awaitWake uses. It skips any wakes before the
-// close, because the test asserts only that the watch ended.
+// awaitClosed fails the test if the channel does not close within 2
+// seconds. It ignores wakes before the close.
 func awaitClosed(t *testing.T, ch <-chan struct{}) {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
@@ -476,17 +431,16 @@ func awaitClosed(t *testing.T, ch <-chan struct{}) {
 	}
 }
 
-// refuteClose fails the test if the channel closes within a short
-// window. Wakes during the window are fine, because the test asserts
-// only that the watch goes on.
-func refuteClose(t *testing.T, ch <-chan struct{}) {
+// requireOpen fails the test if the channel closes within 500
+// milliseconds. It ignores wakes.
+func requireOpen(t *testing.T, ch <-chan struct{}) {
 	t.Helper()
 	window := time.After(500 * time.Millisecond)
 	for {
 		select {
 		case _, ok := <-ch:
 			if !ok {
-				t.Fatal("the wake channel closed, wanted it open")
+				t.Fatal("the wake channel closed, want it open")
 			}
 		case <-window:
 			return
@@ -494,50 +448,49 @@ func refuteClose(t *testing.T, ch <-chan struct{}) {
 	}
 }
 
-// watchedDir makes an empty directory that a test can remove or
-// replace, which a t.TempDir() itself must not be.
+// watchedDir creates an empty directory inside a temporary directory,
+// so that a test can remove or replace it.
 func watchedDir(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "etc")
 	if err := os.Mkdir(dir, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	return dir
 }
 
-// endings are the ways a watched directory leaves its path. After each
-// one, a watch on the directory sees no change made at the path, so
-// the watch must end and close its channel.
-var endings = []struct {
+// directoryRemovals are the ways a watched directory leaves its path. After any
+// of them the watch receives no event for the path, so it must end and
+// close its channel.
+var directoryRemovals = []struct {
 	name string
 	end  func(t *testing.T, dir string)
 }{
 	{"removed", func(t *testing.T, dir string) {
 		if err := os.Remove(dir); err != nil {
-			t.Fatal(err)
+			t.Fatalf("removing the directory: %v", err)
 		}
 	}},
 	{"renamed over", func(t *testing.T, dir string) {
 		other := dir + ".new"
 		if err := os.Mkdir(other, 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the directory: %v", err)
 		}
 		// os.Rename refuses a directory as the target, so the test
-		// calls rename(2) itself, the way a tool that swaps a whole
-		// directory into place does.
+		// calls rename(2) directly.
 		if err := unix.Rename(other, dir); err != nil {
-			t.Fatal(err)
+			t.Fatalf("renaming the directory: %v", err)
 		}
 	}},
 	{"renamed away", func(t *testing.T, dir string) {
 		if err := os.Rename(dir, dir+".old"); err != nil {
-			t.Fatal(err)
+			t.Fatalf("renaming the directory away: %v", err)
 		}
 	}},
 }
 
 func TestWatchNameClosesWhenTheDirectoryLeaves(t *testing.T) {
-	for _, tc := range endings {
+	for _, tc := range directoryRemovals {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := watchedDir(t)
 			ch := mustWatchName(t, dir, "hosts")
@@ -548,12 +501,12 @@ func TestWatchNameClosesWhenTheDirectoryLeaves(t *testing.T) {
 }
 
 func TestWatchFactsTreeClosesWhenTheRootLeaves(t *testing.T) {
-	for _, tc := range endings {
+	for _, tc := range directoryRemovals {
 		t.Run(tc.name, func(t *testing.T) {
 			root := watchedDir(t)
 			tw, err := WatchFactsTree(testCtx(t), root)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("watching the facts tree: %v", err)
 			}
 			tc.end(t, root)
 			awaitClosed(t, tw.Wake)
@@ -561,45 +514,44 @@ func TestWatchFactsTreeClosesWhenTheRootLeaves(t *testing.T) {
 	}
 }
 
-// A subdirectory that leaves the tree wakes the watch and keeps it
-// open, because the next Sync forgets it and the root still holds the
-// rest of the tree.
+// The root is still in place, so the watch stays open and keeps
+// watching the rest of the tree.
 func TestWatchFactsTreeStaysOpenWhenASubdirectoryLeaves(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "modules")
 	if err := os.Mkdir(sub, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	tw, err := WatchFactsTree(testCtx(t), root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("watching the facts tree: %v", err)
 	}
 	if err := os.Remove(sub); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the directory: %v", err)
 	}
 	awaitWake(t, tw.Wake)
-	refuteClose(t, tw.Wake)
+	requireOpen(t, tw.Wake)
 	renameInto(t, root, "role")
 	awaitWake(t, tw.Wake)
 }
 
-// A Sync after the reader stopped answers an error and adds no watch,
-// because the descriptor number may belong to another file by then.
+// Sync must not add a watch after the reader stopped, because the
+// descriptor number may belong to another file by then.
 func TestSyncAfterTheReaderStoppedAddsNothing(t *testing.T) {
 	root := t.TempDir()
 	ctx, cancel := context.WithCancel(t.Context())
 	w, err := WatchFactsTree(ctx, root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("watching the facts tree: %v", err)
 	}
 	if err := os.Remove(root); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the directory: %v", err)
 	}
 	for range w.Wake {
 	}
 	cancel()
 
 	if err := w.Sync(); !errors.Is(err, errWatchClosed) {
-		t.Errorf("Sync after the reader stopped answered %v, want errWatchClosed", err)
+		t.Errorf("Sync after the reader stopped returned %v, want errWatchClosed", err)
 	}
 }

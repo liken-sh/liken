@@ -1,47 +1,41 @@
 package machine
 
-// The manifest lifecycle is how a document edit survives a reboot.
+// A machine with a machineState storage role keeps each document it
+// boots from in a directory on that filesystem. The documents are the
+// Machine manifest, the Cluster manifest, the system release
+// (systemrelease.go), the registry credentials (registries.go), and
+// the imported images record (imports.go). Every directory holds the
+// same files:
 //
-// A machine with a machineState storage role keeps its manifests on
-// that filesystem, one directory for each document. Several documents
-// use this lifecycle. Each one has a constructor below, or in its own
-// file (systemrelease.go, registries.go, imports.go) that names its
-// directory. Every directory holds the same three files, with the
-// same meanings:
+//	staged.yaml    a document waiting for its proving boot. The
+//	               operator writes it when the cluster's copy differs
+//	               from what this boot applied. init stages the
+//	               imports record itself.
+//	proven.yaml    the last document that booted successfully. A
+//	               failed staged document falls back to it.
+//	rejected.yaml  a staged document that failed its boot. init moves
+//	               it aside so it never tries it again, and
+//	               rejection.yaml records why.
 //
-//	staged.yaml    a document that awaits its first successful boot,
-//	               written by the operator when the cluster's copy
-//	               differs from what this boot actuated
-//	proven.yaml    the last document that fully proved out: the
-//	               last-known-good copy that a failed staged
-//	               document falls back to
-//	rejected.yaml  a staged document that failed its boot, moved
-//	               aside (with rejection.yaml stating why) so that
-//	               init never tries it again, but never silently
-//	               forgets it either
+// At boot, init uses the staged document when there is one, and the
+// proven document otherwise. A successful boot promotes staged to
+// proven with one rename. A failed boot rejects the staged document
+// and boots the proven one. When neither staged.yaml nor proven.yaml
+// exists, init boots the Machine and Cluster manifests from their seed
+// copies in the image. A boot that had nothing staged writes its
+// document with WriteProven once the boot is proven.
 //
-// At boot, init prefers the staged document over the proven one.
-// Success promotes staged to proven with one rename. Failure
-// quarantines the staged document and boots the proven document
-// instead. The image's baked-in copy takes part only when none of
-// these files exist: it seeds the very first boot, and the first
-// success writes it down as the first proven.yaml.
+// A store reads and writes bytes and never parses a document. That is
+// also why a rejection records the hash of the raw bytes: a document
+// that does not parse still needs an identity.
 //
-// A store deals in bytes, never in parsed documents. The lifecycle's
-// whole job is to make the right bytes survive reboots and power
-// loss. Which kind of document those bytes contain, a Machine or a
-// Cluster, is the caller's business. This is also why rejections
-// hash the raw bytes: a document that will not even parse must still
-// be identifiable as exactly the bytes that init refused.
-//
-// Every write here is both atomic and durable: a temp file, an fsync
-// of the file, a rename, and an fsync of the directory. A rename
-// alone makes a write atomic against a crash of the writer, but not
-// against power loss. The directory records the rename, and an
-// unsynced directory update can vanish when power fails.
-// The facts tree skips the fsyncs, because /run is tmpfs. These lifecycle files
-// exist precisely to survive a power loss, so they perform both
-// fsyncs every time.
+// Every write is atomic and durable: write a temp file, fsync it,
+// rename it into place, and fsync the directory. The rename alone is
+// atomic against a crash of the writer. It does not survive power
+// loss unless the directory is also synced, because the directory
+// entry for the rename can be lost. These files must survive power
+// loss, so they always do both fsyncs. The facts tree skips them
+// because /run is tmpfs.
 
 import (
 	"crypto/sha256"
@@ -56,10 +50,10 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// MachineStateDir is where the machineState role mounts. It is the
-// root that the store constructors take as a parameter, so tests can
-// use a temporary directory, and it is the path through which the
-// operator reaches the same trees.
+// MachineStateDir is where the machineState role mounts. The store
+// constructors take the root as a parameter so tests can use a
+// temporary directory, and the operator reads the same directories
+// through this path.
 const MachineStateDir = "/var/lib/liken/machine"
 
 const (
@@ -70,54 +64,49 @@ const (
 	attemptedMarker  = "attempted"
 )
 
-// A ManifestStore is one document's lifecycle storage: a directory on
-// machineState that holds that document's staged, proven, and
-// rejected files. Each document's constructor is the only place that
-// names its directory, so no two lifecycles can ever collide.
+// A ManifestStore holds the staged, proven, and rejected files of one
+// document, in one directory under machineState. Each document's
+// constructor is the only place that names its directory.
 type ManifestStore struct {
 	dir string
 }
 
-// MachineManifests is the Machine manifest's store under the given
+// MachineManifests is the store of the Machine manifest under the
 // machineState root.
 func MachineManifests(root string) ManifestStore {
 	return ManifestStore{dir: filepath.Join(root, "manifests")}
 }
 
-// ClusterManifests is the Cluster manifest's store under the same
-// root. It runs the same lifecycle as the Machine's, in its own
-// directory.
+// ClusterManifests is the store of the Cluster manifest under the
+// machineState root.
 func ClusterManifests(root string) ManifestStore {
 	return ManifestStore{dir: filepath.Join(root, "cluster")}
 }
 
-// A Rejection records why a staged document was refused. One type
-// is both rejection.yaml's schema and the facts entry, so the
-// console message, the on-disk record, and the cluster's status all
-// carry the same record. The hash identifies exactly which bytes were
-// rejected. The operator refuses to re-stage a document that matches
-// it, and only a genuinely different edit clears the block.
+// A Rejection records why a staged document was refused. It is the
+// schema of rejection.yaml and also the entry in the facts, so the
+// console message, the file, and the cluster's status report the same
+// record. The operator does not stage a document whose hash matches
+// the rejection, so only a different edit clears the block.
 type Rejection struct {
 	Hash       string    `json:"hash,omitempty"`
 	Reason     string    `json:"reason"`
 	RejectedAt time.Time `json:"rejectedAt"`
 }
 
-// ManifestHash is a document's identity: the sha256 of its exact
-// bytes as they sit in the file. "The same document" must mean the
-// same thing to the operator that staged it and to the init that
-// booted it, or rejected it.
+// ManifestHash returns the sha256 of a document's bytes as they are in
+// the file. The operator that stages a document and the init that
+// boots or rejects it compare these hashes, so both must hash the
+// same bytes.
 func ManifestHash(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
 
-// renderDocument produces a document's canonical bytes and their
-// hash, for the documents that liken itself authors: the
-// credentials, the imported-images record, and the system release.
-// yaml marshals through JSON with sorted keys, so the same document
-// always renders the same bytes. This is what lets a hash comparison
-// answer the question "did anything change".
+// renderDocument returns the bytes of a document that liken writes
+// itself, and their hash. yaml marshals through JSON with sorted
+// keys, so the same document always produces the same bytes and an
+// unchanged document has an unchanged hash.
 func renderDocument(doc any) ([]byte, string, error) {
 	raw, err := yaml.Marshal(doc)
 	if err != nil {
@@ -126,19 +115,16 @@ func renderDocument(doc any) ([]byte, string, error) {
 	return raw, ManifestHash(raw), nil
 }
 
-// NewRejection builds the record for refusing a staged document:
-// exactly these bytes, for this reason, at this moment. It exists
-// apart from Reject, because a boot reports a rejection (on the
-// console, in the boot's facts) even when the durable write of the
-// record fails. The record's existence must not depend on the write
-// succeeding.
+// NewRejection builds the record of a refused document. It is separate
+// from Reject because a boot reports the rejection on the console and
+// in the facts even when writing the record to disk fails.
 func NewRejection(raw []byte, reason string, at time.Time) Rejection {
 	return Rejection{Hash: ManifestHash(raw), Reason: reason, RejectedAt: at}
 }
 
-// load reads one lifecycle file. A missing file is not an error. It
-// returns nil bytes, because most machines have nothing staged most
-// of the time.
+// load reads one lifecycle file. It returns nil bytes and no error
+// when the file does not exist, which is the usual state of a machine
+// with nothing staged.
 func (s ManifestStore) load(name string) ([]byte, error) {
 	raw, err := os.ReadFile(filepath.Join(s.dir, name))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -150,19 +136,20 @@ func (s ManifestStore) load(name string) ([]byte, error) {
 	return raw, nil
 }
 
+// LoadStaged returns the staged document, or nil when none is staged.
 func (s ManifestStore) LoadStaged() ([]byte, error) {
 	return s.load(stagedManifest)
 }
 
+// LoadProven returns the proven document, or nil when there is none.
 func (s ManifestStore) LoadProven() ([]byte, error) {
 	return s.load(provenManifest)
 }
 
-// LoadRejection reads the standing rejection, if any. A rejection
-// stands until a later promotion removes it. tmpfs holds the facts
-// file, and each reboot loses it, so this file is the durable record
-// that lets every boot keep reporting "this document was rejected"
-// until something supersedes it.
+// LoadRejection reads rejection.yaml, or returns nil when there is
+// none. The file stays until a later promotion or ClearRejection
+// removes it. The facts are on tmpfs and a reboot loses them, so this
+// file is what lets every boot keep reporting the rejection.
 func (s ManifestStore) LoadRejection() (*Rejection, error) {
 	raw, err := s.load(rejectionNote)
 	if raw == nil || err != nil {
@@ -175,8 +162,7 @@ func (s ManifestStore) LoadRejection() (*Rejection, error) {
 	return r, nil
 }
 
-// WriteStaged stages a document for the next boot: the operator's one
-// write into the lifecycle.
+// WriteStaged writes the document for a boot to try.
 func (s ManifestStore) WriteStaged(raw []byte) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
@@ -184,10 +170,10 @@ func (s ManifestStore) WriteStaged(raw []byte) error {
 	return WriteDurable(filepath.Join(s.dir, stagedManifest), raw)
 }
 
-// WriteProven records a document as the last-known-good copy
-// directly. The first successful boot does this with the image's
-// seed. This closes the loop for a machine that has never had a
-// staged document to promote.
+// WriteProven writes proven.yaml without a staged file to promote.
+// init calls it for the seed Machine manifest, and the operator calls
+// it for the seed Cluster manifest and for the system release that
+// the machine runs.
 func (s ManifestStore) WriteProven(raw []byte) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
@@ -195,14 +181,14 @@ func (s ManifestStore) WriteProven(raw []byte) error {
 	return WriteDurable(filepath.Join(s.dir, provenManifest), raw)
 }
 
-// Promote marks the staged document proven with one rename. The
-// rename is atomic by the filesystem's own guarantee, and it replaces
-// the old proven file in the same step, so there is never a moment
-// with neither file present. A success supersedes any old rejection,
-// so those files go too. A crash between the rename and that cleanup
-// leaves a stale rejection note beside a newer proven file. This is
-// harmless: the boot that just succeeded reports no rejection, and
-// the next promotion cleans up the stale note.
+// Promote makes the staged document the proven one with one rename.
+// The rename replaces the old proven file atomically, so a crash
+// never leaves a machine with neither file. A success supersedes a
+// rejection, so Promote then removes the rejection files and the
+// attempted marker. A crash before that cleanup leaves a stale
+// rejection note beside the new proven file. That is harmless,
+// because the boot that just succeeded reports no rejection, and the
+// next promotion removes the note.
 func (s ManifestStore) Promote() error {
 	if err := os.Rename(filepath.Join(s.dir, stagedManifest), filepath.Join(s.dir, provenManifest)); err != nil {
 		return err
@@ -213,13 +199,12 @@ func (s ManifestStore) Promote() error {
 	return syncDir(s.dir)
 }
 
-// Reject quarantines the staged document. Reject writes the note
-// durably first, then turns staged into rejected. A crash between the
-// two steps leaves staged.yaml in place, and the next boot simply
-// retries it. A persistent failure re-records this same rejection and
-// finishes the rename. A transient failure, such as an unplugged
-// disk, gets a second chance. Either way, the interrupted state
-// converges on its own.
+// Reject moves the staged document to rejected.yaml. It writes
+// rejection.yaml durably first, then renames the staged file. A crash
+// between the two steps leaves staged.yaml in place, so the next boot
+// tries it again. That boot fails again for a persistent fault and
+// repeats Reject, and succeeds for a transient one such as an
+// unplugged disk. Either way the store reaches a consistent state.
 func (s ManifestStore) Reject(r Rejection) error {
 	note, err := yaml.Marshal(r)
 	if err != nil {
@@ -235,23 +220,20 @@ func (s ManifestStore) Reject(r Rejection) error {
 	return syncDir(s.dir)
 }
 
-// The attempted marker gives a verdict to a trial that could not
-// reach one on its own. Some documents cannot be proven by the boot
-// that runs them. A cluster document's failure modes show up
-// downstream, because a bad endpoint just means the machine never
-// joins the cluster. So init marks the staged document attempted when
-// it boots the document, and the component that can observe the
-// proof promotes the document and clears the marker. For the cluster
-// document, that component is the operator, and the operator's
-// existence as a pod demonstrates the join. When a boot finds the
-// marker still matching the staged document, the last try was never
-// proven, so the boot rejects the document and falls back. Each
-// staged document gets exactly one proving boot. No retry counters
-// are needed, and a crash at any point leaves a state that the next
-// boot reads correctly.
+// Init cannot tell at boot whether every staged document works. A bad
+// Cluster document, for example, shows only later, as a machine that
+// never joins the cluster. So init writes the attempted marker when it
+// boots a staged document, and the component that can check the
+// result promotes the document and removes the marker. For the Cluster document and the system release
+// that component is the operator, because its pod runs only on a
+// machine that joined the cluster. When init finds a marker that
+// still matches the staged document, the previous boot was never
+// proven, so init rejects the document and falls back to the proven
+// one. A staged document gets one proving boot, so no retry counter
+// is needed.
 
-// WriteAttempted marks the staged document, identified by its hash,
-// as tried by this boot.
+// WriteAttempted records the hash of the staged document that this
+// boot is trying.
 func (s ManifestStore) WriteAttempted(hash string) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
@@ -259,8 +241,8 @@ func (s ManifestStore) WriteAttempted(hash string) error {
 	return WriteDurable(filepath.Join(s.dir, attemptedMarker), []byte(hash+"\n"))
 }
 
-// LoadAttempted reads the marker. An empty string means no trial is
-// underway.
+// LoadAttempted returns the recorded hash, or an empty string when no
+// trial is underway.
 func (s ManifestStore) LoadAttempted() (string, error) {
 	raw, err := s.load(attemptedMarker)
 	if raw == nil || err != nil {
@@ -269,16 +251,13 @@ func (s ManifestStore) LoadAttempted() (string, error) {
 	return strings.TrimSpace(string(raw)), nil
 }
 
-// WithdrawStaged removes the staged document. The operator calls this
-// when someone has edited the cluster's copy back to what the machine
-// already runs. If the staged file stayed behind, the next boot would
-// apply an edit that the cluster no longer asks for. The attempted
-// marker goes with it. The marker described a trial of the withdrawn
-// document, and if it stayed behind, it would read as "tried and
-// failed" the next time someone stages the identical document. That
-// would be a false rejection, because the trial never reached a
-// verdict. A missing file is not an error; there is nothing to
-// withdraw.
+// WithdrawStaged removes the staged document. The operator calls it
+// when the cluster's copy has been edited back to what the machine
+// already runs, so the next boot does not apply an edit that the
+// cluster no longer declares. It also removes the attempted marker.
+// The marker belongs to the withdrawn document, and if it stayed, the
+// next staging of an identical document would look like a failed
+// proving boot and be rejected. It is not an error when nothing is staged.
 func (s ManifestStore) WithdrawStaged() error {
 	if err := os.Remove(filepath.Join(s.dir, stagedManifest)); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -290,11 +269,10 @@ func (s ManifestStore) WithdrawStaged() error {
 	return syncDir(s.dir)
 }
 
-// ClearRejection removes the rejected document and its rejection
-// note. The rejection's purpose is to stop the operator from staging
-// the same failed document again. Once the cluster stops asking for
-// that document, the record has no further use. Without this
-// cleanup, every future boot would keep republishing the record in
+// ClearRejection removes rejected.yaml and rejection.yaml. The
+// rejection exists to stop the operator from staging the same failed
+// document again. Once the cluster no longer declares that document
+// it has no use, and every boot would keep publishing it in the
 // status.
 func (s ManifestStore) ClearRejection() error {
 	removed := false
@@ -311,13 +289,12 @@ func (s ManifestStore) ClearRejection() error {
 	return syncDir(s.dir)
 }
 
-// writeAtomic performs the atomic write without the durability: a
-// temp file in the same directory, because a rename cannot cross
-// filesystems, followed by a rename. A rename within one filesystem
-// is atomic, so a reader that polls on its own schedule sees either
-// the old contents or the new, never a torn write. It is
-// WriteDurable's sibling for files on tmpfs, such as the facts and
-// the intent channel, where an fsync would have nothing to flush to.
+// writeAtomic writes a file with a temp file and a rename, without
+// fsync. The temp file is in the same directory because a rename
+// cannot cross filesystems. A reader that polls sees either the old
+// contents or the new, never a partial write. Files on tmpfs, such as
+// the facts and the intent channel, use it because an fsync has
+// nothing to flush.
 func writeAtomic(path string, raw []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".liken-*")
 	if err != nil {
@@ -334,12 +311,12 @@ func writeAtomic(path string, raw []byte) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// WriteDurable performs the atomic, power-loss-proof write: a temp
-// file in the same directory, because a rename cannot cross
-// filesystems; the contents fsynced before the rename makes them
-// visible; and the directory fsynced so the rename itself reaches
-// disk. It is exported because init needs the same guarantee for the
-// identity files that k3s reads, such as the node password.
+// WriteDurable writes a file atomically and durably: a temp file in
+// the same directory (a rename cannot cross filesystems), an fsync of
+// the contents before the rename, and an fsync of the directory so
+// the rename reaches disk. It is exported because init needs the same
+// guarantee for the identity files that k3s reads, such as the node
+// password.
 func WriteDurable(path string, raw []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".liken-*")

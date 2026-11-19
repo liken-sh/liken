@@ -1,16 +1,13 @@
 package machine
 
-// The per-subtree writers. Each writer covers one subtree of the facts
-// tree, and one init component calls it at the point where it discovers
-// those facts. There is no writer for the whole tree, on purpose. A
-// whole-tree writer would be a second owner of every file, and the
-// tree exists so that each fact has one owner and needs no lock.
+// The writers of the facts tree. Each writer writes one subtree, and
+// the part of init that discovers those facts calls it. Each subtree
+// has one owner, so the tree needs no lock.
 //
-// A collection writer reconciles. It writes the element directories
-// that the new set holds, then removes the element directories that the
-// new set dropped. This one step gives a collection the same omitempty
-// semantics that a scalar file gets from writeFact: what is no longer
-// true loses its file.
+// A writer for a collection writes a directory for each element of the
+// new set, then removes the directories of elements that are no longer
+// in it. So a fact that stops being true loses its file, as an empty
+// scalar does in writeFact.
 
 import (
 	"os"
@@ -21,10 +18,9 @@ import (
 	"github.com/liken-sh/liken/liken/api"
 )
 
-// RejectionKind names one of the four standing quarantine records under
-// boot/. Each names the document whose rejection it holds. The value is
-// the record's directory name in the tree, which matches the field name
-// in BootStatus.
+// RejectionKind selects which document's rejection record under boot/
+// to write. The value is the record's directory name, which is also the
+// field name in BootStatus.
 type RejectionKind string
 
 const (
@@ -34,23 +30,21 @@ const (
 	RejectCredentials RejectionKind = "credentialsRejection"
 )
 
-// WriteRole publishes the machine's role in its cluster: leader or
-// follower. Boot derives it from the Cluster manifest's leaders list.
+// WriteRole writes the machine's role in its cluster, leader or
+// follower.
 func (t FactsTree) WriteRole(role api.Role) error {
 	return t.report(t.writeFact("role", string(role)))
 }
 
-// WriteBootTime publishes the moment the machine booted, derived from
-// the kernel's uptime counter. It belongs to the boot record because it
-// shares the record's lifetime: a reboot moves it, an in-place k3s
-// restart does not.
+// WriteBootTime writes the time the machine booted, computed from the
+// kernel's uptime counter. It is part of the boot record because a
+// reboot changes it and an in-place k3s restart does not.
 func (t FactsTree) WriteBootTime(bootedAt *time.Time) error {
 	return t.report(t.writeFact("boot/time", formatTime(bootedAt)))
 }
 
-// WriteLastCrash publishes the newest kernel crash the machine still
-// holds records for. A nil crash means the machine holds no crash on
-// record, so the whole subtree is removed.
+// WriteLastCrash writes the newest kernel crash that the machine still
+// has records for. A nil crash removes the subtree.
 func (t FactsTree) WriteLastCrash(c *CrashStatus) error {
 	if c == nil {
 		return t.report(os.RemoveAll(filepath.Join(t.Dir, "lastCrash")))
@@ -63,9 +57,8 @@ func (t FactsTree) WriteLastCrash(c *CrashStatus) error {
 	))
 }
 
-// WriteLastFailStop publishes the last boot this machine refused to
-// run. A nil record means no boot has ever been refused, so the whole
-// subtree is removed.
+// WriteLastFailStop writes the last boot that this machine refused to
+// run. A nil record removes the subtree.
 func (t FactsTree) WriteLastFailStop(f *FailStop) error {
 	if f == nil {
 		return t.report(os.RemoveAll(filepath.Join(t.Dir, "lastFailStop")))
@@ -76,8 +69,6 @@ func (t FactsTree) WriteLastFailStop(f *FailStop) error {
 	))
 }
 
-// WriteVersion publishes the machine's version inventory: liken's own
-// version, and every outside component the image carries.
 func (t FactsTree) WriteVersion(v VersionStatus) error {
 	return t.report(firstError(
 		t.writeFact("version/liken", v.Liken),
@@ -100,9 +91,9 @@ func (t FactsTree) WriteVersion(v VersionStatus) error {
 	))
 }
 
-// WriteNetwork publishes the outcome of the boot's networking. The
-// top-level fields summarize the primary interface, and the interfaces
-// collection carries the detail for each interface.
+// WriteNetwork writes the result of the boot's network setup. The
+// top-level files describe the primary interface, and network/interfaces
+// has one directory for each interface.
 func (t FactsTree) WriteNetwork(n NetworkStatus) error {
 	if err := firstError(
 		t.writeFact("network/interface", n.Interface),
@@ -141,20 +132,18 @@ func (t FactsTree) WriteNetwork(n NetworkStatus) error {
 	return t.report(syncEntryDirs(filepath.Join(t.Dir, "network", "interfaces"), want))
 }
 
-// writeInterfaceWireless publishes the radio's standing for one
-// interface. The ssid file is the record's presence, for the same
-// reason it is in the boot record: a wireless entry always names a
-// network, so a wired interface leaves no wireless directory at all.
+// writeInterfaceWireless writes the radio's status for one interface.
+// A nil status removes the wireless directory, so a wired interface has
+// none.
 func (t FactsTree) writeInterfaceWireless(base string, w *WirelessStatus) error {
 	dir := filepath.Join(base, "wireless")
 	if w == nil {
 		return os.RemoveAll(filepath.Join(t.Dir, dir))
 	}
-	// The association is one record, because init rewrites it while
-	// the machine runs and its fields change together on each
-	// association (rule 5). It is written before the state, so a
-	// reader that sees the new state also sees the access point that
-	// goes with it.
+	// Init rewrites the association while the machine runs, and its
+	// fields change together, so they are one record file. It is
+	// written before the state, so a reader that sees a new state also
+	// reads the access point of that state.
 	return firstError(
 		t.writeRecordFact(filepath.Join(dir, "association"), [][2]string{
 			{"bssid", w.BSSID},
@@ -169,11 +158,10 @@ func (t FactsTree) writeInterfaceWireless(base string, w *WirelessStatus) error 
 	)
 }
 
-// WriteTime publishes the standing of the machine's clock. The clock
-// loop owns this record and rewrites it while the machine runs, so the
-// four fields are one record file, and one rename replaces them
-// together. Each publish is then one inotify event and one reconcile
-// pass.
+// WriteTime writes the state of the machine's clock to the record file
+// time/standing. Init rewrites it while the machine runs, so the fields
+// are one record file that one rename replaces. Each write then causes one inotify event and one
+// reconcile pass, not one for each field.
 func (t FactsTree) WriteTime(ts TimeStatus) error {
 	return t.report(t.writeRecordFact("time/standing", [][2]string{
 		{"state", string(ts.State)},
@@ -183,9 +171,9 @@ func (t FactsTree) WriteTime(ts TimeStatus) error {
 	}))
 }
 
-// WriteHardwareBasics publishes the machine's processor count and total
-// memory. The disks and the unclaimed devices have their own writers,
-// because the hardware watch keeps them current after boot.
+// WriteHardwareBasics writes the processor count and total memory. The
+// disks and unclaimed devices have their own writers, because the
+// hardware watch updates them after boot.
 func (t FactsTree) WriteHardwareBasics(cpus int, memoryBytes uint64) error {
 	return t.report(firstError(
 		t.writeFact("hardware/cpus", formatInt(cpus)),
@@ -193,9 +181,8 @@ func (t FactsTree) WriteHardwareBasics(cpus int, memoryBytes uint64) error {
 	))
 }
 
-// WriteBlockDevices publishes the machine's storage inventory: every
-// real disk the kernel found. The directory name is the kernel's name
-// for the disk this boot.
+// WriteBlockDevices writes one directory for each real disk the kernel
+// found, named by the kernel's name for the disk in this boot.
 func (t FactsTree) WriteBlockDevices(devices []BlockDevice) error {
 	want := map[string]bool{}
 	for _, d := range devices {
@@ -219,10 +206,9 @@ func (t FactsTree) WriteBlockDevices(devices []BlockDevice) error {
 	return t.report(syncEntryDirs(filepath.Join(t.Dir, "hardware", "blockDevices"), want))
 }
 
-// WriteUnclaimed publishes every device the kernel enumerated but that
-// nothing drives. The directory name is safeKey(modalias), and the
-// exact modalias lives in the modalias file inside. The reconcile
-// removes a device's directory once a module claims it.
+// WriteUnclaimed writes one directory for each device that the kernel
+// found and no driver has bound. The directory name is
+// safeKey(modalias), so the modalias file inside has the exact value.
 func (t FactsTree) WriteUnclaimed(devices []UnclaimedDevice) error {
 	want := map[string]bool{}
 	for _, d := range devices {
@@ -246,8 +232,8 @@ func (t FactsTree) WriteUnclaimed(devices []UnclaimedDevice) error {
 	return t.report(syncEntryDirs(filepath.Join(t.Dir, "hardware", "unclaimed"), want))
 }
 
-// WriteFirmware publishes the machine's standing firmware state: the
-// mode it boots in, and the boot menu from its non-volatile store.
+// WriteFirmware writes the firmware mode the machine booted in and the
+// boot entries from the firmware's non-volatile store.
 func (t FactsTree) WriteFirmware(f FirmwareStatus) error {
 	return t.report(firstError(
 		t.writeFact("firmware/mode", string(f.Mode)),
@@ -258,10 +244,10 @@ func (t FactsTree) WriteFirmware(f FirmwareStatus) error {
 	))
 }
 
-// WriteStorage publishes where each storage role is actually backed
-// this boot. The nine roles are a fixed set, so this writer needs no
-// reconcile: a role that moves from a partition back to memory loses
-// its device, partition, and capacity files through writeFact.
+// WriteStorage writes what backs each storage role in this boot. The
+// roles are the fixed StorageRoleNames, so no directory is removed. A
+// role that moves from a partition back to memory loses its device,
+// partition, and capacity files, because their values are empty.
 func (t FactsTree) WriteStorage(s StorageStatus) error {
 	for _, name := range StorageRoleNames {
 		role := s.Role(name)
@@ -279,8 +265,9 @@ func (t FactsTree) WriteStorage(s StorageStatus) error {
 	return nil
 }
 
-// WriteModules publishes the outcome of every module named in
-// spec.modules. The module loader owns this subtree.
+// WriteModules writes the result of loading each module in
+// spec.modules. Init writes it at boot, and after that moduleLoader in
+// init rewrites it on each live load.
 func (t FactsTree) WriteModules(modules []ModuleStatus) error {
 	want := map[string]bool{}
 	for _, m := range modules {
@@ -304,25 +291,23 @@ func (t FactsTree) WriteModules(modules []ModuleStatus) error {
 	return t.report(syncEntryDirs(filepath.Join(t.Dir, "modules"), want))
 }
 
-// WriteRlimits publishes the resource limits init holds, read back
-// from the kernel. Each resource is one file holding the limit in the
-// spec's syntax, because a limit is a scalar and rule 4's directory
-// per element would wrap each one around a single value.
+// WriteRlimits writes the resource limits of init, read back from the
+// kernel. Each resource is one file with the limit in the spec's
+// syntax.
 func (t FactsTree) WriteRlimits(rlimits map[string]string) error {
 	return t.report(t.writeKeyedScalars("rlimits", rlimits))
 }
 
-// WriteBootRlimits publishes the resource limits the winning manifest
-// declared. This is the drift reference, so it carries the request
-// rather than the outcome, the way boot/modules and boot/storage do.
+// WriteBootRlimits writes the resource limits that the manifest of
+// this boot declared. Drift detection compares the spec with them, so
+// they are the declared values and not what the kernel reports, as in
+// boot/modules and boot/storage.
 func (t FactsTree) WriteBootRlimits(rlimits map[string]string) error {
 	return t.report(t.writeKeyedScalars("boot/rlimits", rlimits))
 }
 
-// writeKeyedScalars publishes a map of scalars as a directory of
-// files, one for each key. A key that disappears takes its file with
-// it, and an empty map leaves no directory at all, which is rule 2's
-// omitempty semantics.
+// writeKeyedScalars writes a map as a directory with one file for each
+// key. An empty map leaves no directory.
 func (t FactsTree) writeKeyedScalars(dir string, values map[string]string) error {
 	want := map[string]bool{}
 	for key := range values {
@@ -344,9 +329,9 @@ func (t FactsTree) writeKeyedScalars(dir string, values map[string]string) error
 	return syncEntryFiles(filepath.Join(t.Dir, dir), want)
 }
 
-// WriteFeatures publishes this machine's standing on every feature the
-// cluster document enables. The restart path owns this subtree, because
-// a k3s restart can change a feature's outcome without a reboot.
+// WriteFeatures writes the state of each feature that the Cluster
+// document enables. An in-place k3s restart rewrites it, because the
+// restart can change a feature's result without a reboot.
 func (t FactsTree) WriteFeatures(features []FeatureStatus) error {
 	want := map[string]bool{}
 	for _, f := range features {
@@ -368,10 +353,9 @@ func (t FactsTree) WriteFeatures(features []FeatureStatus) error {
 	return t.report(syncEntryDirs(filepath.Join(t.Dir, "features"), want))
 }
 
-// WriteRegistries publishes what this boot rendered into k3s's
-// registries.yaml: the mirrored hosts, the credentialed hosts, and
-// whether the embedded registry is on. It never carries credential
-// material.
+// WriteRegistries writes what this boot put in the registries.yaml of
+// k3s: the mirrored hosts, the hosts that have credentials, and whether
+// the embedded registry is on. It writes no credentials.
 func (t FactsTree) WriteRegistries(r RegistriesStatus) error {
 	return t.report(firstError(
 		t.writeListFact("registries/mirrors", r.Mirrors),
@@ -380,14 +364,11 @@ func (t FactsTree) WriteRegistries(r RegistriesStatus) error {
 	))
 }
 
-// WriteRuntime publishes the runtime discipline init imposed this
-// boot: the Go environment and log level it gave the k3s process, the
-// configuration it wrote for the kubelet inside it, and the level it
-// gave containerd beside it. These are the resolved values, not the
-// spec's strings. The restart path owns this subtree, because a k3s
-// restart can change all of them without a reboot. A setting the
-// cluster left unset writes no file, so its absence reads as the
-// default that the reader supplies for itself.
+// WriteRuntime writes the k3s, kubelet, and containerd settings that
+// init applied, as resolved values and not the strings of the spec. An
+// in-place k3s restart rewrites it, because the restart can change any
+// of them without a reboot. A setting that the Cluster does not set has
+// no file, and the reader supplies the default.
 func (t FactsTree) WriteRuntime(r RuntimeStatus) error {
 	gc := r.Kubelet.ImageGC
 	return t.report(firstError(
@@ -402,48 +383,44 @@ func (t FactsTree) WriteRuntime(r RuntimeStatus) error {
 	))
 }
 
-// WriteBootSlot publishes the system slot this boot came from, A or B.
-// It is empty when the boot did not come from a slot, as in a
-// direct-kernel boot.
+// WriteBootSlot writes the system slot that this boot started from, A
+// or B. A direct kernel boot has no slot, so the file is absent.
 func (t FactsTree) WriteBootSlot(slot string) error {
 	return t.report(t.writeFact("boot/slot", slot))
 }
 
-// WriteBootCommandLine publishes the kernel command line this boot ran
-// with, whole. init prints the same line to the console, and this is
-// what carries it to a reader who has no console.
+// WriteBootCommandLine writes the kernel command line of this boot,
+// for a reader that has no console to read it from.
 func (t FactsTree) WriteBootCommandLine(cmdline string) error {
 	return t.report(t.writeFact("boot/commandLine", cmdline))
 }
 
-// WriteBootRestarts publishes the count of in-place k3s restarts this
-// boot has performed. The restart path owns it, and it returns to zero
-// on the next reboot.
+// WriteBootRestarts writes how many in-place k3s restarts this boot has
+// done. A reboot sets the count to zero.
 func (t FactsTree) WriteBootRestarts(n int) error {
 	return t.report(t.writeFact("boot/restarts", formatInt(n)))
 }
 
-// WriteBootModules publishes the module list the winning manifest
-// declared, recorded as actuated regardless of each load's outcome.
-// The list keeps the order the machine loaded the modules in, and the
-// operator compares that order against the declared one.
+// WriteBootModules writes the modules that count as applied, whether
+// or not each load succeeded. The list is in the order that the machine
+// loaded them, because the operator compares that order with the
+// declared one.
 func (t FactsTree) WriteBootModules(modules []string) error {
 	return t.report(t.writeListFact("boot/modules", modules))
 }
 
-// WriteBootModuleParameters publishes the parameter map this machine
-// counts as actuated. A boot records the whole declared map, the
-// same way boot/modules records its list. A live load records only
-// the keys it delivered, so an undelivered parameter drifts and the
-// reboot that can deliver it gets scheduled (init/liveload.go). The
-// per-module readback under modules/ reports what the kernel holds.
+// WriteBootModuleParameters writes the module parameters that count as
+// applied. A boot writes the whole declared map. A live load writes
+// only the parameters it set, and leaves out those of a module that was
+// already loaded, so they show as drift until a reboot sets them. The
+// files under modules/ report what the kernel has.
 func (t FactsTree) WriteBootModuleParameters(parameters map[string]string) error {
 	return t.report(t.writeKeyedScalars("boot/moduleParameters", parameters))
 }
 
-// WriteBootManifest publishes the Machine manifest this boot ran under.
-// The module loader writes it last, because it is the commit point the
-// operator's convergence judges.
+// WriteBootManifest writes which Machine manifest this boot used. A
+// live load writes it after the module records, because the operator
+// reads a match of this record as convergence.
 func (t FactsTree) WriteBootManifest(src ManifestSource, hash string) error {
 	return t.report(t.writeRecordFact("boot/manifest", [][2]string{
 		{"source", string(src)},
@@ -451,8 +428,10 @@ func (t FactsTree) WriteBootManifest(src ManifestSource, hash string) error {
 	}))
 }
 
-// WriteBootClusterManifest publishes the Cluster manifest this boot ran
-// under. The restart path writes it last, because promotion keys on it.
+// WriteBootClusterManifest writes which Cluster manifest this boot
+// used. An in-place k3s restart writes it after the features and
+// registries, because the operator promotes the staged Cluster
+// document when this record matches it.
 func (t FactsTree) WriteBootClusterManifest(src ManifestSource, hash string) error {
 	return t.report(t.writeRecordFact("boot/clusterManifest", [][2]string{
 		{"source", string(src)},
@@ -460,8 +439,8 @@ func (t FactsTree) WriteBootClusterManifest(src ManifestSource, hash string) err
 	}))
 }
 
-// WriteBootCredentials publishes the registry-credentials document this
-// boot, or the latest k3s restart, rendered into registries.yaml.
+// WriteBootCredentials writes which registry credentials document this
+// boot, or its latest k3s restart, put in registries.yaml.
 func (t FactsTree) WriteBootCredentials(src ManifestSource, hash string) error {
 	return t.report(t.writeRecordFact("boot/credentials", [][2]string{
 		{"source", string(src)},
@@ -469,10 +448,9 @@ func (t FactsTree) WriteBootCredentials(src ManifestSource, hash string) error {
 	}))
 }
 
-// WriteBootImports publishes the imported-images record this boot ran
-// under. The discarded field records that this boot found a trial still
-// standing from a boot that died unproven, and threw the container
-// store away.
+// WriteBootImports writes which imported-images record this boot used.
+// discarded is true when an earlier boot died before its imports were
+// proven, so this boot deleted the container store.
 func (t FactsTree) WriteBootImports(src ManifestSource, hash string, discarded bool) error {
 	return t.report(t.writeRecordFact("boot/imports", [][2]string{
 		{"source", string(src)},
@@ -481,9 +459,8 @@ func (t FactsTree) WriteBootImports(src ManifestSource, hash string, discarded b
 	}))
 }
 
-// WriteBootStorage publishes the storage the boot actuated, one
-// directory for each declared role. Only declared roles appear, so the
-// reconcile removes a role's directory once the spec drops it.
+// WriteBootStorage writes the storage that the boot set up, with one
+// directory for each declared role.
 func (t FactsTree) WriteBootStorage(spec StorageSpec) error {
 	want := map[string]bool{}
 	for _, role := range spec.Roles() {
@@ -503,30 +480,24 @@ func (t FactsTree) WriteBootStorage(spec StorageSpec) error {
 	return t.report(syncEntryDirs(filepath.Join(t.Dir, "boot", "storage"), want))
 }
 
-// WriteBootNetwork publishes the network the boot actuated: one
-// directory for each declared interface. A nil spec means this boot
-// recorded nothing about its network, so the whole subtree goes away.
+// WriteBootNetwork writes the network that the boot set up, with one
+// directory for each declared interface. A nil spec removes the
+// subtree.
 //
-// The boot/network directory is the record itself, and it exists even
-// when the spec declares no interface at all. This is the one place
-// in the tree where an empty directory carries meaning, and it has
-// to: a machine that declares no interface and a machine that
-// recorded nothing are different facts, and only the second one is
-// beyond judging (machine/drift.go explains what each one means for
-// drift).
+// boot/network exists even when the spec declares no interface,
+// because a machine that declares no interface and a boot that recorded
+// nothing are different facts. Drift can be checked only for the first
+// (see drift.go).
 //
-// Each interface's key is its position in the declared list, counted
-// from zero, and not the name of its port. The order of this list is
-// part of what it asks for, since it is the order in which each
-// interface's nameservers reach resolv.conf, and position is also
-// what the comparison uses.
+// Each interface's directory is named by its index in the declared
+// list, not by its port name. The order is part of the declaration,
+// because the nameservers reach resolv.conf in that order, and drift.go
+// compares interfaces by index.
 //
-// Host entries carry no boot record. A boot record answers what one
-// boot actuated, and spec.network.hostEntries reconciles live: the
-// machine operator may rewrite /etc/hosts on any later pass, so a
-// file it may have already changed is not one boot's fact.
-// status.hostEntries is the current view, the same as status.sysctls
-// is for sysctls, which also keeps no boot record.
+// Host entries have no boot record, because the machine operator
+// applies spec.network.hostEntries to /etc/hosts while the machine
+// runs. status.hostEntries has the current value, as status.sysctls
+// does for sysctls.
 func (t FactsTree) WriteBootNetwork(spec *NetworkSpec) error {
 	base := filepath.Join("boot", "network")
 	if spec == nil {
@@ -559,11 +530,9 @@ func (t FactsTree) WriteBootNetwork(spec *NetworkSpec) error {
 	return t.report(syncEntryDirs(filepath.Join(t.Dir, interfaces), want))
 }
 
-// writeBootWireless publishes the wireless half of one interface's
-// boot record. The ssid file is the record's presence, because a
-// wireless entry always names a network. An interface with no radio
-// needs no file here, and a respec that drops the radio removes the
-// directory whole, so no stale SSID outlives the spec that named it.
+// writeBootWireless writes the wireless part of one interface's boot
+// record. A nil spec removes the wireless directory, so the SSID of a
+// network that the spec no longer declares does not stay in the tree.
 func (t FactsTree) writeBootWireless(dir string, w *WirelessSpec) error {
 	base := filepath.Join(dir, "wireless")
 	if w == nil {
@@ -575,9 +544,8 @@ func (t FactsTree) writeBootWireless(dir string, w *WirelessSpec) error {
 	)
 }
 
-// WriteRejection publishes one of the four standing quarantine records.
-// A nil rejection means the document has no standing rejection, so the
-// whole record directory is removed.
+// WriteRejection writes the record of a rejected document of the given
+// kind. A nil rejection removes the record.
 func (t FactsTree) WriteRejection(kind RejectionKind, r *Rejection) error {
 	base := filepath.Join("boot", string(kind))
 	if r == nil {
@@ -594,11 +562,10 @@ func (t FactsTree) WriteRejection(kind RejectionKind, r *Rejection) error {
 	))
 }
 
-// firstError returns the first non-nil error of a sequence of writes,
-// or nil when all succeed. Go evaluates the arguments before the call,
-// so every write in the sequence runs even when an early one fails.
-// The writes are independent files, so the later writes stay correct,
-// and the caller receives the first failure.
+// firstError returns the first non-nil error of its arguments. Go
+// evaluates every argument before the call, so each write in the list
+// runs even when an earlier one fails. Each write is its own file, so
+// the later writes are still correct.
 func firstError(errs ...error) error {
 	for _, err := range errs {
 		if err != nil {

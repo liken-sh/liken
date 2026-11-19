@@ -6,18 +6,16 @@ import (
 	"testing"
 )
 
-// fakeProcSys builds a small /proc/sys in a temp directory, with one
-// parameter file already present, in the same way the kernel
-// presents real parameter files.
+// fakeProcSys returns a temporary /proc/sys with one parameter file.
 func fakeProcSys(t *testing.T, relpath, value string) string {
 	t.Helper()
 	dir := t.TempDir()
 	full := filepath.Join(dir, relpath)
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the parameter directory: %v", err)
 	}
 	if err := os.WriteFile(full, []byte(value), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the parameter file: %v", err)
 	}
 	return dir
 }
@@ -29,19 +27,18 @@ func TestSysctlPathTranslation(t *testing.T) {
 	}{
 		{"vm.overcommit_memory", "vm/overcommit_memory"},
 		{"net.ipv4.ip_forward", "net/ipv4/ip_forward"},
-		// The slash form is the kernel's own escape hatch for interface
-		// names that contain dots. When slashes are present, dots stay
-		// literal.
+		// A name with slashes keeps its dots, so it can name an
+		// interface such as eth0.100.
 		{"net/ipv4/conf/eth0.100/rp_filter", "net/ipv4/conf/eth0.100/rp_filter"},
 	}
 	for _, tt := range tests {
 		got, err := sysctlPath("/proc/sys", tt.name)
 		if err != nil {
-			t.Errorf("%s: %v", tt.name, err)
+			t.Errorf("sysctlPath(%q) returned the error %v, want a path", tt.name, err)
 			continue
 		}
 		if got != filepath.Join("/proc/sys", tt.want) {
-			t.Errorf("%s: got %q", tt.name, got)
+			t.Errorf("sysctlPath(%q) = %q, want %q", tt.name, got, filepath.Join("/proc/sys", tt.want))
 		}
 	}
 }
@@ -54,7 +51,7 @@ func TestSysctlPathRejectsEscapes(t *testing.T) {
 	}
 	for _, name := range tests {
 		if _, err := sysctlPath("/proc/sys", name); err == nil {
-			t.Errorf("%s: expected an error", name)
+			t.Errorf("sysctlPath(%q) returned no error, want one", name)
 		}
 	}
 }
@@ -62,21 +59,21 @@ func TestSysctlPathRejectsEscapes(t *testing.T) {
 func TestApplySysctlWritesValue(t *testing.T) {
 	dir := fakeProcSys(t, "vm/overcommit_memory", "0\n")
 	if err := ApplySysctl(dir, "vm.overcommit_memory", "1"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("applying vm.overcommit_memory: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "vm/overcommit_memory"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the parameter file: %v", err)
 	}
 	if string(raw) != "1\n" {
-		t.Errorf("got %q", raw)
+		t.Errorf("the parameter file holds %q, want %q", raw, "1\n")
 	}
 }
 
 func TestApplySysctlRejectsUnknownParameter(t *testing.T) {
 	dir := fakeProcSys(t, "vm/overcommit_memory", "0\n")
 	if err := ApplySysctl(dir, "vm.no_such_knob", "1"); err == nil {
-		t.Fatal("expected an error for a parameter the kernel doesn't have")
+		t.Fatal("applying a parameter that the kernel does not have returned no error, want one")
 	}
 }
 
@@ -84,40 +81,36 @@ func TestReadSysctlTrimsValue(t *testing.T) {
 	dir := fakeProcSys(t, "vm/overcommit_memory", "1\n")
 	got, err := ReadSysctl(dir, "vm.overcommit_memory")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading vm.overcommit_memory: %v", err)
 	}
 	if got != "1" {
-		t.Errorf("got %q", got)
+		t.Errorf("ReadSysctl returned %q, want %q", got, "1")
 	}
 }
 
-func TestApplySysctlRefusesToInventParameters(t *testing.T) {
-	// The open call does not create the file, by design. A parameter
-	// file that the kernel did not put there names a parameter this
-	// kernel does not have. Creating the file would hide a typo
-	// silently.
+func TestApplySysctlDoesNotCreateUnknownParameters(t *testing.T) {
 	err := ApplySysctl(t.TempDir(), "vm.nonsense", "1")
 	if err == nil {
-		t.Error("an unknown parameter must be an error someone sees")
+		t.Error("applying an unknown parameter returned no error, want one")
 	}
 }
 
-func TestReadSysctlReportsUnknownParameters(t *testing.T) {
+func TestReadSysctlFailsOnUnknownParameters(t *testing.T) {
 	if _, err := ReadSysctl(t.TempDir(), "vm.nonsense"); err == nil {
-		t.Error("an unknown parameter must be an error someone sees")
+		t.Error("reading an unknown parameter returned no error, want one")
 	}
 }
 
 func TestApplySysctlRejectsEscapingNames(t *testing.T) {
 	dir := fakeProcSys(t, "vm/overcommit_memory", "0\n")
 	if err := ApplySysctl(dir, "../escape", "1"); err == nil {
-		t.Error("a name that escapes the sysctl tree must be an error")
+		t.Error("applying a name that escapes the sysctl tree returned no error, want one")
 	}
 }
 
 func TestReadSysctlRejectsEscapingNames(t *testing.T) {
 	dir := fakeProcSys(t, "vm/overcommit_memory", "0\n")
 	if _, err := ReadSysctl(dir, "../escape"); err == nil {
-		t.Error("a name that escapes the sysctl tree must be an error")
+		t.Error("reading a name that escapes the sysctl tree returned no error, want one")
 	}
 }

@@ -156,8 +156,8 @@ names the file. Do not install, catalog, or deploy what failed.
 | Message | Meaning |
 |---|---|
 | `release.yaml: the digest is sha256:..., and -digest pins sha256:...` | The channel served a different `release.yaml` than the catalog entry names. Check the digest that you copied, and the `-source`. |
-| `<file> digest mismatch: got ..., want ...` | The bytes differ from what `release.yaml` names: the download was changed or damaged. Run the command again. If it fails the same way, the channel serves a wrong file. |
-| `<file> is N bytes, want M` | The download stopped early, or the server sent more than `release.yaml` names. Run the command again. |
+| `artifact <file> has sha256 ..., want ...` | The bytes differ from what `release.yaml` names: the download was changed or damaged. Run the command again. If it fails the same way, the channel serves a wrong file. |
+| `artifact <file> has N bytes, want M` | The download stopped early, or the server sent more than `release.yaml` names. Run the command again. |
 | `<file>: the signature over sha256:... does not verify: failed to verify certificate identity` | A valid Sigstore signature covers the bytes, but another workflow, another repository, or another ref signed them. A fork, a branch, or a pull request is never a `liken` publish. |
 | `<file>: the signature over sha256:... does not verify: failed to verify signature` | The bundle does not sign these bytes. It is the bundle of another file, or the file changed after it was signed. |
 | `<file>: fetching ...: the server answered 404 Not Found` | The channel has no such file. A release published before the workflow signed its files has no `.sigstore.json` bundles, and `liken verify` cannot check it. |

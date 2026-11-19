@@ -1,10 +1,5 @@
 package machine
 
-// Tests for the deployment layer's sidecar file. This file is the
-// digest record that sits beside deployment.cpio on a boot slot. A
-// machine writes the sidecar file once, at install time, and checks
-// it at every carry forward.
-
 import (
 	"bytes"
 	"strings"
@@ -15,15 +10,15 @@ func TestLayerSidecarRoundTrips(t *testing.T) {
 	layer := []byte("the deployment layer's bytes")
 	installed, err := DigestLayer(bytes.NewReader(layer))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("digesting the layer: %v", err)
 	}
 
 	digest, err := ParseLayerSidecar(FormatLayerSidecar(installed))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the sidecar: %v", err)
 	}
 	if err := VerifyLayer(digest, bytes.NewReader(layer)); err != nil {
-		t.Errorf("the layer does not verify against its own sidecar: %v", err)
+		t.Errorf("verifying the layer against its own sidecar: %v, want no error", err)
 	}
 }
 
@@ -50,7 +45,7 @@ func TestParseLayerSidecarRejectsDamage(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if _, err := ParseLayerSidecar([]byte(c.raw)); err == nil {
-				t.Errorf("%q parsed; a damaged sidecar must be rejected", c.raw)
+				t.Errorf("parsing the damaged sidecar %q returned no error, want one", c.raw)
 			}
 		})
 	}
@@ -59,9 +54,9 @@ func TestParseLayerSidecarRejectsDamage(t *testing.T) {
 func TestVerifyLayerRejectsChangedBytes(t *testing.T) {
 	digest, err := DigestLayer(strings.NewReader("the layer as installed"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("digesting the layer: %v", err)
 	}
 	if err := VerifyLayer(digest, strings.NewReader("the layer, torn")); err == nil {
-		t.Error("changed layer bytes must not verify")
+		t.Error("verifying changed layer bytes returned no error, want one")
 	}
 }

@@ -9,13 +9,11 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// readNodeLabels reads the schema of spec.nodeLabels from the Machine
-// CRD.
 func readNodeLabels(t *testing.T) crdMapField {
 	t.Helper()
 	raw, err := os.ReadFile("manifests/machines-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Machine CRD: %v", err)
 	}
 	var crd struct {
 		Spec struct {
@@ -35,15 +33,14 @@ func readNodeLabels(t *testing.T) crdMapField {
 		} `json:"spec"`
 	}
 	if err := yaml.Unmarshal(raw, &crd); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the Machine CRD: %v", err)
 	}
 	return crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Spec.Properties.NodeLabels
 }
 
-// reservedLabelPattern pulls the regular expression out of the rule
-// that keeps the operating system's own label space. The rule has the
-// form self.all(key, !key.matches('...')), so a key that the pattern
-// matches is a key that the API server refuses.
+// reservedLabelPattern returns the regular expression of the rule
+// self.all(key, !key.matches('...')), which refuses the label keys
+// under liken.sh/.
 func reservedLabelPattern(t *testing.T) *regexp.Regexp {
 	t.Helper()
 	for _, v := range readNodeLabels(t).Validations {
@@ -52,20 +49,19 @@ func reservedLabelPattern(t *testing.T) *regexp.Regexp {
 		}
 		_, rest, found := strings.Cut(v.Rule, "!key.matches('")
 		if !found {
-			t.Fatalf("the liken.sh rule must refuse the keys that one pattern matches: %q", v.Rule)
+			t.Fatalf("the rule is %q, want one that refuses the keys that a single pattern matches", v.Rule)
 		}
 		expression, _, _ := strings.Cut(rest, "')")
 		return regexp.MustCompile(expression)
 	}
-	t.Fatal("spec.nodeLabels must reserve the liken.sh label space")
+	t.Fatal("spec.nodeLabels has no rule that names liken.sh, want one that reserves its label keys")
 	return nil
 }
 
-// The operating system sets its own labels in liken.sh/ itself, so a
-// Machine cannot declare a key there. Each operator owns a subdomain
-// of liken.sh, and its DaemonSet stays off a node labeled
-// <group>/<hardware>: none. The Machine is the record of the machine,
-// so a Machine must be able to declare that label.
+// The OS sets the labels under liken.sh/, so a Machine cannot declare
+// one. An operator's DaemonSet stays off a node labeled
+// <group>/<hardware>: none, where the group is a subdomain of
+// liken.sh, and a Machine must be able to declare that label.
 func TestMachineCRDReservesOnlyTheOperatingSystemsLabels(t *testing.T) {
 	pattern := reservedLabelPattern(t)
 	cases := []struct {
@@ -89,25 +85,23 @@ func TestMachineCRDReservesOnlyTheOperatingSystemsLabels(t *testing.T) {
 	}
 }
 
-// The label that keeps equipment-operator off a node with no CEC
-// adapter passes the key shape rule, the kubernetes.io rule, and the
-// value pattern too, so a Machine that declares it is accepted. The
-// kubernetes.io rule passes any key that its first pattern does not
-// match.
+// equipment.liken.sh/cec: none passes the key shape rule, the
+// kubernetes.io rule, and the value pattern of spec.nodeLabels. The
+// kubernetes.io rule refuses a key that its first pattern matches.
 func TestMachineCRDAcceptsAnOperatorsNoneLabel(t *testing.T) {
 	labels := readNodeLabels(t)
 	if !keyRulePattern(t, labels.Validations).MatchString("equipment.liken.sh/cec") {
-		t.Error("equipment.liken.sh/cec is a well-formed label key")
+		t.Error("the key rule refuses equipment.liken.sh/cec, want it accepted")
 	}
 	for _, v := range labels.Validations {
 		if !strings.Contains(v.Message, "kubernetes.io") {
 			continue
 		}
 		if keyRulePattern(t, []crdValidation{v}).MatchString("equipment.liken.sh/cec") {
-			t.Error("equipment.liken.sh/cec is not in the kubernetes.io or k8s.io namespaces")
+			t.Error("the kubernetes.io rule refuses equipment.liken.sh/cec, want it accepted")
 		}
 	}
 	if !regexp.MustCompile(labels.AdditionalProperties.Pattern).MatchString("none") {
-		t.Error("none is a well-formed label value")
+		t.Error("the value pattern refuses none, want it accepted")
 	}
 }

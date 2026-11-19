@@ -1,9 +1,5 @@
 package machine
 
-// The settings for parameters that an optional module registers: init
-// and the operator apply each one only where its file exists, and
-// never over a spec that names it.
-
 import (
 	"maps"
 	"os"
@@ -20,29 +16,28 @@ func sysctlTree(t *testing.T, names ...string) string {
 	for _, name := range names {
 		path, err := sysctlPath(dir, name)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("resolving the path of %s: %v", name, err)
 		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the directory of %s: %v", name, err)
 		}
 		if err := os.WriteFile(path, []byte("global\n"), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing %s: %v", name, err)
 		}
 	}
 	return dir
 }
 
-func TestModuleSysctlsHoldsExactlyTheDeclaredSet(t *testing.T) {
+func TestModuleSysctlsHasExactlyTheDeclaredEntries(t *testing.T) {
 	want := []string{"net.vsock.child_ns_mode"}
 	if got := slices.Sorted(maps.Keys(ModuleSysctls)); !slices.Equal(got, want) {
-		t.Errorf("the declared set moved:\n got %v\nwant %v", got, want)
+		t.Errorf("ModuleSysctls has the entries %v, want %v", got, want)
 	}
 }
 
-func TestDefaultSysctlsTakeAModuleSettingOnlyWhereItsFileExists(t *testing.T) {
-	// A machine that never loads vsock has no net.vsock tree, and
-	// that is not a fault. The name still comes back as absent, so the
-	// operator's check applies it when the module loads later.
+func TestDefaultSysctlsIncludeAModuleSettingOnlyWhenItsFileExists(t *testing.T) {
+	// absent lists the parameter so that the operator's sysctl check
+	// applies it when the module loads.
 	for _, tc := range []struct {
 		name       string
 		files      []string
@@ -53,8 +48,6 @@ func TestDefaultSysctlsTakeAModuleSettingOnlyWhereItsFileExists(t *testing.T) {
 		{"no vsock module", nil, nil, map[string]string{}, []string{"net.vsock.child_ns_mode"}},
 		{"vsock loaded", []string{"net.vsock.child_ns_mode"}, nil,
 			map[string]string{"net.vsock.child_ns_mode": "local"}, nil},
-		// The kernel takes one write of child_ns_mode and refuses a
-		// second value, so a spec that names it gets the only write.
 		{"the spec names it", []string{"net.vsock.child_ns_mode"}, map[string]string{"net/vsock/child_ns_mode": "global"},
 			map[string]string{}, nil},
 	} {
@@ -75,7 +68,7 @@ func TestDefaultSysctlsTakeAModuleSettingOnlyWhereItsFileExists(t *testing.T) {
 	}
 }
 
-func TestDefaultSysctlsKeepEveryOSSetting(t *testing.T) {
+func TestDefaultSysctlsIncludeEveryOSSetting(t *testing.T) {
 	defaults, _ := DefaultSysctls(t.TempDir(), nil)
 	for name, value := range OSSysctls {
 		if defaults[name] != value {

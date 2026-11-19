@@ -63,18 +63,18 @@ func TestWriteUnclaimedRemovesVanishedDevices(t *testing.T) {
 		{Modalias: "pci:v2", Bus: "pci"},
 	}
 	if err := tree.WriteUnclaimed(both); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing both devices: %v", err)
 	}
 	if err := tree.WriteUnclaimed(both[:1]); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the remaining device: %v", err)
 	}
 	gone := filepath.Join(tree.Dir, "hardware", "unclaimed", safeKey("pci:v2"))
 	if _, err := os.Stat(gone); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("the vanished device's directory still exists: %v", err)
+		t.Errorf("stat of the vanished device's directory returned %v, want fs.ErrNotExist", err)
 	}
 	kept := filepath.Join(tree.Dir, "hardware", "unclaimed", safeKey("pci:v1"))
 	if _, err := os.Stat(kept); err != nil {
-		t.Errorf("the present device's directory should stay: %v", err)
+		t.Errorf("stat of the present device's directory: %v", err)
 	}
 }
 
@@ -85,14 +85,14 @@ func TestWriteFeaturesRemovesVanishedFeatures(t *testing.T) {
 		{Name: "sr-iov", State: FeatureActive},
 	}
 	if err := tree.WriteFeatures(both); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing both features: %v", err)
 	}
 	if err := tree.WriteFeatures(both[:1]); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the remaining feature: %v", err)
 	}
 	gone := filepath.Join(tree.Dir, "features", "sr-iov")
 	if _, err := os.Stat(gone); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("the retracted feature's directory still exists: %v", err)
+		t.Errorf("stat of the retracted feature's directory returned %v, want fs.ErrNotExist", err)
 	}
 }
 
@@ -100,42 +100,41 @@ func TestReconcileLeavesTempFilesAlone(t *testing.T) {
 	tree := FactsTree{Dir: t.TempDir()}
 	parent := filepath.Join(tree.Dir, "hardware", "unclaimed")
 	if err := os.MkdirAll(parent, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the unclaimed directory: %v", err)
 	}
 	temp := filepath.Join(parent, ".liken-inflight")
 	if err := os.WriteFile(temp, []byte("partial"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the temp file: %v", err)
 	}
 	if err := tree.WriteUnclaimed([]UnclaimedDevice{{Modalias: "pci:v1", Bus: "pci"}}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the unclaimed devices: %v", err)
 	}
 	if _, err := os.Stat(temp); err != nil {
-		t.Errorf("reconcile removed another write's temp file: %v", err)
+		t.Errorf("stat of the temp file of another write: %v", err)
 	}
 }
 
-// A read can land between another write's temp file and its rename.
-// writeAtomic names that file .liken-*, and publishing it as a key
-// would put a half-written value in the status under a key nobody
-// declared.
+// A read can run between the creation of a write's .liken-* temp file
+// and its rename. Returning that file as a key would put a half-written
+// value in status under a key that nothing declared.
 func TestReadKeyedScalarsSkipsATempFile(t *testing.T) {
 	tree := FactsTree{Dir: t.TempDir()}
 	if err := tree.WriteRlimits(map[string]string{"nofile": "1048576"}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the rlimits: %v", err)
 	}
 	temp := filepath.Join(tree.Dir, "rlimits", ".liken-inflight")
 	if err := os.WriteFile(temp, []byte("partial\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the temp file: %v", err)
 	}
 	got, err := tree.readKeyedScalars("rlimits")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the rlimits: %v", err)
 	}
 	if _, present := got[".liken-inflight"]; present {
-		t.Errorf("a temp file is not a key: %v", got)
+		t.Errorf("the keys are %v, want no temp file among them", got)
 	}
 	if got["nofile"] != "1048576" {
-		t.Errorf("got %v", got)
+		t.Errorf("the keys are %v, want nofile=1048576", got)
 	}
 }
 
@@ -143,17 +142,17 @@ func TestReadIgnoresUnknownEntries(t *testing.T) {
 	tree := FactsTree{Dir: t.TempDir()}
 	writeAll(t, tree, sparseFacts())
 	if err := os.WriteFile(filepath.Join(tree.Dir, "surprise"), []byte("junk\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the file outside the tree: %v", err)
 	}
 	stray := filepath.Join(tree.Dir, "hardware", "blockDevices")
 	if err := os.MkdirAll(stray, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the stray directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(stray, "README"), []byte("not a device\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the stray file: %v", err)
 	}
 	if _, err := tree.Read(); err != nil {
-		t.Errorf("an unknown file or directory should not break the read: %v", err)
+		t.Errorf("reading a tree with an unknown file and directory: %v", err)
 	}
 }
 
@@ -161,7 +160,7 @@ func TestReadMissingRoot(t *testing.T) {
 	tree := FactsTree{Dir: filepath.Join(t.TempDir(), "absent")}
 	_, err := tree.Read()
 	if !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("a missing root should report fs.ErrNotExist, got %v", err)
+		t.Errorf("reading a missing root returned %v, want fs.ErrNotExist", err)
 	}
 }
 
@@ -169,16 +168,16 @@ func TestReadReportsUnparseableInteger(t *testing.T) {
 	tree := FactsTree{Dir: t.TempDir()}
 	writeAll(t, tree, sparseFacts())
 	if err := os.MkdirAll(filepath.Join(tree.Dir, "hardware"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the hardware directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(tree.Dir, "hardware", "cpus"), []byte("three\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the cpus file: %v", err)
 	}
 	_, err := tree.Read()
 	if err == nil {
-		t.Fatal("a non-integer cpus file should be an error")
+		t.Fatal("reading a cpus file that holds \"three\" returned no error")
 	}
 	if !strings.Contains(err.Error(), filepath.Join("hardware", "cpus")) {
-		t.Errorf("the error should name the bad file's path, got %v", err)
+		t.Errorf("the error is %v, want it to name hardware/cpus", err)
 	}
 }

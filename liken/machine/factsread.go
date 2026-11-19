@@ -1,14 +1,9 @@
 package machine
 
-// The read side of the facts tree. Only the operator reads the tree,
-// and only the operator assembles a MachineStatus from it. Read walks
-// every subtree that a writer fills, and returns the status that those
-// files describe.
-//
-// Read leaves four fields at their zero value: phase,
-// observedGeneration, sysctls, and conditions. The operator owns these
-// fields and overlays them on every pass, because they are the
-// operator's own observation, not init's.
+// The operator reads the facts tree that init writes and builds a
+// MachineStatus from it. Read leaves phase, observedGeneration,
+// sysctls, hostEntries, pending, and conditions empty, because the
+// operator sets those fields itself on every pass.
 
 import (
 	"errors"
@@ -24,16 +19,14 @@ import (
 	"github.com/liken-sh/liken/liken/api"
 )
 
-// Read assembles a MachineStatus from the facts tree. A missing root is
-// an error that wraps fs.ErrNotExist: the facts describe a boot, and
-// their absence on a running machine is a fact the operator must report,
-// not a default it may invent. Read ignores a file or directory it
-// does not recognize, so a tree can carry more than this reader
-// consumes. A file that does not parse is an error that names its
-// path.
+// Read returns an error that wraps fs.ErrNotExist when the tree does
+// not exist, because a running machine always has facts, and an empty
+// status would hide that init never wrote them. Read ignores files it
+// does not recognize. A file that does not parse returns an error with
+// its path.
 func (t FactsTree) Read() (*MachineStatus, error) {
 	if _, err := os.Stat(t.Dir); err != nil {
-		return nil, fmt.Errorf("reading facts tree %s: %w", t.Dir, err)
+		return nil, fmt.Errorf("reading the facts tree: %w", err)
 	}
 
 	s := &MachineStatus{}
@@ -63,10 +56,9 @@ func (t FactsTree) Read() (*MachineStatus, error) {
 	if s.Firmware, err = t.readFirmware(); err != nil {
 		return nil, err
 	}
-	// Rlimits comes from the tree, unlike sysctls above. The operator
-	// can read a sysctl back itself at any time, but a resource limit
-	// belongs to a process, and the process that matters is init. Only
-	// init can report it.
+	// The operator reads sysctls from /proc/sys itself. Resource limits
+	// are per process, and the limits that matter are init's, so only
+	// init can report them.
 	if s.Rlimits, err = t.readKeyedScalars("rlimits"); err != nil {
 		return nil, err
 	}
@@ -94,9 +86,9 @@ func (t FactsTree) Read() (*MachineStatus, error) {
 	return s, nil
 }
 
-// readKeyedScalars reads a directory of scalar files back into a map,
-// the reader for what writeKeyedScalars publishes. An absent directory
-// reads as no map at all, which is rule 2's omitempty semantics.
+// readKeyedScalars reads a directory that writeKeyedScalars wrote,
+// one file per key, into a map. A missing or empty directory returns
+// nil, so the omitempty field it fills stays out of the status.
 func (t FactsTree) readKeyedScalars(rel string) (map[string]string, error) {
 	entries, err := os.ReadDir(filepath.Join(t.Dir, rel))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -110,9 +102,8 @@ func (t FactsTree) readKeyedScalars(rel string) (map[string]string, error) {
 		if entry.IsDir() {
 			continue
 		}
-		// writeAtomic stages its temp file inside this directory as
-		// .liken-*, and a read can race the rename; a dotfile is
-		// never a key.
+		// writeAtomic creates its temporary file here as .liken-*, and
+		// a read can run before the rename.
 		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
@@ -303,10 +294,8 @@ func (t FactsTree) readNetwork() (NetworkStatus, error) {
 	return n, nil
 }
 
-// readInterfaceWireless reads the radio's standing for one
-// interface. The ssid file is the record's presence: a wired
-// interface writes none, so an absent or empty ssid reads back as no
-// status at all rather than an empty one.
+// readInterfaceWireless returns nil for a wired interface, which has
+// no ssid file.
 func (t FactsTree) readInterfaceWireless(base string) (*WirelessStatus, error) {
 	dir := filepath.Join(base, "wireless")
 	ssid, err := t.readFact(filepath.Join(dir, "ssid"))
@@ -338,16 +327,14 @@ func (t FactsTree) readInterfaceWireless(base string) (*WirelessStatus, error) {
 	if at := association["associatedAt"]; at != "" {
 		parsed, err := time.Parse(time.RFC3339Nano, at)
 		if err != nil {
-			return nil, fmt.Errorf("%s: associatedAt: %w", path, err)
+			return nil, fmt.Errorf("reading associatedAt in %s: %w", path, err)
 		}
 		w.AssociatedAt = &parsed
 	}
 	return w, nil
 }
 
-// recordInt reads one decimal field of a record. An absent field is
-// zero, and a field that does not hold an integer is an error that
-// names the record's path.
+// recordInt returns zero for a missing field.
 func recordInt(record map[string]string, key, path string) (int, error) {
 	value := record[key]
 	if value == "" {
@@ -355,7 +342,7 @@ func recordInt(record map[string]string, key, path string) (int, error) {
 	}
 	n, err := strconv.Atoi(value)
 	if err != nil {
-		return 0, fmt.Errorf("%s: %s: %w", path, key, err)
+		return 0, fmt.Errorf("reading %s in %s: %w", key, path, err)
 	}
 	return n, nil
 }
@@ -372,7 +359,7 @@ func (t FactsTree) readTimeStatus() (TimeStatus, error) {
 	}
 	if stratum := record["stratum"]; stratum != "" {
 		if ts.Stratum, err = strconv.Atoi(stratum); err != nil {
-			return TimeStatus{}, fmt.Errorf("%s: stratum: %w", filepath.Join(t.Dir, "time", "standing"), err)
+			return TimeStatus{}, fmt.Errorf("reading stratum in %s: %w", filepath.Join(t.Dir, "time", "standing"), err)
 		}
 	}
 	return ts, nil
@@ -575,13 +562,9 @@ func (t FactsTree) readRegistries() (RegistriesStatus, error) {
 	return r, nil
 }
 
-// entryKeys returns the sorted names of the subdirectories under a
-// collection directory. It is how the reader discovers a collection's
-// elements. It ignores a plain file, so a stray file left beside the
-// element directories does not become a phantom element. A directory
-// that does not exist is an empty collection. The order is sorted, so
-// a round trip through the tree returns the elements in one stable
-// order.
+// entryKeys returns the sorted names of the subdirectories of rel,
+// one for each element of a collection. It ignores plain files, so a
+// stray file does not become an element.
 func (t FactsTree) entryKeys(rel string) ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(t.Dir, rel))
 	if errors.Is(err, fs.ErrNotExist) {

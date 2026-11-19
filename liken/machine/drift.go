@@ -1,15 +1,12 @@
 package machine
 
-// Drift compares what a Machine spec declares against what a boot
-// actuated. This package holds shared logic, not logic specific to
-// the operator, because two programs must agree on the comparison
-// exactly. The operator uses the comparison to determine whether to
-// converge, and how. init uses the comparison to check that a staged
-// manifest is really applicable without a reboot, before init
-// applies the manifest live. If the operator and init used two
-// different implementations of "is this the same storage?", the two
-// implementations would eventually disagree. The operator would then
-// request an action forever that init keeps refusing.
+// machine-operator and init both compare a Machine spec against the
+// boot record, the copy of the spec that this boot applied, so the
+// comparison is in this package. The
+// operator uses it to choose between a live load and a reboot, and
+// init uses it to check that a live load changes nothing that needs a
+// reboot. If the two compared differently, the operator could request
+// a live load that init always refuses.
 
 import (
 	"fmt"
@@ -18,109 +15,99 @@ import (
 	"strings"
 )
 
-// StorageDrift compares the declared storage against what the boot
-// actuated. It compares role by role and normalizes sizes, so
-// 2048Mi and 2Gi declare the same thing. StorageDrift writes the
-// returned diffs for people to read. The diffs appear verbatim in
-// condition messages.
-func StorageDrift(desired, actuated StorageSpec) []string {
+// StorageDrift returns one line for each difference between the
+// declared storage and the boot record's storage, role by role. Sizes
+// are compared as byte counts, so 2048Mi and 2Gi are the same. The
+// lines appear verbatim in condition messages.
+func StorageDrift(desired, booted StorageSpec) []string {
 	var diffs []string
 	desiredRoles := rolesByName(desired)
-	actuatedRoles := rolesByName(actuated)
+	bootedRoles := rolesByName(booted)
 	for _, name := range StorageRoleNames {
 		d, dok := desiredRoles[name]
-		a, aok := actuatedRoles[name]
+		a, aok := bootedRoles[name]
 		switch {
 		case dok && !aok:
-			diffs = append(diffs, fmt.Sprintf("%s: declared but not actuated", name))
+			diffs = append(diffs, fmt.Sprintf("%s: declared but this boot ran without it", name))
 		case !dok && aok:
-			diffs = append(diffs, fmt.Sprintf("%s: actuated but no longer declared", name))
+			diffs = append(diffs, fmt.Sprintf("%s: no longer declared but this boot ran with it", name))
 		case dok && aok:
 			if d.Device != a.Device {
-				diffs = append(diffs, fmt.Sprintf("%s: device %s declared, %s actuated", name, d.Device, a.Device))
+				diffs = append(diffs, fmt.Sprintf("%s: device %s declared, %s in this boot", name, d.Device, a.Device))
 			}
 			if !sameSize(d.Size, a.Size) {
-				diffs = append(diffs, fmt.Sprintf("%s: size %s declared, %s actuated", name, orRemainder(d.Size), orRemainder(a.Size)))
+				diffs = append(diffs, fmt.Sprintf("%s: size %s declared, %s in this boot", name, orRemainder(d.Size), orRemainder(a.Size)))
 			}
 		}
 	}
 	return diffs
 }
 
-// NetworkDrift compares the declared network against what the boot
-// actuated. Unlike storage, a network spec has no grow-only rule and
-// no shape a machine must keep: any spec may replace any other, and
-// the only question is whether the running machine matches the one
-// the cluster asks for now.
+// NetworkDrift returns one line for each difference between the
+// declared network and the boot record's network.
 //
-// A nil actuated spec means the boot recorded no network. There is
-// nothing to compare against, so there is no drift to report. The
-// alternative would be to read every declared interface as drift, and
-// stage a manifest and ask for a reboot on every machine whose facts
-// happen to lack this record.
+// A nil booted spec means the boot recorded no network, and
+// NetworkDrift returns no differences. If it compared against an
+// empty spec, every declared interface would be drift, and every
+// machine with no network in its boot record would request a reboot.
 //
-// HostEntries takes no part in this comparison. Unlike an interface,
-// a host entry reconciles live (milestone 53): the machine operator
-// applies spec.network.hostEntries on every pass, so an edit never
-// waits for a reboot and never belongs in the set of differences
-// that asks for one.
-func NetworkDrift(desired NetworkSpec, actuated *NetworkSpec) []string {
-	if actuated == nil {
+// spec.network.hostEntries is not compared, because machine-operator
+// writes /etc/hosts on every reconcile pass and an edit needs no
+// reboot.
+func NetworkDrift(desired NetworkSpec, booted *NetworkSpec) []string {
+	if booted == nil {
 		return nil
 	}
 	var diffs []string
-	for i := range max(len(desired.Interfaces), len(actuated.Interfaces)) {
+	for i := range max(len(desired.Interfaces), len(booted.Interfaces)) {
 		switch {
-		case i >= len(actuated.Interfaces):
-			diffs = append(diffs, fmt.Sprintf("network: %s declared but not actuated", desired.Interfaces[i].Name))
+		case i >= len(booted.Interfaces):
+			diffs = append(diffs, fmt.Sprintf("network: %s declared but this boot ran without it", desired.Interfaces[i].Name))
 		case i >= len(desired.Interfaces):
-			diffs = append(diffs, fmt.Sprintf("network: %s actuated but no longer declared", actuated.Interfaces[i].Name))
+			diffs = append(diffs, fmt.Sprintf("network: %s no longer declared but this boot ran with it", booted.Interfaces[i].Name))
 		default:
-			diffs = append(diffs, interfaceDrift(i, desired.Interfaces[i], actuated.Interfaces[i])...)
+			diffs = append(diffs, interfaceDrift(i, desired.Interfaces[i], booted.Interfaces[i])...)
 		}
 	}
 	return diffs
 }
 
-// interfaceDrift compares one position of the two lists. When the two
-// entries name different ports, that one difference is the whole
-// report: the addressing under it belongs to another port, so
-// reporting each field as well would say the same thing several times
-// over.
-func interfaceDrift(position int, desired, actuated InterfaceSpec) []string {
-	if desired.Name != actuated.Name {
-		return []string{fmt.Sprintf("network: interface %d: %s declared, %s actuated",
-			position+1, desired.Name, actuated.Name)}
+// interfaceDrift compares the interfaces at one position of the two
+// lists. When the names differ, it reports only the name, because the
+// other fields then describe two different ports.
+func interfaceDrift(position int, desired, booted InterfaceSpec) []string {
+	if desired.Name != booted.Name {
+		return []string{fmt.Sprintf("network: interface %d: %s declared, %s in this boot",
+			position+1, desired.Name, booted.Name)}
 	}
 	var diffs []string
-	if desired.Address != actuated.Address {
-		diffs = append(diffs, fmt.Sprintf("network: %s: address %s declared, %s actuated",
-			desired.Name, orDHCP(desired.Address), orDHCP(actuated.Address)))
+	if desired.Address != booted.Address {
+		diffs = append(diffs, fmt.Sprintf("network: %s: address %s declared, %s in this boot",
+			desired.Name, orDHCP(desired.Address), orDHCP(booted.Address)))
 	}
-	if desired.Gateway != actuated.Gateway {
-		diffs = append(diffs, fmt.Sprintf("network: %s: gateway %s declared, %s actuated",
-			desired.Name, orNone(desired.Gateway), orNone(actuated.Gateway)))
+	if desired.Gateway != booted.Gateway {
+		diffs = append(diffs, fmt.Sprintf("network: %s: gateway %s declared, %s in this boot",
+			desired.Name, orNone(desired.Gateway), orNone(booted.Gateway)))
 	}
-	if !slices.Equal(desired.Nameservers, actuated.Nameservers) {
-		diffs = append(diffs, fmt.Sprintf("network: %s: nameservers %s declared, %s actuated",
+	if !slices.Equal(desired.Nameservers, booted.Nameservers) {
+		diffs = append(diffs, fmt.Sprintf("network: %s: nameservers %s declared, %s in this boot",
 			desired.Name,
 			orNone(strings.Join(desired.Nameservers, ", ")),
-			orNone(strings.Join(actuated.Nameservers, ", "))))
+			orNone(strings.Join(booted.Nameservers, ", "))))
 	}
-	if wirelessSummary(desired.Wireless) != wirelessSummary(actuated.Wireless) {
-		diffs = append(diffs, fmt.Sprintf("network: %s: wireless %s declared, %s actuated",
+	if wirelessSummary(desired.Wireless) != wirelessSummary(booted.Wireless) {
+		diffs = append(diffs, fmt.Sprintf("network: %s: wireless %s declared, %s in this boot",
 			desired.Name,
 			orNone(wirelessSummary(desired.Wireless)),
-			orNone(wirelessSummary(actuated.Wireless))))
+			orNone(wirelessSummary(booted.Wireless))))
 	}
 	return diffs
 }
 
-// wirelessSummary renders one wireless entry as the pair of facts
-// that decide whether a rejoin is needed. The security is resolved
-// through its default first, so a spec that left the field unset and
-// a record that holds the default read as the same request instead
-// of as drift that never settles.
+// wirelessSummary returns the SSID and security of a wireless entry,
+// the fields that decide whether the machine must join the network
+// again. It applies the security default first, so a spec that leaves
+// the field unset matches a boot record that has the default.
 func wirelessSummary(w *WirelessSpec) string {
 	if w == nil {
 		return ""
@@ -128,62 +115,52 @@ func wirelessSummary(w *WirelessSpec) string {
 	return fmt.Sprintf("%s (%s)", w.SSID, w.SecurityOrDefault())
 }
 
-// RlimitDrift compares the declared resource limits against what the
-// boot actuated. Both sides are the spec's own map, so this is a
-// straight comparison of two requests, the way ModulesDrift compares
-// two module lists.
+// RlimitDrift returns one line for each difference between the
+// declared spec.rlimits and the boot's copy of it.
 //
-// The limits every liken machine holds take no part in this. They ship
-// with the release rather than with the spec, so a change to the table
-// arrives with a new system image and the reboot that installs it.
-// Comparing them here would read as drift on every machine in a fleet
-// the moment the table changed.
+// OSRlimits is not compared, because a change to it ships in a new
+// release, and the upgrade to that release reboots the machine.
 //
-// A value is compared as written, not as parsed. "1048576" and
-// "1048576:1048576" set the same pair of numbers, and this reports
-// them as drift. That costs one reboot on a machine whose operator
-// rewrote a value without changing it, and the alternative costs a
-// parse in the one comparison that decides whether to reboot a
-// machine. A drift that reboots once too often is a smaller fault than
-// one that never reboots at all.
-func RlimitDrift(desired, actuated map[string]string) []string {
+// Values are compared as strings, so "1048576" and "1048576:1048576"
+// are drift although they set the same limits. A person who rewrites
+// a value in another form causes one reboot that changes nothing, and
+// in return the comparison that decides a reboot does no parsing.
+func RlimitDrift(desired, booted map[string]string) []string {
 	var diffs []string
 	names := map[string]bool{}
 	for name := range desired {
 		names[name] = true
 	}
-	for name := range actuated {
+	for name := range booted {
 		names[name] = true
 	}
 	for _, name := range slices.Sorted(maps.Keys(names)) {
 		d, dok := desired[name]
-		a, aok := actuated[name]
+		a, aok := booted[name]
 		switch {
 		case dok && !aok:
-			diffs = append(diffs, fmt.Sprintf("rlimit %s: %s declared but not actuated", name, d))
+			diffs = append(diffs, fmt.Sprintf("rlimit %s: %s declared but this boot ran without it", name, d))
 		case !dok && aok:
-			diffs = append(diffs, fmt.Sprintf("rlimit %s: %s actuated but no longer declared", name, a))
+			diffs = append(diffs, fmt.Sprintf("rlimit %s: %s no longer declared but this boot ran with it", name, a))
 		case d != a:
-			diffs = append(diffs, fmt.Sprintf("rlimit %s: %s declared, %s actuated", name, d, a))
+			diffs = append(diffs, fmt.Sprintf("rlimit %s: %s declared, %s in this boot", name, d, a))
 		}
 	}
 	return diffs
 }
 
-// ModuleSetDiff compares two module lists as sets. Order and
-// repetition carry no meaning in these lists. ModuleSetDiff reports
-// both directions separately, because the two directions converge in
-// different ways. The system can load an added module into the
-// running kernel. But a retracted module can only leave the system
-// at a reboot. The kernel has no safe way to remove a driver while
-// something else uses it.
-func ModuleSetDiff(desired, actuated []string) (added, retracted []string) {
+// ModuleSetDiff compares two module lists as sets, ignoring order and
+// repeats, and returns the added and the retracted modules
+// separately. init can load an added module into the running kernel.
+// A retracted module stays loaded until the next boot, because the
+// kernel cannot safely unload a driver that something may be using.
+func ModuleSetDiff(desired, booted []string) (added, retracted []string) {
 	want := map[string]bool{}
 	for _, name := range desired {
 		want[name] = true
 	}
 	have := map[string]bool{}
-	for _, name := range actuated {
+	for _, name := range booted {
 		have[name] = true
 	}
 	for _, name := range slices.Sorted(maps.Keys(want)) {
@@ -199,23 +176,19 @@ func ModuleSetDiff(desired, actuated []string) (added, retracted []string) {
 	return added, retracted
 }
 
-// ModulesDrift writes ModuleSetDiff results for people to read, the
-// same way StorageDrift does. The actuated side is the boot record's
-// copy of the request, not the result of loading modules. This
-// design is deliberate. A declared module that the image lacked
-// still counts as actuated, because rebooting again with the same
-// image would change nothing. The ModulesLoaded condition reports
-// that problem instead. The fix for that problem is a new image, not
-// a reboot.
+// ModulesDrift returns one line for each added or retracted module and
+// each changed module parameter. The booted list is the boot
+// record's copy of the declared list, not the modules that loaded. A
+// declared module that the image lacks is still in the booted list,
+// because another reboot with the same image would not load it. The
+// ModulesLoaded condition reports that module.
 //
-// Parameter drift rides in this same list rather than in a list of
-// its own, because the live-load rule counts: a staged spec applies
-// live only when added modules are the whole of the drift
-// (converge.go). A parameter line in the count makes any parameter
-// change on a loaded module miss that test and take the reboot path,
-// with no new rule written anywhere.
-func ModulesDrift(desired, actuated []string, desiredParameters, actuatedParameters map[string]string) []string {
-	added, retracted := ModuleSetDiff(desired, actuated)
+// decideConvergence in machine-operator/converge.go requests a live
+// load only when the drift has one line for each added module or
+// serio entry and no other lines. So a parameter line here makes a
+// changed parameter need a reboot.
+func ModulesDrift(desired, booted []string, desiredParameters, bootedParameters map[string]string) []string {
+	added, retracted := ModuleSetDiff(desired, booted)
 	var diffs []string
 	for _, name := range added {
 		diffs = append(diffs, fmt.Sprintf("modules: %s declared but this boot ran without it", name))
@@ -223,27 +196,26 @@ func ModulesDrift(desired, actuated []string, desiredParameters, actuatedParamet
 	for _, name := range retracted {
 		diffs = append(diffs, fmt.Sprintf("modules: %s no longer declared but this boot ran with it", name))
 	}
-	return append(diffs, ModuleParameterDrift(desired, actuated, desiredParameters, actuatedParameters)...)
+	return append(diffs, ModuleParameterDrift(desired, booted, desiredParameters, bootedParameters)...)
 }
 
-// ModuleOrderDrift writes one line when the declared order of the
+// ModuleOrderDrift returns one line when the declared order of the
 // modules differs from the order the boot loaded them in.
 //
-// Order is drift because the position of a name decides which driver
-// claims the hardware. When a sound controller loads before the
-// codec's own driver, the kernel binds the codec to the generic
-// driver, and the codec's outputs never appear. Only a boot can load
-// the list again in a new order, so a reorder stages the manifest
-// and asks for no disruption (machine-operator/converge.go).
+// Order decides which driver binds the hardware. When a sound
+// controller's driver loads before the codec's own driver, the kernel
+// binds the codec to the generic driver and the codec's outputs do
+// not appear. Only a boot can load the list in a new order, so
+// machine-operator stages a reordered spec for the next boot and
+// requests no reboot.
 //
-// The comparison is its own function beside the set diff above, and
-// it uses only the modules both lists hold. An addition or a
-// retraction is then never read as a reorder. It reports the earliest
-// pair that changed places, because one pair names the change.
-func ModuleOrderDrift(desired, actuated []string) []string {
-	shared := sharedModules(desired, actuated)
+// It compares only the modules that are in both lists, so an added or
+// retracted module is not a reorder, and it reports the first
+// position where the lists differ.
+func ModuleOrderDrift(desired, booted []string) []string {
+	shared := sharedModules(desired, booted)
 	declared := sharedOrder(desired, shared)
-	loaded := sharedOrder(actuated, shared)
+	loaded := sharedOrder(booted, shared)
 	for i := range declared {
 		if declared[i] != loaded[i] {
 			return []string{fmt.Sprintf("modules: the declared order changed: %s now loads before %s", declared[i], loaded[i])}
@@ -252,9 +224,8 @@ func ModuleOrderDrift(desired, actuated []string) []string {
 	return nil
 }
 
-// sharedOrder reduces a list to the shared modules alone, in the
-// list's own order and with repetition dropped. The two reduced lists
-// hold the same names, so they compare position by position.
+// sharedOrder returns the names that are in shared, in list order and
+// without repeats.
 func sharedOrder(names []string, shared map[string]bool) []string {
 	var order []string
 	for _, name := range names {
@@ -265,21 +236,20 @@ func sharedOrder(names []string, shared map[string]bool) []string {
 	return order
 }
 
-// ModuleParameterDrift writes a line only for a module that both the
-// desired and the actuated sets declare. A parameter that arrives
-// with a module the boot never loaded is part of that module's own
-// added line: the live loader passes the string at the load, because
-// a module loading for the first time takes its parameters normally.
-// A parameter on a module the boot already loaded writes its own
-// line here, and that line is what forces the reboot path, because a
-// loaded module never reads its parameters again.
-func ModuleParameterDrift(desiredModules, actuatedModules []string, desired, actuated map[string]string) []string {
-	shared := sharedModules(desiredModules, actuatedModules)
+// ModuleParameterDrift returns one line for each changed parameter of
+// a module that is in both the desired and the booted lists.
+//
+// It skips the parameters of an added module, because init passes
+// them when it loads the module. A loaded module does not read its
+// parameters again, so a changed parameter of a loaded module needs a
+// reboot.
+func ModuleParameterDrift(desiredModules, bootedModules []string, desired, booted map[string]string) []string {
+	shared := sharedModules(desiredModules, bootedModules)
 	keys := map[string]bool{}
 	for key := range desired {
 		keys[key] = true
 	}
-	for key := range actuated {
+	for key := range booted {
 		keys[key] = true
 	}
 	var diffs []string
@@ -289,24 +259,23 @@ func ModuleParameterDrift(desiredModules, actuatedModules []string, desired, act
 			continue
 		}
 		d, dok := desired[key]
-		a, aok := actuated[key]
+		a, aok := booted[key]
 		switch {
 		case dok && !aok:
-			diffs = append(diffs, fmt.Sprintf("module parameter %s: %s declared but not actuated", key, d))
+			diffs = append(diffs, fmt.Sprintf("module parameter %s: %s declared but this boot ran without it", key, d))
 		case !dok && aok:
-			diffs = append(diffs, fmt.Sprintf("module parameter %s: %s actuated but no longer declared", key, a))
+			diffs = append(diffs, fmt.Sprintf("module parameter %s: %s no longer declared but this boot ran with it", key, a))
 		case d != a:
-			diffs = append(diffs, fmt.Sprintf("module parameter %s: %s declared, %s actuated", key, d, a))
+			diffs = append(diffs, fmt.Sprintf("module parameter %s: %s declared, %s in this boot", key, d, a))
 		}
 	}
 	return diffs
 }
 
-// sharedModules is the set of modules present in both lists, the
-// only modules a parameter drift line may name.
-func sharedModules(desired, actuated []string) map[string]bool {
+// sharedModules returns the modules that are in both lists.
+func sharedModules(desired, booted []string) map[string]bool {
 	have := map[string]bool{}
-	for _, name := range actuated {
+	for _, name := range booted {
 		have[name] = true
 	}
 	shared := map[string]bool{}
@@ -326,10 +295,9 @@ func rolesByName(spec StorageSpec) map[StorageRoleName]DeclaredRole {
 	return byName
 }
 
-// sameSize compares two size declarations by the number of bytes
-// each one describes, not by the spelling. If a size cannot be
-// parsed, sameSize falls back to a string comparison instead of a
-// panic. Validation refuses an unparseable size anyway.
+// sameSize compares two sizes as byte counts. When either size does
+// not parse, it compares the strings. Validation rejects such a size,
+// so the result only has to be stable.
 func sameSize(a, b string) bool {
 	if a == "" || b == "" {
 		return a == b
@@ -349,9 +317,8 @@ func orRemainder(size string) string {
 	return size
 }
 
-// orDHCP names the empty address for a reader. An interface with no
-// declared address asks for DHCP, so the diff says so rather than
-// leaving a gap where a value should be.
+// orDHCP shows an empty address as "(DHCP)", because an interface
+// with no address uses DHCP.
 func orDHCP(address string) string {
 	if address == "" {
 		return "(DHCP)"
@@ -359,8 +326,6 @@ func orDHCP(address string) string {
 	return address
 }
 
-// orNone names an empty optional field for a reader, for the same
-// reason orDHCP does.
 func orNone(value string) string {
 	if value == "" {
 		return "(none)"
@@ -368,19 +333,18 @@ func orNone(value string) string {
 	return value
 }
 
-// SerioSetDiff compares two spec.serio lists as sets of whole entries.
-// Order carries no meaning in the list. The two directions converge
-// differently, the same way modules do: init attaches an added entry
-// while the machine runs, and a retracted entry's holder keeps the
-// port until the next boot, because a pod may hold the devices the
-// port created.
-func SerioSetDiff(desired, actuated []SerioAttachment) (added, retracted []SerioAttachment) {
+// SerioSetDiff compares two spec.serio lists as sets of whole
+// entries, and returns the added and the retracted entries
+// separately. init attaches an added entry while the machine runs. A
+// retracted entry stays attached until the next boot, because a pod
+// can hold the devices that the attachment created.
+func SerioSetDiff(desired, booted []SerioAttachment) (added, retracted []SerioAttachment) {
 	for _, a := range desired {
-		if !slices.Contains(actuated, a) && !slices.Contains(added, a) {
+		if !slices.Contains(booted, a) && !slices.Contains(added, a) {
 			added = append(added, a)
 		}
 	}
-	for _, a := range actuated {
+	for _, a := range booted {
 		if !slices.Contains(desired, a) && !slices.Contains(retracted, a) {
 			retracted = append(retracted, a)
 		}
@@ -388,12 +352,11 @@ func SerioSetDiff(desired, actuated []SerioAttachment) (added, retracted []Serio
 	return added, retracted
 }
 
-// SerioDrift writes SerioSetDiff for people to read, one line per
-// entry. The line count is part of the live-load rule
-// (machine-operator/converge.go): a spec applies live only when added
-// modules and added serio entries are the whole of the drift.
-func SerioDrift(desired, actuated []SerioAttachment) []string {
-	added, retracted := SerioSetDiff(desired, actuated)
+// SerioDrift returns one line for each added or retracted spec.serio
+// entry. decideConvergence counts these lines, as ModulesDrift
+// describes.
+func SerioDrift(desired, booted []SerioAttachment) []string {
+	added, retracted := SerioSetDiff(desired, booted)
 	var diffs []string
 	for _, a := range added {
 		diffs = append(diffs, fmt.Sprintf("serio: %s declared but this boot ran without it", a))

@@ -10,10 +10,9 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// ssidCase is one SSID and the two answers it must get: valid is
-// what Validate answers, and matches is what the CRD pattern
-// answers. The two columns differ only where the gap between the two
-// copies of the rule is deliberate.
+// ssidCase is one SSID, whether Validate accepts it (valid), and
+// whether the CRD pattern accepts it (matches). They differ only for
+// control bytes, which Validate refuses and the pattern accepts.
 type ssidCase struct {
 	name    string
 	ssid    string
@@ -21,12 +20,9 @@ type ssidCase struct {
 	matches bool
 }
 
-// ssidCases is the whole SSID rule in one table: the file-naming
-// half, which both copies of the rule enforce, and the control-byte
-// half, which only Validate enforces.
 var ssidCases = []ssidCase{
 	{name: "a plain name", ssid: "homenet", valid: true, matches: true},
-	{name: "spaces and punctuation", ssid: "Stony Point 5G!", valid: true, matches: true},
+	{name: "spaces and punctuation", ssid: "Guest Net 5G!", valid: true, matches: true},
 	{name: "a dot inside", ssid: "home.arpa", valid: true, matches: true},
 	{name: "a leading dot", ssid: ".hidden", valid: true, matches: true},
 	{name: "two leading dots", ssid: "..hidden", valid: true, matches: true},
@@ -45,8 +41,6 @@ var ssidCases = []ssidCase{
 	{name: "a NUL", ssid: "home\x00guest", valid: false, matches: true},
 }
 
-// wirelessSpec builds the one-radio spec the wireless checks run
-// against.
 func wirelessSpec(ssid string, security WirelessSecurity) NetworkSpec {
 	return NetworkSpec{Interfaces: []InterfaceSpec{
 		{Name: "wlan0", Wireless: &WirelessSpec{SSID: ssid, Security: security}},
@@ -58,30 +52,27 @@ func TestNetworkValidateJudgesAnSSIDByWhetherItCanNameAFile(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := wirelessSpec(tc.ssid, WirelessWPAPSK).Validate()
 			if tc.valid && err != nil {
-				t.Errorf("%q must be accepted: %v", tc.ssid, err)
+				t.Errorf("Validate() for the ssid %q returned %v, want no error", tc.ssid, err)
 			}
 			if !tc.valid && err == nil {
-				t.Errorf("%q must be refused", tc.ssid)
+				t.Errorf("Validate() for the ssid %q returned no error, want a refusal", tc.ssid)
 			}
 		})
 	}
 }
 
-func TestNetworkValidateNamesTheInterfaceThatHoldsAControlByte(t *testing.T) {
-	// The SSID reaches a line-oriented fact file and a generated
-	// supplicant configuration, so a newline breaks the first and
-	// would end a line early in the second. The error must name the
-	// interface and spell the byte, because the raw value prints as
-	// nothing a person can read.
+func TestNetworkValidateEscapesAControlByteInTheSSID(t *testing.T) {
+	// The raw byte would not be readable in the message, so the error
+	// must write it as an escape.
 	err := wirelessSpec("home\nguest", WirelessWPAPSK).Validate()
 	if err == nil {
-		t.Fatal("an SSID with a newline must be refused")
+		t.Fatal("Validate() for an ssid with a newline returned no error, want a refusal")
 	}
 	if !strings.Contains(err.Error(), "wlan0") {
-		t.Errorf("the error must name the interface: %v", err)
+		t.Errorf("the error is %q, want it to name wlan0", err)
 	}
 	if !strings.Contains(err.Error(), `\n`) {
-		t.Errorf("the error must spell the byte rather than print it: %v", err)
+		t.Errorf("the error is %q, want the newline written as an escape because a raw newline is unreadable", err)
 	}
 }
 
@@ -92,25 +83,21 @@ func TestNetworkValidateAcceptsAnSSIDOf32Octets(t *testing.T) {
 }
 
 func TestNetworkValidateRejectsAnSSIDLongerThan32Octets(t *testing.T) {
-	// 802.11 carries an SSID in an element of at most 32 octets, so
-	// a longer value names a network no radio can join.
 	err := wirelessSpec(strings.Repeat("s", 33), WirelessWPAPSK).Validate()
 	if err == nil {
-		t.Fatal("an SSID of 33 octets must be refused")
+		t.Fatal("Validate() for an ssid of 33 octets returned no error, want a refusal")
 	}
 	if !strings.Contains(err.Error(), "32") {
-		t.Errorf("the error must name the limit: %v", err)
+		t.Errorf("the error is %q, want it to name the limit 32", err)
 	}
 }
 
 func TestNetworkValidateCountsAnSSIDInOctetsNotCharacters(t *testing.T) {
-	// The limit counts octets, not characters: sixteen two-octet
-	// characters fill the element exactly and seventeen overrun it.
 	if err := wirelessSpec(strings.Repeat("é", 16), WirelessWPAPSK).Validate(); err != nil {
-		t.Errorf("16 two-octet characters fit in 32 octets: %v", err)
+		t.Errorf("Validate() for 16 two-octet characters (32 octets) returned %v, want no error", err)
 	}
 	if err := wirelessSpec(strings.Repeat("é", 17), WirelessWPAPSK).Validate(); err == nil {
-		t.Error("17 two-octet characters overrun 32 octets")
+		t.Error("Validate() for 17 two-octet characters (34 octets) returned no error, want a refusal")
 	}
 }
 
@@ -125,15 +112,14 @@ func TestNetworkValidateAcceptsBothSecurityValues(t *testing.T) {
 }
 
 func TestNetworkValidateRejectsAnUnknownSecurityValue(t *testing.T) {
-	// The API server refuses a value outside the enum, but a
-	// manifest from a stick reaches init without that check, so the
-	// Go copy of the rule must refuse it too.
+	// A manifest from an install stick reaches init without the CRD's
+	// enum check.
 	err := wirelessSpec("homenet", "wep").Validate()
 	if err == nil {
-		t.Fatal("an unknown security value must be refused")
+		t.Fatal("Validate() for the security wep returned no error, want a refusal")
 	}
 	if !strings.Contains(err.Error(), "wep") {
-		t.Errorf("the error must name the value: %v", err)
+		t.Errorf("the error is %q, want it to name the value wep", err)
 	}
 }
 
@@ -145,8 +131,6 @@ func TestNetworkValidateLeavesAWiredInterfaceAlone(t *testing.T) {
 }
 
 func TestSecurityOrDefaultResolvesTheUnsetValue(t *testing.T) {
-	// A manifest that names only an SSID asks for the common case,
-	// and an open network is the deviation a person spells out.
 	cases := map[WirelessSecurity]WirelessSecurity{
 		"":             WirelessWPAPSK,
 		WirelessWPAPSK: WirelessWPAPSK,
@@ -156,7 +140,7 @@ func TestSecurityOrDefaultResolvesTheUnsetValue(t *testing.T) {
 		t.Run(string(declared), func(t *testing.T) {
 			got := WirelessSpec{SSID: "homenet", Security: declared}.SecurityOrDefault()
 			if got != want {
-				t.Errorf("got %q, want %q", got, want)
+				t.Errorf("SecurityOrDefault() for %q is %q, want %q", declared, got, want)
 			}
 		})
 	}
@@ -184,22 +168,20 @@ spec:
 	}
 	interfaces := m.Spec.Network.Interfaces
 	if interfaces[0].Wireless != nil {
-		t.Errorf("a wired entry declares no wireless: %+v", interfaces[0].Wireless)
+		t.Errorf("the wired entry has wireless %+v, want nil", interfaces[0].Wireless)
 	}
 	wireless := interfaces[1].Wireless
 	if wireless == nil {
-		t.Fatalf("wlan0 declared a wireless network: %+v", interfaces[1])
+		t.Fatalf("wlan0 is %+v, want a wireless network", interfaces[1])
 	}
 	if wireless.SSID != "homenet" || wireless.Security != WirelessWPAPSK {
-		t.Errorf("wlan0 wireless: got %+v", wireless)
+		t.Errorf("wlan0 wireless is %+v, want ssid homenet and security wpa-psk", wireless)
 	}
 }
 
 func TestLoadRejectsAPassphraseInTheManifest(t *testing.T) {
-	// The manifest travels on install sticks and in deployment git,
-	// so strict parsing turns a field that looks like the place for
-	// the secret into an error a person sees before the secret
-	// travels anywhere.
+	// Strict parsing refuses the unknown field, so a passphrase cannot
+	// be written into a manifest.
 	path := writeManifest(t, `
 apiVersion: liken.sh/v1alpha1
 kind: Machine
@@ -214,13 +196,11 @@ spec:
           passphrase: hunter2
 `)
 	if _, err := Load(path); err == nil {
-		t.Error("a wireless entry must have no field for a passphrase")
+		t.Error("Load returned no error for a passphrase in a wireless entry, want a refusal of the unknown field")
 	}
 }
 
-// machineCRDWireless is the wireless schema as the CRD carries it,
-// so the tests can hold the API server's copy of the rules against
-// this package's copy.
+// machineCRDWireless is the wireless schema of the Machine CRD.
 type machineCRDWireless struct {
 	Required   []string `json:"required"`
 	Properties struct {
@@ -237,8 +217,6 @@ type machineCRDWireless struct {
 	} `json:"properties"`
 }
 
-// readMachineCRDWireless reads the wireless schema out of the CRD
-// manifest.
 func readMachineCRDWireless(t *testing.T) machineCRDWireless {
 	t.Helper()
 	raw, err := os.ReadFile("manifests/machines-crd.yaml")
@@ -282,29 +260,27 @@ func readMachineCRDWireless(t *testing.T) machineCRDWireless {
 func TestMachineCRDDeclaresTheWirelessFields(t *testing.T) {
 	wireless := readMachineCRDWireless(t)
 	if !slices.Contains(wireless.Required, "ssid") {
-		t.Errorf("a wireless entry names a network, so ssid is required: %v", wireless.Required)
+		t.Errorf("the required fields are %v, want ssid among them", wireless.Required)
 	}
 	if slices.Contains(wireless.Required, "security") {
-		t.Errorf("security defaults, so it is not required: %v", wireless.Required)
+		t.Errorf("the required fields are %v, want security absent because it has a default", wireless.Required)
 	}
 	if wireless.Properties.SSID.Type != "string" || wireless.Properties.SSID.MaxLength != 32 {
-		t.Errorf("ssid: got %+v", wireless.Properties.SSID)
+		t.Errorf("the ssid schema is %+v, want type string and maxLength 32", wireless.Properties.SSID)
 	}
 	security := wireless.Properties.Security
 	if !slices.Equal(security.Enum, []string{string(WirelessWPAPSK), string(WirelessOpen)}) {
-		t.Errorf("security enum: got %v", security.Enum)
+		t.Errorf("the security enum is %v, want wpa-psk and open", security.Enum)
 	}
 	if security.Default != string(WirelessWPAPSK) {
-		t.Errorf("security default: got %q", security.Default)
+		t.Errorf("the security default is %q, want wpa-psk", security.Default)
 	}
 }
 
 func TestTheCRDPatternJudgesAnSSIDTheSameWayValidateDoes(t *testing.T) {
-	// The API server runs the pattern and never runs the Go check,
-	// so a spec applied with kubectl passes only the pattern. The
-	// two answer alike on the file-naming rule. The control-byte
-	// rows are the deliberate gap, and the operator closes it when
-	// it refuses to stage.
+	// The API server checks a spec applied with kubectl against the
+	// pattern only. The pattern accepts control bytes, and the machine
+	// operator refuses such a spec when it runs Validate.
 	pattern, err := regexp.Compile(readMachineCRDWireless(t).Properties.SSID.Pattern)
 	if err != nil {
 		t.Fatal(err)

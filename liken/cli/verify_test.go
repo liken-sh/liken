@@ -129,7 +129,7 @@ func TestSBOMRefusesARelease(t *testing.T) {
 	files["sbom.cdx.json"] = verifytest.Tampered(files["sbom.cdx.json"])
 	server := verifytest.ServeChannel(t, verifytest.Version, files)
 	err := sbomCommand(t.Context(), []string{"-source", server.URL, verifytest.Version}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "sbom.cdx.json digest mismatch") {
+	if err == nil || !strings.Contains(err.Error(), "artifact sbom.cdx.json has sha256") {
 		t.Errorf("the sbom returned %v", err)
 	}
 }

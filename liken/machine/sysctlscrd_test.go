@@ -7,12 +7,11 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// readSysctls reads the schema of spec.sysctls from the Machine CRD.
 func readSysctls(t *testing.T) crdMapField {
 	t.Helper()
 	raw, err := os.ReadFile("manifests/machines-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Machine CRD: %v", err)
 	}
 	var crd struct {
 		Spec struct {
@@ -32,16 +31,16 @@ func readSysctls(t *testing.T) crdMapField {
 		} `json:"spec"`
 	}
 	if err := yaml.Unmarshal(raw, &crd); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the Machine CRD: %v", err)
 	}
 	return crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Spec.Properties.Sysctls
 }
 
-// A sysctl name names a file under /proc/sys, in the kernel's dotted
-// form or in the slashed form that a name with a dot in one segment
-// needs. Admission refuses a name that cannot name a file there: one
-// that is absolute, climbs out with "..", or has an empty segment, the
-// names sysctlPath refuses before it reaches the kernel.
+// A sysctl name is dotted, as the kernel writes it, or slashed, for a
+// segment that has a dot, such as a VLAN interface. The CRD refuses the
+// names that sysctlPath refuses because they would not map to a file
+// under /proc/sys: an absolute name, one with "." or ".." as a segment,
+// and one with an empty segment.
 func TestMachineCRDRefusesASysctlNameOutsideProcSys(t *testing.T) {
 	pattern := keyRulePattern(t, readSysctls(t).Validations)
 	cases := []struct {
@@ -69,16 +68,16 @@ func TestMachineCRDRefusesASysctlNameOutsideProcSys(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.key, func(t *testing.T) {
 			if got := pattern.MatchString(tc.key); got != tc.accepted {
-				t.Errorf("%q accepted = %v, want %v", tc.key, got, tc.accepted)
+				t.Errorf("the key rule accepts %q is %v, want %v", tc.key, got, tc.accepted)
 			}
 		})
 	}
 }
 
-// The CEL cost of a rule over every key needs a bound on the number of
-// keys, and the API server refuses a schema whose rule it cannot bound.
+// The API server refuses a schema with a CEL rule over every key
+// unless it can bound the rule's cost, which needs maxProperties.
 func TestMachineCRDBoundsTheSysctlsItChecks(t *testing.T) {
 	if got := readSysctls(t).MaxProperties; got == 0 {
-		t.Error("spec.sysctls must set maxProperties, so the key rule has a bounded cost")
+		t.Error("spec.sysctls has no maxProperties, want one so the API server can bound the key rule's cost")
 	}
 }

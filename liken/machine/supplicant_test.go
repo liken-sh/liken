@@ -7,8 +7,8 @@ import (
 	"github.com/liken-sh/liken/liken/machine/supplicanttest"
 )
 
-// statusCompleted is the answer a real wpa_supplicant 2.12 gave to
-// STATUS on an associated radio.
+// statusCompleted is a STATUS reply that wpa_supplicant 2.12 returned
+// for an associated radio.
 const statusCompleted = `bssid=04:4a:2c:11:22:33
 freq=5180
 ssid=homenet
@@ -29,11 +29,11 @@ func TestASupplicantReportsTheAccessPointItIsAssociatedWith(t *testing.T) {
 	s.Answer("STATUS", statusCompleted)
 	got, err := AskSupplicantAssociation(s.Socket, time.Second)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("asking the supplicant for its association: %v", err)
 	}
 	want := SupplicantAssociation{BSSID: "04:4a:2c:11:22:33", Frequency: 5180}
 	if got != want {
-		t.Errorf("got %+v, want %+v", got, want)
+		t.Errorf("AskSupplicantAssociation = %+v, want %+v", got, want)
 	}
 }
 
@@ -42,23 +42,23 @@ func TestASupplicantStillJoiningReportsNoAccessPoint(t *testing.T) {
 	s.Answer("STATUS", "bssid=04:4a:2c:11:22:33\nfreq=5180\nwpa_state=4WAY_HANDSHAKE\n")
 	got, err := AskSupplicantAssociation(s.Socket, time.Second)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("asking the supplicant for its association: %v", err)
 	}
 	if got != (SupplicantAssociation{}) {
-		t.Errorf("got %+v, want no access point before the handshake completes", got)
+		t.Errorf("AskSupplicantAssociation = %+v, want no access point before the handshake completes", got)
 	}
 }
 
 func TestAnUnknownCommandIsAnError(t *testing.T) {
 	s := supplicanttest.Start(t, t.TempDir(), "wlan0")
 	if _, err := AskSupplicant(s.Socket, "SIGNAL_POLL", time.Second); err == nil {
-		t.Error("an answer of UNKNOWN COMMAND must be an error")
+		t.Error("AskSupplicant returned no error for a reply of UNKNOWN COMMAND, want an error")
 	}
 }
 
 func TestAMissingSocketIsAnError(t *testing.T) {
 	if _, err := AskSupplicant(SupplicantSocket(t.TempDir(), "wlan0"), "STATUS", time.Second); err == nil {
-		t.Error("a socket that does not exist must be an error")
+		t.Error("AskSupplicant returned no error for a socket that does not exist, want an error")
 	}
 }
 

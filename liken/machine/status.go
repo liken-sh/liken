@@ -1,12 +1,9 @@
 package machine
 
-// This file defines the observed half of the Machine API. Kubernetes
-// convention keeps the two halves separate: the spec is what a user
-// requested, and the status is what the controllers observed. The
-// status must be reconstructible. An operator must be able to erase
-// the status and rebuild it only by observing the machine. The types
-// in this file do not store anything between passes. Each pass
-// re-derives every value from the current observation.
+// The status of a Machine is what init and the operators observed on
+// the machine. No value in status depends on an earlier status: each
+// pass derives every value again from the machine, so a status that is
+// erased is rebuilt in full.
 
 import (
 	"strings"
@@ -16,217 +13,154 @@ import (
 )
 
 type MachineStatus struct {
-	// Phase summarizes the machine's state in one word. Each pass
-	// computes it from the conditions below. No component stores
-	// Phase between passes, so it can never go out of date compared
-	// to the conditions. Conditions serve programs, such as kubectl
-	// wait and other controllers. Phase serves the human who reads a
-	// fleet listing. See the api package's Phase constants for the
-	// vocabulary.
+	// Phase summarizes the conditions in one word for a person who
+	// reads `kubectl get machines`. Each pass computes it from the
+	// conditions, so the two agree. A program reads the conditions.
 	Phase api.Phase `json:"phase,omitempty"`
 
 	// ObservedGeneration is the metadata.generation of the spec that
-	// this status judged, stamped by the operator on every pass. The
-	// conditions each carry the same stamp, but a client that only
-	// asks "has the operator seen my edit yet" should not have to
-	// parse conditions for the answer. Kubernetes controllers publish
-	// this field at the top of status for exactly that question.
-	// Init leaves this field empty in the facts, because init runs
-	// before the cluster exists and a generation is the API server's
-	// number to hand out.
+	// the operator computed this status from, so a client can tell
+	// whether the operator has read its edit without parsing the
+	// conditions. Init leaves it empty, because the API server assigns
+	// generations and init runs before the cluster exists.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// Version reports what this machine runs. It does not include the
-	// k3s and kubelet versions, because Kubernetes already reports
-	// them on the built-in Node object. Version covers the layer
-	// below the Node object instead.
+	// Version reports the version of liken and of each component that
+	// the OS image contains.
 	Version VersionStatus `json:"version,omitzero"`
 
-	// Role is what this machine is in its cluster: a leader that runs
-	// a control plane, or a follower that runs workloads. Boot derives
-	// Role from the Cluster manifest's leaders list. No one declares
-	// Role here directly.
+	// Role is a leader, which runs a control plane, or a follower,
+	// which runs workloads. Init derives it at boot from the leaders
+	// list of the Cluster manifest. No field of the Machine spec sets
+	// it.
 	Role api.Role `json:"role,omitempty"`
 
-	// Network is the outcome of the boot's networking: DHCP leases and
-	// static assignments alike. It makes queryable the same facts that
-	// init prints to the console.
+	// Network is the result of the network setup at boot, by DHCP or
+	// by static assignment.
 	Network NetworkStatus `json:"network,omitzero"`
 
-	// Time reports the state of this machine's clock. It makes
-	// queryable the same facts that the time loop prints to the
-	// console. Unlike most of status, Time changes for the whole life
-	// of the machine, because the clock is disciplined continuously,
-	// not configured once at boot.
+	// Time reports the state of this machine's clock. Init updates it
+	// for as long as the machine runs, because it adjusts the clock
+	// continuously and not only at boot.
 	Time TimeStatus `json:"time,omitzero"`
 
-	// Hardware is what the machine found when it started running.
+	// Hardware is what the machine found when it started.
 	Hardware HardwareStatus `json:"hardware,omitzero"`
 
-	// Firmware is the machine's standing firmware state: the mode it
-	// boots in, and the boot menu from its non-volatile store. On
-	// UEFI machines, the variables are decoded into words. BIOS is
-	// the name for any machine without firmware variables to consult,
-	// such as a legacy server or a direct-kernel boot under a
-	// hypervisor. Firmware sits beside Hardware because it describes
-	// the machine, not the boot: BootOrder is a standing preference,
-	// and BootNext is about the next boot. Only BootCurrent is a fact
-	// about this boot, and it stays here so the firmware fields read
-	// together. Contrast this with Boot, the per-boot record below.
+	// Firmware is the firmware mode that the machine booted in, and the
+	// boot entries from the firmware's variable store. The mode is BIOS
+	// on any machine with no firmware variables to read, such as a
+	// legacy server or a direct-kernel boot under a hypervisor.
+	//
+	// Firmware is separate from Boot because the firmware variables
+	// persist across reboots. BootCurrent is the only field here that
+	// describes this boot.
 	Firmware FirmwareStatus `json:"firmware,omitzero"`
 
-	// Storage reports where each storage role is actually backed this
-	// boot, whether declared or not. The spec says what was
-	// requested, and hardware.blockDevices says what is attached.
-	// Storage connects the two.
+	// Storage reports where each storage role is on this boot, whether
+	// the spec declares the role or not. It connects the roles of the
+	// spec with the disks of hardware.blockDevices.
 	Storage StorageStatus `json:"storage,omitzero"`
 
-	// Sysctls echoes the observed value of every parameter liken sets,
-	// read back from /proc/sys: the settings every liken machine holds
-	// (machine.OSSysctls) and the ones spec.sysctls declares. This
-	// puts what was asked for and what the kernel holds side by side
-	// in one kubectl get.
-	//
-	// A parameter liken could not write is absent here, because a
-	// failed write is never read back. That is what makes this map the
-	// list of parameters that currently hold, rather than the list
-	// somebody wanted.
+	// Sysctls has the value of each parameter of machine.OSSysctls and
+	// of spec.sysctls, read back from /proc/sys. A parameter that liken
+	// could not write is absent, so the map lists the parameters in
+	// effect, not every one that was requested.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
-	// HostEntries echoes the entries /etc/hosts actually holds,
-	// observed on the pass that published them: the live view of
-	// spec.network.hostEntries, the way Sysctls above is the live
-	// view of spec.sysctls. Init writes the file at boot, and the
-	// machine operator reconciles it live afterward, so this field
-	// changes within one reconcile pass of a spec edit, with no
-	// reboot. There is no boot record for it, for the same reason
-	// there is none for Sysctls: a file the operator may rewrite on
-	// any pass is not one boot's fact.
+	// HostEntries has the entries of /etc/hosts, as the observed
+	// counterpart of spec.network.hostEntries. Init writes the file at
+	// boot, and the machine operator writes it on every pass where it
+	// differs from the spec, so an edit takes effect without a reboot.
+	// For the same reason, BootStatus records no copy of it.
 	HostEntries []HostEntry `json:"hostEntries,omitempty"`
 
-	// Rlimits echoes the resource limits init holds, read back from
-	// the kernel: the limits every liken machine holds
-	// (machine.OSRlimits) and the ones spec.rlimits declares. Init is
-	// PID 1, so these are the limits every process on the machine
-	// inherits, k3s and containerd and the containers below them.
-	// Reading /proc/1/limits on the machine gives the same answer in
-	// the kernel's own layout.
+	// Rlimits has the resource limits of machine.OSRlimits and of
+	// spec.rlimits that init applied, read back from the kernel. Init
+	// is PID 1, so every process on the machine inherits them,
+	// including k3s, containerd, and the containers. `/proc/1/limits`
+	// shows the same limits.
 	//
-	// Each value is in the spec's syntax: a number when both halves
-	// agree, "infinity" for no limit, and "soft:hard" when the halves
-	// differ. So this map and spec.rlimits can be compared without
-	// translating either.
-	//
-	// A limit liken could not set is absent here, because a failed
-	// write is never read back. That is what makes this map the list
-	// of limits that hold, rather than the list somebody wanted.
+	// Each value uses the syntax of spec.rlimits, so the two compare
+	// directly: a number when the soft and hard limits are equal,
+	// "infinity" for no limit, and "soft:hard" when they differ. A
+	// limit that liken could not set is absent.
 	Rlimits map[string]string `json:"rlimits,omitempty"`
 
-	// Modules reports the outcome of every module named in
-	// spec.modules. It makes queryable the same verdicts that init
-	// prints to the console. Only the declared extras appear here.
-	// The fixed list of modules the OS loads by itself belongs to the
-	// image, not to the spec.
+	// Modules reports the result for each module in spec.modules. It
+	// does not list the modules that every liken image loads, because
+	// the image and not the spec chooses those.
 	Modules []ModuleStatus `json:"modules,omitempty"`
 
-	// Serio reports each attachment init holds or tried to hold for
-	// spec.serio, and the device nodes each attached driver created.
-	// Unlike Modules, it changes while the machine runs: an adapter
-	// that is unplugged goes Missing, and it goes Attached again
-	// when it is plugged back in.
+	// Serio reports each attachment that init made, or tried to make,
+	// for spec.serio, and the device nodes that each attached driver
+	// created. It changes while the machine runs: an adapter that is
+	// unplugged becomes Missing, and it becomes Attached again when it
+	// is plugged back in.
 	Serio []SerioStatus `json:"serio,omitempty"`
 
-	// Features reports this machine's standing on every feature that
-	// the cluster document enables, in the Cluster's spec.features.
-	// It makes queryable the same verdicts that init prints at boot.
-	// The Cluster declares features for the whole fleet, but this
-	// field is the per-machine answer, because honoring a feature
-	// depends on what the booted image carries. Machines can run
-	// different releases in the middle of a rollout.
+	// Features reports the result on this machine for each feature
+	// that spec.features of the Cluster enables. The result is per
+	// machine because it depends on what the booted image contains,
+	// and machines can run different releases during a rollout.
 	Features []FeatureStatus `json:"features,omitempty"`
 
-	// Registries reports what this machine rendered into k3s's
-	// registries.yaml: which registries are mirrored, which have
-	// credentials, and whether the embedded registry is on. It
-	// reports the hosts only, never the credential material. This
-	// gives console parity, like Features above.
+	// Registries reports what this machine wrote into the
+	// registries.yaml of k3s: which registries are mirrored, which have
+	// credentials, and whether the embedded registry is on. It lists
+	// the hosts and never the credentials.
 	Registries RegistriesStatus `json:"registries,omitzero"`
 
-	// Runtime reports the Go runtime environment init actually handed
-	// the k3s process this boot: the resolved values, not the spec's
-	// strings. It gives console parity for spec.runtime.k3s, so an
-	// operator who edits the ceiling can read back what each machine
-	// runs. This is what makes the values visible while an experiment
-	// runs across a fleet of different sizes.
+	// Runtime reports the runtime settings that init applied to k3s,
+	// the kubelet, and containerd on this boot.
 	Runtime RuntimeStatus `json:"runtime,omitzero"`
 
-	// Boot is what this boot ran under: which documents, and the
-	// storage as actuated. Each boot re-derives it, and it is the
-	// record the operator compares against the spec. Lifetime is what
-	// separates Boot from Firmware. If you power-cut the machine and
-	// boot it unchanged, everything in Boot is freshly re-derived (a
-	// staged manifest applies, or a rejection lands), while Firmware
-	// reports the standing state that carried across the reboot.
+	// Boot records what this boot ran under: the copy of each document
+	// and the storage as init set it up. The operator compares it with
+	// the spec to find drift. Unlike Firmware, every value here is
+	// derived again on each boot.
 	Boot BootStatus `json:"boot,omitzero"`
 
-	// LastCrash is the newest kernel crash this machine still holds
-	// records for: a panic or an oops that pstore carried across the
-	// reboot. It is not necessarily the previous boot's crash. A
-	// machine can boot cleanly for years while an old crash stays on
-	// record, and the timestamp is what says how old the news is.
-	// Every boot re-derives this field from the preserved records on
-	// machineState, so an erased status rebuilds it, and it clears
-	// only when the records themselves leave the retention window.
+	// LastCrash is the newest kernel panic or oops that this machine
+	// has records of, from the pstore records that init copied to
+	// machineState. It can be much older than the previous boot. Read
+	// its time. A newer crash replaces it, and nothing else clears it.
 	LastCrash *CrashStatus `json:"lastCrash,omitempty"`
 
-	// LastFailStop is the last boot this machine refused to run, and
-	// the reason init gave for the refusal (failstop.go). It is not
-	// necessarily the previous boot: a machine that refuses once,
-	// gets repaired, and then runs for months keeps reporting the
-	// refusal, and the timestamp is what says how old the news is.
-	// Every boot re-derives this field from the record on
-	// machineState, so an erased status rebuilds it. Nothing clears
-	// it; the next refusal overwrites it.
+	// LastFailStop is the last boot that this machine refused to run,
+	// with the reason that init gave (see failstop.go). It can be much
+	// older than the previous boot. Read its time. The next refusal
+	// replaces it, and nothing else clears it.
 	LastFailStop *FailStop `json:"lastFailStop,omitempty"`
 
-	// Conditions follow the standard Kubernetes pattern: a set of
-	// typed, timestamped observations, such as "Ready" and
-	// "SysctlsApplied", that controllers maintain and that humans and
-	// tooling read.
+	// Conditions are the standard Kubernetes conditions, such as
+	// "Ready" and "SysctlsApplied".
 	Conditions []api.Condition `json:"conditions,omitempty"`
 
-	// Pending lists what this machine waits to apply: each staged
-	// document that needs a disruption, with the hash a person
-	// approves. The conditions carry the same facts in their
-	// messages, but a message is prose. This field exists so that
-	// nothing has to parse a condition message to find a hash, and
-	// so the question "what is this machine waiting for me to
-	// allow" has a field that answers it.
+	// Pending lists each staged document that waits for a reboot or a
+	// k3s restart to apply it, with the hash that a person approves. A
+	// program reads the hash here and does not parse it out of a
+	// condition message.
 	Pending []PendingDisruption `json:"pending,omitempty"`
 }
 
-// VersionStatus is the complete inventory of what this machine
-// runs: liken's own version, and every outside component the OS
-// carries. Two kinds of fact live here, sourced in different ways.
-// For the kernel and the netfilter userspace, the running machine
-// itself reports a version (`uname` and `iptables -V`), so those
-// fields are observed, in the running software's own vocabulary. The
-// rest — boot artifacts, bundled images, data files — cannot report
-// anything about themselves. VersionStatus reports those from the
-// components record that the image build wrote alongside the bytes
-// it staged (/usr/share/liken/components.yaml). This is the same
-// record of pins that the release document publishes, so the two can
-// never disagree. This block lists k3s even though the Node object
-// already reports a kubelet version, because this block answers a
-// different question: not "what is running the pods" but "what did
-// this OS image carry".
+// VersionStatus lists the version of liken and of each outside
+// component that the OS image contains.
+//
+// Kernel, Xtables, and MicrocodeRevision are read from the running
+// machine. A boot artifact, a bundled image, or a data file cannot
+// report its own version, so those fields come from
+// /usr/share/liken/components.yaml, which the image build writes from
+// the same pins as the release document.
+//
+// K3s is here although the Node reports a kubelet version, because
+// this field reports what the OS image contains.
 type VersionStatus struct {
 	Liken  string `json:"liken,omitempty"`
 	Kernel string `json:"kernel,omitempty"`
 
-	// Xtables is the netfilter userspace version as it reports
-	// itself, for example "v1.8.11 (legacy)" from `iptables -V`. It
-	// is observed, not echoed from a build pin.
+	// Xtables is the version that `iptables -V` reports, for example
+	// "v1.8.11 (legacy)".
 	Xtables string `json:"xtables,omitempty"`
 
 	K3s       string `json:"k3s,omitempty"`
@@ -235,8 +169,8 @@ type VersionStatus struct {
 	OpenISCSI string `json:"openIscsi,omitempty"`
 	NFSUtils  string `json:"nfsUtils,omitempty"`
 
-	// WPASupplicant is the hostap release that supplied the
-	// supplicant init runs for a wireless spec.network entry.
+	// WPASupplicant is the hostap release of the supplicant that init
+	// runs for a wireless entry in spec.network.
 	WPASupplicant string `json:"wpaSupplicant,omitempty"`
 
 	SystemdBoot   string `json:"systemdBoot,omitempty"`
@@ -245,27 +179,24 @@ type VersionStatus struct {
 	Tzdata        string `json:"tzdata,omitempty"`
 	LinuxFirmware string `json:"linuxFirmware,omitempty"`
 
-	// WirelessRegdb is the regulatory database under /lib/firmware.
-	// Its pin lives inside linux-firmware/fetch.sh rather than in a
-	// domain of its own, but the channels a radio may use depend on
-	// it, so it reports here like any other component.
+	// WirelessRegdb is the version of the wireless regulatory database
+	// under /lib/firmware, which decides the channels a radio can use.
+	// linux-firmware/fetch.sh pins it.
 	WirelessRegdb string `json:"wirelessRegdb,omitempty"`
 
-	// Microcode is the pin: which early cpio the release carries.
-	// MicrocodeRevision is observed from the running CPUs. The two
-	// agreeing is the proof that the early cpio applied, and only
-	// real hardware can give it; on a virtual machine the revision is
-	// the hypervisor's.
+	// Microcode is the pinned version of the early microcode cpio in
+	// the release. MicrocodeRevision is the revision that the running
+	// CPUs report. When the two agree, the CPUs loaded the early cpio.
+	// On a virtual machine the hypervisor reports the revision, so only
+	// real hardware shows this.
 	Microcode         string `json:"microcode,omitempty"`
 	MicrocodeRevision string `json:"microcodeRevision,omitempty"`
 }
 
-// NetworkStatus reports how the boot attached this machine to the
-// network. The top-level fields summarize the primary interface: the
-// cluster-facing interface when the Cluster's nodeCIDR identifies it,
-// or otherwise the first interface that came up. Interfaces carries
-// the full detail for each interface, for a machine with more than
-// one.
+// NetworkStatus reports how the boot configured the network. The
+// top-level fields describe the primary interface: the interface whose
+// address is in the nodeCIDR of the Cluster, or the first interface
+// that came up when none is. Interfaces has each interface.
 type NetworkStatus struct {
 	Interface    string     `json:"interface,omitempty"`
 	MAC          string     `json:"mac,omitempty"`
@@ -296,22 +227,17 @@ type InterfaceStatus struct {
 	Nameservers  []string      `json:"nameservers,omitempty"`
 	LeaseExpires *time.Time    `json:"leaseExpires,omitempty"`
 
-	// Wireless is the radio's own standing, present only for an
-	// interface the spec gave a wireless entry. The addressing
-	// fields above describe the same interface after the join, so an
-	// interface can carry a wireless failure and no address at all.
+	// Wireless is the state of the radio, set only for an interface
+	// with a wireless entry in the spec. The interface gets an address
+	// only after the radio joins, so a failed join leaves the address
+	// fields empty.
 	Wireless *WirelessStatus `json:"wireless,omitempty"`
 }
 
-// WirelessState is what a radio is doing at the moment the machine
-// reports it. Distinct words exist because the kernel alone cannot
-// tell them apart: it reports the same missing carrier for a wrong
-// passphrase and for an access point that is switched off. Only the
-// supplicant's own events separate WrongKey from NoCarrier, and
-// WrongKey is the one value that no amount of waiting corrects.
-// NotRaised is the exception that comes from init rather than the
-// supplicant: the kernel call that raises the interface never
-// returned, so no supplicant ever ran on it.
+// WirelessState is the state of a radio. The kernel reports the same
+// missing carrier for a wrong passphrase and for an access point that
+// is off, so only the supplicant's events tell WrongKey from
+// NoCarrier. Waiting does not fix WrongKey.
 type WirelessState string
 
 const (
@@ -319,48 +245,47 @@ const (
 	WirelessConnected   WirelessState = "Connected"
 	WirelessWrongKey    WirelessState = "WrongKey"
 	WirelessNoCarrier   WirelessState = "NoCarrier"
-	// WirelessNotRaised reports a raise that did not return within
-	// init's deadline. A driver that deadlocks in the kernel while
-	// powering the radio produces it; the thread cannot be stopped,
-	// so this state is a report about the driver, not the network,
-	// and only a reboot without the radio in the spec clears it.
+	// WirelessNotRaised means that the kernel call to bring the
+	// interface up did not return before init's deadline, so no
+	// supplicant ran. A driver that deadlocks while it powers the radio
+	// causes it. The blocked call cannot be stopped, so the state
+	// reports a fault of the driver and not of the network, and only a
+	// reboot without the radio in the spec clears it.
 	WirelessNotRaised WirelessState = "NotRaised"
 )
 
-// WirelessStatus is the wireless half of one interface's status: the
-// network the spec named, what the join did, and the reason behind a
-// join that failed. Everything init prints about the radio also
-// lands here, because a machine with no shell cannot be asked to
-// repeat itself.
+// WirelessStatus is the wireless part of one interface's status: the
+// network that the spec names, the result of the join, and the reason
+// for a failed join.
 type WirelessStatus struct {
 	SSID    string        `json:"ssid,omitempty"`
 	State   WirelessState `json:"state,omitempty"`
 	Message string        `json:"message,omitempty"`
 
-	// The access point the radio is associated with, present only
-	// while the state is Connected. An SSID names a network, and a
-	// network can have many access points, so the BSSID is the only
-	// field that says which one carries this machine's traffic. The
-	// fields change only when the radio associates, so they cost no
-	// status write while the radio stays with one access point.
+	// These fields describe the access point that the radio is
+	// associated with, and are set only while the state is Connected.
+	// A network can have many access points, and the BSSID identifies
+	// one. Init updates the fields only when the radio associates with
+	// another access point or channel, so a radio that stays connected
+	// causes no status writes.
 	BSSID        string     `json:"bssid,omitempty"`
 	Frequency    int        `json:"frequency,omitempty"`
 	Band         string     `json:"band,omitempty"`
 	AssociatedAt *time.Time `json:"associatedAt,omitempty"`
 
 	// LastDisconnectReason is the IEEE 802.11 reason code of the last
-	// time the radio lost an access point during this boot. Zero
-	// means the radio has not lost one.
+	// disconnection during this boot. Zero means none.
 	LastDisconnectReason int `json:"lastDisconnectReason,omitempty"`
 }
 
-// TimeState is a machine clock's condition. FreeRunning and
-// Unsynchronized both mean the clock does not follow any source, but
-// for different reasons. A free-running machine never received any
-// sources and runs on its hardware clock by design. An unsynchronized
-// machine has sources, but currently cannot reach them. The
-// distinction matters when you decide whether a fleet listing shows a
-// configuration choice or an outage.
+// TimeState is the state of a machine's clock. Synchronized means the
+// machine follows a source that is itself synchronized. FreeRunning
+// and Unsynchronized both mean that the clock follows no source. A
+// free-running machine has no sources configured and runs on its
+// hardware clock. An unsynchronized machine has sources and cannot
+// reach them. A fleet with no upstream sources free-runs: its machines
+// agree with each other but not necessarily with the rest of the
+// world, and certificate validation depends on the second.
 type TimeState string
 
 const (
@@ -369,36 +294,27 @@ const (
 	TimeUnsynchronized TimeState = "Unsynchronized"
 )
 
-// TimeStatus reports the state of the machine's clock. A fleet with
-// no upstreams free-runs and agrees with itself, but still does not
-// report Synchronized. Machines that agree with each other make a
-// different claim than machines that agree with the rest of the
-// world, and certificate validation cares about that difference.
 type TimeStatus struct {
-	// State reports whether the machine currently disciplines the
-	// clock against a source that is itself synchronized. When it
-	// does not, State also reports whether that is by design
-	// (FreeRunning) or by outage (Unsynchronized).
 	State TimeState `json:"state,omitempty"`
 
-	// Source is who this machine follows: an upstream's name on a
-	// leader, or one of the cluster's leaders on a follower.
+	// Source is the clock that this machine follows: an upstream
+	// server on a leader, or one of the cluster's leaders on a
+	// follower.
 	Source string `json:"source,omitempty"`
 
-	// Stratum is the machine's distance from a reference clock, in
-	// NTP's own vocabulary: a source at stratum n makes this machine
-	// stratum n+1. A leader that free-runs by design reports the
-	// local-clock convention (10). A value of 16 means unsynchronized,
-	// the value NTP reserves for a clock that no machine should use
-	// as a source.
+	// Stratum is the NTP stratum: one more than the stratum of the
+	// source. A free-running machine reports 10, the NTP convention for
+	// a local clock. An unsynchronized machine reports 16, which NTP
+	// reserves for a clock that no machine may use as a source.
 	Stratum int `json:"stratum,omitempty"`
 
-	// Offset is the bound that the clock's error fits inside, such as
-	// "±5ms" (OffsetBound in clock.go). A worse bound publishes at the
-	// poll that measures it, and a better bound after three polls in a
-	// row inside it. The exact error goes to Prometheus, not here,
-	// because it changes at every poll. Offset is empty while State is
-	// not Synchronized, and after a boot step until the first poll.
+	// Offset is a bound on the clock's error, such as "±5ms" (see
+	// OffsetBound in clock.go), and not the exact offset, because the
+	// exact offset changes on every poll. A worse bound is published at
+	// once. A better bound is published after three polls in a row
+	// inside it (init/clockbound.go). Offset is empty while State is
+	// not Synchronized, and after a boot that stepped the clock until
+	// the next poll.
 	Offset string `json:"offset,omitempty"`
 }
 
@@ -406,90 +322,72 @@ type HardwareStatus struct {
 	CPUs        int    `json:"cpus,omitempty"`
 	MemoryBytes uint64 `json:"memoryBytes,omitempty"`
 
-	// BlockDevices is the machine's storage inventory: every real disk
-	// the kernel found, whether or not the spec says anything about
-	// it. An attached but undeclared disk shows up here. This is how
-	// an operator notices one.
+	// BlockDevices lists every real disk that the kernel found,
+	// whether or not the spec names it.
 	BlockDevices []BlockDevice `json:"blockDevices,omitempty"`
 
-	// Unclaimed lists every device the kernel enumerated but that
-	// nothing drives: hardware that waits on a module that
-	// spec.modules does not declare. It is the gap, never the full
-	// count. A machine whose hardware is fully driven reports nothing
-	// here, the same way healthy conditions read True and a healthy
-	// fleet listing looks uneventful. The full inventory of working
-	// devices is deliberately not status material. Workloads reach it
-	// through /sys, and claimable devices belong to ResourceSlices.
+	// Unclaimed lists each device that has no driver bound and that a
+	// loadable module could drive, so a machine with a driver for all
+	// its hardware lists nothing. Devices with a driver are not
+	// listed: workloads find them through /sys, and ResourceSlices
+	// publish the ones that a claim can use.
 	Unclaimed []UnclaimedDevice `json:"unclaimed,omitempty"`
 }
 
-// UnclaimedDevice is one enumerated but undriven device, reported
-// with everything an operator needs to fix it: the device named in
-// words, and the candidate modules whose alias patterns match its
-// fingerprint. Only a device that some loadable module could drive
-// appears here at all. A device the kernel build has no module for,
-// such as a host bridge or a platform stub, is not actionable, and
-// reporting it would hide the fixable gaps among noise.
+// UnclaimedDevice is one device that has no driver bound, with the
+// modules that could drive it. A device for which the kernel build has
+// no module, such as a host bridge or a platform stub, is not listed,
+// because no edit to spec.modules can fix it.
 type UnclaimedDevice struct {
-	// Modalias is the kernel's fingerprint for this device, the same
-	// string it announces in uevents and matches driver patterns
-	// against. It identifies the device precisely, in cases where the
-	// words above it do not.
+	// Modalias is the kernel's identifier for this device, the string
+	// that the kernel matches the alias patterns of modules against.
 	Modalias string `json:"modalias"`
 
-	// Bus is where the device lives: pci or usb.
+	// Bus is pci or usb.
 	Bus string `json:"bus"`
 
-	// Name is the device in words: a USB device's own manufacturer
-	// and product strings, or a PCI device's names from the pci.ids
-	// database. It falls back to numeric vendor:device IDs when no
-	// better name exists.
+	// Name is a USB device's manufacturer and product strings, or the
+	// name of a PCI device from the pci.ids database. When neither is
+	// available it is the numeric vendor:device ID.
 	Name string `json:"name,omitempty"`
 
-	// Class is the device's coarse kind, such as mass-storage,
-	// display, or network, decoded from the bus's class code.
+	// Class is the kind of device, such as mass-storage, display, or
+	// network, decoded from the bus's class code.
 	Class string `json:"class,omitempty"`
 
-	// Candidates are the loadable modules whose alias patterns match
-	// this device, in the kernel build's preference order. More than
-	// one candidate is normal; USB storage matches both uas and
-	// usb_storage. The choice belongs to whoever edits spec.modules.
+	// Candidates lists the loadable modules whose alias patterns match
+	// this device, in the order that the kernel build prefers. A device
+	// can match more than one, as a USB storage device matches both uas
+	// and usb_storage, and the person who edits spec.modules chooses.
 	Candidates []string `json:"candidates,omitempty"`
 
-	// Message says what would fix the gap, like every message in this
-	// status: declare a candidate when the image carries one, or get
-	// an image that carries one when none is present.
+	// Message says how to fix the gap: add a candidate to
+	// spec.modules, or move to an image that has one.
 	Message string `json:"message,omitempty"`
 }
 
-// BlockDevice is one disk, as the machine observed it directly from
-// sysfs. Name is the kernel's name for this boot, such as vda or
-// nvme0n1, assigned in driver probe order. It addresses the device
-// within this boot, but it does not identify the device across
-// boots. StableNames carries the names that do. Model and serial
-// come from the device itself.
+// BlockDevice is one disk, as read from sysfs. Name is the kernel's
+// name for this boot, such as vda or nvme0n1, which depends on the
+// order that drivers probe, so it can name another disk on the next
+// boot.
 type BlockDevice struct {
 	Name      string `json:"name"`
 	SizeBytes uint64 `json:"sizeBytes,omitempty"`
 	Model     string `json:"model,omitempty"`
 	Serial    string `json:"serial,omitempty"`
 
-	// StableNames is every name this disk answers to across boots:
-	// each by-id name, built from a value the disk's own controller
-	// reports, then the by-path name, built from the port the disk
-	// sits on, when the disk has one. spec.storage.<role>.device
-	// accepts any name in this list. The first by-id entry is the one
-	// to prefer, because a by-id name follows the disk itself, while
-	// a by-path name follows the port and stops naming the disk the
-	// moment it moves to a different bay. A disk with no by-id name
-	// carries only a by-path name, so the first entry overall is not
-	// always the one to prefer.
+	// StableNames lists the names that identify this disk across
+	// boots: each by-id name, which comes from the disk's own
+	// controller, and then the by-path name, which comes from the port,
+	// when the disk has one. spec.storage.<role>.device accepts any of
+	// them. Prefer a by-id name, because a by-path name names another
+	// disk when the disk moves to another bay. A disk with no by-id name
+	// has only a by-path name.
 	StableNames []string `json:"stableNames,omitempty"`
 }
 
-// Backing is where a storage role's data actually lives. There are
-// exactly two options: a partition claimed for the role, or the
-// machine's RAM root, which is the default and needs no setup.
+// Backing is where the data of a storage role is: a partition assigned
+// to the role, or the machine's RAM root, which is the default.
 type Backing string
 
 const (
@@ -497,9 +395,7 @@ const (
 	BackingMemory    Backing = "Memory"
 )
 
-// FirmwareMode is which kind of firmware booted the machine. Like
-// every closed vocabulary in this API, it is a named string type, so
-// the compiler can catch a value used in the wrong place.
+// FirmwareMode is the kind of firmware that booted the machine.
 type FirmwareMode string
 
 const (
@@ -507,41 +403,40 @@ const (
 	FirmwareBIOS FirmwareMode = "BIOS"
 )
 
-// FirmwareStatus reports the firmware's boot configuration, read from
-// its variable store. Each entry field renders as the variable's own
-// name plus the entry's decoded description, such as "Boot0001
-// (liken slot A)", because a fleet listing should read in words.
+// FirmwareStatus reports the boot variables of the firmware. Each entry
+// is the variable's name and the entry's description, such as
+// "Boot0001 (liken slot A)".
 type FirmwareStatus struct {
 	Mode FirmwareMode `json:"mode,omitempty"`
 
-	// BootCurrent is the entry the firmware reports it used this
-	// boot. It is empty when the firmware never picked one, as in a
-	// direct-kernel boot, or when the machine is not UEFI at all.
+	// BootCurrent is the entry that the firmware reports it booted
+	// from. It is empty when the firmware did not boot an entry, as in
+	// a direct-kernel boot, and when the machine is not UEFI.
 	BootCurrent string `json:"bootCurrent,omitempty"`
 
-	// BootNext, when present, is a one-shot override armed for the
-	// next boot. The firmware consumes it at power-on. Seeing a value
-	// here means a proving boot is queued but has not yet happened.
+	// BootNext is the entry that the firmware boots once, at the next
+	// power-on, in place of BootOrder. Init sets it for the proving
+	// boot of a staged release. The requester of a Disruption with
+	// spec.keepBootNext, such as a firmware update, can also set it.
 	BootNext string `json:"bootNext,omitempty"`
 
-	// BootOrder is the firmware's standing preference list, with the
-	// first choice listed first.
+	// BootOrder is the firmware's list of boot entries, with the first
+	// choice first.
 	BootOrder []string `json:"bootOrder,omitempty"`
 
-	// BootOrderKept reports whether the proven slot led BootOrder at
-	// power-on, before init wrote anything. Every shutdown puts the
-	// proven slot first, so false means the firmware did not keep that
-	// order through the reset, or a person changed it in the
-	// firmware's menu. It is absent when the boot could not tell, as
-	// on a machine that has never proven a release. A reboot hands
-	// BootNext to a Disruption's requester only when this is true.
+	// BootOrderKept is true when the proven slot was first in
+	// BootOrder at power-on, before init wrote anything. Every
+	// shutdown puts the proven slot first, so false means that the
+	// firmware did not keep the order through the reset, or that a
+	// person changed it in the firmware menu. It is absent when the
+	// machine has no proven slot. Init leaves BootNext to the requester
+	// of a Disruption only when this is true (init/handover.go).
 	BootOrderKept *bool `json:"bootOrderKept,omitempty"`
 }
 
-// StorageStatus lists every role liken defines, whether declared or
-// not. An absent role must be visible in one kubectl get, not merely
-// implied. The fields mirror the spec's keys exactly, so spec and
-// status line up name for name.
+// StorageStatus has an entry for every storage role, whether the spec
+// declares it or not, so a role that is not declared shows as Memory.
+// The field names are the keys of spec.storage.
 type StorageStatus struct {
 	BIOSBoot         StorageRoleStatus `json:"biosBoot"`
 	BootHome         StorageRoleStatus `json:"bootHome"`
@@ -554,28 +449,25 @@ type StorageStatus struct {
 	PodEphemeral     StorageRoleStatus `json:"podEphemeral"`
 }
 
-// StorageRoleStatus is where one role is backed. A memory-backed role
-// deliberately reports no capacity. All memory-backed roles share the
-// one RAM root, and a per-role figure would count that root several
-// times over.
+// StorageRoleStatus is where one role is. A role in memory reports no
+// capacity, because all of those roles share one RAM root, and a
+// figure for each would count it more than once.
 type StorageRoleStatus struct {
 	Backing       Backing `json:"backing"`
 	Device        string  `json:"device,omitempty"`    // the partition's node this boot: vda1
 	Partition     string  `json:"partition,omitempty"` // its on-disk name: liken:clusterState
 	CapacityBytes uint64  `json:"capacityBytes,omitempty"`
 
-	// LastStopUnclean says this boot found the role's filesystem
-	// still marked as mounted, which means the machine's previous
-	// stop did not release it. Only the FAT32 roles report it: the
-	// system slots and the boot home carry a mark for exactly this,
-	// and the ext4 roles replay a journal instead and need no
-	// warning. The field describes the stop before this boot, so it
-	// keeps its value for the life of the boot.
+	// LastStopUnclean is true when this boot found the role's
+	// filesystem still marked as mounted, so the previous shutdown did
+	// not unmount it. Only the FAT32 roles, the system slots and the
+	// boot home, report it. The ext4 roles replay their journal and
+	// need no warning.
 	LastStopUnclean bool `json:"lastStopUnclean,omitempty"`
 }
 
-// Role addresses one role's status by its spec name. It returns nil
-// for a name outside the vocabulary.
+// Role returns the status of the role with the given spec name, or nil
+// for a name that is not a role.
 func (s *StorageStatus) Role(name StorageRoleName) *StorageRoleStatus {
 	switch name {
 	case BIOSBootRole:
@@ -600,9 +492,8 @@ func (s *StorageStatus) Role(name StorageRoleName) *StorageRoleStatus {
 	return nil
 }
 
-// AllRolesInMemory marks every role as backed by the RAM root. This
-// is the accurate starting point. Reconciliation upgrades each role,
-// one at a time, as it places the role on a partition.
+// AllRolesInMemory returns a status with every role in the RAM root,
+// which is the state before init places any role on a partition.
 func AllRolesInMemory() StorageStatus {
 	s := StorageStatus{}
 	for _, name := range StorageRoleNames {
@@ -611,17 +502,16 @@ func AllRolesInMemory() StorageStatus {
 	return s
 }
 
-// ModuleState is one declared module's outcome. Like every state word
-// in this API, it is a closed vocabulary. Two of the four values are
-// healthy. Loaded means the kernel took the module, or already had
-// it. Builtin means the kernel compiles the name in, so there was
-// nothing to load and nothing wrong. Missing means this kernel has no
-// module by that name at all. The image carries the kernel's whole
-// module tree, so the usual cause is a misspelling, and the fix is
-// the name rather than a new image. A name that is spelled right and
-// still missing needs a release whose kernel builds it. Failed means
-// the kernel has the module and refused it, which usually points to a
-// problem in the hardware.
+// ModuleState is the result for one module of spec.modules. Loaded
+// means the kernel loaded the module or already had it. Builtin means
+// the module is compiled into the kernel.
+//
+// Missing means this kernel has no module with that name. The image
+// contains the kernel's whole module tree, so the usual cause is a
+// misspelled name. When the name is correct, the machine needs a
+// release whose kernel builds the module. Failed means the kernel has
+// the module and refused to load it, and Message has the kernel's
+// error and the parameters that the load passed.
 type ModuleState string
 
 const (
@@ -631,48 +521,38 @@ const (
 	ModuleFailed  ModuleState = "Failed"
 )
 
-// ModuleStatus is one declared module's outcome, from the boot that
-// loaded it or from the load that followed a later edit. Message
-// carries the detail for the unhealthy states, phrased to name the
-// fix. A status that names the repair is more useful than one that
-// only names the problem.
+// ModuleStatus is the result for one module of spec.modules, from the
+// boot or from the load after a later edit. For an unhealthy state,
+// Message says how to fix it.
 type ModuleStatus struct {
 	Name    string      `json:"name"`
 	State   ModuleState `json:"state"`
 	Message string      `json:"message,omitempty"`
 
-	// Parameters is what the machine read back from
-	// /sys/module/<name>/parameters/ for the declared parameter
-	// names, keyed by parameter name, verbatim. A declared name that
-	// is absent here usually means the kernel ignored a wrong name,
-	// which it says once in its log as "unknown parameter ...
-	// ignored". It can also mean the parameter is real but offers
-	// nothing to read: a driver may register a parameter with no
-	// sysfs file at all, or with a write-only mode. The values are
-	// not compared against the declaration, because the kernel
-	// prints a bool back as Y or N and an array with its own
-	// separators; a person compares the two fields that sit beside
-	// each other.
+	// Parameters has the values read back from
+	// /sys/module/<name>/parameters/ for the declared parameter names,
+	// unchanged. A declared name is absent when the kernel ignored it
+	// as unknown, and logged "unknown parameter ... ignored", or when
+	// the driver registered it with no sysfs file or as write-only.
+	// The values are not compared with the declaration, because the
+	// kernel prints a bool as Y or N and an array with its own
+	// separators.
 	Parameters map[string]string `json:"parameters,omitempty"`
 
-	// AlreadyResident reports that the module was in the kernel
-	// before the declared pass reached it, loaded by the fixed list,
-	// a feature, or an earlier module's dependency chain. It matters
-	// because a resident module never receives a parameter string:
-	// finit_module returns EEXIST and ignores it, so the residency
-	// has to be read before the load to be reported at all.
+	// AlreadyResident is true when the module was in the kernel before
+	// init loaded the modules of spec.modules, because the image's
+	// fixed list, a feature, or an earlier module's dependencies loaded
+	// it. Such a module never receives its parameters: finit_module
+	// returns EEXIST and ignores them.
 	AlreadyResident bool `json:"alreadyResident,omitempty"`
 }
 
-// FeatureState is one enabled feature's standing on one machine, a
-// closed vocabulary like ModuleState's. Active means this boot could
-// honor everything the feature asks of this machine. Missing means
-// the booted image predates the feature. The cluster document
-// declares the feature, but the image carries no payload for it, so
-// the fix is a release that does. Failed means the image carries the
-// payload, but actuating it went wrong, for example a module the
-// kernel refused or a boot hook that returned an error; the message
-// explains what happened.
+// FeatureState is the result for one enabled feature on one machine.
+// Active means this boot set up everything that the feature needs on
+// this machine. Missing means the booted image has no payload for the
+// feature, so the machine needs a newer release. Failed means the
+// image has the payload and its setup failed, for example because the
+// kernel refused a module or a boot hook returned an error.
 type FeatureState string
 
 const (
@@ -681,62 +561,52 @@ const (
 	FeatureFailed  FeatureState = "Failed"
 )
 
-// FeatureStatus is one enabled feature's outcome on this machine, on
-// this boot. Like ModuleStatus, Message carries detail for the
-// unhealthy states, phrased to name the fix.
 type FeatureStatus struct {
 	Name    string       `json:"name"`
 	State   FeatureState `json:"state"`
 	Message string       `json:"message,omitempty"`
 }
 
-// RuntimeStatus reports the runtime discipline this machine actually
-// runs under. It mirrors spec.runtime subsection for subsection, and
-// holds the resolved values rather than the spec's strings.
+// RuntimeStatus reports the runtime settings that this machine uses,
+// with the same sections as spec.runtime. Each value is the resolved
+// one, not the string of the spec, so after an edit across machines
+// of different sizes it shows what each one uses.
 type RuntimeStatus struct {
 	K3s        K3sRuntimeStatus        `json:"k3s,omitzero"`
 	Kubelet    KubeletRuntimeStatus    `json:"kubelet,omitzero"`
 	Containerd ContainerdRuntimeStatus `json:"containerd,omitzero"`
 }
 
-// K3sRuntimeStatus is the discipline init imposed on the k3s process
-// this boot. GoMemoryLimit is the resolved ceiling as an absolute
-// quantity in MiB, for example "256Mi"; it is empty when the cluster
-// left the ceiling unset or turned it off, so the field's absence reads
-// as "no ceiling, Go's own default". GoGC is the resolved collector
-// pace; it is empty when the cluster set none, so its absence reads as
-// "Go's own pace". Debug is true when init rendered k3s's debug key,
-// so its absence reads as "k3s logs at info".
+// K3sRuntimeStatus has the settings that init applied to the k3s
+// process on this boot. GoMemoryLimit is the resolved limit in MiB,
+// for example "256Mi". It is empty when the cluster set no limit or
+// turned it off, and GoGC is empty when the cluster set none. Go's
+// defaults apply to an empty field. Debug is true when init wrote the
+// debug key of k3s. Otherwise k3s logs at info level.
 type K3sRuntimeStatus struct {
 	GoMemoryLimit string `json:"goMemoryLimit,omitempty"`
 	GoGC          int    `json:"goGC,omitempty"`
 	Debug         bool   `json:"debug,omitempty"`
 }
 
-// ContainerdRuntimeStatus is the containerd configuration init wrote on
-// this machine's boot. LogLevel is the level the drop-in gives
-// containerd; it is empty when the cluster named none, which reads as
-// containerd's own default of info. This is the console parity for
-// spec.runtime.containerd, so an operator who turns a fleet down can
-// read back which machines carry the change.
+// ContainerdRuntimeStatus is the containerd configuration that init
+// wrote on this boot. LogLevel is the level of the drop-in, empty when
+// the cluster set none, and then containerd logs at info.
 type ContainerdRuntimeStatus struct {
 	LogLevel string `json:"logLevel,omitempty"`
 }
 
-// KubeletRuntimeStatus is the kubelet configuration init rendered on
-// this machine's boot. It is absent when the cluster named none, which
-// reads as "the kubelet's own defaults".
+// KubeletRuntimeStatus is the kubelet configuration that init wrote on
+// this boot. It is empty when the cluster set none.
 type KubeletRuntimeStatus struct {
 	ImageGC ImageGCStatus `json:"imageGC,omitzero"`
 }
 
-// ImageGCStatus is the image collection policy init wrote into the
-// kubelet's configuration file. Each field is present only when the
-// cluster named it, so an absent field reads as the kubelet's own
-// default for that field: 85 percent, 80 percent, two minutes, and no
-// age ceiling at all. This is the console parity for
-// spec.runtime.kubelet.imageGC, so an operator who tunes the policy
-// can read back which machines carry it.
+// ImageGCStatus is the image garbage collection policy that init wrote
+// into the kubelet's configuration file. A field is set only when the
+// cluster set it. Otherwise the kubelet's default applies: 85 percent
+// for the high threshold, 80 percent for the low threshold, two
+// minutes for the minimum age, and no limit on the maximum age.
 type ImageGCStatus struct {
 	HighThresholdPercent int    `json:"highThresholdPercent,omitempty"`
 	LowThresholdPercent  int    `json:"lowThresholdPercent,omitempty"`
@@ -744,10 +614,10 @@ type ImageGCStatus struct {
 	MinimumAge           string `json:"minimumAge,omitempty"`
 }
 
-// ManifestSource is which copy of a document a boot ran under, in
-// preference order: a staged manifest awaiting its proving boot, the
-// proven last-known-good copy, or the image's seed, for the first
-// boot only (see staging.go).
+// ManifestSource is the copy of a document that a boot ran under, in
+// order of preference: a staged copy on its proving boot, the proven
+// copy from the last good boot, and the image's seed copy, which only
+// the first boot uses (see staging.go).
 type ManifestSource string
 
 const (
@@ -756,174 +626,131 @@ const (
 	ManifestSourceSeed   ManifestSource = "Seed"
 )
 
-// BootStatus records the configuration this boot actually used: which
-// copy of each document, identified by the hashes of their exact
-// bytes, and the storage spec it actuated. This is the half of drift
-// detection that only init can supply. The operator compares it
-// against the cluster's copies.
+// BootStatus records what this boot ran under: the copy of each
+// document, identified by the hash of its bytes, and the spec fields
+// that init applied. The operator compares it with the spec to find
+// drift. Each field records the request as init applied it, whatever
+// the result. The results are in the other fields of status.
 type BootStatus struct {
-	// Time is the moment the machine booted, derived by init from the
-	// kernel's uptime counter. It is a timestamp rather than a
-	// duration, because a timestamp never goes out of date in the
-	// cluster. `kubectl get machines` renders it as a live elapsed
-	// time in the Uptime column. It belongs to the boot record because
-	// it shares the record's lifetime: a reboot moves it, an in-place
-	// k3s restart does not.
+	// Time is when the machine booted, which init derives from the
+	// kernel's uptime counter. It is a timestamp and not a duration,
+	// because a duration would be out of date as soon as it was
+	// written. `kubectl get machines` shows it as elapsed time in the
+	// Uptime column. A reboot changes it, and a k3s restart does not.
 	//
-	// This status deliberately has no heartbeat. The machine's
-	// liveness signal is a Lease in the liken-system namespace, not a
-	// status field, because a heartbeat must renew forever, and every
-	// status write rewrites this whole object and wakes every
-	// watcher. This is the same reason kube-node-lease exists (see the
-	// kubernetes package). The cluster operator reads the leases and
-	// marks a silent machine Lost.
+	// Status has no heartbeat, because every status write sends the
+	// whole object to every watcher. A machine renews a Lease in the
+	// liken-system namespace instead, as a Node renews its Lease in
+	// kube-node-lease, and the cluster operator marks a machine whose
+	// Lease is not renewed Lost.
 	Time *time.Time `json:"time,omitempty"`
 
-	// The Machine manifest this boot ran under.
+	// The Machine manifest that this boot ran under.
 	ManifestSource ManifestSource `json:"manifestSource,omitempty"`
 	ManifestHash   string         `json:"manifestHash,omitempty"`
 	Storage        StorageSpec    `json:"storage,omitzero"`
 
-	// Network is the network spec the winning manifest declared,
-	// recorded as actuated whatever each interface's outcome was. It
-	// is the drift reference, like Storage above: booting again under
-	// this manifest would ask for the same network, and status.network
-	// reports what each interface actually got.
-	//
-	// The field is a pointer because absence and emptiness say
-	// different things here. An empty spec is a machine that declares
-	// no interface and takes the zero-configuration default. An absent
-	// record is a boot that reported nothing about its network at all,
-	// which the operator cannot judge: comparing a real spec against
-	// nothing would read as drift on every machine at once and ask a
-	// whole fleet to reboot on the strength of a missing file.
+	// Network is the network spec of the manifest that this boot used.
+	// It is a pointer because nil and empty mean different things. An
+	// empty spec declares no interface and uses the default network
+	// setup. A nil record means the boot reported nothing, and the
+	// operator does not compare it, because a comparison with nothing
+	// would report drift on every machine and reboot the whole fleet.
 	Network *NetworkSpec `json:"network,omitempty"`
 
-	// Modules is the module list the winning manifest declared,
-	// recorded as actuated regardless of each load's outcome. It is
-	// the drift reference, like Storage above. Outcomes are a health
-	// signal and live in status.modules instead; a module the image
-	// lacked still counts as actuated here, because rebooting again
-	// with the same image would not change anything.
+	// Modules is the module list of the manifest that this boot used. A
+	// module that the image did not have still counts as applied,
+	// because another reboot with the same image changes nothing.
 	//
-	// The list is in the order this machine loaded the modules in,
-	// because the order decides which driver claims a device. A live
-	// load appends what it loaded and does not adopt the manifest's
-	// order (init/liveload.go). The operator compares this order
-	// against spec.modules and stages a reorder for the next boot.
+	// The list is in the order in which this machine loaded the
+	// modules, because the order decides which driver binds a device.
+	// A live load appends the modules it loaded (see init/liveload.go).
+	// The operator compares this order with spec.modules and stages a
+	// reorder for the next boot.
 	Modules []string `json:"modules,omitempty"`
 
-	// Rlimits is the resource limit map the winning manifest declared,
-	// recorded as actuated whatever each limit's outcome was. It is
-	// the drift reference, like Storage and Modules above: booting
-	// again under this manifest would ask for the same limits, and
-	// status.rlimits reports what the kernel actually holds.
-	//
-	// The limits every liken machine holds are deliberately not part
-	// of this record. They ship with the release rather than with the
-	// spec, so a change to them arrives with a new system image and a
-	// reboot of its own. Comparing them here would read as drift on
-	// every machine at once the moment the table changed.
+	// Rlimits is the resource limit map of the manifest that this boot
+	// used. It does not include machine.OSRlimits, because those ship
+	// with the release and change only with a new system image. If it
+	// included them, a release that changed them would report drift on
+	// every machine.
 	Rlimits map[string]string `json:"rlimits,omitempty"`
 
-	// ModuleParameters is the parameter map the winning manifest
-	// declared and this boot passed to the loads, the drift
-	// reference for spec.moduleParameters the same way Modules is
-	// for spec.modules. It records the request; the readback lives
-	// in status.modules[].parameters.
+	// ModuleParameters is the spec.moduleParameters map that this boot
+	// passed to the module loads. The values read back are in
+	// status.modules[].parameters.
 	ModuleParameters map[string]string `json:"moduleParameters,omitempty"`
 
-	// Serio is the spec.serio list this boot declared, the drift
-	// reference for that field the same way Modules is for
-	// spec.modules. It records the request whatever each attachment's
-	// outcome was; status.serio reports the outcomes. A live load
-	// adds the entries it applied.
+	// Serio is the spec.serio list that this boot used. A live load
+	// adds the entries that it applied.
 	Serio []SerioAttachment `json:"serio,omitempty"`
 
-	// Slot is the system slot this boot came from, "A" or "B", read
-	// from the liken.slot= parameter in each boot entry's command
-	// line. It is empty when the boot did not come from a slot at
-	// all, as in a direct-kernel boot or install media. This is how a
-	// machine reports which side of the blue-green pair it runs from:
-	// releases download to the other slot.
+	// Slot is the system slot that this boot came from, "A" or "B",
+	// read from the liken.slot= kernel parameter. It is empty for a
+	// boot that did not come from a slot, such as a direct-kernel boot
+	// or a boot from install media. A release downloads to the other
+	// slot.
 	Slot string `json:"slot,omitempty"`
 
-	// CommandLine is the kernel command line this boot ran with, whole
-	// and unparsed. Slot above is one parameter out of it, and init
-	// reads a handful of others, but the line as a whole is the only
-	// input a machine has before it reads a single file, and every
-	// other field here describes what happened after that point.
-	//
-	// It is reported and not declared. No spec field sets it: the boot
-	// entries liken writes name the console, the machine, and the
-	// slot, and nothing else. So this field answers the question a
-	// person asks when a machine behaves unlike its siblings, which is
-	// what the firmware actually handed the kernel. Reading it needed
-	// a serial console before it was here.
+	// CommandLine is the complete kernel command line of this boot. No
+	// spec field sets it, and the boot entries that liken writes set
+	// only the console, the machine, and the slot. When a machine
+	// behaves differently from the others, this field shows what the
+	// firmware passed to the kernel without a serial console.
 	CommandLine string `json:"commandLine,omitempty"`
 
-	// The Cluster manifest this boot ran under: the same lifecycle,
-	// recorded separately, because the two documents stage and prove
-	// independently. A machine can be current on one document while
-	// drifted on the other.
+	// The Cluster manifest that this boot ran under. It is recorded
+	// apart from the Machine manifest because the two are staged and
+	// proven independently, so a machine can match one and have
+	// drifted from the other.
 	ClusterManifestSource ManifestSource `json:"clusterManifestSource,omitempty"`
 	ClusterManifestHash   string         `json:"clusterManifestHash,omitempty"`
 
-	// The registry-credentials document this boot, or the latest k3s
-	// restart, rendered into registries.yaml: the same lifecycle
-	// again, in its own store. The source is only ever Staged or
-	// Proven, because the operator is this document's sole author, so
-	// no image carries a seed. Both fields are empty on a machine
-	// that has never had credentials, which is an ordinary state, not
-	// a gap.
+	// The registry credentials document that this boot, or the latest
+	// k3s restart, wrote into registries.yaml. The source is only
+	// Staged or Proven, because the operator writes this document and
+	// no image has a seed copy. Both fields are empty on a machine that
+	// never had credentials.
 	CredentialsSource ManifestSource `json:"credentialsSource,omitempty"`
 	CredentialsHash   string         `json:"credentialsHash,omitempty"`
 
-	// The imported-images record this boot ran under (imports.go):
-	// Staged while the container store serves unpacks that no
-	// operator has yet proven, or Proven on the ordinary boot whose
-	// tarballs all match the record. It is empty when the lifecycle
-	// is not running, either because there is no durable machineState
-	// to remember a trial, or because the container store is
-	// ephemeral and a reboot resets it anyway. ImportsDiscarded
-	// records that this boot found a trial still standing from a boot
-	// that died unproven, and threw the container store away rather
-	// than trust it.
+	// The record of the image tarballs that this boot gave to
+	// containerd (see imports.go). It is Proven when the tarballs match
+	// the record that an earlier boot proved, and Staged when they are
+	// new and the operator has not yet proven that containerd serves
+	// them. It is empty when machineState or clusterState is not on
+	// disk, because then there is no place to keep the record or the
+	// container store resets at every boot. ImportsDiscarded is true
+	// when this boot found a staged record that no boot proved, and
+	// deleted the container store in place of trusting it.
 	ImportsSource    ManifestSource `json:"importsSource,omitempty"`
 	ImportsHash      string         `json:"importsHash,omitempty"`
 	ImportsDiscarded bool           `json:"importsDiscarded,omitempty"`
 
-	// Restarts counts the in-place k3s restarts this boot has
-	// performed to apply restart-class changes (cluster/changes.go).
-	// It lives in the boot record because it shares the boot's
-	// lifetime: a reboot re-makes the record, and the count returns
-	// to zero. That reset is itself a signal. A change that arrived
-	// by restart increments this count without moving the boot
-	// record's time, and a change that arrived by reboot does the
-	// opposite.
+	// Restarts is the number of k3s restarts that this boot made to
+	// apply a Cluster change that does not need a reboot (see
+	// cluster.RestartApplies). A reboot sets it back to zero, so a
+	// change by restart raises this count and keeps Time, and a change
+	// by reboot changes Time.
 	Restarts int `json:"restarts,omitempty"`
 
-	// Rejection is the standing quarantine record for the Machine
-	// manifest. Every boot republishes it until a promotion clears
-	// it, so a rejected spec stays visible in the cluster no matter
-	// how many times the machine power-cycles. ClusterRejection is
-	// the same record for the Cluster document. SystemRejection is
-	// for a system release whose proving boot fell back.
-	// CredentialsRejection is for a credentials document that would
-	// not parse.
+	// Rejection records that a staged Machine manifest was refused.
+	// Every boot publishes it again until a manifest is promoted, so
+	// the refusal stays in status across reboots. ClusterRejection is
+	// the same record for the Cluster manifest. SystemRejection is for
+	// a system release whose proving boot fell back.
+	// CredentialsRejection is for a credentials document that did not
+	// parse.
 	Rejection            *Rejection `json:"rejection,omitempty"`
 	ClusterRejection     *Rejection `json:"clusterRejection,omitempty"`
 	SystemRejection      *Rejection `json:"systemRejection,omitempty"`
 	CredentialsRejection *Rejection `json:"credentialsRejection,omitempty"`
 }
 
-// CrashReason is the kernel's own word for why it dumped its log:
-// the kmsg-dump reason, taken from the first line of each pstore
-// record. Panic and Oops are the two words the vendored kernel's
-// configuration dumps. The type stays an open string rather than a
-// closed vocabulary, because the kernel owns these words and a
-// future kernel may say something new. A status write must not fail
-// over an unexpected word.
+// CrashReason is the kmsg-dump reason on the first line of a pstore
+// record. liken's kernel configuration dumps on Panic and Oops. The
+// type is an open string, because a later kernel can add a reason, and
+// an unknown one must not make a status write fail.
 type CrashReason string
 
 const (
@@ -931,80 +758,65 @@ const (
 	CrashOops  CrashReason = "Oops"
 )
 
-// CrashStatus summarizes one kernel crash from the records that
-// pstore preserved across the reboot. It is a stub, not the
-// evidence: the kernel log tail around a crash runs to kilobytes,
-// and status is read on every list and watch, so the full text
-// stays on disk and this block carries just enough to say what
-// happened and where to read the rest.
+// CrashStatus summarizes one kernel crash. The kernel log of a crash is
+// kilobytes long, and every list and watch of Machines sends status,
+// so the log stays on the machine and Records gives its path.
 type CrashStatus struct {
-	// Time is the machine's own clock at the moment of the crash. A
-	// crash usually beats the boot's first clock sync, so this is
-	// RTC time, reported as recorded.
+	// Time is when pstore recorded the dump, by the machine's own clock
+	// at that moment, which may not yet have been synchronized.
 	Time *time.Time `json:"time,omitempty"`
 
-	// Reason is the kernel's word for the crash: Panic or Oops.
 	Reason CrashReason `json:"reason,omitempty"`
 
-	// Message is the kernel's own first description of the failure:
-	// the "Kernel panic - not syncing:" line, or the oops's BUG
-	// line. It is capped and cleaned of control bytes before it
-	// leaves the machine.
+	// Message is the first line in which the kernel described the
+	// failure: the "Kernel panic - not syncing:" line, or the BUG line
+	// of an oops. Init cuts it to a maximum length and removes control
+	// bytes.
 	Message string `json:"message,omitempty"`
 
-	// Records is where the full kernel log tail lives on the
-	// machine: a directory under machineState's crash store, or
-	// /sys/fs/pstore itself on a machine whose machineState fell
-	// back to memory and whose records therefore stay in the
-	// firmware's own store.
+	// Records is the path of the full kernel log on the machine: a
+	// directory in the crash store of machineState, or /sys/fs/pstore
+	// when machineState is in memory and the records stay in the
+	// firmware's store.
 	Records string `json:"records,omitempty"`
 }
 
-// RebootApprovedCondition is the rollout conductor's record of a
-// reboot turn on the Machine. The turn itself is the machine's entry
-// in the Cluster's status.rebootTurns, and the machine's own operator
-// acts on the entry. The conductor still writes this condition,
-// because a machine operator of the release before acts on nothing
-// else, and the machine's own operator carries it along unchanged. It
-// belongs here because it is shared vocabulary, in the same way that
-// PodScheduled is a condition the scheduler writes onto Pods that the
-// kubelet owns.
+// RebootApprovedCondition is the condition that cluster-operator sets
+// on a Machine when it grants the machine a reboot turn, and removes
+// when the turn ends. machine-operator acts on the machine's entry in
+// the Cluster's status.rebootTurns and not on this condition, and
+// keeps the condition unchanged when it writes status.
+// cluster-operator reads it back to count a silent machine as
+// rebooting and not Lost.
 const RebootApprovedCondition = "RebootApproved"
 
-// ApprovalGrants reports whether an approval names a request's hash:
-// a Disruption's spec.approvedHash against its spec.hash.
+// ApprovalGrants reports whether an approval matches the hash of a
+// request: the spec.approvedHash of a Disruption against its
+// spec.hash.
 func ApprovalGrants(approval, hash string) bool {
-	return hashNames(approval, hash)
+	return matchesHash(approval, hash)
 }
 
-// RebootRequestNames reports whether a person's reboot request names
-// the boot that is running now: a Disruption's spec.hash against the
-// boot's identity. A boot that published no time has no identity, and
-// no request names it.
+// RebootRequestNames reports whether a person's reboot request, the
+// spec.hash of a Disruption, matches bootID, the BootID of the running
+// boot. No request matches an empty bootID.
 func RebootRequestNames(request, bootID string) bool {
-	return bootID != "" && hashNames(request, bootID)
+	return bootID != "" && matchesHash(request, bootID)
 }
 
-// hashNames is the matching rule for a hash a person writes. The value
-// may carry the full hash or a prefix of it, because every condition
-// message and listing shows a hash in its 12-character short form and
-// a person pastes what they can see. A prefix shorter than 12
-// characters never matches: below that length a paste error could
-// match by accident.
-func hashNames(value, hash string) bool {
+// matchesHash reports whether value, which a person wrote, is hash or
+// a prefix of it. Condition messages and listings show the first 12
+// characters of a hash, and a person pastes what they see. A shorter
+// prefix never matches, so a bad paste does not match by accident.
+func matchesHash(value, hash string) bool {
 	return len(value) >= 12 && strings.HasPrefix(hash, value)
 }
 
-// BootID is the running boot's identity: the sha256 of the moment
-// the machine booted, which is the one value in the boot record that
-// no two boots share. A person's reboot request names it, so a
-// request applies to one boot and to no other.
-//
-// It is a hash rather than the timestamp itself so that it reads and
-// truncates like every other identity liken hands a person: 12
-// hexadecimal characters in a condition message, in status.pending,
-// and in an annotation. A boot that published no time has no
-// identity, and this returns "".
+// BootID identifies the running boot: the sha256 of the boot time,
+// which no two boots share. A person's reboot request names this ID,
+// so the request applies to one boot only. It is a hash and not the
+// timestamp so that a person sees and shortens it like every other
+// hash that liken shows. It returns "" when the boot published no time.
 func BootID(boot BootStatus) string {
 	if boot.Time == nil || boot.Time.IsZero() {
 		return ""
@@ -1012,8 +824,8 @@ func BootID(boot BootStatus) string {
 	return ManifestHash([]byte(boot.Time.UTC().Format(time.RFC3339Nano)))
 }
 
-// A DisruptionKind names what applies a staged document: a machine
-// reboot, or a k3s restart in place.
+// A DisruptionKind is what applies a staged document: a reboot of the
+// machine, or a restart of k3s.
 type DisruptionKind string
 
 const (
@@ -1021,31 +833,27 @@ const (
 	DisruptionRestart DisruptionKind = "Restart"
 )
 
-// A PendingDisruption is one staged document waiting for its
-// disruption. The machine operator publishes one entry per gated
-// document on every pass and stores nothing between passes, like
-// the rest of status. A reboot a person requested is an entry here
-// too, because it waits on the same policy, the same turn, and the
-// same drain; its document is the one thing it lacks.
+// A PendingDisruption is one staged document that waits for a reboot or
+// a k3s restart. A reboot that a person requested is also an entry,
+// with no document: it waits for the same policy, turn, and drain.
 type PendingDisruption struct {
-	// Condition names the condition that reported this entry:
+	// Condition is the type of the condition that reported this entry:
 	// SpecConverged, ClusterConverged, VersionConverged,
 	// CredentialsConverged, or RebootRequestHonored.
 	Condition string `json:"condition"`
 
-	// Kind says what applies the staged document. A reboot applies
-	// every staged document at once; a restart applies only the
-	// documents k3s reads when its process starts.
+	// Kind is what applies the staged document. A reboot applies every
+	// staged document. A restart applies only the documents that k3s
+	// reads when it starts.
 	Kind DisruptionKind `json:"kind"`
 
-	// Hash is the staged document's identity. The hash of
-	// machine-operator's Disruption covers the hash of each entry,
-	// so an approval of that request approves these bytes and no
-	// others. A requested reboot has no document, so its entry
-	// carries the running boot's identity instead (BootID), which
-	// spends itself when the machine boots again.
+	// Hash is the hash of the staged document. The spec.hash of the
+	// Disruption that machine-operator creates covers the hash of each
+	// entry, so an approval of that Disruption approves exactly these
+	// bytes. For a requested reboot, Hash is the BootID of the running
+	// boot, which no longer matches after the machine reboots.
 	Hash string `json:"hash"`
 
-	// Summary says in one line what the document changes.
+	// Summary is one line that says what the document changes.
 	Summary string `json:"summary"`
 }

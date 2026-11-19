@@ -1,27 +1,20 @@
 package machine
 
-// The system release record is the document that carries an OS
-// upgrade through its proving reboot.
+// A SystemRelease record names the slot that init boots. It goes
+// through the same staged, attempted, and proven steps as the Machine
+// and Cluster manifests (staging.go), in its own store.
+// machine-operator stages a record when it has verified a release on
+// the inactive slot and the machine should reboot into it. Init marks
+// the record attempted when it sets the firmware to boot that slot
+// once and reboots. machine-operator promotes it to proven when the
+// machine reports that it runs that release from that slot.
 //
-// A verified download is bytes on a slot. This record states the
-// intent to boot those bytes. The record goes through the same
-// staged, attempted, and proven lifecycle as the Machine and Cluster
-// manifests (staging.go), in its own store. The record is staged
-// when the operator has verified a release on the inactive slot and
-// the machine should reboot into it. The record is attempted when
-// init arms the firmware and takes the machine down. The record is
-// proven when the operator, now running as the new release, confirms
-// that the machine came up and serves its cluster. The proven record
-// is the standing answer to the question "which slot is this
-// machine's known-good slot?" init sets the firmware's BootOrder
-// from the proven record on every boot. The store holds the
-// authoritative answer. The firmware holds a cached copy of it.
+// The proven record names the slot that is known to work, and at boot
+// init writes the firmware's BootOrder to match it. So BootOrder
+// always follows the proven record, and not the other way round.
 //
-// The record carries no artifact digests, by design. Those digests
-// live in the release document on the slot itself, and the trust
-// chain already ran when the bytes landed. The record pins the
-// decision itself: this version, under this catalog digest, on this
-// slot.
+// The record has no artifact digests, because the release document on
+// the slot has them, and they were verified when the slot was written.
 
 import (
 	"fmt"
@@ -30,37 +23,35 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// SystemRelease names one release installed on one slot.
+// SystemRelease is a release installed on one slot.
 type SystemRelease struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`
 
-	// Version is the release, exactly as the catalog names it.
+	// Version is the release version, as the catalog spells it.
 	Version string `json:"version"`
 
-	// Slot names where the release's artifacts are: "A" or "B".
+	// Slot is the slot that holds the release's artifacts: "A" or "B".
 	Slot string `json:"slot"`
 
-	// ReleaseDigest is the catalog's digest over the release
-	// document. The record carries this digest so the record's
-	// identity changes when the catalog's entry changes. The same
-	// version, republished under a different digest, counts as a
-	// different decision. ReleaseDigest is empty on records that
-	// describe an installed system instead of a catalog download.
-	// The installer's release predates any catalog.
+	// ReleaseDigest is the catalog's digest of the release document.
+	// A version that is published again with a different document
+	// makes a different record, and so a new upgrade. It is empty on
+	// the record that machine-operator writes for a machine that has
+	// never upgraded, because its release came from the install and
+	// not from a catalog.
 	ReleaseDigest string `json:"releaseDigest,omitempty"`
 }
 
-// SystemReleases returns the record's lifecycle store under the
-// given machineState root, beside the Machine's store and the
-// Cluster's store.
+// SystemReleases returns the store of the record under the
+// machineState root.
 func SystemReleases(root string) ManifestStore {
 	return ManifestStore{dir: root + "/system"}
 }
 
-// RenderSystemRelease produces the record's canonical bytes and their
-// hash. The hash serves as the record's identity for staging
-// idempotence, for the attempted marker, and for rejections.
+// RenderSystemRelease returns the record's canonical bytes and their
+// hash. The attempted marker and a rejection name the record by this
+// hash.
 func RenderSystemRelease(version, slot, releaseDigest string) ([]byte, string, error) {
 	return renderDocument(SystemRelease{
 		APIVersion:    api.APIVersion,
@@ -71,24 +62,22 @@ func RenderSystemRelease(version, slot, releaseDigest string) ([]byte, string, e
 	})
 }
 
-// ParseSystemRelease reads a record with strict checks and validates
-// the record right away. liken validates every document for the same
-// reason: if a record would fail every future boot in the same way,
-// the system must reject the record once, in a visible way. The
-// system must not retry the record forever.
+// ParseSystemRelease parses a record strictly and validates it. An
+// invalid record would fail every boot the same way, so a caller
+// rejects it once instead of retrying it.
 func ParseSystemRelease(raw []byte) (*SystemRelease, error) {
 	r := &SystemRelease{}
 	if err := yaml.UnmarshalStrict(raw, r); err != nil {
 		return nil, err
 	}
 	if r.Kind != "SystemRelease" {
-		return nil, fmt.Errorf("expected kind SystemRelease, got %q", r.Kind)
+		return nil, fmt.Errorf("the kind is %q, and a system release record must have kind SystemRelease", r.Kind)
 	}
 	if r.Version == "" {
-		return nil, fmt.Errorf("the record names no version")
+		return nil, fmt.Errorf("the record has no version")
 	}
 	if r.Slot != "A" && r.Slot != "B" {
-		return nil, fmt.Errorf("the record's slot must be A or B, got %q", r.Slot)
+		return nil, fmt.Errorf("the record has slot %q, and the slot must be A or B", r.Slot)
 	}
 	return r, nil
 }

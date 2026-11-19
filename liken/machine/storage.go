@@ -1,38 +1,28 @@
 package machine
 
-// This file holds the storage half of the Machine spec.
+// The storage part of the Machine spec.
 //
-// Storage is declared by purpose, not by mount path. The manifest
-// never says "/var/lib/rancher" (a k3s implementation detail that
-// liken owns). Instead it says "this disk holds the cluster's
-// state", and liken translates that purpose into the actual path.
-// The roles are fields rather than a list, on purpose. Each role is
-// a singleton: a machine has one cluster state, and one pod-storage
-// pool. Making the roles fields in the schema means a duplicate role
-// cannot even be expressed. A new role is visibly a change to the
-// API.
+// A manifest declares storage by role, such as "this disk holds the
+// cluster state", and never by mount path, so the manifest does not
+// depend on k3s's directory layout under /var/lib/rancher. Each role is
+// its own field, not an entry in a list, because a machine has each
+// role at most once and a struct cannot hold a duplicate.
 //
-// The device path in each role matters only on the boot that claims
-// the disk. A manifest can name the disk by its kernel name
-// (/dev/vda), or by a stable name under /dev/disk/by-id/ or
-// /dev/disk/by-path/. The kernel assigns its own device names in
-// driver probe order, so a kernel name addresses a disk within one
-// boot, but does not identify the disk across boots. A stable name
-// survives longer: a by-id name belongs to the disk itself, and a
-// by-path name belongs to the port the disk is plugged into. None of
-// these names has to survive past the claim, because claiming a disk
-// writes the role's name onto the partition itself, as its GPT
-// partition name. Every boot after that finds the partition by that
-// name, wherever the disk enumerates. A /dev/disk/by-uuid/ name is
-// never legal here: that tree names a filesystem, and the disk a
-// role claims is blank.
+// init reads a role's device path only on the boot that claims a blank
+// disk. The path can be a kernel name such as /dev/vda, or a name under
+// /dev/disk/by-id/ or /dev/disk/by-path/. A kernel name can point to a
+// different disk on the next boot, because the kernel assigns names in
+// the order that drivers probe. A by-id name follows the disk, and a
+// by-path name follows the port. When init claims the disk, it writes
+// the role's name into the GPT partition name, and every later boot
+// finds the partition by that name, so the device path does not have
+// to stay valid. A /dev/disk/by-uuid/ name is refused, because it
+// names a filesystem and a blank disk has none.
 //
-// init resolves a stable name to a disk by recomputing every attached
-// disk's own by-id and by-path names from sysfs, the same computation
-// that publishes the /dev/disk link trees, rather than by reading
-// those trees back. The component that publishes the trees starts
-// once storage has already settled, so the very first boot that
-// claims a disk under a stable name has no tree there yet to read.
+// The /dev/disk link trees do not exist yet when init claims a disk,
+// because the program that creates them starts after storage is
+// mounted. So init computes each attached disk's by-id and by-path names from
+// sysfs, the same way that program does.
 
 import (
 	"fmt"
@@ -40,16 +30,14 @@ import (
 	"strings"
 )
 
-// PartitionPrefix namespaces liken's GPT partition names. Anyone who
-// looks at a partition table can see which partitions belong to
-// liken, and which role each partition serves.
+// PartitionPrefix starts the GPT partition name of every partition
+// that liken creates, so a partition table shows which partitions are
+// liken's and the role of each.
 const PartitionPrefix = "liken:"
 
-// StorageRoleName names one of the storage roles. The vocabulary is
-// closed: these nine names are the spec's field names, the GPT
-// partition names (behind PartitionPrefix), and the status's keys.
-// The names are defined once here, and everything else ranges over
-// StorageRoleNames instead of spelling them out again.
+// StorageRoleName is the name of a storage role. The same name is the
+// spec's field name, the GPT partition name after PartitionPrefix, and
+// the key in the status.
 type StorageRoleName string
 
 const (
@@ -64,23 +52,14 @@ const (
 	PodEphemeralRole     StorageRoleName = "podEphemeral"
 )
 
-// StorageRoleNames is the canonical order. It is the order that
-// liken lays partitions down when roles share a disk. The order is
-// fixed here, rather than by YAML map order, because Kubernetes does
-// not preserve YAML map order.
-//
-// The boot roles lead the list, with the earliest reader first. BIOS
-// firmware executes the MBR before anything else exists, so the
-// partition that its boot code jumps into comes first. GRUB's own
-// config home comes next. The system slots come after that: an EFI
-// system partition conventionally leads its disk, and here it leads
-// everything that the firmware does not read. machineState comes
-// next, ahead of all the data roles. It holds the partition that a
-// future boot must find, before that boot has read any spec.
-//
-// liken recognizes a role by its partition name, never by its
-// position in this order. The order is a layout convention, not a
-// way to discover roles.
+// StorageRoleNames lists the roles in the order that liken lays out
+// partitions when roles share a disk. The partitions that a boot reads
+// first come first. The MBR's boot code loads GRUB's core image from
+// biosBoot, and GRUB then reads its config from bootHome.
+// The system slots are EFI system partitions, which by convention come
+// first on a disk. machineState comes before the data roles because a
+// boot reads it before it has read any spec. Later boots find each
+// role by its partition name, not by its position.
 var StorageRoleNames = []StorageRoleName{
 	BIOSBootRole,
 	BootHomeRole,
@@ -93,138 +72,110 @@ var StorageRoleNames = []StorageRoleName{
 	PodEphemeralRole,
 }
 
+// StorageSpec declares which disk holds each storage role.
 type StorageSpec struct {
-	// BIOSBoot and BootHome are how a machine declares that it boots
-	// through GRUB rather than UEFI firmware. There is no separate
-	// firmware field. Declaring the partitions that GRUB needs is
-	// itself the declaration. A BIOS machine has no boot variables to
-	// hold the blue-green bookkeeping, so liken supplies the pieces
-	// that the firmware would otherwise provide. BIOSBoot is a tiny
-	// raw partition (about 1Mi, with no filesystem) that holds GRUB's
-	// core image, the code that the MBR's 440 boot bytes jump into.
-	// BootHome is a small FAT32 partition (about 64Mi) that holds
-	// GRUB's config and its environment block, the file that holds
-	// the same role as BootNext and BootOrder. Machines that boot
-	// UEFI leave both fields out.
+	// Declaring BIOSBoot and BootHome makes the machine boot through GRUB
+	// in BIOS mode instead of through UEFI firmware. No other field
+	// selects the boot mode. BIOSBoot is a raw partition of about 1Mi
+	// that holds GRUB's core image. BootHome is a FAT32 partition of
+	// about 64Mi that holds GRUB's config and its environment block. A
+	// BIOS machine has no EFI boot variables, so the environment block
+	// records the slot to try next and the default slot, the jobs that
+	// BootNext and BootOrder do on UEFI. A UEFI machine omits both
+	// fields.
 	BIOSBoot *StorageRole `json:"biosBoot,omitempty"`
 	BootHome *StorageRole `json:"bootHome,omitempty"`
 
-	// SystemA and SystemB are the operating system's own boot slots.
-	// Each slot holds one complete liken version: the kernel and the
-	// initramfs that makes up the rest of the OS. The machine runs
-	// from one slot while it writes upgrades to the other slot. This
-	// is a blue-green deployment at the scale of the whole operating
-	// system. The slots are EFI system partitions that carry FAT32,
-	// because the firmware itself is their first reader, and FAT is
-	// the only filesystem that the firmware promises to understand. A
-	// machine without these slots boots from external media forever,
-	// for example the lab's -kernel flag or a USB stick. A machine
-	// with these slots can be installed once, and upgraded
-	// declaratively after that.
+	// SystemA and SystemB are the two boot slots. Each slot holds one
+	// liken version: the kernel and the initramfs. The machine runs from
+	// one slot and writes an upgrade to the other. The slots are FAT32
+	// EFI system partitions, because FAT is the filesystem that the UEFI
+	// specification requires firmware to read. A machine without slots
+	// boots only from outside media, such as a USB stick or QEMU's
+	// -kernel flag, and cannot take an upgrade.
 	SystemA *StorageRole `json:"systemA,omitempty"`
 	SystemB *StorageRole `json:"systemB,omitempty"`
 
-	// MachineState is the machine's own durable data: the manifests
-	// that configure the machine. It holds the staged and proven
-	// copies that let a spec edit survive a reboot, and apply at the
-	// next reboot. The data is small, but it changes the machine in a
-	// fundamental way. With this data, the configuration outlives the
-	// image that first delivered it.
+	// MachineState holds the machine's own durable data, such as the
+	// staged and proven copies of its manifests. An edited spec is
+	// staged here and applies at the next boot, and it stays in place
+	// when an upgrade replaces the image.
 	MachineState *StorageRole `json:"machineState,omitempty"`
 
-	// MachineEphemeral is the operating system's own scratch space:
-	// /tmp. It is small, but necessary, because the container runtime
-	// stages exec sessions there. On a machine whose root filesystem
-	// is RAM, moving /tmp to disk frees that memory for pods.
+	// MachineEphemeral is mounted at /tmp, where the container runtime
+	// stages exec sessions. When the root filesystem is in RAM, a disk
+	// for /tmp frees that memory for pods.
 	MachineEphemeral *StorageRole `json:"machineEphemeral,omitempty"`
 
-	// ClusterState is k3s's state: the etcd or sqlite database, TLS
-	// material, and containerd's images. Persisting this state is
-	// what lets a reboot resume the same cluster, instead of starting
-	// a new one. This role is named for the cluster, not the machine,
-	// because this data belongs to the cluster rather than to any one
-	// machine.
+	// ClusterState holds k3s's state: the etcd or sqlite database, TLS
+	// material, and containerd's images, so a reboot rejoins the same
+	// cluster.
 	ClusterState *StorageRole `json:"clusterState,omitempty"`
 
-	// PodStorage is durable storage that pods claim by name: the
-	// PersistentVolumeClaim pool. k3s's local-path provisioner serves
-	// this pool from this role's filesystem.
+	// PodStorage is the durable storage that pods claim through
+	// PersistentVolumeClaims. k3s's local-path provisioner serves
+	// volumes from this role's filesystem.
 	PodStorage *StorageRole `json:"podStorage,omitempty"`
 
-	// PodEphemeral is kubelet's working space: emptyDir volumes and
-	// per-pod scratch space. It is the pool that pods measure with
-	// ephemeral-storage requests and limits. The pod logs live here
-	// too, bound onto /var/log/pods, because a log that appends for
-	// as long as its pod runs must not be written to the root
-	// filesystem's small write budget.
+	// PodEphemeral is the kubelet's working space: emptyDir volumes and
+	// the scratch space that ephemeral-storage requests and limits count.
+	// Pod logs are here too, bind-mounted onto /var/log/pods, because a
+	// log grows for as long as its pod runs and would fill the small
+	// tmpfs that takes the root filesystem's writes.
 	PodEphemeral *StorageRole `json:"podEphemeral,omitempty"`
 }
 
-// StorageRole places one role onto hardware. A role that is missing
-// from the spec is not an error. That role's directory simply stays
-// on the machine's RAM root.
+// StorageRole places one role on a disk. A role that the spec omits is
+// not an error, and its directory stays on the RAM root.
 type StorageRole struct {
-	// Device is the disk that this role lives on: a device path
-	// (/dev/vda), or a stable name under /dev/disk/by-id/ or
-	// /dev/disk/by-path/. The code reads this field only when it
-	// claims a blank disk. A by-id name belongs to the disk and
-	// survives a port move. A by-path name belongs to the port. After
-	// the claim, every boot finds the role's partition by the GPT
-	// name written on it, so this field never names a filesystem, and
-	// a /dev/disk/by-uuid/ name is refused.
+	// Device is the disk that holds this role, as a kernel name or a
+	// /dev/disk/by-id/ or /dev/disk/by-path/ name. init reads it only
+	// when it claims a blank disk.
 	Device string `json:"device"`
 
-	// Size is how much of the device this role takes, as a binary
-	// quantity ("2Gi"). This is an exact allocation, not a request.
-	// If Size is omitted, the role takes the rest of its disk. Only
-	// one role per disk may omit Size.
+	// Size is the exact size of this role's partition, as a binary
+	// quantity ("2Gi"). When it is omitted, the role takes the rest of
+	// its disk, and only one role per disk may omit it.
 	Size string `json:"size,omitempty"`
 }
 
-// A DeclaredRole is one role that is present in the spec, paired
-// with its name. This is the form that the rest of liken works with,
-// because the name becomes the partition's on-disk identity.
+// DeclaredRole is a role that the spec declares, with its name.
 type DeclaredRole struct {
 	Name StorageRoleName
 	StorageRole
 }
 
-// PartitionName is the role's on-disk identity: the GPT partition
-// name. liken writes this name when it claims the role's disk, and
-// matches it on every boot after that.
+// PartitionName returns the GPT partition name that init writes when
+// it claims the role's disk and finds the partition by on later boots.
 func (r DeclaredRole) PartitionName() string {
 	return PartitionPrefix + string(r.Name)
 }
 
-// systemSlotsDir is where the system slots' filesystems are mounted:
-// slot A at system/a, and slot B at system/b. Init mounts the slots
-// there, through its roleMounts table. The operator writes
-// downloaded releases there too, through a hostPath mount. So this
-// path is defined once, in the package that both programs share.
+// systemSlotsDir holds the slot mountpoints, system/a and system/b.
+// init mounts the slots there, and the operator writes downloaded
+// releases there through a hostPath mount, so both read this constant.
 const systemSlotsDir = "/var/lib/liken/system"
 
-// SystemSlotDir is one slot's mountpoint. Slots are named "A" and
-// "B" everywhere a person sees them: boot entries, conditions, and
-// the liken.slot= parameter. The directory names use the same
-// letters, in lowercase.
+// SystemSlotDir returns the mountpoint of slot "A" or "B". People see
+// the uppercase letter, in boot entries, conditions, and the
+// liken.slot= kernel parameter, and the directory uses the lowercase
+// letter.
 func SystemSlotDir(slot string) string {
 	return systemSlotsDir + "/" + strings.ToLower(slot)
 }
 
-// ProvenESPLink names the ESP that a UEFI machine's next boot reads:
-// init points it at the proven slot's mountpoint at each boot and each
-// promotion. A pod that stages a firmware update for that boot, such
-// as firmware-operator's, mounts this path through a hostPath volume,
-// which follows the link when the pod starts. A machine whose store
-// names no proven slot has no link.
+// ProvenESPLink is a symlink to the mountpoint of the proven slot,
+// whose ESP a UEFI machine's next boot reads. init points it at that
+// slot at each boot and each promotion. A pod that stages a firmware
+// update for the next boot, such as firmware-operator's, mounts this
+// path as a hostPath volume, and the bind mount resolves the link when
+// the pod starts. A machine with no proven slot has no link.
 const ProvenESPLink = "/run/liken/proven-esp"
 
-// InactiveSlot is the slot that a machine is not running from. A
-// downloaded release lands on this slot; that placement is the point
-// of the blue-green arrangement. InactiveSlot returns "" for a
-// machine whose boot did not come from a slot at all. Such a machine
-// has no inactive slot, and it should never download a release that
-// it could not boot.
+// InactiveSlot returns the slot that the machine is not running from,
+// where a downloaded release is written. It returns "" when the machine
+// did not boot from a slot, because that machine has no slot to write
+// a release to.
 func InactiveSlot(running string) string {
 	switch running {
 	case "A":
@@ -235,9 +186,8 @@ func InactiveSlot(running string) string {
 	return ""
 }
 
-// Role addresses one role's declaration by name. It returns nil for
-// names outside the vocabulary, and for roles that the spec leaves
-// out.
+// Role returns the declaration of the named role. It returns nil for
+// a name that is not a role and for a role that the spec omits.
 func (s *StorageSpec) Role(name StorageRoleName) *StorageRole {
 	switch name {
 	case BIOSBootRole:
@@ -262,8 +212,7 @@ func (s *StorageSpec) Role(name StorageRoleName) *StorageRole {
 	return nil
 }
 
-// Roles returns the declared roles in StorageRoleNames' canonical
-// order.
+// Roles returns the declared roles in the order of StorageRoleNames.
 func (s StorageSpec) Roles() []DeclaredRole {
 	var roles []DeclaredRole
 	for _, name := range StorageRoleNames {
@@ -274,37 +223,36 @@ func (s StorageSpec) Roles() []DeclaredRole {
 	return roles
 }
 
-// Validate checks the spec's internal consistency. It catches the
-// errors that a person can fix in the manifest, before the code
-// touches any disk.
+// Validate checks the spec on its own, without the disks, so a person
+// can fix a mistake in the manifest before init writes to any disk.
 func (s StorageSpec) Validate() error {
 	remainders := map[string]StorageRoleName{}
 	for _, role := range s.Roles() {
 		if role.Device == "" {
-			return fmt.Errorf("storage role %s: no device", role.Name)
+			return fmt.Errorf("storage role %s has no device", role.Name)
 		}
 		if suffix, ok := strings.CutPrefix(role.Device, "/dev/disk/"); ok {
 			tree, name, _ := strings.Cut(suffix, "/")
 			if tree == "by-uuid" {
 				return fmt.Errorf(
-					"storage role %s: device %s is a by-uuid name; a role claims a whole blank disk, and a blank disk has no filesystem, so no UUID can name it",
+					"storage role %s: device %s is a by-uuid name, but a role claims a whole blank disk, and a blank disk has no filesystem to have a UUID. Use a by-id or by-path name",
 					role.Name, role.Device)
 			}
 			if tree != "by-id" && tree != "by-path" {
 				return fmt.Errorf(
-					"storage role %s: device %s names a /dev/disk/%s tree; only by-id and by-path names are allowed",
+					"storage role %s: device %s is in /dev/disk/%s, and a device must be a /dev name or be in /dev/disk/by-id or /dev/disk/by-path",
 					role.Name, role.Device, tree)
 			}
 			if name == "" {
 				return fmt.Errorf(
-					"storage role %s: device %s names the /dev/disk/%s tree, not a disk under it",
+					"storage role %s: device %s is the /dev/disk/%s directory, not a disk in it",
 					role.Name, role.Device, tree)
 			}
 		}
 		if role.Size == "" {
 			if other, ok := remainders[role.Device]; ok {
 				return fmt.Errorf(
-					"storage roles %s and %s both omit their size on %s; only one role per disk may omit its size",
+					"storage roles %s and %s both omit size on %s, and only one role per disk may omit it",
 					other, role.Name, role.Device)
 			}
 			remainders[role.Device] = role.Name
@@ -317,20 +265,13 @@ func (s StorageSpec) Validate() error {
 	return nil
 }
 
-// ParseSize reads a binary quantity ("2Gi", "512Mi", or a plain
-// count of bytes) into bytes. ParseSize accepts only the
-// power-of-two suffixes. liken divides disks into partitions using
-// the same units that its partition math uses. Accepting "2G"
-// (decimal) alongside "2Gi" (binary) would invite subtle mistakes,
-// because the two units differ by about 7%.
+// ParseSize converts a binary quantity ("2Gi", "512Mi") or a plain
+// count of bytes into bytes. It refuses decimal suffixes such as "2G",
+// because "2G" is about 7% smaller than "2Gi" and the partition math
+// uses binary units.
 func ParseSize(s string) (uint64, error) {
-	// The units form an ordered list rather than a map. The search
-	// stops at the first suffix that matches, so the order of the
-	// candidates must stay fixed, and a map's iteration order does
-	// not stay fixed. No suffix here is a suffix of another suffix,
-	// so any fixed order works. If someone adds a suffix that
-	// overlaps another (for example "KiB"), that suffix must come
-	// before the shorter suffix that it ends with.
+	// The loop takes the first suffix that matches, so a suffix that
+	// ends with another suffix in this list must come before it.
 	units := []struct {
 		suffix string
 		factor uint64
@@ -350,24 +291,20 @@ func ParseSize(s string) (uint64, error) {
 	}
 	n, err := strconv.ParseUint(digits, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("size %q: expected bytes or a Ki/Mi/Gi/Ti quantity", s)
+		return 0, fmt.Errorf("size %q is not a count of bytes or a number with the suffix Ki, Mi, Gi, or Ti", s)
 	}
-	// ParseSize rejects zero here, instead of leaving it for the
-	// partition math to fail on. A zero-sector partition would have
-	// an end before its start, and a zero-byte role is always a
-	// mistake in the manifest.
+	// A zero-byte role is always a mistake in the manifest, and this
+	// error is clearer than the one the partition math would give.
 	if n == 0 {
-		return 0, fmt.Errorf("size %q: a storage role can't be zero bytes", s)
+		return 0, fmt.Errorf("size %q is zero bytes, and a storage role needs at least 1 byte", s)
 	}
 	return n * unit, nil
 }
 
-// SizeText renders a byte count as the quantity a manifest would carry:
-// the largest binary unit that divides it exactly. It is the inverse of
-// ParseSize for every size a spec can name, so a number the system
-// prints back to a person is a number they can paste into a spec. A
-// count that no unit divides exactly renders as plain bytes, which
-// ParseSize also accepts.
+// SizeText converts a byte count into the largest binary unit that
+// divides it exactly, or plain bytes when none does. ParseSize reads
+// back every nonzero result, so a person can paste a size that liken
+// prints into a spec.
 func SizeText(bytes uint64) string {
 	switch {
 	case bytes%(1<<40) == 0:

@@ -1,12 +1,5 @@
 package machine
 
-// These tests drive the error paths of the facts codec. A read walks
-// many small files, and each parse can fail on a corrupt file. A write
-// of a collection can meet a key that is not a plain name. Both paths
-// must report the fault and name the thing at fault, so an operator can
-// find it. The round-trip tests prove the happy path; these prove that
-// a fault surfaces instead of a silent zero value.
-
 import (
 	"os"
 	"path/filepath"
@@ -14,18 +7,17 @@ import (
 	"testing"
 )
 
-// writeBadFact plants one unparseable file at rel under the tree. It
-// makes the file's parent directories first, because the writer that
-// normally makes them does not run here. An empty tree reads clean, so
-// this one bad file is the only fault the read can meet.
+// writeBadFact writes value to the file at rel in an otherwise empty
+// tree. An empty tree reads without error, so the file is the only
+// fault that Read can report.
 func writeBadFact(t *testing.T, tree FactsTree, rel, value string) {
 	t.Helper()
 	path := filepath.Join(tree.Dir, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory of the fact: %v", err)
 	}
 	if err := os.WriteFile(path, []byte(value+"\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the fact: %v", err)
 	}
 }
 
@@ -53,32 +45,30 @@ func TestReadReportsUnparseableValues(t *testing.T) {
 			writeBadFact(t, tree, tc.rel, tc.value)
 			_, err := tree.Read()
 			if err == nil {
-				t.Fatalf("a bad %s file should be an error", tc.rel)
+				t.Fatalf("reading a bad %s file returned no error, want one", tc.rel)
 			}
 			if !strings.Contains(err.Error(), filepath.FromSlash(tc.rel)) {
-				t.Errorf("the error should name %s, got %v", tc.rel, err)
+				t.Errorf("the error is %v, want it to name %s", err, tc.rel)
 			}
 		})
 	}
 }
 
-// A fact that cannot be read at all is an error that names its path,
-// exactly like a fact that does not parse. The boot's network carries
-// no numbers or timestamps to spell wrongly, so a directory standing
-// where one of its files belongs is what an unreadable fact looks
-// like in that subtree.
+// The boot network facts are strings with nothing to parse, so this
+// test makes the address file a directory, which os.ReadFile fails to
+// read.
 func TestReadReportsAnUnreadableFact(t *testing.T) {
 	tree := FactsTree{Dir: t.TempDir()}
 	rel := filepath.Join("boot", "network", "interfaces", "0", "address")
 	if err := os.MkdirAll(filepath.Join(tree.Dir, rel), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory %s: %v", rel, err)
 	}
 	_, err := tree.Read()
 	if err == nil {
-		t.Fatal("a fact that cannot be read must be an error, not a silent zero")
+		t.Fatal("reading a fact that is a directory returned no error, want one")
 	}
 	if !strings.Contains(err.Error(), rel) {
-		t.Errorf("the error should name %s, got %v", rel, err)
+		t.Errorf("the error is %v, want it to name %s", err, rel)
 	}
 }
 
@@ -119,19 +109,16 @@ func TestWritersRejectUnsafeKeys(t *testing.T) {
 			tree := FactsTree{Dir: t.TempDir()}
 			err := tc.write(tree, tc.key)
 			if err == nil {
-				t.Fatalf("the writer should reject the key %q", tc.key)
+				t.Fatalf("writing the key %q returned no error, want one", tc.key)
 			}
 			if !strings.Contains(err.Error(), tc.key) {
-				t.Errorf("the error should name the key %q, got %v", tc.key, err)
+				t.Errorf("the error is %v, want it to name the key %q", err, tc.key)
 			}
 		})
 	}
 }
 
-// TestReportRunsOncePerFailure proves the tree's error policy. A writer
-// routes its failure through Report, so the owner reports it once, and
-// still returns the error, so a caller that needs it has it. The
-// reporter is additive: it never hides the fault.
+// A writer that fails calls Report once and returns the same error.
 func TestReportRunsOncePerFailure(t *testing.T) {
 	var reported []error
 	tree := FactsTree{
@@ -141,12 +128,12 @@ func TestReportRunsOncePerFailure(t *testing.T) {
 
 	err := tree.WriteBlockDevices([]BlockDevice{{Name: "bad disk"}})
 	if err == nil {
-		t.Fatal("the writer should reject the unsafe key")
+		t.Fatal("writing the key \"bad disk\" returned no error, want one")
 	}
 	if len(reported) != 1 {
-		t.Fatalf("Report should run once, ran %d times", len(reported))
+		t.Fatalf("Report ran %d times, want 1", len(reported))
 	}
 	if reported[0] != err {
-		t.Errorf("Report should get the returned error, got %v", reported[0])
+		t.Errorf("Report got %v, want the returned error %v", reported[0], err)
 	}
 }

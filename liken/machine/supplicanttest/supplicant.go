@@ -1,5 +1,5 @@
-// Package supplicanttest serves a stand-in for wpa_supplicant's control
-// socket, so the clients in init and machine-operator run the real
+// Package supplicanttest serves a fake wpa_supplicant control socket,
+// so the clients in init and machine-operator run the real
 // datagram transport with no radio and no supplicant.
 package supplicanttest
 
@@ -11,37 +11,36 @@ import (
 	"testing"
 )
 
-// Supplicant answers commands on a control socket the way
-// wpa_supplicant does: ATTACH with OK, a command it holds an answer
-// for with that answer, and any other command with UNKNOWN COMMAND.
-// Push sends an event to every client that attached.
+// Supplicant replies to commands on a control socket the way
+// wpa_supplicant does. It replies OK to ATTACH, the configured reply
+// to a command set with Answer, and UNKNOWN COMMAND to any other
+// command. Push sends an event to every client that attached.
 type Supplicant struct {
-	// Socket is the control socket's path.
 	Socket string
 
 	conn *net.UnixConn
 
 	mu       sync.Mutex
-	answers  map[string]string
+	replies  map[string]string
 	attached []*net.UnixAddr
-	asked    []string
+	received []string
 }
 
-// Start serves a stand-in for the supplicant of ifname under dir, at
-// the path machine.SupplicantSocket names. The test's cleanup closes
-// it.
+// Start serves a fake supplicant for ifname under dir, at
+// the path that machine.SupplicantSocket returns. The test's cleanup
+// closes it.
 func Start(t *testing.T, dir, ifname string) *Supplicant {
 	t.Helper()
 	ctrl := filepath.Join(dir, ifname, "ctrl")
 	if err := os.MkdirAll(ctrl, 0o700); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	socket := filepath.Join(ctrl, ifname)
 	conn, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: socket, Net: "unixgram"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listening on the control socket: %v", err)
 	}
-	s := &Supplicant{Socket: socket, conn: conn, answers: map[string]string{}}
+	s := &Supplicant{Socket: socket, conn: conn, replies: map[string]string{}}
 	t.Cleanup(func() { conn.Close() })
 	go s.serve()
 	return s
@@ -51,18 +50,18 @@ func Start(t *testing.T, dir, ifname string) *Supplicant {
 func (s *Supplicant) Answer(command, reply string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.answers[command] = reply
+	s.replies[command] = reply
 }
 
-// Asked answers every command the stand-in received other than
-// ATTACH, in order.
+// Asked returns every command except ATTACH that the fake has
+// received, in order.
 func (s *Supplicant) Asked() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]string(nil), s.asked...)
+	return append([]string(nil), s.received...)
 }
 
-// Attached reports whether a client attached for events.
+// Attached reports whether a client has attached for events.
 func (s *Supplicant) Attached() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -78,7 +77,7 @@ func (s *Supplicant) Push(t *testing.T, event string) {
 	s.mu.Unlock()
 	for _, peer := range peers {
 		if _, err := s.conn.WriteToUnix([]byte("<3>"+event), peer); err != nil {
-			t.Fatal(err)
+			t.Fatalf("sending the event: %v", err)
 		}
 	}
 }
@@ -92,13 +91,13 @@ func (s *Supplicant) serve() {
 		}
 		command := string(buf[:n])
 		s.mu.Lock()
-		reply, known := s.answers[command]
+		reply, known := s.replies[command]
 		switch {
 		case command == "ATTACH":
 			s.attached = append(s.attached, from)
 			reply, known = "OK\n", true
 		default:
-			s.asked = append(s.asked, command)
+			s.received = append(s.received, command)
 		}
 		s.mu.Unlock()
 		if !known {

@@ -9,8 +9,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// crdSerioField is the part of the spec.serio schema that the Go side
-// must agree with: the protocol enum and the three patterns.
+// crdSerioField is the part of the spec.serio schema that the Go code
+// must match: the protocol enum, the USB patterns, and maxItems.
 type crdSerioField struct {
 	MaxItems int `json:"maxItems"`
 	Items    struct {
@@ -58,25 +58,25 @@ func readSerioCRD(t *testing.T) crdSerioField {
 	return crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Spec.Properties.Serio
 }
 
-// A protocol the API server admits and init does not know would reach
-// the machine as an entry that never attaches, so the enum and the
-// table are one list.
+// A protocol that the API server accepts and init does not support would
+// reach the machine as an entry that never attaches, so the enum and
+// the protocol table must list the same names.
 func TestTheCRDEnumIsTheProtocolTable(t *testing.T) {
 	enum := slices.Sorted(slices.Values(readSerioCRD(t).Items.Properties.Protocol.Enum))
 	if !slices.Equal(enum, SerioProtocolNames()) {
-		t.Errorf("the CRD admits %v, the table holds %v", enum, SerioProtocolNames())
+		t.Errorf("the CRD enum is %v, want the protocol table %v", enum, SerioProtocolNames())
 	}
 }
 
-// ValidateSerio applies the same patterns to a manifest that no API
-// server admitted, so the two must accept and refuse the same values.
+// ValidateSerio checks a manifest that the API server never saw, so it
+// must accept and refuse the same values as the CRD patterns.
 func TestTheCRDPatternsMatchValidateSerio(t *testing.T) {
 	usb := readSerioCRD(t).Items.Properties.USB.Properties
 	tests := []struct {
-		name  string
-		crd   string
-		goes  *regexp.Regexp
-		value string
+		name      string
+		crd       string
+		goPattern *regexp.Regexp
+		value     string
 	}{
 		{"a vendor", usb.Vendor.Pattern, usbIDPattern, "2548"},
 		{"an uppercase vendor", usb.Vendor.Pattern, usbIDPattern, "25A8"},
@@ -88,17 +88,17 @@ func TestTheCRDPatternsMatchValidateSerio(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			crd := regexp.MustCompile(test.crd).MatchString(test.value)
-			if crd != test.goes.MatchString(test.value) {
-				t.Errorf("the CRD says %v for %q, and ValidateSerio disagrees", crd, test.value)
+			if crd != test.goPattern.MatchString(test.value) {
+				t.Errorf("the CRD pattern gives %v for %q, and the Go pattern gives %v", crd, test.value, test.goPattern.MatchString(test.value))
 			}
 		})
 	}
 }
 
-// A holder is one goroutine and one open tty, and a machine carries a
-// handful of adapters at most, so the list has a small bound.
+// Each entry runs one goroutine with one open tty, and a machine has
+// few adapters, so the list is limited to 8 entries.
 func TestTheCRDBoundsTheSerioList(t *testing.T) {
 	if got := readSerioCRD(t).MaxItems; got != 8 {
-		t.Errorf("got %d", got)
+		t.Errorf("the CRD maxItems is %d, want 8", got)
 	}
 }

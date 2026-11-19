@@ -1,24 +1,22 @@
 package machine
 
-// The facts tree carries what init observed to the operator, as a
-// directory of small files under /run/liken/facts.
+// The facts tree is how init passes what it observed to the operator.
+// It is a directory of small files under /run/liken/facts.
 //
-// Init gathers facts that no program inside the cluster can observe
-// directly: the DHCP exchange, the moment of boot, the hardware as the
-// kernel first showed it. The operator reads these facts, adds what it
-// observes itself, and publishes the result to the Machine's status.
+// Init records facts that no program inside the cluster can observe
+// directly: the DHCP exchange, the time of boot, and the hardware as
+// the kernel first showed it. The operator reads these facts, adds
+// what it observes itself, and publishes the result to the Machine's
+// status.
 //
-// The tree is one rendering of the same contract that MachineStatus and
-// the CRD describe. Each path segment is a JSON field name, so the
-// three renderings read alike. A person can explore the tree with ls,
-// cat, and grep, and read one fact without parsing the whole status.
+// The tree mirrors MachineStatus and the CRD, because each path
+// segment is a JSON field name. You can read one fact with cat, or
+// explore the tree with ls and grep, without parsing the whole status.
 //
-// One value lives in one file. This is the reason the tree exists as a
-// tree at all. A single status file forces one writer, because a write
-// serializes the whole struct, and two writers would race to rewrite
-// the same bytes. A tree gives each fact its own file, so each init
-// component writes its own subtree with no shared lock. The ownership
-// map has no file with two owners:
+// Each fact is in its own file so that each part of init can write its
+// own subtree with no shared lock. A single status file would allow
+// only one writer, because each write replaces the whole file. Each
+// path below has one owner:
 //
 //	time/                          the clock loop
 //	hardware/blockDevices/         the hardware watch
@@ -36,55 +34,53 @@ package machine
 //	firmware/                      the boot step, then the proving watch
 //	everything else                the boot step that discovers it
 //
-// A boot step writes its subtree once, at the point where it discovers
-// the fact, and prints its console line from the same place. The tree
-// fills in as the boot runs. A partial tree is safe, because the
+// A boot step writes its subtree when it discovers the fact. The
 // operator runs under k3s, and k3s starts only after the boot steps
-// finish.
+// finish, so the operator never reads a subtree that a boot step has
+// only partly written.
 //
-// The grammar has five rules:
+// The tree follows five rules:
 //
 //  1. A scalar fact is one file: the value plus one trailing newline.
-//     Strings are raw, integers decimal, booleans the word true,
-//     timestamps RFC3339Nano in UTC, and enums their API word.
+//     Strings are raw, integers are decimal, booleans are the word
+//     true, timestamps are RFC3339Nano in UTC, and enums are their API
+//     word.
 //  2. An absent fact has no file, and a zero value has no file. A
-//     reader treats a missing file as the zero value, which is
-//     omitempty semantics. A writer removes the file for a fact that
-//     disappears.
+//     reader treats a missing file as the zero value, as omitempty
+//     does. A writer removes the file for a fact that disappears.
 //  3. A scalar list is one file, one item per line, in list order. An
 //     empty list has no file.
-//  4. An identity-keyed collection is a directory for each element,
-//     named by the element's natural key.
-//  5. A group of facts that change together mid-run is one record file
-//     of key=value lines.
+//  4. A collection with a natural key is a directory with one
+//     subdirectory for each element, named by the element's key.
+//  5. A group of facts that must change together while the machine
+//     runs is one record file of key=value lines.
 //
-// Rule 5 applies to four boot records, boot/manifest,
-// boot/clusterManifest, boot/credentials, and boot/imports, to the
-// clock's standing, time/standing, to each radio's association,
-// network/interfaces/<name>/wireless/association, and to each element
-// of the two serio lists, serio/ and boot/serio/. Each of
-// these is rewritten while the machine runs. A rename replaces one
-// inode in one step, so a rename of one file is the only write that a
-// concurrent reader can never see half done. The paired fields of each
-// record must land together, so each pair is one file that one rename
-// replaces. The rest of the tree writes once at boot, before the
-// operator exists, so those facts cannot tear and stay one file each.
-// firmware/ is written once more, after a promotion rewrites the boot
-// order. A pass that reads during that write can publish part of the
-// new order with part of the old, and the last rename wakes the next
-// pass, which publishes the order as the promotion left it.
+// Rule 2 has one exception, boot/network. A machine that declared no
+// interface and a machine whose boot recorded no network are different
+// cases, and the operator must act differently on each. So the
+// boot/network directory exists whenever the boot recorded anything,
+// even when it has no file under it. No other empty directory means
+// anything.
 //
-// Rule 2 has one exception, boot/network, and the exception is what
-// the fact is for. A machine that declared no interface and a machine
-// whose boot recorded no network are different facts, and the
-// operator must act differently on each, so the boot/network
-// directory exists whenever the boot recorded anything, even with no
-// file under it. Nowhere else does an empty directory mean anything.
+// The tree is on tmpfs, so a write needs no fsync. Every write goes
+// through writeAtomic, which writes a temp file in the same directory
+// and renames it over the target, so a reader sees either the old file
+// or the new one, never a partial write.
 //
-// The tree lives on tmpfs, so a write needs no fsync. Every write goes
-// through writeAtomic: a temp file in the same directory, then a
-// rename. A reader that polls or wakes on its own schedule sees either
-// the old file or the new file, never a torn write.
+// The owners in the table other than the boot steps rewrite their
+// subtrees while the operator runs. A subtree of several files changes
+// one file at a time, so a pass of the operator can read part of the
+// new subtree with part of the old. The operator watches the tree with
+// WatchFactsTree, so the last rename wakes another pass, which reads
+// the subtree as the writer left it. A record file of rule 5 holds
+// fields that a reader must never see from two different writes,
+// because one rename replaces all of them. These are the records:
+//
+//   - boot/manifest, boot/clusterManifest, boot/credentials, and
+//     boot/imports
+//   - time/standing, the state, source, stratum, and offset of the clock
+//   - network/interfaces/<name>/wireless/association for each radio
+//   - each element of the serio lists, serio/ and boot/serio/
 
 import (
 	"crypto/sha256"
@@ -100,31 +96,25 @@ import (
 	"time"
 )
 
-// FactsDir is the root of the facts tree. It sits on /run, which is
-// tmpfs, because the facts describe one boot and a reboot must start
-// them empty.
+// FactsDir is the root of the facts tree. It is on /run, which is
+// tmpfs, so a reboot starts with an empty tree.
 const FactsDir = "/run/liken/facts"
 
-// FactsTree is one facts tree, rooted at Dir. Production code roots it
-// at FactsDir. Tests root it at a temporary directory, so a test never
-// touches the machine's real /run.
+// FactsTree is one facts tree, rooted at Dir. Production code uses
+// FactsDir, and tests use a temporary directory.
 //
-// A fact write must never stop the machine: a lost fact is a reporting
-// gap the operator fills with a zero value, not a reason to halt PID 1.
-// The program that owns the tree states that policy once, in Report,
-// rather than at every call site. Each writer routes its result through
-// report, which hands a failure to Report and returns the error
-// unchanged. The reporter is additive: the error still reaches the
-// caller, so a test with a nil Report asserts it directly.
+// A failed fact write must not stop PID 1. The operator reads a lost
+// fact as a zero value, which leaves a gap in the status. So init sets
+// Report to log each write error, and does not stop on one. Each
+// writer still returns its error, so a test with a nil Report can
+// check it.
 type FactsTree struct {
 	Dir string
-	// Report receives each failed write. A nil Report leaves the error
-	// with the caller.
+	// Report, when it is not nil, receives each error that a write
+	// returns.
 	Report func(err error)
 }
 
-// report hands a failed write to the tree's reporter and returns the
-// error unchanged, so the caller still sees it.
 func (t FactsTree) report(err error) error {
 	if err != nil && t.Report != nil {
 		t.Report(err)
@@ -132,34 +122,28 @@ func (t FactsTree) report(err error) error {
 	return err
 }
 
-// keyPattern is the set of characters that a collection key may use
-// directly, for interfaces, disks, modules, and features. These keys
-// come from the kernel and from the spec, and they already read as
-// plain names, so the writer asserts the pattern instead of rewriting
-// the key. A key outside the pattern is a programming error, not a
-// value to sanitize.
+// keyPattern matches the keys of collections such as interfaces,
+// disks, modules, and features. These keys come from the kernel and
+// the spec and are already plain names. A key outside the pattern, such
+// as one with a slash, is a programming error, so a writer refuses it
+// and does not escape it.
 var keyPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
 
-// assertKey checks that a collection key is safe to use as a directory
-// name. It rejects a key that could escape its parent or collide with
-// the tree's own structure.
 func assertKey(kind, key string) error {
 	if !keyPattern.MatchString(key) {
-		return fmt.Errorf("facts %s key %q is not a plain name", kind, key)
+		return fmt.Errorf("the facts tree has a %s key %q outside %s", kind, key, keyPattern)
 	}
 	return nil
 }
 
-// safeKey turns a modalias into a directory name. A modalias is the
-// kernel's own fingerprint string, and it carries bytes that a path
-// segment cannot hold, such as a slash or a space. safeKey replaces
-// every byte outside [A-Za-z0-9._:+-] with an underscore. If it
-// changed any byte, or the result runs past 200 bytes, it truncates to
-// 64 bytes and appends a dash and the first twelve hex digits of the
-// modalias's sha256. The hash makes the key unique, so two aliases
-// that differ only in an unsafe byte never collide. The exact modalias
-// lives in the modalias file inside the directory, so the key itself
-// needs no way back to the original.
+// safeKey turns a kernel modalias, which can contain a slash or a
+// space, into a directory name. It replaces each byte outside
+// [A-Za-z0-9._:+-] with an underscore. When it replaced a byte, or the
+// key is longer than 200 bytes, it cuts the key to 64 bytes and appends
+// a dash and 12 hex digits of the modalias's sha256, so two aliases
+// that differ only in an unsafe byte get different keys. The key need
+// not be reversible, because the directory's modalias file holds the
+// exact modalias.
 func safeKey(modalias string) string {
 	var b strings.Builder
 	changed := false
@@ -187,9 +171,8 @@ func safeKey(modalias string) string {
 	return key + "-" + suffix
 }
 
-// writeFact writes one scalar file. An empty value means the fact is
-// absent, so writeFact removes the file instead. A reader treats the
-// missing file as the zero value.
+// writeFact writes one scalar file. An empty value is an absent fact,
+// so writeFact removes the file instead.
 func (t FactsTree) writeFact(rel, value string) error {
 	path := filepath.Join(t.Dir, rel)
 	if value == "" {
@@ -202,8 +185,7 @@ func (t FactsTree) writeFact(rel, value string) error {
 }
 
 // writeListFact writes one scalar list, one item per line, in order.
-// An empty list means the fact is absent, so writeListFact removes the
-// file.
+// An empty list is an absent fact, so writeListFact removes the file.
 func (t FactsTree) writeListFact(rel string, items []string) error {
 	path := filepath.Join(t.Dir, rel)
 	if len(items) == 0 {
@@ -216,11 +198,9 @@ func (t FactsTree) writeListFact(rel string, items []string) error {
 }
 
 // writeRecordFact writes one record file of key=value lines, in the
-// given order. It skips a pair whose value is empty, so an absent
-// field of the record leaves no line. If no pair has a value, the whole
-// record is absent, so writeRecordFact removes the file. A value cannot
-// hold a newline or a control byte, because those would break the line
-// grammar, so writeRecordFact replaces each with a space.
+// order of pairs. A pair with an empty value is an absent field and
+// gets no line. When every value is empty, the record is absent and
+// writeRecordFact removes the file.
 func (t FactsTree) writeRecordFact(rel string, pairs [][2]string) error {
 	var b strings.Builder
 	for _, p := range pairs {
@@ -242,10 +222,9 @@ func (t FactsTree) writeRecordFact(rel string, pairs [][2]string) error {
 	return writeAtomic(path, []byte(b.String()))
 }
 
-// sanitizeValue replaces every newline and control byte with a space,
-// so a record value stays on one line. A record file's grammar is one
-// key=value pair per line, and a raw newline in a value would forge a
-// second line.
+// sanitizeValue replaces each newline and control character with a
+// space. A newline in a value would start a new line in the record
+// file, and a reader would take that line as another key.
 func sanitizeValue(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f {
@@ -255,9 +234,8 @@ func sanitizeValue(s string) string {
 	}, s)
 }
 
-// readFact reads one scalar file. A missing file is the zero value, so
-// readFact returns an empty string with no error. It strips the single
-// trailing newline that writeFact added.
+// readFact reads one scalar file without its trailing newline. A
+// missing file returns an empty string and no error.
 func (t FactsTree) readFact(rel string) (string, error) {
 	raw, err := os.ReadFile(filepath.Join(t.Dir, rel))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -269,8 +247,8 @@ func (t FactsTree) readFact(rel string) (string, error) {
 	return strings.TrimSuffix(string(raw), "\n"), nil
 }
 
-// readListFact reads one scalar list into its lines, in order. A
-// missing file is an empty list.
+// readListFact reads one scalar list, one item for each line. A
+// missing file returns an empty list.
 func (t FactsTree) readListFact(rel string) ([]string, error) {
 	raw, err := os.ReadFile(filepath.Join(t.Dir, rel))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -287,9 +265,7 @@ func (t FactsTree) readListFact(rel string) ([]string, error) {
 }
 
 // readRecordFact reads one record file into a map of its key=value
-// lines. A missing file is an empty record. It reads each key on its
-// own, so it accepts a record that carries an unknown key, and a
-// caller reads only the keys it needs.
+// lines. A missing file returns a nil map. It skips a line with no "=".
 func (t FactsTree) readRecordFact(rel string) (map[string]string, error) {
 	raw, err := os.ReadFile(filepath.Join(t.Dir, rel))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -312,9 +288,9 @@ func (t FactsTree) readRecordFact(rel string) (map[string]string, error) {
 	return record, nil
 }
 
-// readInt reads a scalar file as a decimal integer. A missing file is
-// zero. A file that does not hold an integer is an error that names its
-// path, so an operator can find the bad file.
+// readInt reads a scalar file as a decimal integer. A missing file
+// returns zero. A file that is not an integer returns an error with
+// the file's path.
 func (t FactsTree) readInt(rel string) (int, error) {
 	value, err := t.readFact(rel)
 	if err != nil || value == "" {
@@ -322,15 +298,15 @@ func (t FactsTree) readInt(rel string) (int, error) {
 	}
 	n, err := strconv.Atoi(value)
 	if err != nil {
-		return 0, fmt.Errorf("%s: %w", filepath.Join(t.Dir, rel), err)
+		return 0, fmt.Errorf("reading %s as a number: %w", filepath.Join(t.Dir, rel), err)
 	}
 	return n, nil
 }
 
-// readUint reads a scalar file as a decimal unsigned integer, the shape
-// of every byte count in the tree. A missing file is zero, and a file
-// that does not hold an unsigned integer is an error that names its
-// path.
+// readUint reads a scalar file as a decimal unsigned integer, which is
+// how the tree stores each byte count. A missing file returns zero. A
+// file that is not an unsigned integer returns an error with the
+// file's path.
 func (t FactsTree) readUint(rel string) (uint64, error) {
 	value, err := t.readFact(rel)
 	if err != nil || value == "" {
@@ -338,15 +314,14 @@ func (t FactsTree) readUint(rel string) (uint64, error) {
 	}
 	n, err := strconv.ParseUint(value, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("%s: %w", filepath.Join(t.Dir, rel), err)
+		return 0, fmt.Errorf("reading %s as a number: %w", filepath.Join(t.Dir, rel), err)
 	}
 	return n, nil
 }
 
-// readTime reads a scalar file as an RFC3339Nano timestamp in UTC. A
-// missing file is a nil time, the absent value for every timestamp in
-// the tree. A file that does not hold a timestamp is an error that
-// names its path.
+// readTime reads a scalar file as an RFC3339Nano timestamp and returns
+// it in UTC. A missing file returns a nil time. A file that is not a
+// timestamp returns an error with the file's path.
 func (t FactsTree) readTime(rel string) (*time.Time, error) {
 	value, err := t.readFact(rel)
 	if err != nil || value == "" {
@@ -354,14 +329,14 @@ func (t FactsTree) readTime(rel string) (*time.Time, error) {
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", filepath.Join(t.Dir, rel), err)
+		return nil, fmt.Errorf("reading %s as a timestamp: %w", filepath.Join(t.Dir, rel), err)
 	}
 	parsed = parsed.UTC()
 	return &parsed, nil
 }
 
-// formatTime renders a timestamp for the tree: RFC3339Nano in UTC. A
-// nil or zero time renders empty, so its file is absent.
+// formatTime formats a timestamp as RFC3339Nano in UTC. A nil or zero
+// time formats as empty, so it gets no file.
 func formatTime(t *time.Time) string {
 	if t == nil || t.IsZero() {
 		return ""
@@ -369,8 +344,8 @@ func formatTime(t *time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-// formatInt renders an integer for the tree. Zero renders empty, so a
-// zero value leaves no file.
+// formatInt formats an integer in decimal. Zero formats as empty, so
+// it gets no file.
 func formatInt(n int) string {
 	if n == 0 {
 		return ""
@@ -378,8 +353,8 @@ func formatInt(n int) string {
 	return strconv.Itoa(n)
 }
 
-// formatUint renders an unsigned integer for the tree. Zero renders
-// empty, so a zero value leaves no file.
+// formatUint formats an unsigned integer in decimal. Zero formats as
+// empty, so it gets no file.
 func formatUint(n uint64) string {
 	if n == 0 {
 		return ""
@@ -387,9 +362,8 @@ func formatUint(n uint64) string {
 	return strconv.FormatUint(n, 10)
 }
 
-// formatBool renders a boolean for the tree. Only a true value has a
-// file, and its content is the word true. A false value leaves no file,
-// which the reader treats as false.
+// formatBool formats true as the word true and false as empty, so a
+// false fact has no file. A reader treats a missing file as false.
 func formatBool(b bool) string {
 	if b {
 		return "true"
@@ -397,9 +371,9 @@ func formatBool(b bool) string {
 	return ""
 }
 
-// formatOptionalBool renders a boolean that can be unknown. Both
-// answers have a file, so false survives the round trip, and an
-// unknown value leaves no file.
+// formatOptionalBool formats a boolean that can be unknown. True and
+// false each get a file, and nil gets none, so a reader can tell false
+// from unknown.
 func formatOptionalBool(b *bool) string {
 	if b == nil {
 		return ""
@@ -407,8 +381,8 @@ func formatOptionalBool(b *bool) string {
 	return strconv.FormatBool(*b)
 }
 
-// parseOptionalBool reads what formatOptionalBool wrote. Any other
-// content reads as unknown.
+// parseOptionalBool reverses formatOptionalBool. Content that is not a
+// boolean returns nil.
 func parseOptionalBool(s string) *bool {
 	b, err := strconv.ParseBool(s)
 	if err != nil {
@@ -417,8 +391,7 @@ func parseOptionalBool(s string) *bool {
 	return &b
 }
 
-// removeFile deletes a file that a fact no longer needs. A file that is
-// already gone is not an error, because the goal is only its absence.
+// removeFile deletes a file. A missing file is not an error.
 func removeFile(path string) error {
 	err := os.Remove(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -427,11 +400,10 @@ func removeFile(path string) error {
 	return err
 }
 
-// syncEntryDirs removes the element directories under parent whose keys
-// are not in want. It is how every collection writer honors rule 2: an
-// element that leaves the set loses its directory. It removes
-// directories only, so a temp file that another write left behind stays
-// untouched. A parent that does not exist yet has nothing to remove.
+// syncEntryDirs deletes each directory under parent whose name is not
+// in want, so an element that leaves a collection loses its directory.
+// It leaves files alone, including the temp file of a write in
+// progress. A missing parent is not an error.
 func syncEntryDirs(parent string, want map[string]bool) error {
 	entries, err := os.ReadDir(parent)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -452,10 +424,8 @@ func syncEntryDirs(parent string, want map[string]bool) error {
 }
 
 // syncEntryFiles is syncEntryDirs for a collection whose elements are
-// scalars rather than records: it removes the file of every key the
-// writer no longer names. A collection of scalars is a directory of
-// files, not a directory of directories, so the two cannot share one
-// walk.
+// files. It deletes each file under parent whose name is not in want,
+// and leaves directories alone.
 func syncEntryFiles(parent string, want map[string]bool) error {
 	entries, err := os.ReadDir(parent)
 	if errors.Is(err, fs.ErrNotExist) {

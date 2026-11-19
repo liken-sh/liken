@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// A proven manifest that a newer release wrote: storage this release
-// knows, and fields it does not.
+// A proven manifest written by a newer release. It has storage that
+// this release supports and fields that it does not.
 const newerManifest = `apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:
@@ -28,18 +28,18 @@ spec:
         names: [nas]
         aliasOf: nas.local
   nodeLabels:
-    zone: den
+    zone: east
   sysctls:
     net.ipv4.ip_forward: "1"
 `
 
-func TestParseKnownSkipsTheFieldsThisReleaseDoesNotKnow(t *testing.T) {
+func TestParseKnownSkipsTheFieldsThisReleaseDoesNotHave(t *testing.T) {
 	cases := []struct {
 		name    string
 		raw     string
 		ignored []string
 	}{
-		{name: "a manifest this release knows", raw: "kind: Machine\nmetadata:\n  name: node-1\n"},
+		{name: "a manifest with only fields this release has", raw: "kind: Machine\nmetadata:\n  name: node-1\n"},
 		{name: "a field a newer release added", raw: newerManifest, ignored: []string{"spec.futureDevices", "spec.network.hostEntries[0].aliasOf"}},
 		{name: "a field nested in a known object", raw: `kind: Machine
 spec:
@@ -54,32 +54,30 @@ spec:
 			m, ignored, err := ParseKnown([]byte(one.raw))
 
 			if err != nil {
-				t.Fatalf("ParseKnown: %v", err)
+				t.Fatalf("parsing the manifest: %v", err)
 			}
 			if m.Kind != "Machine" {
-				t.Errorf("parsed kind %q", m.Kind)
+				t.Errorf("the kind is %q, want Machine", m.Kind)
 			}
 			if !slices.Equal(ignored, one.ignored) {
-				t.Errorf("ignored %v, want %v", ignored, one.ignored)
+				t.Errorf("the ignored fields are %v, want %v", ignored, one.ignored)
 			}
 		})
 	}
 }
 
-// The fields this release knows survive the parse.
-func TestParseKnownKeepsTheFieldsItKnows(t *testing.T) {
+func TestParseKnownKeepsTheFieldsThisReleaseHas(t *testing.T) {
 	m, _, err := ParseKnown([]byte(newerManifest))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the newer manifest: %v", err)
 	}
 
 	if m.Metadata.Name != "node-1" || m.Spec.Storage.MachineState == nil ||
-		m.Spec.Storage.MachineState.Size != "1Gi" || m.Spec.NodeLabels["zone"] != "den" {
-		t.Errorf("the known fields did not survive: %+v", m.Spec)
+		m.Spec.Storage.MachineState.Size != "1Gi" || m.Spec.NodeLabels["zone"] != "east" {
+		t.Errorf("the spec is %+v, want the known fields node-1, a 1Gi machineState, and the zone label", m.Spec)
 	}
 }
 
-// A manifest that is wrong, not newer, still fails.
 func TestParseKnownRefusesAManifestThatIsWrong(t *testing.T) {
 	cases := []struct {
 		name string
@@ -92,7 +90,7 @@ func TestParseKnownRefusesAManifestThatIsWrong(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			if _, _, err := ParseKnown([]byte(one.raw)); err == nil {
-				t.Error("parsed, want an error")
+				t.Error("the manifest parsed, want an error")
 			}
 		})
 	}
@@ -103,30 +101,30 @@ func TestLoadKnownReadsAProvedManifestFile(t *testing.T) {
 	newer := filepath.Join(dir, "newer.yaml")
 	broken := filepath.Join(dir, "broken.yaml")
 	if err := os.WriteFile(newer, []byte(newerManifest), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing newer.yaml: %v", err)
 	}
 	if err := os.WriteFile(broken, []byte("kind: Cluster\nspec:\n  futureDevices: [a]\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing broken.yaml: %v", err)
 	}
 
 	m, ignored, err := LoadKnown(newer)
 	if err != nil || m.Metadata.Name != "node-1" || len(ignored) != 2 {
-		t.Errorf("newer: %v, %v, %v", m, ignored, err)
+		t.Errorf("loading the newer manifest gave %v, %v, %v, want node-1, two ignored fields, and no error", m, ignored, err)
 	}
 	if m, ignored, err := LoadKnown(filepath.Join(dir, "absent.yaml")); err != nil || m == nil || ignored != nil {
-		t.Errorf("absent: %v, %v, %v; want a machine with every field at its default", m, ignored, err)
+		t.Errorf("loading an absent file gave %v, %v, %v, want a machine with every field at its default", m, ignored, err)
 	}
 	if _, _, err := LoadKnown(broken); err == nil || !strings.Contains(err.Error(), "broken.yaml") {
-		t.Errorf("broken: %v, want an error that names the file", err)
+		t.Errorf("loading the broken manifest gave %v, want an error that names broken.yaml", err)
 	}
 	if _, _, err := LoadKnown(dir); err == nil {
-		t.Error("a directory: want an error")
+		t.Error("loading a directory returned no error, want one")
 	}
 }
 
-// The walk matches the names encoding/json matches: case aside, the
-// fields an embedded struct promotes, and never a field tagged "-".
-// A type that decodes its own JSON keeps its keys to itself.
+// The walk matches names as encoding/json does: ignoring case,
+// including fields promoted from an embedded struct, and never a
+// field tagged "-". It skips a type that decodes its own JSON.
 type walkedBase struct {
 	Shared string `json:"shared"`
 }

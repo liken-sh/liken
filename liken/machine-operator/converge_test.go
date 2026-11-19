@@ -278,7 +278,7 @@ func TestDecideConvergenceRefusesTwoInterfacesForOnePort(t *testing.T) {
 	if conv.stage || conv.requestReboot {
 		t.Error("the convergence stages an invalid network, want no staging")
 	}
-	if !strings.Contains(conv.condition.Message, "declare each port once") {
+	if !strings.Contains(conv.condition.Message, "remove one of them") {
 		t.Errorf("the message is %q, want it to name the fix", conv.condition.Message)
 	}
 }
