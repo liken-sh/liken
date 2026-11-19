@@ -219,9 +219,11 @@ func installGRUB(parts []partition, machineName, slotMount string) error {
 	if err := writeFileDurably(filepath.Join(grubDir, "grubenv"), env); err != nil {
 		return fmt.Errorf("install: writing grubenv: %w", err)
 	}
-	// Flush both renames and the drive's write cache, because GRUB
-	// stops at its rescue prompt when a power cut loses grub.cfg.
-	if err := syncDirectory(grubDir); err != nil {
+	// The boot home is FAT, so the directory entries of both renames
+	// stay in the block device's buffers until flushSlot writes them
+	// and flushes the drive's write cache (durable.go). GRUB stops at
+	// its rescue prompt when a power cut loses grub.cfg.
+	if err := flushSlot(grubDir); err != nil {
 		return fmt.Errorf("install: flushing the boot home to the disk: %w", err)
 	}
 
