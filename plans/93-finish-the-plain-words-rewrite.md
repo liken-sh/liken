@@ -24,7 +24,12 @@ the CRD descriptions, and the manual of these components:
 `brand`, `firmware-operator`, `kubernetes`, `ci`, `git-csi-driver`,
 `media-screen`, `astrophotography-operator`, `observatory-operator`,
 `media-operator`, `transect`, and, inside `liken`, `init`,
-`machine-operator`, and `machine`.
+`machine-operator`, `machine`, and `cluster-operator`.
+
+For the rest of `liken`, the rewrite covered only the text that a
+user reads: the manual, the README files, the descriptions of the
+`Cluster` and `Disruption` CRDs, and the help, output, errors, and
+log lines of each Go package.
 
 The rewrite fixed no defect. Each thing that looked like a defect is
 an open problem in the `plans/open-problems/` of its component,
@@ -60,10 +65,13 @@ them in, with the briefs under `brand/` in place of
 
 ## Components not rewritten
 
-- `liken/cluster-operator`.
-- The rest of `liken`: the CLI, `cluster`, `disks`, the manual under
-  `docs`, the build scripts, and the other directories. The scripts
-  and build files keep their long explanatory comments, and the
+- The comments and the private names of the Go packages of `liken`
+  outside `init`, `machine-operator`, `machine`, and
+  `cluster-operator`: the CLI, `cluster`, `disks`, `hardware`,
+  `image`, `kubernetes`, `logs`, `releases`, and the smaller packages.
+- The scripts and build files of `liken`: `dev-cluster`, `userland`,
+  `image`, the bootloaders, and the files at the top of the
+  directory. They keep their long explanatory comments, and the
   rewrite changes only their words.
 - `library-operator`, with its media browser. The browser's Rust
   coverage floor is 97% and counts test code.
@@ -85,6 +93,16 @@ reaches other components:
   recorder's "last write had not returned", the election's "holding
   Lease" and "waiting for Lease", and the conversion's "holds no
   copy".
+- The names of `liken/machine` that `init` and `machine-operator`
+  use: `AskSupplicant`, `AskSupplicantAssociation`, the `Answer` and
+  `Asked` of the fake supplicant, `ApprovalGrants`,
+  `RebootRequestNames`, `OffsetBoundOf`, and `OutrunsSlew`. The fact
+  path `time/standing` is in the same group, and `init` and the
+  operator can run different releases, so a rename of it needs a
+  migration.
+- The file names `steward.go` and `janitor.go` of
+  `liken/cluster-operator`, which `machine-operator` and the manual
+  name.
 - The public names `Moment` and `pressed` of `media-screen`, and the
   words "shade", "desire", "window", and "step back" in the code that
   uses them.
@@ -133,6 +151,9 @@ Each one is an open problem of its component:
 ## Decisions put off
 
 - A rename of anything in the API: a kind, a field, a condition type,
-  a reason, a metric, or a flag.
+  a reason, a metric, or a flag. The figurative names that the rewrite
+  met are the reasons `NotPlantedByLiken`, `FluxEngineSeeded`, and
+  `FluxDeployKeyMinted`, the name `liken-engine-planter`, and the
+  `seed/` directory of `liken/cluster-operator`.
 - Which level each log line takes, and whether the components share
   one way to log.
