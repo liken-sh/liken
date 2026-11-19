@@ -13,56 +13,9 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/endedpods"
 )
-
-// The kubelet's end of a pod is a Failed phase with a DisruptionTarget
-// condition, or with a pod-level reason other than DeadlineExceeded. A
-// program that exits non-zero leaves the pod-level reason empty.
-func TestTheKubeletsEndIsToldFromTheProgramsFailure(t *testing.T) {
-	disrupted := []podCondition{{Type: "DisruptionTarget", Status: "True"}}
-	cases := []struct {
-		name   string
-		status podStatus
-		want   bool
-	}{
-		{"an eviction", podStatus{Phase: podFailed, Reason: "Evicted", Message: "The node was low on resource: memory."}, true},
-		{"a rejection for CPU", podStatus{Phase: podFailed, Reason: "OutOfcpu"}, true},
-		{"a rejection for node affinity", podStatus{Phase: podFailed, Reason: "NodeAffinity"}, true},
-		{"a graceful node shutdown", podStatus{Phase: podFailed, Reason: "Terminated", Message: "Pod was terminated in response to imminent node shutdown."}, true},
-		{"a preemption", podStatus{Phase: podFailed, Conditions: disrupted}, true},
-		{"the pod's own deadline", podStatus{Phase: podFailed, Reason: "DeadlineExceeded"}, false},
-		{"a program that exits non-zero", podStatus{Phase: podFailed}, false},
-		{"a pod that succeeded", podStatus{Phase: podSucceeded, Conditions: disrupted}, false},
-		{"a pod that runs", podStatus{Phase: "Running", Reason: "Evicted"}, false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := (pod{Status: c.status}).endedByKubelet(); got != c.want {
-				t.Errorf("endedByKubelet of %+v = %v, want %v", c.status, got, c.want)
-			}
-		})
-	}
-}
-
-// The wait before the next pod of an attempt doubles from 10 seconds
-// for each pod that the kubelet ended, up to 5 minutes.
-func TestTheWaitBeforeTheNextPodDoubles(t *testing.T) {
-	cases := []struct {
-		tries int
-		want  time.Duration
-	}{
-		{0, 10 * time.Second},
-		{1, 20 * time.Second},
-		{4, 160 * time.Second},
-		{5, 5 * time.Minute},
-		{40, 5 * time.Minute},
-	}
-	for _, c := range cases {
-		if got := retryWait(c.tries); got != c.want {
-			t.Errorf("retryWait(%d) = %s, want %s", c.tries, got, c.want)
-		}
-	}
-}
 
 // endByKubelet acts as the kubelet that rejects or evicts a pod: the
 // pod ends Failed with the pod-level reason and message, and its
@@ -231,7 +184,7 @@ func TestAScanStopsAfterTheKubeletEndedFivePods(t *testing.T) {
 		w := discoveryWorld(t)
 		for range maxTaskPods {
 			w.api.endByKubelet(t, w.onlyScan(t).Metadata.Name, "Evicted", "Pod ephemeral local storage usage exceeds the total limit of containers 16Mi.")
-			time.Sleep(maxRetryWait)
+			time.Sleep(endedpods.MaxWait)
 			synctest.Wait()
 		}
 

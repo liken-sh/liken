@@ -8,23 +8,19 @@ package main
 // in ensure and in each wait of an activation step for a pod.
 //
 // A device's claim, or the guide camera's affinity to its server's
-// node, keeps the new pod on the same node, and no taint keeps it away
-// after the kubelet rejects it at admission. So the operator replaces
-// an ended pod no earlier than the pod's creation plus a wait that
-// doubles with each pod that the kubelet ended (replaceWait). The
-// count is in the pod's annotation annotationTries, so a restarted
-// operator waits as long as the one before it. A pod that ran for
-// longer than its wait is replaced at once. The ended pod stays during
-// the wait, so a person can read its status.
+// node, keeps the new pod on the same node. So the operator replaces an
+// ended pod after the wait of kubernetes/endedpods, with the count in
+// the pod's annotation annotationTries. The ended pod stays during the
+// wait, so a person can read its status.
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/endedpods"
 	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
@@ -35,39 +31,45 @@ import (
 // pod differ from the one that the operator would build.
 const annotationTries = Group + "/tries"
 
-// The wait before an ended pod is replaced: firstReplaceWait for a pod
-// with no count, doubled for each count, up to maxReplaceWait.
-const (
-	firstReplaceWait = 10 * time.Second
-	maxReplaceWait   = 5 * time.Minute
-)
-
-func replaceWait(tries int) time.Duration {
-	wait := firstReplaceWait
-	for range tries {
-		if wait >= maxReplaceWait {
-			break
-		}
-		wait *= 2
-	}
-	return min(wait, maxReplaceWait)
-}
-
 // ended reports whether the kubelet ended the pod (see above).
 func (p *pod) ended() bool {
-	return p.Status.Phase == "Failed" || p.Status.Phase == "Succeeded"
+	return endedpods.Ended(p.Status.Phase)
 }
 
 func (p *pod) tries() int {
-	count, _ := strconv.Atoi(p.Metadata.Annotations[annotationTries])
-	return max(count, 0)
+	return endedpods.Tries(p.Metadata.Annotations, annotationTries)
+}
+
+// end returns what the rule of kubernetes/endedpods reads of a pod.
+func (p *pod) end() endedpods.Pod {
+	end := endedpods.Pod{
+		Phase:   p.Status.Phase,
+		Reason:  p.Status.Reason,
+		Created: p.created(),
+		Tries:   p.tries(),
+	}
+	for _, c := range p.Status.Conditions {
+		end.Conditions = append(end.Conditions, endedpods.Condition{Type: c.Type, Status: c.Status, LastTransitionTime: timeOf(c.LastTransitionTime)})
+	}
+	for _, c := range p.Status.ContainerStatuses {
+		if c.State.Terminated != nil {
+			end.Finished = append(end.Finished, timeOf(c.State.Terminated.FinishedAt))
+		}
+	}
+	return end
+}
+
+// timeOf returns the time that a decoded timestamp holds, and the zero
+// time for a timestamp that the API server did not write.
+func timeOf(stamp *time.Time) time.Time {
+	if stamp == nil {
+		return time.Time{}
+	}
+	return *stamp
 }
 
 func (p *pod) created() time.Time {
-	if p.Metadata.CreationTimestamp == nil {
-		return time.Time{}
-	}
-	return *p.Metadata.CreationTimestamp
+	return timeOf(p.Metadata.CreationTimestamp)
 }
 
 // replacements holds what a caller of keepPod carries from the pass
@@ -76,7 +78,7 @@ func (p *pod) created() time.Time {
 // is gone by then. The caller keeps it for as long as its wait or its
 // loop runs. An operator restart between the delete and the create
 // loses the count, so the replacement has none and its own wait starts
-// again at firstReplaceWait.
+// again at endedpods.FirstWait.
 type replacements struct {
 	pods map[string]replacement
 	// wake is notified when a pod's wait ends, so the caller's wait or
@@ -103,7 +105,7 @@ type replacement struct {
 	// tries is the count of the replacement.
 	tries int
 	// announce is true when the replacement gets a PodCreated Event
-	// (announces).
+	// (endedpods.Pod.FirstOfLoop).
 	announce bool
 	// armed is the time of the timer that wakes the caller.
 	armed time.Time
@@ -119,39 +121,6 @@ type keepResult struct {
 	waiting string
 	created bool
 	due     time.Time
-}
-
-// announces reports whether the replacement of an ended pod gets a
-// PodCreated Event: when the pod is the first of its name to end, or
-// when it ran for longer than maxReplaceWait (ranFor). The pod's age at
-// the replacement does not count, because each pod of a loop of
-// rejections is older than maxReplaceWait when its wait ends.
-func announces(p *pod) bool {
-	return p.tries() == 0 || p.ranFor() > maxReplaceWait
-}
-
-// ranFor returns how long the pod ran before the kubelet ended it: from
-// its creation to the lastTransitionTime of its DisruptionTarget
-// condition, or else to the latest finishedAt of a container. A pod
-// with neither was rejected at admission and never ran.
-func (p *pod) ranFor() time.Duration {
-	var end time.Time
-	for _, c := range p.Status.Conditions {
-		if c.Type == "DisruptionTarget" && c.Status == "True" && c.LastTransitionTime != nil {
-			end = *c.LastTransitionTime
-		}
-	}
-	if end.IsZero() {
-		for _, c := range p.Status.ContainerStatuses {
-			if f := c.State.Terminated; f != nil && f.FinishedAt != nil && f.FinishedAt.After(end) {
-				end = *f.FinishedAt
-			}
-		}
-	}
-	if end.IsZero() {
-		return 0
-	}
-	return end.Sub(p.created())
 }
 
 // keepPod runs one pass of keeping a pod. It creates the pod when no
@@ -170,7 +139,7 @@ func (o *operator) keepPod(ctx context.Context, report func(string), t *tree, bu
 			if built.Metadata.Annotations == nil {
 				built.Metadata.Annotations = map[string]string{}
 			}
-			built.Metadata.Annotations[annotationTries] = strconv.Itoa(next.tries)
+			endedpods.SetTries(built.Metadata.Annotations, annotationTries, next.tries)
 		}
 		var made bool
 		err := o.send(ctx, report, fmt.Sprintf("creating pod %s", name), func() (err error) {
@@ -187,10 +156,11 @@ func (o *operator) keepPod(ctx context.Context, report func(string), t *tree, bu
 	case running.ended():
 		why := firstNonEmpty(running.Status.Reason, running.Status.Phase)
 		now := time.Now()
-		next := replacement{deleted: true, tries: running.tries() + 1, announce: announces(running)}
+		end := running.end()
+		next := replacement{deleted: true, tries: end.Tries + 1, announce: end.FirstOfLoop()}
 		if !current(running, built) {
 			next = replacement{deleted: true, announce: true}
-		} else if due := running.created().Add(replaceWait(running.tries())); now.Before(due) {
+		} else if due := end.ReplaceAt(); now.Before(due) {
 			// The wait is a deadline: the timer wakes the caller at due.
 			if armed := carried.pods[name]; !armed.armed.Equal(due) {
 				armed.armed = due

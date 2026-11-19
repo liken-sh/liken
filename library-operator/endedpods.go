@@ -8,12 +8,9 @@ package main
 //
 // A claim can pin the replacement to the node that ended the pod: a
 // display claim pins a screen pod, and a volume on a node-local class
-// pins a store copy. The scheduler then puts the replacement on the same
-// node, and no taint keeps it away after a rejection at admission, so
-// the kubelet can reject it again at once. So the replacement waits: 10
-// seconds after the ended pod's creation for its first try, doubling
-// with each try, to a limit of 5 minutes. A pod that ran longer than its
-// wait is replaced at once, so only a pod that ends young waits.
+// pins a store copy. So the replacement waits, by the rule of
+// kubernetes/endedpods: 10 seconds after the ended pod's creation for
+// its first try, doubling with each try, to a limit of 5 minutes.
 //
 // The backstop tick of the loop (operate.go) is this component's only
 // clock, and it serves every deadline of the pass. So the wait ends on
@@ -26,54 +23,41 @@ import (
 	"maps"
 	"os"
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/endedpods"
 )
 
 // triesAnnotation records how many earlier pods of the same name the
-// kubelet ended. The count is in the pod, not in memory, so a restarted
-// operator waits as long as the one before it. The template hash reads
-// the spec alone, so the count does not make a pod stale. It is never
-// reset, because the wait counts from the pod's creation.
+// kubelet ended. The template hash reads the spec alone, so the count
+// does not make a pod stale. It is never reset, because the wait counts
+// from the pod's creation.
 const triesAnnotation = "library.liken.sh/tries"
 
-// The wait before the first try, and the limit the doubling stops at.
-const (
-	firstReplaceWait = 10 * time.Second
-	maxReplaceWait   = 5 * time.Minute
-)
-
-// endedByKubelet reports a pod that will not run again. With
-// restartPolicy Always, both terminal phases mean that the kubelet ended
-// the pod.
-func endedByKubelet(pod *Pod) bool {
-	return pod.Status.Phase == podFailed || pod.Status.Phase == podSucceeded
-}
-
-// tries is the pod's count of earlier pods that the kubelet ended. A pod
-// with no count reads as zero.
 func tries(pod *Pod) int {
-	count, _ := strconv.Atoi(pod.Metadata.Annotations[triesAnnotation])
-	return max(count, 0)
+	return endedpods.Tries(pod.Metadata.Annotations, triesAnnotation)
 }
 
-func replaceWait(tries int) time.Duration {
-	wait := firstReplaceWait
-	for range tries {
-		if wait >= maxReplaceWait {
-			break
-		}
-		wait *= 2
+// endOf returns what the rule of kubernetes/endedpods reads of a pod.
+// The catalog agent is a native sidecar, so the time the last container
+// stopped can be in initContainerStatuses.
+func endOf(pod *Pod) endedpods.Pod {
+	end := endedpods.Pod{
+		Phase:   pod.Status.Phase,
+		Reason:  pod.Status.Reason,
+		Created: pod.Metadata.CreationTimestamp,
+		Tries:   tries(pod),
 	}
-	return min(wait, maxReplaceWait)
-}
-
-// replaceAt is the earliest time at which the pass replaces an ended pod.
-func replaceAt(pod *Pod) time.Time {
-	return pod.Metadata.CreationTimestamp.Add(replaceWait(tries(pod)))
+	for _, c := range pod.Status.Conditions {
+		end.Conditions = append(end.Conditions, endedpods.Condition{Type: c.Type, Status: c.Status, LastTransitionTime: c.LastTransitionTime})
+	}
+	for _, status := range slices.Concat(pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses) {
+		if status.State.Terminated != nil {
+			end.Finished = append(end.Finished, status.State.Terminated.FinishedAt)
+		}
+	}
+	return end
 }
 
 // replaceEnded replaces a pod that the kubelet ended, when its turn has
@@ -90,7 +74,8 @@ func replaceAt(pod *Pod) time.Time {
 // with no count, as it does when the operator restarts between the
 // delete and the create. The wait then starts again at 10 seconds.
 func (o *operator) replaceEnded(ctx context.Context, live, desired *Pod, now time.Time) (*Pod, error) {
-	if now.Before(replaceAt(live)) || o.leftToTheHeal(live, now) {
+	end := endOf(live)
+	if now.Before(end.ReplaceAt()) || o.leftToTheHeal(live, now) {
 		return live, nil
 	}
 	namespace, name := live.Metadata.Namespace, live.Metadata.Name
@@ -101,7 +86,7 @@ func (o *operator) replaceEnded(ctx context.Context, live, desired *Pod, now tim
 
 	next := *desired
 	next.Metadata.Annotations = maps.Clone(desired.Metadata.Annotations)
-	next.Metadata.Annotations[triesAnnotation] = strconv.Itoa(tries(live) + 1)
+	endedpods.SetTries(next.Metadata.Annotations, triesAnnotation, end.Tries+1)
 	created, err := CreatePod(ctx, o.client, &next)
 	if errors.Is(err, apiclient.ErrConflict) {
 		return nil, nil
@@ -109,45 +94,10 @@ func (o *operator) replaceEnded(ctx context.Context, live, desired *Pod, now tim
 	if err != nil {
 		return nil, err
 	}
-	// A retry loop posts its first failure and not each retry. A pod that
-	// ran longer than the longest wait before the kubelet ended it ended
-	// for a cause of its own. The pod's age at the replace is no measure:
-	// once the wait is at its limit, every pod is older than the limit
-	// when its turn comes.
-	if tries(live) == 0 || ranFor(live) > maxReplaceWait {
+	if end.FirstOfLoop() {
 		postPodRecreated(o.recorder, live)
 	}
 	return created, nil
-}
-
-// endedAt is when the kubelet ended a pod: the time of the
-// DisruptionTarget condition that an eviction or a node shutdown writes,
-// or else the time the last of its containers stopped. A pod that the
-// kubelet rejected at admission has neither, because it never ran.
-func endedAt(pod *Pod) (time.Time, bool) {
-	for _, condition := range pod.Status.Conditions {
-		if condition.Type == "DisruptionTarget" && condition.Status == "True" &&
-			!condition.LastTransitionTime.IsZero() {
-			return condition.LastTransitionTime, true
-		}
-	}
-	var last time.Time
-	for _, status := range slices.Concat(pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses) {
-		if status.State.Terminated != nil && status.State.Terminated.FinishedAt.After(last) {
-			last = status.State.Terminated.FinishedAt
-		}
-	}
-	return last, !last.IsZero()
-}
-
-// ranFor is how long a pod ran before the kubelet ended it, and zero for
-// a pod that never ran.
-func ranFor(pod *Pod) time.Duration {
-	end, held := endedAt(pod)
-	if !held {
-		return 0
-	}
-	return end.Sub(pod.Metadata.CreationTimestamp)
 }
 
 // leftToTheHeal reports an ended store copy whose node is not Ready. A
@@ -185,7 +135,7 @@ func (o *operator) leftToTheHeal(pod *Pod, now time.Time) bool {
 		if timed {
 			return true
 		}
-		end, held := endedAt(pod)
+		end, held := endOf(pod).EndedAt()
 		if !held {
 			end = pod.Metadata.CreationTimestamp
 		}
@@ -205,18 +155,11 @@ func nodeReadiness(node *Node) (ready, timed bool) {
 	return false, false
 }
 
-// podEndedBy is the kubelet's words for why it ended a pod: the reason,
-// such as Evicted or Terminated, and the message beside it. The kubelet
-// ends its message with a period, which the Event's sentence drops.
+// podEndedBy is the kubelet's words for why it ended a pod
+// (endedpods.Words).
 func podEndedBy(pod *Pod) string {
-	message := strings.TrimSuffix(pod.Status.Message, ".")
-	switch {
-	case pod.Status.Reason != "" && message != "":
-		return pod.Status.Reason + ": " + message
-	case pod.Status.Reason != "":
-		return pod.Status.Reason
-	case message != "":
-		return message
+	if words := endedpods.Words(pod.Status.Reason, pod.Status.Message); words != "" {
+		return words
 	}
 	return "the pod status gives no reason"
 }

@@ -10,8 +10,9 @@ UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.Im
 #
 # library-operator's pod build imports `apiclient`, `memo`, `events`, and
 # `conditions`, and its Makefile fails when that build links client-go.
-# PLAIN_K8S lists every k8s.io package that these four packages depend
-# on, and `test` fails when the list is not empty.
+# `endedpods` is held to the same limit, so any program can import it.
+# PLAIN_K8S lists every k8s.io package that these packages depend on,
+# and `test` fails when the list is not empty.
 #
 # media-operator's pod build and equipment-operator's node build import
 # `informer`, which needs only client-go's reflector, dynamic client, and
@@ -20,7 +21,7 @@ UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.Im
 # INFORMER_HEAVY lists any of them that it does depend on. Leader
 # election is in `election`, which only an operator that elects a leader
 # imports.
-PLAIN_K8S := go list -deps ./apiclient ./memo ./events ./conditions | grep '^k8s.io/'
+PLAIN_K8S := go list -deps ./apiclient ./memo ./events ./conditions ./endedpods | grep '^k8s.io/'
 INFORMER_HEAVY := go list -deps ./informer | grep -E '^k8s.io/client-go/(kubernetes|informers|dynamic/dynamicinformer|tools/leaderelection)(/|$$)'
 
 .PHONY: test
@@ -28,7 +29,7 @@ test:
 	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
 	go mod tidy -diff
 	test -z "$$($(UNTESTED_PACKAGES))" || { echo 'packages with no test file:'; $(UNTESTED_PACKAGES); exit 1; }
-	test -z "$$($(PLAIN_K8S))" || { echo 'apiclient, memo, events, or conditions depends on these k8s.io packages, want none:'; $(PLAIN_K8S); exit 1; }
+	test -z "$$($(PLAIN_K8S))" || { echo 'apiclient, memo, events, conditions, or endedpods depends on these k8s.io packages, want none:'; $(PLAIN_K8S); exit 1; }
 	test -z "$$($(INFORMER_HEAVY))" || { echo 'informer depends on these client-go packages, want none of the typed clientset, the informer factories, or leader election:'; $(INFORMER_HEAVY); exit 1; }
 	go vet ./...
 	go test -race -covermode=atomic -coverprofile=coverage.out ./...

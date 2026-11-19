@@ -49,6 +49,13 @@ against the code in the tree. The module is not published.
 - `conditions` defines the `Condition` type that the resources of every
   component report, in the shape of `metav1.Condition`. Its `Set`
   function changes `lastTransitionTime` only when the status changes.
+- `endedpods` holds the rule for a pod that the kubelet ended, such
+  as for an eviction or a rejection at admission: whether the kubelet
+  ended it, the count of earlier ended pods in the annotation
+  `<group>/tries`, the wait before the next pod, from 10 seconds
+  doubling to 5 minutes from the ended pod's creation, and whether the
+  end posts an `Event`. Each operator fills an `endedpods.Pod` from its
+  own pod type.
 - `events/eventstest` is a fake of the core/v1 events collection. A
   test serves it as part of its fake API server and reads back the
   `Event`s that the component posted.
@@ -56,8 +63,8 @@ against the code in the tree. The module is not published.
   connections, so the test can run on the fake clock of
   `testing/synctest`.
 
-`apiclient`, `memo`, `events`, and `conditions` import nothing from
-`k8s.io`, so a program that must not link client-go, such as the pod
+`apiclient`, `memo`, `events`, `conditions`, and `endedpods` import
+nothing from `k8s.io`, so a program that must not link client-go, such as the pod
 build of `library-operator`, can use them. `informer` uses client-go's
 reflector, dynamic client, and `rest` packages, and not the typed
 clientset, the informer factories, or leader election. `make test`

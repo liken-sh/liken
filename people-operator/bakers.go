@@ -11,10 +11,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/endedpods"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -76,7 +76,7 @@ func (b *bakers) start(p *person, mount bakerMount, tries int) (bool, error) {
 	baker := buildBakerPod(p, mount, b.image)
 	if tries > 0 {
 		baker.Metadata.Name = tryPodName(p.Metadata.Name, tries)
-		baker.Metadata.Annotations[triesKey] = strconv.Itoa(tries)
+		endedpods.SetTries(baker.Metadata.Annotations, triesKey, tries)
 	}
 	err := b.client.RequestJSON(http.MethodPost, "/api/v1/namespaces/"+mount.namespace+"/pods", mustJSON(baker), nil)
 	if errors.Is(err, apiclient.ErrConflict) {

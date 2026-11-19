@@ -10,7 +10,6 @@ package main
 
 import (
 	"slices"
-	"strconv"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -246,45 +245,6 @@ func TestTheReplacementOfAPodThatTheKubeletRejectsWaitsLongerEachTime(t *testing
 			t.Errorf("Events = %q, want one", got)
 		}
 	})
-}
-
-// endedAt builds a pod with a count of tries, created at created, that
-// the kubelet ended at ended. A zero ended builds a pod that the kubelet
-// rejected at admission, so it has no DisruptionTarget condition and no
-// container that ran.
-func endedAt(tries int, created, ended time.Time) *pod {
-	p := &pod{Metadata: meta{Annotations: map[string]string{annotationTries: strconv.Itoa(tries)}, CreationTimestamp: &created}}
-	p.Status.Phase = "Failed"
-	if !ended.IsZero() {
-		p.Status.Conditions = []podCondition{{Type: "DisruptionTarget", Status: "True", LastTransitionTime: &ended}}
-	}
-	return p
-}
-
-// The replacement of an ended pod posts an Event when the pod is the
-// first of its name to end, or when it ran for longer than 5 minutes
-// before the kubelet ended it. The age of the pod at its replacement
-// does not count, because a pod of a long loop of rejections is always
-// older than 5 minutes when the operator replaces it.
-func TestAReplacementPostsAnEventOnlyAfterAPodRanLong(t *testing.T) {
-	now := time.Date(2026, 11, 19, 22, 0, 0, 0, time.UTC)
-	cases := []struct {
-		name string
-		pod  *pod
-		want bool
-	}{
-		{"the first pod to end", endedAt(0, now.Add(-time.Second), time.Time{}), true},
-		{"the seventh try, rejected 5 minutes and 1 second ago", endedAt(6, now.Add(-5*time.Minute-time.Second), time.Time{}), false},
-		{"a pod that ran for 6 minutes", endedAt(3, now.Add(-7*time.Minute), now.Add(-time.Minute)), true},
-		{"a pod that ran for a minute", endedAt(3, now.Add(-7*time.Minute), now.Add(-6*time.Minute)), false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := announces(c.pod); got != c.want {
-				t.Errorf("announces = %t, want %t", got, c.want)
-			}
-		})
-	}
 }
 
 // staleEndedPod makes a pod one that the kubelet ended just now after

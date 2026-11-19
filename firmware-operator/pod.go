@@ -7,7 +7,8 @@ package main
 
 import (
 	"encoding/json"
-	"strings"
+
+	"github.com/liken-sh/liken/kubernetes/endedpods"
 )
 
 type pod struct {
@@ -249,19 +250,8 @@ func mustJSON(object any) []byte {
 }
 
 // endedByKubelet reports whether the kubelet ended the pod for a reason
-// that is not the pod's own program: an eviction for pressure on the
-// node, a rejection at admission such as OutOfcpu or NodeAffinity, a
-// graceful node shutdown, or a preemption. Each of these leaves the pod
-// Failed with a DisruptionTarget condition or a pod-level reason. A
-// container that exits non-zero leaves the pod-level reason empty, and
-// DeadlineExceeded is the pod's own activeDeadlineSeconds, so both are
-// failures of the attempt.
-func (p pod) endedByKubelet() bool {
-	if p.Status.Phase != podFailed {
-		return false
-	}
-	return p.conditionTrue("DisruptionTarget") || (p.Status.Reason != "" && p.Status.Reason != "DeadlineExceeded")
-}
+// that is not the pod's own program (endedpods.Pod.EndedByKubelet).
+func (p pod) endedByKubelet() bool { return p.end().EndedByKubelet() }
 
 // endedAtShutdown reports whether the kubelet ended the pod because its
 // node shuts down. The reasons Terminated and Shutdown mean a graceful
@@ -290,19 +280,11 @@ func (p pod) endedAtShutdown() bool {
 }
 
 // kubeletEnd describes why the kubelet ended the pod, for a status
-// message: the pod's reason and message, or the DisruptionTarget
-// condition when the pod has no reason. The kubelet ends its message
-// with a period, and the operator joins the description into a
-// sentence, so the period is dropped.
+// message: the pod's reason and message (endedpods.Words), or the
+// DisruptionTarget condition when the pod has neither.
 func (p pod) kubeletEnd() string {
-	var parts []string
-	for _, part := range []string{p.Status.Reason, p.Status.Message} {
-		if part = strings.TrimSuffix(strings.TrimSpace(part), "."); part != "" {
-			parts = append(parts, part)
-		}
+	if words := endedpods.Words(p.Status.Reason, p.Status.Message); words != "" {
+		return words
 	}
-	if len(parts) == 0 {
-		return "DisruptionTarget"
-	}
-	return strings.Join(parts, ": ")
+	return "DisruptionTarget"
 }

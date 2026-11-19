@@ -160,16 +160,14 @@ func (o *operator) writeBakerResult(p *person, baker pod) (time.Time, error) {
 		if baker.Metadata.Annotations[bakerCheckedKey] != p.checkRequest() {
 			return time.Time{}, o.bakers.remove(baker)
 		}
-		if at := baker.retryAt(); time.Now().Before(at) {
+		if at := baker.end().ReplaceAt(); time.Now().Before(at) {
 			return at, nil
 		}
 		created, err := o.bakers.replace(p, baker)
 		if err != nil {
 			return time.Time{}, err
 		}
-		// A retry loop posts its first failure and not each retry. A
-		// pod that ran for longer than maxRetryWait starts a new loop.
-		if created && (baker.tries() == 0 || baker.ran() > maxRetryWait) {
+		if created && baker.end().FirstOfLoop() {
 			o.postRecreated(p, baker)
 		}
 		return time.Time{}, nil

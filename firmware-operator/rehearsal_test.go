@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/conditions"
+	"github.com/liken-sh/liken/kubernetes/endedpods"
 )
 
 func (a *fakeAPI) rehearsals(t *testing.T) []pod {
@@ -335,7 +336,7 @@ func TestARehearsalStopsAfterTheKubeletEndedFivePods(t *testing.T) {
 		before := w.api.created(operatorPodsPath)
 		for range maxTaskPods {
 			w.api.endByKubelet(t, w.onlyRehearsal(t).Metadata.Name, "Evicted", "Usage of EmptyDir volume \"rehearsal\" exceeds the limit \"256Mi\".")
-			time.Sleep(maxRetryWait)
+			time.Sleep(endedpods.MaxWait)
 			synctest.Wait()
 		}
 

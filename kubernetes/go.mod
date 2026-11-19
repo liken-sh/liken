@@ -1,6 +1,6 @@
 // The client, the watch, the cache, and the Event writer that the
-// operators share. The apiclient, memo, events, and conditions packages
-// depend on no k8s.io module, so a program that must not link client-go
+// operators share. The apiclient, memo, events, conditions, and
+// endedpods packages depend on no k8s.io module, so a program that must not link client-go
 // can use them. The informer package links client-go's reflector,
 // dynamic client, and rest packages, and the election package links
 // client-go's leader election.

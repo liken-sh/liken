@@ -14,6 +14,8 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/endedpods"
 )
 
 // The name every durable copy of the namespace's catalog is numbered
@@ -197,7 +199,7 @@ func catalogPodBlocker(pod *Pod) (string, string) {
 	switch {
 	case pod == nil:
 		return catalogReasonPodPending, "there is no catalog pod yet"
-	case endedByKubelet(pod):
+	case endedpods.Ended(pod.Status.Phase):
 		// The pod waits for its replacement, or a finalizer keeps it
 		// after the delete (endedpods.go).
 		return catalogReasonPodFailed, podFailureMessage(pod)

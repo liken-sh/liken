@@ -33,8 +33,8 @@ that adds it names the operator. The hooks of that kind now are:
 The code the hook runs, such as the transform itself, stays in the
 operator.
 
-`apiclient`, `memo`, `events`, and `conditions` import nothing from
-`k8s.io`, because some
+`apiclient`, `memo`, `events`, `conditions`, and `endedpods` import
+nothing from `k8s.io`, because some
 programs must not link client-go at all: the pod build of
 `library-operator` checks for it in its `Makefile`. Keep every
 client-go import in `informer` and `election`, and keep `informer` to

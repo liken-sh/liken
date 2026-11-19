@@ -3,10 +3,12 @@ package main
 import (
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/endedpods"
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
@@ -55,7 +57,7 @@ func TestABakerPodThatTheKubeletEndedIsCreatedAgain(t *testing.T) {
 					t.Errorf("the baker pod has the phase %q during the wait, want the ended pod, Failed", ended.Status.Phase)
 				}
 
-				time.Sleep(firstRetryWait)
+				time.Sleep(endedpods.FirstWait)
 				w.waitForIdle()
 				if ready := w.api.person(t, "ada").Status.ready(); ready.Reason != "" {
 					t.Errorf("AvatarReady = %+v, want no condition while the next baker pod runs", ready)
@@ -93,7 +95,7 @@ func TestARecheckThatTheKubeletEndedBakesAgain(t *testing.T) {
 		time.Sleep(recheckInterval)
 		w.waitForIdle()
 		w.api.endPod("media", bakerPodName("ada"), kubeletEnds[0].status)
-		time.Sleep(firstRetryWait)
+		time.Sleep(endedpods.FirstWait)
 		w.waitForIdle()
 
 		if ready := w.api.person(t, "ada").Status.ready(); ready.Status != "True" || ready.Reason != reasonBaked {
@@ -216,7 +218,7 @@ func TestARefusedCreatePostsNoRecreate(t *testing.T) {
 func stamp(at time.Time) string { return at.UTC().Format(time.RFC3339) }
 
 // The recreate Event posts for the first pod of a bake, and for a pod
-// that ran for longer than maxRetryWait before the kubelet ended it.
+// that ran for longer than endedpods.MaxWait before the kubelet ended it.
 // The age of a pod at its replacement is no measure: a pod that the
 // kubelet refused at admission never ran, however late the pass
 // replaces it.
@@ -305,6 +307,42 @@ func TestAChangedPersonReplacesAnEndedBakerPodAtOnce(t *testing.T) {
 				}
 				if ready := w.api.person(t, "ada").Status.ready(); ready.Reason != "" {
 					t.Errorf("AvatarReady = %+v, want no condition while the new bake runs", ready)
+				}
+			})
+		})
+	}
+}
+
+// The PodRecreated Event gives the kubelet's message with no period at
+// its end. An eviction's message ends in a period and a space, and a
+// rejection's message ends in no period.
+func TestTheRecreateEventGivesTheKubeletsMessageWithNoPeriod(t *testing.T) {
+	cases := []struct {
+		name    string
+		message string
+		want    string
+	}{
+		{"a message that ends in a period", "Pod was terminated in response to imminent node shutdown.",
+			"which the kubelet ended with the reason Evicted before it wrote a result: Pod was terminated in response to imminent node shutdown"},
+		{"a message that ends in a period and a space", "The node was low on resource: memory. Threshold quantity: 100Mi, available: 50Mi. ",
+			"which the kubelet ended with the reason Evicted before it wrote a result: The node was low on resource: memory. Threshold quantity: 100Mi, available: 50Mi"},
+		{"a message with no period", "Predicate NodeAffinity failed",
+			"which the kubelet ended with the reason Evicted before it wrote a result: Predicate NodeAffinity failed"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				w := startWorld(t)
+				w.api.putPerson(ada("claim://media/pictures/ada.png"))
+				w.waitForIdle()
+
+				w.api.endPod("media", bakerPodName("ada"), map[string]any{"reason": "Evicted", "message": c.message})
+				time.Sleep(endedpods.FirstWait)
+				w.waitForIdle()
+
+				got := w.api.recorded.About(personKind, "ada")
+				if len(got) != 1 || got[0].Reason != reasonPodRecreated || !strings.HasSuffix(got[0].Message, c.want) {
+					t.Errorf("the Events about ada = %+v, want one PodRecreated whose message ends %q", got, c.want)
 				}
 			})
 		})

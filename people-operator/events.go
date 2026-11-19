@@ -9,9 +9,9 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/liken-sh/liken/kubernetes/conditions"
+	"github.com/liken-sh/liken/kubernetes/endedpods"
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
@@ -79,8 +79,8 @@ func (o *operator) postRecreated(p *person, ended pod) {
 	}
 	message := fmt.Sprintf("Created the baker pod %s/%s in place of %s, which the kubelet ended with %s before it wrote a result",
 		ended.Metadata.Namespace, tryPodName(p.Metadata.Name, ended.tries()+1), ended.Metadata.Name, cause)
-	if ended.Status.Message != "" {
-		message += ": " + strings.TrimSuffix(ended.Status.Message, ".")
+	if words := endedpods.Words("", ended.Status.Message); words != "" {
+		message += ": " + words
 	}
 	o.recorder.Warning(personRef(p), reasonPodRecreated, message)
 }

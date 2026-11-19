@@ -12,8 +12,8 @@ package main
 //
 // A scan pod and a rehearsal pod name their node in spec.nodeName, so
 // the scheduler does not check them, and the kubelet can reject the
-// next pod again at once. So the next pod waits, and the wait doubles
-// for each pod of the attempt that the kubelet ended.
+// next pod again at once. So the next pod waits, by the rule of
+// kubernetes/endedpods.
 
 import (
 	"crypto/sha256"
@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/endedpods"
 )
 
 // retry is a pod that the kubelet ended, and the time at which the
@@ -40,7 +41,7 @@ type retry struct {
 // retryOf returns the retry of a pod that the kubelet ended. When the
 // wait is already over, the next pod starts now.
 func retryOf(p pod, now time.Time) retry {
-	return retry{ended: p, at: later(p.retryAt(), now)}
+	return retry{ended: p, at: later(p.end().ReplaceAt(), now)}
 }
 
 func (r retry) due(now time.Time) bool { return !now.Before(r.at) }
@@ -84,46 +85,30 @@ func later(a, b time.Time) time.Time {
 }
 
 // triesKey records how many earlier pods of the same attempt the
-// kubelet ended. The operator keeps the count in the pod, and not in
-// memory, so a restarted operator waits as long as the one before it.
-// Each next pod copies the count and raises it by one.
+// kubelet ended. Each next pod copies the count and raises it by one.
 const triesKey = "firmware.liken.sh/tries"
 
 // tries returns the pod's count of earlier pods that the kubelet ended.
 // A pod with no count is the attempt's first.
 func (p pod) tries() int {
-	count, _ := strconv.Atoi(p.Metadata.Annotations[triesKey])
-	return max(count, 0)
+	return endedpods.Tries(p.Metadata.Annotations, triesKey)
 }
 
-// The wait before the next pod of a scan or a rehearsal. Both pods name
-// their node in spec.nodeName, and the scheduler does not check such a
-// pod, so the kubelet can reject the next pod at once for the same
-// reason. The wait doubles for each pod that the kubelet ended, up to
-// maxRetryWait.
-const (
-	firstRetryWait = 10 * time.Second
-	maxRetryWait   = 5 * time.Minute
-)
-
-func retryWait(tries int) time.Duration {
-	wait := firstRetryWait
-	for range tries {
-		if wait >= maxRetryWait {
-			break
-		}
-		wait *= 2
+// end returns what the rule of kubernetes/endedpods reads of a pod. The
+// operator reads no time of a condition or a container, because it
+// posts the Event of the first next pod alone (retry.first) and needs
+// no measure of how long a pod ran.
+func (p pod) end() endedpods.Pod {
+	end := endedpods.Pod{
+		Phase:   p.Status.Phase,
+		Reason:  p.Status.Reason,
+		Created: parseTime(p.Metadata.CreationTimestamp),
+		Tries:   p.tries(),
 	}
-	return min(wait, maxRetryWait)
-}
-
-// retryAt returns when the next pod of an attempt can start: the wait
-// for the pod's count of tries, counted from the pod's creation. The
-// kubelet rejects a pod soon after its creation, so the wait counts
-// from there. A pod that ran for longer than the wait is replaced at
-// once.
-func (p pod) retryAt() time.Time {
-	return parseTime(p.Metadata.CreationTimestamp).Add(retryWait(p.tries()))
+	for _, c := range p.Status.Conditions {
+		end.Conditions = append(end.Conditions, endedpods.Condition{Type: c.Type, Status: c.Status})
+	}
+	return end
 }
 
 // nextTry returns the pod that runs the same attempt after the kubelet
@@ -136,7 +121,7 @@ func (p pod) retryAt() time.Time {
 func nextTry(p pod) pod {
 	tries := p.tries() + 1
 	notes := maps.Clone(p.Metadata.Annotations)
-	notes[triesKey] = strconv.Itoa(tries)
+	endedpods.SetTries(notes, triesKey, tries)
 	return pod{
 		APIVersion: "v1",
 		Kind:       "Pod",

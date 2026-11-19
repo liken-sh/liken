@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/endedpods"
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
@@ -310,7 +311,7 @@ func (o *operator) standPod(ctx context.Context, desired *Pod, now time.Time) (*
 	// (endedpods.go). A pod of another template is not: the person who
 	// changed the template can have fixed what the kubelet refused, so
 	// the branch below replaces it at once, and the new pod has no count.
-	if endedByKubelet(live) && sameTemplate(&live.Metadata, &desired.Metadata) {
+	if endedpods.Ended(live.Status.Phase) && sameTemplate(&live.Metadata, &desired.Metadata) {
 		return o.replaceEnded(ctx, live, desired, now)
 	}
 
