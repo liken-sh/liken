@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -39,29 +40,74 @@ type bakers struct {
 	namespace string
 }
 
-// byPerson returns the baker pods keyed by Person name. It returns
-// false until the informer has listed every pod, because a pass that
-// finds no pod for a Person starts one.
-func (b *bakers) byPerson() (map[string]pod, bool) {
+// byPerson returns the baker pods keyed by Person name, and the pods
+// that a later pod of the same Person replaces. A Person has two pods
+// when an operator created the next pod of a bake and stopped before it
+// deleted the pod that the kubelet ended. The pod with the higher count
+// of tries is the current one. It returns false until the informer has
+// listed every pod, because a pass that finds no pod for a Person
+// starts one.
+func (b *bakers) byPerson() (map[string]pod, []pod, bool) {
 	if !b.pods.Ready() {
-		return nil, false
+		return nil, nil, false
 	}
 	byName := map[string]pod{}
+	var replaced []pod
 	for _, item := range informer.CachedList[pod](b.pods) {
-		byName[item.Metadata.Annotations[bakerPersonKey]] = item
+		name := item.Metadata.Annotations[bakerPersonKey]
+		held, found := byName[name]
+		switch {
+		case !found:
+			byName[name] = item
+		case item.tries() > held.tries():
+			byName[name] = item
+			replaced = append(replaced, held)
+		default:
+			replaced = append(replaced, item)
+		}
 	}
-	return byName, true
+	return byName, replaced, true
 }
 
-// start creates the Person's baker pod. A 409 means the pod exists
-// already (see bakerPodName), and the next pass finds it.
-func (b *bakers) start(p *person, mount bakerMount) error {
+// start creates the Person's baker pod for a count of tries, and
+// reports whether it created the pod. A 409 means the pod exists
+// already (see tryPodName), and the next pass finds it.
+func (b *bakers) start(p *person, mount bakerMount, tries int) (bool, error) {
 	baker := buildBakerPod(p, mount, b.image)
+	if tries > 0 {
+		baker.Metadata.Name = tryPodName(p.Metadata.Name, tries)
+		baker.Metadata.Annotations[triesKey] = strconv.Itoa(tries)
+	}
 	err := b.client.RequestJSON(http.MethodPost, "/api/v1/namespaces/"+mount.namespace+"/pods", mustJSON(baker), nil)
 	if errors.Is(err, apiclient.ErrConflict) {
-		return nil
+		return false, nil
 	}
-	return err
+	return err == nil, err
+}
+
+// replace creates the next pod of a bake whose pod the kubelet ended,
+// and then deletes the ended pod. It reports whether it created the
+// next pod. The next pod has a name of its own, so the create comes
+// first, and an operator that stops between the two steps leaves both
+// pods. The operator that follows keeps the next pod and deletes the
+// ended one (byPerson), so the bake is not lost, also for a recheck
+// that needsRead does not show. The watch delivers the next pod before
+// the delete of the ended one, so no pass finds the Person without a
+// pod and starts a first pod beside the next one.
+func (b *bakers) replace(p *person, ended pod) (bool, error) {
+	ref, err := url.Parse(p.Spec.Avatar)
+	if err != nil {
+		return false, fmt.Errorf("parsing spec.avatar: %w", err)
+	}
+	mount, _, err := bakerMountFor(ref, b.namespace)
+	if err != nil {
+		return false, err
+	}
+	created, err := b.start(p, mount, ended.tries()+1)
+	if err != nil {
+		return false, err
+	}
+	return created, b.remove(ended)
 }
 
 func (b *bakers) remove(baker pod) error {

@@ -12,8 +12,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -57,7 +59,7 @@ func (o *operator) pass(ctx context.Context, recheck bool) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, fmt.Errorf("listing the people: %w", err)
 	}
-	pods, podsListed := o.bakers.byPerson()
+	pods, replaced, podsListed := o.bakers.byPerson()
 	var next time.Time
 	var problems []error
 	for index := range people {
@@ -77,7 +79,7 @@ func (o *operator) pass(ctx context.Context, recheck bool) (time.Time, error) {
 		delete(pods, p.Metadata.Name)
 	}
 	// A pod still in the map belongs to a Person that no longer exists.
-	for _, baker := range pods {
+	for _, baker := range append(replaced, slices.Collect(maps.Values(pods))...) {
 		problems = append(problems, o.bakers.remove(baker))
 	}
 	return next, errors.Join(problems...)
@@ -118,7 +120,7 @@ func (o *operator) reconcile(ctx context.Context, p *person, pods map[string]pod
 	mount, baked, err := bakerMountFor(ref, o.bakers.namespace)
 	switch {
 	case baked && err == nil && podsListed:
-		err := o.bakers.start(p, mount)
+		_, err := o.bakers.start(p, mount, 0)
 		// A claim URI whose namespace does not exist gets 404 on every
 		// try. That is a failed source for the condition, and retrying
 		// would not help.
@@ -143,6 +145,35 @@ func (o *operator) reconcile(ctx context.Context, p *person, pods map[string]pod
 // deletes the pod. While the pod has no result, it returns the pod's
 // deadline.
 func (o *operator) writeBakerResult(p *person, baker pod) (time.Time, error) {
+	// A pod that the kubelet ended says nothing about the picture, so
+	// it writes no outcome, and AvatarReady keeps its value. The ended
+	// pod stays until its wait is over, so a person can read its status,
+	// and the pass wakes at the end of the wait.
+	live := baker.Metadata.DeletionTimestamp == "" && baker.Metadata.Annotations[bakerSourceKey] == p.Spec.Avatar
+	if live && baker.endedByKubelet() {
+		// A new check-avatar value asks for a new bake, and the person
+		// may have changed the Person to fix what the kubelet refused.
+		// So the ended pod goes at once, and the pass that its delete
+		// event starts finds that needsRead holds and starts the first
+		// pod of the new bake, with no wait and no count. A new
+		// spec.avatar takes the same path through inspect.
+		if baker.Metadata.Annotations[bakerCheckedKey] != p.checkRequest() {
+			return time.Time{}, o.bakers.remove(baker)
+		}
+		if at := baker.retryAt(); time.Now().Before(at) {
+			return at, nil
+		}
+		created, err := o.bakers.replace(p, baker)
+		if err != nil {
+			return time.Time{}, err
+		}
+		// A retry loop posts its first failure and not each retry. A
+		// pod that ran for longer than maxRetryWait starts a new loop.
+		if created && (baker.tries() == 0 || baker.ran() > maxRetryWait) {
+			o.postRecreated(p, baker)
+		}
+		return time.Time{}, nil
+	}
 	out, deadline, err := o.bakers.inspect(p, baker, time.Now())
 	if out == nil || err != nil {
 		return deadline, err

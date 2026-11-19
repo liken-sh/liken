@@ -101,6 +101,31 @@ kubectl describe person ada
 kubectl events -n default --for person/ada
 ```
 
+The kubelet can end a baker pod before the pod writes its result, for
+example when it evicts the pod from a node that is low on memory, or
+when the node shuts down. That says nothing about the picture, so the
+operator writes no `BakeFailed`. It creates a next pod, deletes the
+ended one, and posts a `Warning` with the reason `PodRecreated` and the
+kubelet's reason in the message. `AvatarReady` keeps its earlier value
+until the next pod writes its result.
+
+A pod that ends within 10 seconds of its creation stays until those 10
+seconds pass, so you can read its status with `kubectl describe pod`.
+When a claim on a node-local storage class keeps the pod on one node,
+the kubelet of that node can refuse each next pod. Each refused pod
+doubles the wait before the next one, to a limit of 5 minutes. The
+first pod that the kubelet ends posts `PodRecreated`. After that, the
+operator posts no further `PodRecreated` until a pod runs for longer
+than 5 minutes before the kubelet ends it. When you change
+`spec.avatar` or the `people.liken.sh/check-avatar` annotation, the
+operator deletes the ended pod at once and starts the new bake with no
+wait. The annotation
+`people.liken.sh/tries` on a pod counts the pods before it that the
+kubelet ended. Each next pod restarts the two minutes in which a pod
+must finish, so a node that refuses every pod never gives the `Person`
+a `BakeFailed`. The `Person` keeps its last picture, or its initials,
+for as long as the node refuses the pod.
+
 ## Show a replaced picture
 
 When you replace the file behind a URL, an NFS path, or a claim path,

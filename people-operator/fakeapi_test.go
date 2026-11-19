@@ -62,6 +62,13 @@ type fakeAPI struct {
 	// of them returns 404.
 	absent map[string]bool
 
+	// rejection, when set, is the status that the kubelet gives each
+	// new pod at once, as it does when it refuses the pod at admission.
+	rejection map[string]any
+
+	// created holds the time of each pod create that succeeded.
+	created []time.Time
+
 	// statusDelay and eventDelay imitate a loaded API server.
 	// afterStatusWrite runs once a status write is stored.
 	// afterEventWrite runs after the delay, just before the Event is
@@ -348,8 +355,52 @@ func (a *fakeAPI) createPod(w http.ResponseWriter, r *http.Request, namespace st
 	metadata["namespace"] = namespace
 	metadata["creationTimestamp"] = time.Now().UTC().Format(time.RFC3339)
 	created["status"] = map[string]any{"phase": "Pending"}
+	a.created = append(a.created, time.Now())
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(a.store(podsPath, key, created, "ADDED"))
+	stored := a.store(podsPath, key, created, "ADDED")
+	_ = json.NewEncoder(w).Encode(stored)
+	if a.rejection != nil {
+		rejected := clone(stored)
+		rejected["status"] = clone(a.rejection)
+		rejected["status"].(map[string]any)["phase"] = podFailed
+		a.logs[key] = ""
+		a.store(podsPath, key, rejected, "MODIFIED")
+	}
+}
+
+// rejectPods makes the kubelet end each new pod at once with the given
+// status.
+func (a *fakeAPI) rejectPods(status map[string]any) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.rejection = status
+}
+
+// createTimes returns the time of each pod create that succeeded.
+func (a *fakeAPI) createTimes() []time.Time {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]time.Time(nil), a.created...)
+}
+
+// bakerPodsOf returns the stored baker pods of a Person in a
+// namespace, whatever their names.
+func (a *fakeAPI) bakerPodsOf(t *testing.T, namespace, personName string) []pod {
+	t.Helper()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var out []pod
+	for key, object := range a.objects[podsPath] {
+		var item pod
+		body, _ := json.Marshal(object)
+		if err := json.Unmarshal(body, &item); err != nil {
+			t.Fatalf("decoding the stored pod %s: %v", key, err)
+		}
+		if item.Metadata.Namespace == namespace && item.Metadata.Annotations[bakerPersonKey] == personName {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func (a *fakeAPI) deletePod(w http.ResponseWriter, key string) {
@@ -444,5 +495,19 @@ func (a *fakeAPI) finishPod(namespace, name, phase, log string) {
 	next := clone(a.objects[podsPath][key])
 	next["status"] = map[string]any{"phase": phase}
 	a.logs[key] = log
+	a.store(podsPath, key, next, "MODIFIED")
+}
+
+// endPod acts as the kubelet that ends a pod for a cause outside the
+// pod's program, such as an eviction: the pod moves to Failed with the
+// given status fields, and its container wrote nothing.
+func (a *fakeAPI) endPod(namespace, name string, status map[string]any) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := namespace + "/" + name
+	next := clone(a.objects[podsPath][key])
+	status["phase"] = podFailed
+	next["status"] = status
+	a.logs[key] = ""
 	a.store(podsPath, key, next, "MODIFIED")
 }

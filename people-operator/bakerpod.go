@@ -27,6 +27,7 @@ const (
 	bakerPersonKey      = "people.liken.sh/person"
 	bakerSourceKey      = "people.liken.sh/source"
 	bakerCheckedKey     = "people.liken.sh/checked"
+	triesKey            = "people.liken.sh/tries"
 	bakerContainer      = "bake"
 	bakerMountPath      = "/source"
 	bakerVolume         = "source"
@@ -102,6 +103,24 @@ func bakerPodName(person string) string {
 	sum := sha256.Sum256([]byte(person))
 	suffix := "-" + hex.EncodeToString(sum[:8])
 	return strings.TrimRight(name[:bakerPodMaxNameSize-len(suffix)], "-.") + suffix
+}
+
+// tryPodName returns the name of a Person's baker pod for a count of
+// tries. The first pod has the name of bakerPodName. Each next pod ends
+// with a hash of the Person's name and the count, so two passes that
+// create the same try get 409 for the second create, and the next pod
+// has a name of its own while the ended pod still exists.
+func tryPodName(person string, tries int) string {
+	if tries == 0 {
+		return bakerPodName(person)
+	}
+	sum := sha256.Sum256([]byte(person + "\x00" + strconv.Itoa(tries)))
+	suffix := "-" + hex.EncodeToString(sum[:6])
+	name := "avatar-" + person
+	if len(name)+len(suffix) > bakerPodMaxNameSize {
+		name = strings.TrimRight(name[:bakerPodMaxNameSize-len(suffix)], "-.")
+	}
+	return name + suffix
 }
 
 // buildBakerPod returns the pod that bakes one Person's picture.
