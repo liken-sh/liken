@@ -246,13 +246,13 @@ func gateThroughDrain(r *reader, node *nodeObject, conv convergence, now time.Ti
 	pods, err := r.nodePods(node.Metadata.Name)
 	if err != nil {
 		fmt.Printf("listing the pods of Node %s for the drain: %v\n", node.Metadata.Name, err)
-		return holdForDrain(conv, "The reboot waits because the pods of the Node cannot be listed. The operator retries")
+		return holdForDrain(conv, fmt.Sprintf("The reboot waits because the pods of the Node cannot be listed: %v. The operator retries", err))
 	}
 	step := decideDrainStep(node, pods, now)
 	if step.patch != nil {
 		if err := kubernetes.PatchJSON(r.client, nodesPath+"/"+node.Metadata.Name, step.patch); err != nil {
 			fmt.Printf("cordoning Node %s: %v\n", node.Metadata.Name, err)
-			return holdForDrain(conv, "The reboot waits because the Node is not cordoned. The operator retries")
+			return holdForDrain(conv, fmt.Sprintf("The reboot waits because the Node is not cordoned: %v. The operator retries", err))
 		}
 		fmt.Printf("cordoned Node %s ahead of its reboot\n", node.Metadata.Name)
 		notes.normal(reasonCordoned, fmt.Sprintf("Cordoned the Node %s before the reboot. Pods to evict: %d", node.Metadata.Name, step.remaining))

@@ -447,6 +447,29 @@ func TestGateThroughDrainHoldsWhenTheCordonFails(t *testing.T) {
 	}
 }
 
+// A person who runs kubectl describe sees only the condition, so the
+// condition of a drain that the API server stops gives the server's
+// answer.
+func TestTheDrainHoldGivesTheAnswerOfTheAPIServer(t *testing.T) {
+	cases := []struct {
+		name string
+		api  *drainAPI
+		node *nodeObject
+	}{
+		{"a refused pod list", &drainAPI{listFail: true}, drainNode(true, true, drainNow.Format(time.RFC3339))},
+		{"a refused cordon", &drainAPI{patchFail: true}, drainNode(false, false, "")},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			client := testClient(t, c.api.handler())
+			conv := gateThroughDrain(&reader{client: client}, c.node, rebootingConvergence(), drainNow, machineEvents{}, nil)
+			if !strings.Contains(conv.condition.Message, "500") {
+				t.Errorf("the condition's message is %q, want it to give the status 500 that the API server answered", conv.condition.Message)
+			}
+		})
+	}
+}
+
 func TestGateThroughDrainEvictsAndHolds(t *testing.T) {
 	fake := &drainAPI{pods: []kubernetes.Pod{pod("web", "default")}}
 	client := testClient(t, fake.handler())
