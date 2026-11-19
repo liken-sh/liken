@@ -428,6 +428,29 @@ func TestTheRadioComponentJoinsEachRadioOnlyOnce(t *testing.T) {
 	}
 }
 
+func TestARadioWhoseBringUpPanicsStillReports(t *testing.T) {
+	// The watch waits for one result for each radio, so a panic in a
+	// bring-up must still send a result, and status must name the
+	// panic in place of the pending state.
+	passes := interfacePasses{radio: func(ifc machine.InterfaceSpec) (*connection, error) {
+		panic("the driver returned a nil station")
+	}}
+	radios := []machine.InterfaceSpec{declaredRadio("wlan0", "homenet")}
+	pass := &radioPass{settled: make(chan *connection, 4), pending: 1}
+	component := passes.joinRadios(pass, radios)
+
+	_ = runComponent(context.Background(), component)
+	_ = runComponent(context.Background(), component)
+
+	if len(pass.settled) != 1 {
+		t.Fatalf("the component sent %d results for one radio, want 1", len(pass.settled))
+	}
+	got := (<-pass.settled).radio
+	if got.state != machine.WirelessNoCarrier || !strings.Contains(got.message, "the driver returned a nil station") {
+		t.Errorf("the radio is %s with message %q, want NoCarrier with a message that names the panic", got.state, got.message)
+	}
+}
+
 func TestTheConnectionsComeBackInSpecOrder(t *testing.T) {
 	interfaces := []machine.InterfaceSpec{declaredRadio("wlan0", "homenet"), wired("eth0")}
 

@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"sync/atomic"
 	"time"
 
@@ -157,7 +158,10 @@ func (p interfacePasses) background(interfaces []machine.InterfaceSpec, conns []
 // The machine plane runs a component again after it returns an error
 // or panics. The claimed flags make a second run skip each radio that
 // an earlier run started, so it starts no second supplicant and sends
-// no second result.
+// no second result. A second run would then send no result at all for
+// a radio whose bring-up panicked, and the radio watch would wait for
+// it until the next boot, so joinOneOrReportPanic turns that panic into
+// the radio's result.
 func (p interfacePasses) joinRadios(pass *radioPass, radios []machine.InterfaceSpec) func(context.Context) error {
 	claimed := make([]atomic.Bool, len(radios))
 	return func(context.Context) error {
@@ -171,7 +175,7 @@ func (p interfacePasses) joinRadios(pass *radioPass, radios []machine.InterfaceS
 				continue
 			}
 			fmt.Printf("liken: wireless: %s joins %s in the background\n", ifc.Name, ifc.Wireless.SSID)
-			conn := p.joinOne(ifc)
+			conn := p.joinOneOrReportPanic(ifc)
 			if conn.radio != nil && conn.radio.state == machine.WirelessNotRaised {
 				stuck = ifc.Name
 			}
@@ -217,6 +221,18 @@ func inSpecOrder(interfaces []machine.InterfaceSpec, conns []*connection) []*con
 		}
 	}
 	return ordered
+}
+
+// joinOneOrReportPanic brings up one radio, and returns a failedRadio
+// connection that names the panic when the bring-up panics.
+func (p interfacePasses) joinOneOrReportPanic(ifc machine.InterfaceSpec) (conn *connection) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "liken: network: %s: the bring-up panicked: %v\n%s", ifc.Name, r, debug.Stack())
+			conn = failedRadio(ifc, fmt.Errorf("the bring-up panicked: %v", r))
+		}
+	}()
+	return p.joinOne(ifc)
 }
 
 // joinOne brings up one radio. It returns a connection even when the
