@@ -195,6 +195,25 @@ func TestLayerNeedsACompleteIdentity(t *testing.T) {
 	}
 }
 
+// A refused layer leaves no file at the output path, because a later
+// build step would pack a truncated archive into an image.
+func TestARefusedLayerLeavesNoOutput(t *testing.T) {
+	identityDir := t.TempDir()
+	if err := identity.Mint(identityDir, io.Discard); err != nil {
+		t.Fatalf("minting the identity: %v", err)
+	}
+	if err := os.Remove(filepath.Join(identityDir, "token")); err != nil {
+		t.Fatalf("removing the token: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "deployment.cpio")
+	if err := Layer(fixtureManifests(t), identityDir, out); err == nil {
+		t.Fatal("an incomplete identity was not refused")
+	}
+	if _, err := os.Stat(out); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("after the refusal, stat %s returns %v, want no such file", out, err)
+	}
+}
+
 // TestLayerRefusesADocumentAMachineWouldRefuse covers the reason the
 // layer parses at all. Each of these documents packs and installs
 // without complaint if nobody reads it, and then stops every boot from

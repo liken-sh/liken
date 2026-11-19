@@ -53,7 +53,7 @@ import (
 )
 
 // Layer packs a deployment's archive from its manifests and identity.
-func Layer(manifests, identityDir, out string) error {
+func Layer(manifests, identityDir, out string) (err error) {
 	// The documents are read and validated before the output file
 	// exists, so a refusal leaves no truncated cpio behind for a later
 	// step to pack into an image.
@@ -70,11 +70,20 @@ func Layer(manifests, identityDir, out string) error {
 		return err
 	}
 
-	f, err := os.Create(out)
+	// The archive is written to a file beside out and renamed over it
+	// only when the whole archive is written. A refusal while the
+	// identity files are read, or a write that fails partway, then
+	// leaves nothing at out.
+	f, err := os.CreateTemp(filepath.Dir(out), filepath.Base(out)+".partial-*")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if err != nil {
+			f.Close()
+			os.Remove(f.Name())
+		}
+	}()
 	a := newArchive(f)
 	dirs := map[string]bool{}
 
@@ -153,7 +162,16 @@ func Layer(manifests, identityDir, out string) error {
 		}
 	}
 
-	return a.close()
+	if err := a.close(); err != nil {
+		return err
+	}
+	if err := f.Chmod(0o644); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), out)
 }
 
 // deployment is the manifests directory read into memory: the cluster
