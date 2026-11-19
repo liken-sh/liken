@@ -91,7 +91,11 @@ so a script that writes no termination message leaves the end of its
 log there instead. When no pod reports how its container ended, such
 as after `activeDeadlineSeconds`, the summary contains the `Job`'s own
 reason and message. The `Job` runs its pod once, with no retry, and
-its `activeDeadlineSeconds` is the action's timeout. Kubernetes
+its `activeDeadlineSeconds` is the action's timeout. When the kubelet
+ends the pod for a reason that is not the container's own, such as an
+eviction, a preemption, or the node's shutdown, the pod gets the
+condition `DisruptionTarget`. The `Job`'s `podFailurePolicy` ignores
+that pod, so the `Job` runs a new pod and the action does not fail. Kubernetes
 deletes the `Job` an hour after it ends, so you can read its logs for
 that hour.
 

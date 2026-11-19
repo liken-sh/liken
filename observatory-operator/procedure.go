@@ -497,7 +497,7 @@ func (o *operator) deviceHandle(ctx context.Context, c procCall, report func(str
 		}
 		h = live[0]
 	} else {
-		byKey, err := o.waitDefined(ctx, report, ref, []*device{d})
+		byKey, err := o.waitDefined(ctx, report, nil, ref, []*device{d})
 		if err != nil {
 			return handle{}, err
 		}

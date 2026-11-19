@@ -283,13 +283,13 @@ func (r *runner) powerSwitches(ctx context.Context, w *stepWork, ref serverRef, 
 // with connectAll. It returns the handles by device key, and a note for
 // each resource whose device does not serve its interface.
 func (r *runner) startAndConnect(ctx context.Context, w *stepWork, ref serverRef, devices []*device) (map[string]handle, []string, error) {
-	if _, err := r.o.startDevices(ctx, w.report, ref, devices); err != nil {
+	if _, err := r.o.startDevices(ctx, w.report, nil, ref, devices); err != nil {
 		return nil, nil, err
 	}
-	if err := r.o.waitReady(ctx, w.report, devices); err != nil {
+	if err := r.o.waitReady(ctx, w.report, r.keeper(), ref, devices); err != nil {
 		return nil, nil, err
 	}
-	handles, err := r.o.waitDefined(ctx, w.report, ref, devices)
+	handles, err := r.o.waitDefined(ctx, w.report, r.keeper(), ref, devices)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -402,13 +402,13 @@ func (r *runner) startTelescopeDevices(ctx context.Context, w *stepWork) (outcom
 	if len(others) == 0 {
 		return skipped("no devices besides Switches")
 	}
-	if _, err := r.o.startDevices(ctx, w.report, ref, others); err != nil {
+	if _, err := r.o.startDevices(ctx, w.report, nil, ref, others); err != nil {
 		return outcome{}, err
 	}
-	if err := r.o.waitReady(ctx, w.report, others); err != nil {
+	if err := r.o.waitReady(ctx, w.report, r.keeper(), ref, others); err != nil {
 		return outcome{}, err
 	}
-	if _, err := r.o.waitDefined(ctx, w.report, ref, others); err != nil {
+	if _, err := r.o.waitDefined(ctx, w.report, r.keeper(), ref, others); err != nil {
 		return outcome{}, err
 	}
 	return done("started %d devices on %s", len(driverDevices(others)), ref)
@@ -424,7 +424,7 @@ func (r *runner) telescopeHandles(ctx context.Context, w *stepWork) (*tree, []ha
 	}
 	_, others := t.partition(devices)
 	ordered := inOrder(others, connectOrder)
-	byKey, err := r.o.waitDefined(ctx, w.report, ref, ordered)
+	byKey, err := r.o.waitDefined(ctx, w.report, r.keeper(), ref, ordered)
 	if err != nil {
 		return nil, nil, err
 	}

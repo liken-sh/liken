@@ -128,15 +128,15 @@ func (r *runner) startGuider(ctx context.Context, w *stepWork) (outcome, error) 
 	if mount != nil {
 		wanted = append(wanted, mount)
 	}
-	handles, err := r.o.waitDefined(ctx, w.report, ref, wanted)
+	handles, err := r.o.waitDefined(ctx, w.report, r.keeper(), ref, wanted)
 	if err != nil {
 		return outcome{}, err
 	}
 	gear, _ := guiderGear(camera, mount, focalLength, handles)
-	if _, err := r.o.startGuiderPod(ctx, w.report, ref, guider, gear); err != nil {
+	if _, err := r.o.startGuiderPod(ctx, w.report, nil, ref, guider, gear); err != nil {
 		return outcome{}, err
 	}
-	conn, err := r.o.waitGuider(ctx, w.report, guider)
+	conn, err := r.o.waitGuider(ctx, w.report, r.keeper(), ref, guider, gear)
 	if err != nil {
 		return outcome{}, err
 	}
@@ -156,7 +156,7 @@ func gearText(gear guiderEquipment) string {
 
 // startGuiderPod creates the guider's ConfigMap, pod, and Service, or
 // updates them, and reports whether it created the pod.
-func (o *operator) startGuiderPod(ctx context.Context, report func(string), ref serverRef, guider *observatory.Guider, gear guiderEquipment) (bool, error) {
+func (o *operator) startGuiderPod(ctx context.Context, report func(string), carried *replacements, ref serverRef, guider *observatory.Guider, gear guiderEquipment) (bool, error) {
 	files, built, svc, err := guiderPod(o.namespace, ref, guider, gear)
 	if err != nil {
 		return false, err
@@ -164,15 +164,19 @@ func (o *operator) startGuiderPod(ctx context.Context, report func(string), ref 
 	if err := o.ensureFiles(ctx, report, o.snapshot(), files); err != nil {
 		return false, err
 	}
-	return o.ensure(ctx, report, built, svc, nil)
+	return o.ensure(ctx, report, carried, built, svc, nil)
 }
 
 // waitGuider waits until the guider's pod is Ready and the operator's
-// connection to PHD2's event server is open.
-func (o *operator) waitGuider(ctx context.Context, report func(string), guider *observatory.Guider) (*guiderConn, error) {
+// connection to PHD2's event server is open. keeper creates the pod
+// again when it is gone or ended.
+func (o *operator) waitGuider(ctx context.Context, report func(string), keeper *podKeeper, ref serverRef, guider *observatory.Guider, gear guiderEquipment) (*guiderConn, error) {
 	name := guiderName(guider)
 	var conn *guiderConn
 	err := o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
+		if acted, waiting, err := keeper.keepGuider(ctx, report, t, ref, guider, gear); acted || err != nil {
+			return false, waiting, err
+		}
 		p, ok := t.pods[name]
 		if !ok || !p.ready() {
 			phase := "not created"

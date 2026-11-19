@@ -20,6 +20,9 @@ type meta struct {
 	Annotations       map[string]string `json:"annotations,omitempty"`
 	OwnerReferences   []ownerReference  `json:"ownerReferences,omitempty"`
 	DeletionTimestamp *time.Time        `json:"deletionTimestamp,omitempty"`
+	// CreationTimestamp is read from a pod that the kubelet ended, to
+	// time its replacement (podkeeper.go).
+	CreationTimestamp *time.Time `json:"creationTimestamp,omitempty"`
 }
 
 type ownerReference struct {
@@ -176,6 +179,9 @@ type podStatus struct {
 	PodIP             string            `json:"podIP,omitempty"`
 	Conditions        []podCondition    `json:"conditions,omitempty"`
 	ContainerStatuses []containerStatus `json:"containerStatuses,omitempty"`
+	// Reason is the kubelet's reason for a pod that it ended, such as
+	// Evicted.
+	Reason string `json:"reason,omitempty"`
 }
 
 // containerStatus is read for the exit code and message of a failed
@@ -188,15 +194,19 @@ type containerStatus struct {
 }
 
 type terminated struct {
-	ExitCode int32  `json:"exitCode"`
-	Reason   string `json:"reason,omitempty"`
-	Message  string `json:"message,omitempty"`
+	ExitCode   int32      `json:"exitCode"`
+	Reason     string     `json:"reason,omitempty"`
+	Message    string     `json:"message,omitempty"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 }
 
 type podCondition struct {
 	Type    string `json:"type"`
 	Status  string `json:"status"`
 	Message string `json:"message,omitempty"`
+	// LastTransitionTime of DisruptionTarget is when the kubelet ended
+	// the pod (podkeeper.go).
+	LastTransitionTime *time.Time `json:"lastTransitionTime,omitempty"`
 }
 
 // ready reports whether the pod is Ready and is not being deleted.
@@ -269,10 +279,25 @@ type jobMeta struct {
 }
 
 type jobSpec struct {
-	BackoffLimit            *int32      `json:"backoffLimit,omitempty"`
-	ActiveDeadlineSeconds   *int64      `json:"activeDeadlineSeconds,omitempty"`
-	TTLSecondsAfterFinished *int32      `json:"ttlSecondsAfterFinished,omitempty"`
-	Template                podTemplate `json:"template"`
+	BackoffLimit            *int32            `json:"backoffLimit,omitempty"`
+	ActiveDeadlineSeconds   *int64            `json:"activeDeadlineSeconds,omitempty"`
+	TTLSecondsAfterFinished *int32            `json:"ttlSecondsAfterFinished,omitempty"`
+	PodFailurePolicy        *podFailurePolicy `json:"podFailurePolicy,omitempty"`
+	Template                podTemplate       `json:"template"`
+}
+
+type podFailurePolicy struct {
+	Rules []podFailurePolicyRule `json:"rules"`
+}
+
+type podFailurePolicyRule struct {
+	Action          string              `json:"action"`
+	OnPodConditions []podConditionMatch `json:"onPodConditions"`
+}
+
+type podConditionMatch struct {
+	Type   string `json:"type"`
+	Status string `json:"status"`
 }
 
 type podTemplate struct {

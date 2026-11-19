@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -130,6 +131,28 @@ func TestAJobRunsOnceAndRestricted(t *testing.T) {
 	})
 }
 
+// A pod that the kubelet ends, such as for an eviction, gets the
+// condition DisruptionTarget, and the Job's podFailurePolicy runs a new
+// pod in its place without counting a failure. The fake API server runs
+// no Job controller that reads the policy, so the test reads the Job
+// that the operator created.
+func TestAJobRunsItsPodAgainWhenTheKubeletEndsIt(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
+		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
+		j := jobNamed(t, w, exampleJob)
+		stored, _ := w.api.object(jobsPath, j.Metadata.Name)
+
+		policy, _ := json.Marshal(stored["spec"].(map[string]any)["podFailurePolicy"])
+		want := `{"rules":[{"action":"Ignore","onPodConditions":[{"status":"True","type":"DisruptionTarget"}]}]}`
+		if string(policy) != want {
+			t.Errorf("podFailurePolicy = %s, want %s", policy, want)
+		}
+	})
+}
+
 // A Job that fails fails its action and the step, with the Job's reason
 // and message. The retry annotation deletes that Job and runs a new
 // one.
@@ -168,13 +191,15 @@ func TestAFailedJobErrorIncludesThePodExit(t *testing.T) {
 	cases := []struct {
 		name    string
 		pod     bool
+		evicted bool
 		message string
 		why     string
 	}{
-		{"a short message", true, "checking the dew heater\n", "exit code 3: checking the dew heater"},
-		{"a long message", true, long, "exit code 3: " + strings.Repeat("reading the relay board; ", 11) + "checking the dew heater"},
-		{"no message", true, "", "exit code 3"},
-		{"no pod", false, "", "BackoffLimitExceeded: Job has reached the specified backoff limit"},
+		{"a short message", true, false, "checking the dew heater\n", "exit code 3: checking the dew heater"},
+		{"a long message", true, false, long, "exit code 3: " + strings.Repeat("reading the relay board; ", 11) + "checking the dew heater"},
+		{"no message", true, false, "", "exit code 3"},
+		{"an evicted pod before the pod that failed", true, true, "checking the dew heater\n", "exit code 3: checking the dew heater"},
+		{"no pod", false, false, "", "BackoffLimitExceeded: Job has reached the specified backoff limit"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -184,6 +209,9 @@ func TestAFailedJobErrorIncludesThePodExit(t *testing.T) {
 				w.api.failJobs("BackoffLimitExceeded", "Job has reached the specified backoff limit")
 				if c.pod {
 					w.api.terminateJobPods(3, c.message)
+				}
+				if c.evicted {
+					w.api.evictJobPods()
 				}
 				w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 				r := w.phase("east-tonight", observatory.ReservationFailed, 10*time.Minute)

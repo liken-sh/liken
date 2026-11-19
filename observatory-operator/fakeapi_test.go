@@ -52,6 +52,9 @@ type fakeAPI struct {
 
 	// pending is the set of pods that stay Pending, by name.
 	pending map[string]bool
+	// rejected is the set of pods that the kubelet rejects at admission
+	// as soon as the operator creates them, by name.
+	rejected map[string]bool
 	// writes counts the status writes to each object, keyed by its
 	// path, and the creates in each collection, keyed by "POST " and
 	// the collection's path.
@@ -119,10 +122,11 @@ var fakeKinds = func() map[string][2]string {
 
 func startFakeAPI(t *testing.T) *fakeAPI {
 	api := &fakeAPI{
-		objects: map[string]map[string]map[string]any{},
-		changed: make(chan struct{}),
-		pending: map[string]bool{},
-		writes:  map[string]int{},
+		objects:  map[string]map[string]map[string]any{},
+		changed:  make(chan struct{}),
+		pending:  map[string]bool{},
+		rejected: map[string]bool{},
+		writes:   map[string]int{},
 
 		recorded: &eventstest.Events{},
 	}
@@ -313,6 +317,11 @@ func (a *fakeAPI) list(w http.ResponseWriter, r *http.Request, collection string
 			}
 		}
 	}
+	// The API server lists the objects of a namespace in the order of
+	// their names.
+	slices.SortFunc(items, func(a, b any) int {
+		return strings.Compare(a.(map[string]any)["metadata"].(map[string]any)["name"].(string), b.(map[string]any)["metadata"].(map[string]any)["name"].(string))
+	})
 	kind := fakeKinds[plural(collection)]
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"apiVersion": kind[0], "kind": kind[1] + "List",
@@ -434,6 +443,9 @@ func (a *fakeAPI) add(collection string, object map[string]any) map[string]any {
 		if !a.pending[name] {
 			object["status"] = readyStatus()
 			object["spec"].(map[string]any)["nodeName"] = "node-1"
+		}
+		if a.rejected[name] {
+			object["status"] = map[string]any{"phase": "Failed", "reason": "OutOfcpu", "message": "Pod was rejected: Node didn't have enough resource: cpu"}
 		}
 	}
 	return a.store(collection, name, object, "ADDED")

@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"errors"
 
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
@@ -49,9 +50,15 @@ func (r *runner) keepGuider(ctx context.Context, t *tree, ref serverRef, telesco
 	}
 	ctx, cancel := context.WithTimeout(ctx, guiderLimit)
 	defer cancel()
-	created, err := r.o.startGuiderPod(ctx, nil, ref, guider, gear)
+	created, err := r.o.startGuiderPod(ctx, nil, r.kept, ref, guider, gear)
 	if created {
 		r.recordPod(reference(observatory.GuiderKind, guider.Metadata), guiderName(guider), "The new PHD2 starts idle and not calibrated")
+	}
+	if errors.Is(err, errReplaceLater) {
+		// The guider's status reads the ended pod's phase until the
+		// replacement, so the wait is not a fault.
+		r.o.logf("keeping Guider %s: %v", guider.Metadata.Name, err)
+		return
 	}
 	if err == nil && gearConnected(handles) {
 		err = r.connectNewGuider(ctx, ref, guider, gear)

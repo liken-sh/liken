@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -126,6 +127,17 @@ func jobFor(t *tree, name string, r resource, trigger string, spec observatory.J
 			BackoffLimit:            int32Pointer(0),
 			ActiveDeadlineSeconds:   int64Pointer(int64(limit / time.Second)),
 			TTLSecondsAfterFinished: int32Pointer(jobTTL),
+			// A pod that the kubelet ends, such as for an eviction, a
+			// preemption, or a node's shutdown, has the condition
+			// DisruptionTarget. Its container did not fail, so the Job
+			// controller runs a new pod and counts no failure. The
+			// deadline above still bounds the action. The API server
+			// accepts a podFailurePolicy only with the restartPolicy Never
+			// below.
+			PodFailurePolicy: &podFailurePolicy{Rules: []podFailurePolicyRule{{
+				Action:          "Ignore",
+				OnPodConditions: []podConditionMatch{{Type: "DisruptionTarget", Status: "True"}},
+			}}},
 			Template: podTemplate{
 				Metadata: meta{Labels: podLabels},
 				Spec: podSpec{
@@ -227,23 +239,41 @@ const messageTail = 300
 // such as "exit code 3: checking the dew heater". It returns false
 // when no pod reports a terminated container. No watch caches the pod,
 // so runJob reads it once, after the Job fails.
+//
+// The Job's podFailurePolicy ignores a pod that the kubelet ended, which
+// has the condition DisruptionTarget, and runs a new pod. So the Job's
+// failure comes from the newest pod without that condition, and the
+// exit code of an ignored pod says nothing about the action.
 func (o *operator) jobPodEnd(name string) (string, bool) {
 	var pods struct {
-		Items []pod `json:"items"`
+		Items []struct {
+			Metadata struct {
+				CreationTimestamp time.Time `json:"creationTimestamp"`
+			} `json:"metadata"`
+			Status podStatus `json:"status"`
+		} `json:"items"`
 	}
 	path := "/api/v1/namespaces/" + o.namespace + "/pods?labelSelector=" + url.QueryEscape(labelName+"="+name)
 	if err := o.client.RequestJSON(http.MethodGet, path, nil, &pods); err != nil {
 		o.logf("reading the pod of Job %s: %v", name, err)
 		return "", false
 	}
+	var end *terminated
+	var newest time.Time
 	for _, p := range pods.Items {
+		if slices.ContainsFunc(p.Status.Conditions, func(c podCondition) bool { return c.Type == "DisruptionTarget" && c.Status == "True" }) {
+			continue
+		}
 		for _, c := range p.Status.ContainerStatuses {
-			if end := c.State.Terminated; end != nil {
-				return terminationText(*end), true
+			if c.State.Terminated != nil && (end == nil || p.Metadata.CreationTimestamp.After(newest)) {
+				end, newest = c.State.Terminated, p.Metadata.CreationTimestamp
 			}
 		}
 	}
-	return "", false
+	if end == nil {
+		return "", false
+	}
+	return terminationText(*end), true
 }
 
 // terminationText describes how a container ended: its exit code, its

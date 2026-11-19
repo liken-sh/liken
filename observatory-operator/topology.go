@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -16,14 +17,17 @@ import (
 )
 
 // ensure creates a pod, its Service, and its claim template, or
-// replaces a running pod whose spec or server differs from built
-// (current). The new pod has the old pod's name, so ensure waits until
-// the old pod is gone. send retries a write that the API server
-// refuses, until the step's deadline. created reports whether the API
+// replaces a pod that the kubelet ended (keepPod) or whose spec or
+// server differs from built (current). The new pod has the old pod's
+// name, so ensure waits until the old pod is gone. send retries a write
+// that the API server refuses, until the step's deadline. created reports whether the API
 // server created the pod, so the runner of a Ready reservation can post
 // an Event for each pod that it creates.
-func (o *operator) ensure(ctx context.Context, report func(string), built *pod, svc *service, template *claimTemplate) (created bool, err error) {
+func (o *operator) ensure(ctx context.Context, report func(string), carried *replacements, built *pod, svc *service, template *claimTemplate) (created bool, err error) {
 	name := built.Metadata.Name
+	if carried == nil {
+		carried = newReplacements(o.changed, false)
+	}
 	err = o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
 		if template != nil {
 			// A claim template's spec is immutable, and an existing one is
@@ -42,19 +46,21 @@ func (o *operator) ensure(ctx context.Context, report func(string), built *pod, 
 				return false, "", err
 			}
 		}
+		result, err := o.keepPod(ctx, report, t, built, carried)
+		created = created || result.created
+		if err != nil {
+			return false, "", err
+		}
+		if !result.due.IsZero() && carried.later {
+			return false, "", fmt.Errorf("%w: %s", errReplaceLater, result.waiting)
+		}
+		// A pod that keepPod just created, or found created by an earlier
+		// pass, is not in this tree yet, and it is built from built.
 		running, ok := t.pods[name]
-		switch {
-		case !ok:
-			if err := o.send(ctx, report, fmt.Sprintf("creating pod %s", name), func() (err error) {
-				created, err = o.post("/api/v1/namespaces/"+o.namespace+"/pods", built)
-				return err
-			}); err != nil {
-				return false, "", err
-			}
-			return true, "", nil
-		case running.Metadata.DeletionTimestamp != nil:
-			return false, "waiting for the earlier pod " + name + " to stop", nil
-		case !current(running, built):
+		if !result.done || !ok {
+			return result.done, result.waiting, nil
+		}
+		if !current(running, built) {
 			if err := o.send(ctx, report, fmt.Sprintf("replacing pod %s: its spec or its server changed", name), func() error { return o.deleteObject(podPath(o.namespace, name)) }); err != nil {
 				return false, "", err
 			}
@@ -68,7 +74,7 @@ func (o *operator) ensure(ctx context.Context, report func(string), built *pod, 
 // startServer creates the pod and the Service of one INDI server, and
 // sets the server's drivers to the drivers of the devices.
 func (o *operator) startServer(ctx context.Context, report func(string), ref serverRef, ownerUID string, devices []*device) (created bool, err error) {
-	created, err = o.ensureServer(ctx, report, ref, ownerUID, devices)
+	created, err = o.ensureServer(ctx, report, nil, ref, ownerUID, devices)
 	if err != nil {
 		return created, err
 	}
@@ -79,21 +85,22 @@ func (o *operator) startServer(ctx context.Context, report func(string), ref ser
 // ensureServer creates the pod and the Service of one INDI server, with
 // the devices in its annotation, when the pod is gone. setDrivers
 // changes the devices of a running server.
-func (o *operator) ensureServer(ctx context.Context, report func(string), ref serverRef, ownerUID string, devices []*device) (created bool, err error) {
+func (o *operator) ensureServer(ctx context.Context, report func(string), carried *replacements, ref serverRef, ownerUID string, devices []*device) (created bool, err error) {
 	built, svc, err := serverPod(o.namespace, ref, ownerUID, devices)
 	if err != nil {
 		return false, err
 	}
-	return o.ensure(ctx, report, built, svc, nil)
+	return o.ensure(ctx, report, carried, built, svc, nil)
 }
 
 // startDevices adds the finalizer to each device that runs a driver and
 // to each device that the driver serves, then creates the pod, Service,
 // and claim template of the device that runs the driver. It returns the
 // devices whose pod it created.
-func (o *operator) startDevices(ctx context.Context, report func(string), ref serverRef, devices []*device) ([]*device, error) {
+func (o *operator) startDevices(ctx context.Context, report func(string), carried *replacements, ref serverRef, devices []*device) ([]*device, error) {
 	t := o.snapshot()
 	var started []*device
+	var later error
 	for _, d := range driverDevices(devices) {
 		built, svc, template, err := devicePod(o.namespace, ref, d, t.guides(ref, d), t.outbox(ref, d))
 		if err != nil {
@@ -106,27 +113,34 @@ func (o *operator) startDevices(ctx context.Context, report func(string), ref se
 		if err := o.addServedFinalizers(ctx, report, t, d); err != nil {
 			return started, err
 		}
-		created, err := o.ensure(ctx, report, built, svc, template)
+		created, err := o.ensure(ctx, report, carried, built, svc, template)
 		if created {
 			started = append(started, d)
 		}
-		if err != nil {
+		switch {
+		case errors.Is(err, errReplaceLater):
+			// The other devices' pods do not wait for this one.
+			later = errors.Join(later, err)
+		case err != nil:
 			return started, err
 		}
 	}
-	return started, nil
+	return started, later
 }
 
-// waitReady waits until the pod of each device is Ready. A pod with a
-// claim for real hardware stays Pending until its device appears, so
-// activation waits here until a person or a Switch powers the device
-// on.
-func (o *operator) waitReady(ctx context.Context, report func(string), devices []*device) error {
+// waitReady waits until the pod of each device on ref is Ready. A pod
+// with a claim for real hardware stays Pending until its device
+// appears, so activation waits here until a person or a Switch powers
+// the device on. keeper creates a pod again that is gone or ended.
+func (o *operator) waitReady(ctx context.Context, report func(string), keeper *podKeeper, ref serverRef, devices []*device) error {
 	return o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
 		for _, d := range driverDevices(devices) {
 			name, err := objectName(d.kind, d.name())
 			if err != nil {
 				return false, "", err
+			}
+			if acted, waiting, err := keeper.keepDevice(ctx, report, t, ref, d, name); acted || err != nil {
+				return false, waiting, err
 			}
 			p, ok := t.pods[name]
 			if !ok || !p.ready() {
@@ -142,10 +156,13 @@ func (o *operator) waitReady(ctx context.Context, report func(string), devices [
 }
 
 // waitServer waits until the operator's INDI connection to a server is
-// open.
-func (o *operator) waitServer(ctx context.Context, report func(string), ref serverRef) (*indiServer, error) {
+// open. keeper creates the server's pod again when it is gone or ended.
+func (o *operator) waitServer(ctx context.Context, report func(string), keeper *podKeeper, ref serverRef) (*indiServer, error) {
 	var server *indiServer
 	err := o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
+		if acted, waiting, err := keeper.keepServer(ctx, report, t, ref); acted || err != nil {
+			return false, waiting, err
+		}
 		s, ok := o.servers.get(ref.String())
 		if !ok || !s.client.Connected() {
 			return false, "waiting for the INDI connection to " + ref.String(), nil
@@ -158,9 +175,10 @@ func (o *operator) waitServer(ctx context.Context, report func(string), ref serv
 
 // waitDefined waits until the driver of each device defines its INDI
 // device on the server, and returns a handle for each, keyed by device
-// key.
-func (o *operator) waitDefined(ctx context.Context, report func(string), ref serverRef, devices []*device) (map[string]handle, error) {
-	server, err := o.waitServer(ctx, report, ref)
+// key. keeper creates the server's pod again while the wait for the
+// connection runs (waitServer).
+func (o *operator) waitDefined(ctx context.Context, report func(string), keeper *podKeeper, ref serverRef, devices []*device) (map[string]handle, error) {
+	server, err := o.waitServer(ctx, report, keeper, ref)
 	if err != nil {
 		return nil, err
 	}

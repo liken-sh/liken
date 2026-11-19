@@ -27,7 +27,10 @@ import (
 var errEnding = errors.New("reservation ended")
 
 type runner struct {
-	o    *operator
+	o *operator
+	// kept holds the replacements of the pods that the kubelet ended,
+	// while the reservation is Ready (steady).
+	kept *replacements
 	uid  string
 	name string
 	// res is the last copy of the reservation that the runner read.

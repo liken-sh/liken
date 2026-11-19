@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -48,6 +49,12 @@ func (r *runner) steady(ctx context.Context) {
 	subscribed := map[string]*indi.Client{}
 	// lastInputs is the podInputs of the last keepPods that succeeded.
 	lastInputs := ""
+	// kept holds the replacements of the pods that the kubelet ended.
+	// Its timer notifies structure, which this loop waits on, so the wait
+	// for a pod's replacement is a deadline of the loop and holds no
+	// lock. A keepPods that returns errReplaceLater does not set
+	// lastInputs, so the pass at the deadline runs keepPods again.
+	r.kept = newReplacements(r.o.structure, true)
 	for ctx.Err() == nil {
 		// Get the channel before reading any state, so a change during
 		// this pass ends the next wait at once.
@@ -111,8 +118,9 @@ func (r *runner) waitForChange(ctx context.Context, wake <-chan struct{}) {
 // several telescopes share that server. When the observatory has no
 // devices and no server pod, it only removes stray objects.
 func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope *observatory.Telescope, devices []*device) error {
-	if err := r.keepServer(ctx, t, ref, telescope.Metadata, devices); err != nil {
-		return err
+	later := r.keepServer(ctx, t, ref, telescope.Metadata, devices)
+	if later != nil && !errors.Is(later, errReplaceLater) {
+		return later
 	}
 	site, ok := t.observatories[telescope.Spec.Observatory]
 	if !ok {
@@ -126,9 +134,9 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 	}
 	defer lock.release()
 	if _, running := t.pods[siteRef.String()]; len(siteDevices) == 0 && !running {
-		return r.removeStrays(ctx, t, t, siteRef)
+		return errors.Join(later, r.removeStrays(ctx, t, t, siteRef))
 	}
-	return r.keepServer(ctx, t, siteRef, site.Metadata, siteDevices)
+	return errors.Join(later, r.keepServer(ctx, t, siteRef, site.Metadata, siteDevices))
 }
 
 // keepServer creates the server's pod and each device's pod when they
@@ -138,22 +146,25 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 // them on when the Switch's driver defines CONNECTION.
 func (r *runner) keepServer(ctx context.Context, t *tree, ref serverRef, owner observatory.ObjectMeta, devices []*device) error {
 	about := reference(ref.kind, owner)
-	created, err := r.o.ensureServer(ctx, nil, ref, owner.UID, devices)
+	// A pod that waits for its replacement (errReplaceLater) does not
+	// hold up the other pods, and keepServer returns the error at the
+	// end, so steady runs keepPods again when the wait ends.
+	created, later := r.o.ensureServer(ctx, nil, r.kept, ref, owner.UID, devices)
 	if created {
 		r.recordServerPod(ref, owner)
 	}
-	if err != nil {
-		return err
+	if later != nil && !errors.Is(later, errReplaceLater) {
+		return later
 	}
-	started, err := r.o.startDevices(ctx, nil, ref, devices)
+	started, err := r.o.startDevices(ctx, nil, r.kept, ref, devices)
 	for _, d := range started {
 		name, _ := objectName(d.kind, d.name())
 		r.recordPod(reference(d.kind, d.object.Metadata), name, "")
 	}
-	if err != nil {
+	if err != nil && !errors.Is(err, errReplaceLater) {
 		return err
 	}
-	return r.releaseLeft(ctx, t, t, ref, about)
+	return errors.Join(later, err, r.releaseLeft(ctx, t, t, ref, about))
 }
 
 // releaseLeft releases each device that the server still runs but that

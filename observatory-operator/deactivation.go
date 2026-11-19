@@ -145,7 +145,7 @@ func (o *operator) connectedHandles(ctx context.Context, report func(string), t 
 	}
 	wait, cancel := context.WithTimeout(ctx, settleWait)
 	defer cancel()
-	byKey, _ := o.waitDefined(wait, report, ref, running)
+	byKey, _ := o.waitDefined(wait, report, nil, ref, running)
 	var out []handle
 	var notes []string
 	for _, d := range running {

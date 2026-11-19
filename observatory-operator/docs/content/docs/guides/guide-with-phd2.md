@@ -131,7 +131,8 @@ phase and PHD2's state together, such as `Ready, Guiding`.
 
 ## When PHD2 restarts
 
-If PHD2's pod is deleted, the operator creates it again and connects
+If PHD2's pod is deleted, or the kubelet ends it, for example for an
+eviction, the operator creates it again and connects
 PHD2's camera and mount. It also connects them again when the
 telescope's INDI server restarts. A new PHD2 starts idle and not
 calibrated, so calibrate and start guiding again from Ekos.

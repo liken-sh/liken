@@ -391,8 +391,11 @@ spec:
                           webhook. The resource owns the `Job`. The
                           action is `Done` when the `Job` succeeds, and
                           `Failed` with the `Job`'s reason and message
-                          when it fails. The `Job` has no retry, and its
-                          `activeDeadlineSeconds` is the action's
+                          when it fails. The `Job` does not run a pod
+                          again that failed itself. It runs its pod
+                          again when the kubelet ends the pod for a
+                          disruption of the node, such as an eviction.
+                          Its `activeDeadlineSeconds` is the action's
                           timeout. Kubernetes deletes it an hour after
                           it ends. The environment adds
                           `LIKEN_OBSERVATORY`, `LIKEN_TELESCOPE` for a
@@ -610,8 +613,11 @@ spec:
                           webhook. The resource owns the `Job`. The
                           action is `Done` when the `Job` succeeds, and
                           `Failed` with the `Job`'s reason and message
-                          when it fails. The `Job` has no retry, and its
-                          `activeDeadlineSeconds` is the action's
+                          when it fails. The `Job` does not run a pod
+                          again that failed itself. It runs its pod
+                          again when the kubelet ends the pod for a
+                          disruption of the node, such as an eviction.
+                          Its `activeDeadlineSeconds` is the action's
                           timeout. Kubernetes deletes it an hour after
                           it ends. The environment adds
                           `LIKEN_OBSERVATORY`, `LIKEN_TELESCOPE` for a
@@ -893,21 +899,24 @@ spec:
                                 resource owns the `Job`. The action is
                                 `Done` when the `Job` succeeds, and
                                 `Failed` with the `Job`'s reason and
-                                message when it fails. The `Job` has no
-                                retry, and its `activeDeadlineSeconds`
-                                is the action's timeout. Kubernetes
-                                deletes it an hour after it ends. The
-                                environment adds `LIKEN_OBSERVATORY`,
-                                `LIKEN_TELESCOPE` for a resource of a
-                                telescope, `LIKEN_RESOURCE` such as
-                                `Dome/lab`, `LIKEN_TRIGGER` such as
-                                `activation` or `triggers[0]`, and
-                                `INDI_HOST` and `INDI_PORT` of the
-                                resource's INDI server. The container
-                                runs as user 1000 with no capabilities,
-                                on a read-only root filesystem with a
-                                writable `/tmp`. The default timeout is
-                                10 minutes.
+                                message when it fails. The `Job` does
+                                not run a pod again that failed itself.
+                                It runs its pod again when the kubelet
+                                ends the pod for a disruption of the
+                                node, such as an eviction. Its
+                                `activeDeadlineSeconds` is the action's
+                                timeout. Kubernetes deletes it an hour
+                                after it ends. The environment adds
+                                `LIKEN_OBSERVATORY`, `LIKEN_TELESCOPE`
+                                for a resource of a telescope,
+                                `LIKEN_RESOURCE` such as `Dome/lab`,
+                                `LIKEN_TRIGGER` such as `activation` or
+                                `triggers[0]`, and `INDI_HOST` and
+                                `INDI_PORT` of the resource's INDI
+                                server. The container runs as user 1000
+                                with no capabilities, on a read-only
+                                root filesystem with a writable `/tmp`.
+                                The default timeout is 10 minutes.
                               properties:
                                 image:
                                   type: string

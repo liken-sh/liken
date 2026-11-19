@@ -143,6 +143,54 @@ and message. The transition is a `Warning` Event when `ParentFound` is
 hour. Your own write of `SetUp` posts no Event, and its expiry posts a
 `Normal` Event with the reason `Expired`.
 
+## A pod that the kubelet ended
+
+The kubelet can end a pod for an eviction, a rejection at admission,
+or the node's shutdown. The pod then stays `Failed`, or `Succeeded`
+when its containers exit zero at a shutdown, and its restart policy
+does not start it again. The operator deletes such a pod and creates
+it again, while the reservation is `Ready` and while an activation
+step waits for the pod. A step that waits for a pod that is gone
+creates it again too. The reservation stays in its phase meanwhile.
+While a device's pod has ended, its driver is gone, so the device is
+`Starting` and its message reads `Waiting for its driver on <server>`.
+
+A device's claim, or the guide camera's place on its server's node,
+keeps the new pod on the same node, so the kubelet can reject it again
+at once. So the operator replaces an ended pod no earlier than the
+pod's creation plus a wait: 10 seconds for a pod with no count,
+doubled for each pod of the same name that the kubelet ended before
+it, to a limit of 5 minutes. The annotation
+`observatory.liken.sh/tries` on the pod holds that count. A pod that
+ran for longer than its wait is replaced at once. An ended pod whose
+spec differs from the one the operator builds now, for example after
+you changed what the kubelet refused, is replaced at once, and its
+replacement has no count.
+
+During the wait, the ended pod stays, so you can read its status and
+the kubelet's reason with `kubectl describe pod`. While the
+reservation is `Ready`, the device whose pod ended is `Starting` with
+the message `Waiting for its driver on <server>`, a `Guider` whose pod
+ended reads `Waiting for pod <name> (Failed)` or `(Succeeded)`, and
+the operator's log has a line `keeping the pods of <server>: the
+replacement waits: waiting until <time> to replace the pod <name>,
+which the kubelet ended (<reason>)`. The runner goes on with the other
+devices and holds no lock during the wait. When the reservation ends,
+its release does not wait for the replacement of its own pods. It
+still waits while another reservation of the same observatory runs its
+`StartSite` step, because that step holds the observatory's lock until
+it finishes or reaches its deadline. During activation, the step's
+summary reads `Waiting until <time> to replace
+the pod <name>, which the kubelet ended (<reason>)`, and the step's
+deadline still ends the step.
+
+The operator posts a `PodCreated` Event for the first replacement of a
+pod. After that it posts no further Event until a pod has run for
+longer than 5 minutes before the kubelet ended it, so a loop of
+rejections posts one Event. During activation, the Event's message
+reads `Created pod <name> again during the activation of Reservation
+<name>`.
+
 ## Requirements and dawn
 
 A resource with procedures can list conditions in `spec.requires` that
@@ -321,9 +369,9 @@ takes effect when the session ends:
   camera whose train or tube is gone gets no `SCOPE_INFO` when its
   driver restarts.
 
-When an eviction deletes some or all of a server's pods, the operator
-creates them again from the record, with the drivers, power, and claims
-that the session started with. A device added during the session still
+When an eviction deletes or ends some or all of a server's pods, the
+operator creates them again from the record, with the drivers, power,
+and claims that the session started with. A device added during the session still
 waits.
 
 The reservations of several telescopes in one observatory share the
