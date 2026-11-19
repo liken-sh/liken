@@ -332,10 +332,7 @@ func (p *supplicantProcess) await(ctx context.Context, proc runningSupplicant,
 
 // next returns the delay after backoff: double it, up to maxBackoff.
 func (p *supplicantProcess) next(backoff time.Duration) time.Duration {
-	if backoff >= p.maxBackoff {
-		return p.maxBackoff
-	}
-	return backoff * 2
+	return min(backoff*2, p.maxBackoff)
 }
 
 // run supervises one supplicant until stop closes or ctx ends. It
@@ -404,8 +401,9 @@ func (p *supplicantProcess) watch(ctx context.Context, proc runningSupplicant,
 			stopSupplicant(p.ifname, proc, died)
 			return supplicantEnded
 		}
+		delay := withJitter(backoff)
 		backoff = p.next(backoff)
-		if outcome := p.await(ctx, proc, died, time.After(withJitter(backoff))); outcome != supplicantWaited {
+		if outcome := p.await(ctx, proc, died, time.After(delay)); outcome != supplicantWaited {
 			return outcome
 		}
 	}
@@ -417,8 +415,8 @@ func (p *supplicantProcess) watch(ctx context.Context, proc runningSupplicant,
 // without a supplicant the radio stays disconnected.
 func (p *supplicantProcess) restart(ctx context.Context, config string, backoff *time.Duration) (runningSupplicant, bool) {
 	for {
-		*backoff = p.next(*backoff)
 		delay := withJitter(*backoff)
+		*backoff = p.next(*backoff)
 		fmt.Printf("liken: wireless: restarting the supplicant on %s in %s\n", p.ifname, delay.Round(time.Millisecond))
 		if p.await(ctx, runningSupplicant{}, nil, time.After(delay)) == supplicantEnded {
 			return runningSupplicant{}, false
