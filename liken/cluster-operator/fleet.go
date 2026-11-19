@@ -1,29 +1,22 @@
 package main
 
-// The fleet sweep is the cluster operator's main task.
+// reconcileFleet runs one reconcile pass over the fleet. It reads every
+// Machine and heartbeat Lease, marks the machines that stopped renewing
+// their Lease as Lost, grants reboot turns, and writes the result to the
+// Cluster's status.
 //
-// Each machine's operator reports on itself. This leaves one gap
-// that nothing else covers: a dead machine cannot report that it is
-// dead. Its last written status stays in the API and reads Ready
-// forever, which is worse than no status at all. Kubernetes has this
-// same problem with kubelets, and it solves the problem with
-// heartbeats. The kubelet renews a lease every few seconds, and the
-// node controller turns a silent lease into a NotReady Node. The
-// Machine object gets the same treatment here. Each machine's
-// operator renews its own heartbeat lease (see the kubernetes
-// package), and this sweep marks a machine with the Lost phase when
-// its lease goes silent. The sweep also produces the cluster's
-// headcount. The same pass over the Machine list produces the
-// ready-out-of-total tally that the Cluster's status carries.
+// A dead machine cannot report that it is dead, so its last written
+// status stays in the API and reads Ready indefinitely. Each machine's
+// operator renews a heartbeat lease (see the kubernetes package), the
+// way a kubelet renews its node lease, and the pass marks a machine
+// Lost when its lease stops being renewed.
 //
-// Writing another machine's status breaks the one-writer-per-object
-// rule that the machine operators otherwise follow. So the sweep is
-// careful about when it writes: it only writes a machine whose
-// heartbeat is already stale. A stale heartbeat means the machine's
-// own operator has stopped writing, so the two writers can never
-// actually write to the same object at the same time. The moment the
-// machine returns, its own operator's next pass overwrites the Lost
-// verdict with fresh observations. No cleanup step is needed.
+// Each Machine's status belongs to that machine's operator, so the
+// pass writes the Lost phase only to a machine whose heartbeat is
+// already stale. A stale heartbeat means the machine's operator has
+// stopped writing, so the two writers do not write at the same time.
+// When the machine returns, its operator's next pass overwrites the
+// Lost phase with what it observes.
 
 import (
 	"errors"
@@ -38,41 +31,36 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// A fleetSweep holds one pass's verdict over the whole fleet: which
-// machines to declare Lost, the headcount for the Cluster's status,
-// the MachinesReady condition that carries the full detail, and the
-// phase that summarizes the verdict in one word. Every Machine uses
-// this same conditions-then-phase arrangement, applied here to the
-// fleet. The function decideFleetSweep only computes the verdict; the
-// function sweepFleet carries it out.
-type fleetSweep struct {
-	lost      []string
-	tally     cluster.MachineTally
-	condition api.Condition
-	phase     api.Phase
+// A fleetDecision is what one pass decides about the whole fleet: the
+// machines to mark Lost, the ready count for the Cluster's status, the
+// MachinesReady condition, and the Cluster's phase. decideFleet
+// computes it and reconcileFleet writes it.
+type fleetDecision struct {
+	lost          []string
+	machineCounts cluster.MachineTally
+	condition     api.Condition
+	phase         api.Phase
 
-	// The two counts that the fleet's metrics publish (metrics.go).
-	// They are part of the verdict because this loop is the one place
-	// that judges every machine at once, and a second pass over the
-	// same list could only ever repeat this one.
+	// The counts that the fleet's metrics publish (metrics.go).
 	phases    map[api.Phase]int
 	approvals int
 }
 
-// decideFleetSweep judges each machine by its effective phase. A
-// machine counts toward ready only when its phase is Ready and its
-// heartbeat is fresh. The verdict sorts each machine that is not
-// Ready into one of two groups: mid-transition (rebooting into a
-// change, waiting for a reboot, or booting) or unwell (Lost, Blocked,
-// or otherwise degraded). Unwell outranks mid-transition. The
-// MachinesReady condition names the affected machines, so nobody has
-// to search for them.
-func decideFleetSweep(machines []machine.Machine, heard map[string]time.Time, now time.Time) fleetSweep {
-	s := fleetSweep{tally: cluster.MachineTally{Total: len(machines)}, phases: map[api.Phase]int{}}
-	var transitioning, unwell []string
+// decideFleet uses each machine's effective phase (effectivePhase), so
+// a machine counts as ready only when its phase is Ready and its
+// heartbeat is fresh. A machine that is not ready is either updating
+// (Updating, UpdatePending, Downloading, or Booting) or degraded (Lost,
+// Blocked, or any other phase). When any machine is degraded the fleet
+// is Degraded, otherwise when any is updating it is Updating. The
+// MachinesReady condition names
+// those machines. changedAt maps each lease name to the time this
+// program last saw its renewTime change (heartbeatSightings.changeTimes).
+func decideFleet(machines []machine.Machine, changedAt map[string]time.Time, now time.Time) fleetDecision {
+	s := fleetDecision{machineCounts: cluster.MachineTally{Total: len(machines)}, phases: map[api.Phase]int{}}
+	var updating, degraded []string
 	for i := range machines {
 		m := &machines[i]
-		effective := effectivePhase(m, heard, now)
+		effective := effectivePhase(m, changedAt, now)
 		if effective == api.PhaseLost && m.Status.Phase != api.PhaseLost {
 			s.lost = append(s.lost, m.Metadata.Name)
 		}
@@ -83,44 +71,42 @@ func decideFleetSweep(machines []machine.Machine, heard map[string]time.Time, no
 
 		switch effective {
 		case api.PhaseReady:
-			s.tally.Ready++
+			s.machineCounts.Ready++
 		case api.PhaseUpdating, api.PhaseUpdatePending, api.PhaseDownloading, api.PhaseBooting:
-			transitioning = append(transitioning, m.Metadata.Name)
+			updating = append(updating, m.Metadata.Name)
 		default:
-			unwell = append(unwell, m.Metadata.Name)
+			degraded = append(degraded, m.Metadata.Name)
 		}
 	}
-	s.tally.Summary = fmt.Sprintf("%d/%d", s.tally.Ready, s.tally.Total)
+	s.machineCounts.Summary = fmt.Sprintf("%d/%d", s.machineCounts.Ready, s.machineCounts.Total)
 
 	switch {
-	case len(unwell) > 0:
+	case len(degraded) > 0:
 		s.phase = api.PhaseDegraded
 		s.condition = api.Condition{
 			Type: "MachinesReady", Status: api.ConditionFalse, Reason: "MachinesDegraded",
-			Message: fmt.Sprintf("%s machines ready; unwell: %s", s.tally.Summary, strings.Join(unwell, ", ")),
+			Message: fmt.Sprintf("%s machines are ready. Not ready and not updating: %s", s.machineCounts.Summary, strings.Join(degraded, ", ")),
 		}
-	case len(transitioning) > 0:
+	case len(updating) > 0:
 		s.phase = api.PhaseUpdating
 		s.condition = api.Condition{
 			Type: "MachinesReady", Status: api.ConditionFalse, Reason: "MachinesUpdating",
-			Message: fmt.Sprintf("%s machines ready; mid-transition: %s", s.tally.Summary, strings.Join(transitioning, ", ")),
+			Message: fmt.Sprintf("%s machines are ready. Updating: %s", s.machineCounts.Summary, strings.Join(updating, ", ")),
 		}
 	default:
 		s.phase = api.PhaseReady
 		s.condition = api.Condition{
 			Type: "MachinesReady", Status: api.ConditionTrue, Reason: "AllMachinesReady",
-			Message: fmt.Sprintf("all %d machines are ready", s.tally.Total),
+			Message: fmt.Sprintf("All %d machines are ready", s.machineCounts.Total),
 		}
 	}
 	return s
 }
 
-// awaitsApproval reports whether this machine holds a staged change
-// that waits for a person. A machine on the Manual reboot policy
-// stages its change and stops there, and the reason on the
-// convergence condition says so. The cluster operator counts these,
-// because the count is a fleet fact: it says how many machines a
-// person has to visit before the fleet converges.
+// awaitsApproval reports whether the machine has a staged change that
+// waits for a person to approve the reboot or restart. A machine on
+// the Manual reboot policy stages its change and then stops, with the
+// reason RebootPending or RestartPending on a condition.
 func awaitsApproval(m *machine.Machine) bool {
 	for _, c := range m.Status.Conditions {
 		if c.Reason == "RebootPending" || c.Reason == "RestartPending" {
@@ -130,224 +116,183 @@ func awaitsApproval(m *machine.Machine) bool {
 	return false
 }
 
-// sweepFleet carries out the sweep. It lists the fleet and its
-// heartbeats, determines the verdict, marks the silent machines Lost,
-// and publishes the verdict on the Cluster. The available parameter
-// is the channel poller's last answer, probe holds when the flux
-// engine probe last asked, and steward holds the terminating pods the
-// steward has reported. The caller passes all three in, so the sweep
-// itself stays a function of its arguments.
+// available is the channel poller's latest version. probe and
+// overduePods keep state between passes.
 //
-// A pass that cannot read the fleet returns the reason. The reading
-// is the whole pass here: with no list of machines there is no
-// verdict to reach, so this is the failure that the layer 2 error
-// counter counts (metrics.go).
+// It returns an error only when a read that the decision needs fails:
+// the Machines, their heartbeat leases, or the Disruptions and their
+// budgets. The operator's metrics count that error as a
+// failed reconcile (metrics.go).
 //
-// The order of the writes matters. The Cluster's status goes first,
-// because it carries the grant ledger, and a grant goes out only after
-// the API server stores the grant's entry (rollout.go). The Machine
-// writes follow it: the grants, the confirms, the reclaims, and the
-// Lost verdicts.
-func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available string, probe *engineProbe,
-	steward *podSteward, cm *clusterMetrics, now time.Time) error {
+// The Cluster's status is written before any Machine, because a
+// Machine gets a reboot grant only after the API server has stored
+// the grant's turn in the Cluster's status.rebootTurns (rollout.go).
+func reconcileFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available string, probe *fluxProbe,
+	overduePods *overduePodReports, cm *clusterMetrics, now time.Time) error {
 	c := reads.client
 	machines, err := reads.machines()
 	if err != nil {
-		fmt.Printf("listing machines for the fleet sweep: %v\n", err)
+		fmt.Printf("the pass stopped while listing the Machines: %v\n", err)
 		return err
 	}
-	// Each Machine whose ledger entry shows no grant in its copy comes
-	// from the API server, because the decision to free the entry's
-	// slot needs the Machine's current version (rollout.go).
+	// The rollout releases a turn by comparing its Machine's current
+	// resourceVersion with the turn's, so readTurns reads those
+	// Machines from the API server instead of the watch cache.
 	machines, err = reads.readTurns(clusterDoc.Status.RebootTurns, machines)
 	if err != nil {
-		fmt.Printf("reading the machines that hold reboot turns: %v\n", err)
+		fmt.Printf("the pass stopped while reading the Machines that have reboot turns: %v\n", err)
 		return err
 	}
-	heard, err := reads.heartbeats(now)
+	changedAt, err := reads.heartbeats(now)
 	if err != nil {
-		fmt.Printf("listing heartbeats for the fleet sweep: %v\n", err)
+		fmt.Printf("the pass stopped while listing the heartbeat Leases: %v\n", err)
 		return err
 	}
 	requests, err := reads.requests()
 	if err != nil {
-		fmt.Printf("%v\n", err)
+		fmt.Printf("the pass stopped while %v\n", err)
 		return err
 	}
-	s := decideFleetSweep(machines, heard, now)
+	s := decideFleet(machines, changedAt, now)
 
-	// The rollout decision uses the same listing: which machines may
-	// take their reboot turn now, and which spent grants return to
-	// the budget (see rollout.go). This sequencing happens here for
-	// the same reason the tally does: the sweep is the one place that
-	// sees the whole fleet at once. appliedVersion is the release the
-	// machine-operator DaemonSet's template actually carries
-	// (daemonSetVersion, steward.go); decideRollout compares it
-	// against the fleet's target so a leader can go first while the
-	// applied template lags, because only a leader's boot can advance
-	// it.
+	// appliedVersion is the release in the machine-operator
+	// DaemonSet's template. Only a leader's boot updates that
+	// template, so while it is older than the target release,
+	// decideRollout reboots a leader first. When the DaemonSet cannot
+	// be read, the pass grants no turns.
 	appliedVersion, err := daemonSetVersion(reads, machineOperatorDaemonSet)
-	r := decideRollout(machines, heard, reads.sightings.since(), clusterDoc, appliedVersion, requests, now)
+	r := decideRollout(machines, changedAt, reads.sightings.firstReadTime(), clusterDoc, appliedVersion, requests, now)
 	if err != nil {
-		fmt.Printf("reading the %s DaemonSet for the rollout: %v\n", machineOperatorDaemonSet, err)
+		fmt.Printf("the pass grants no reboot turns, because it cannot read the DaemonSet %s: %v\n", machineOperatorDaemonSet, err)
 		r = r.withoutGrants(err)
 	}
 
-	// The OS's own pods, the operator's pods and the log relay pods,
-	// are also fleet state. An upgraded machine keeps pods from
-	// before its upgrade until the steward refreshes them (see
-	// steward.go).
-	stewardOSPods(reads, machines, steward, now)
+	// The OS's own pods, the operators and the log relay, keep their
+	// old release after a machine upgrades until refreshOSPods evicts
+	// them (steward.go).
+	refreshOSPods(reads, machines, overduePods, now)
 
-	// A retracted feature leaves its workloads behind. k3s only
-	// deletes an addon when it sees the addon's manifest disappear
-	// while k3s is running, but retraction removes the manifest while
-	// k3s is down (see janitor.go). The flux feature's teardown is
-	// always the janitor's, in a deliberate order (janitorFlux). That
-	// teardown can also decline, when liken did not plant the Flux it
-	// found, and it reports the refusal on the Cluster.
-	janitorFeatureWorkloads(reads, clusterDoc)
-	fluxTeardown := janitorFlux(c, clusterDoc)
+	// k3s does not delete an addon's objects when init removes its
+	// manifest file, so this program deletes the workloads of retracted
+	// features (janitor.go). tearDownFlux removes Flux one stage per
+	// pass, and returns a condition for the Cluster when it refuses
+	// because `liken` did not install that Flux.
+	deleteRetractedWorkloads(reads, clusterDoc)
+	fluxTeardown := tearDownFlux(c, clusterDoc)
 
-	// The flux feature's deploy key is fleet state too: minted once,
-	// then read on every pass so the status always carries the
-	// public half (see flux.go). The engine gets the same standing
-	// care on a slower cadence: the probe asks once a minute, and gone
-	// means re-planted on the pass that asked.
+	// The deploy key is created once and read on every pass, so the
+	// status always has its public key (flux.go). The Flux controllers
+	// are checked at most once each fluxProbeInterval, and created
+	// again when they are missing.
 	publicKey := ensureFluxDeployKey(c, reads.recorder, clusterDoc)
-	if seed, err := engineSeed(); err != nil {
+	if manifest, err := fluxManifest(); err != nil {
 		if clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
-			fmt.Printf("this build carries no engine seed (a plain go build outside make): %v\n", err)
+			fmt.Printf("the Flux controllers are not checked, because this binary has no embedded Flux manifest, as in a go build outside make: %v\n", err)
 		}
 	} else {
-		ensureFluxEngine(c, reads.recorder, clusterDoc, seed, probe, now)
+		ensureFluxControllers(c, reads.recorder, clusterDoc, manifest, probe, now)
 	}
 
-	// The Cluster's status goes first, ahead of every Machine write
-	// (see above).
 	stored := publishClusterStatus(reads, clusterDoc, s, r, fluxTeardown, available, publicKey, now)
 	carryOutRollout(reads, machines, r, stored, now)
-	markLost(reads, machines, s.lost, heard, now)
+	markLost(reads, machines, s.lost, changedAt, now)
 
-	// The requests and the budgets report what the ledger the API
-	// server stored says, so a request reads Granted only after its
-	// turn is recorded (requeststatus.go).
+	// A Disruption reports Granted only after the API server has stored
+	// its turn in status.rebootTurns (requeststatus.go).
 	reportRequests(reads, machines, requests, r, stored, now)
 	reportBudgets(reads, clusterDoc, requests, r, now)
 
-	// The fleet's metrics come from the verdict that the write above
-	// carries, so the graph and the Cluster's status report one
-	// observation (metrics.go).
-	cm.observeSweep(s, r)
+	cm.observePass(s, r)
 	return nil
 }
 
-// markLost writes the Lost verdict onto each machine that the sweep
-// found silent. Each verdict that lands posts MachineLost on the
-// machine, with the time this program last saw its heartbeat lease
-// renewed, because the Ready condition holds only that the heartbeat
-// is stale, not since when.
-func markLost(reads *fleetReader, machines []machine.Machine, lost []string, heard map[string]time.Time, now time.Time) {
+// markLost writes the Lost phase to each machine in lost. Each write
+// that succeeds posts a MachineLost Event. The Event's message has the
+// time of the last renewal that this program saw, which the Ready
+// condition's message does not.
+func markLost(reads *fleetReader, machines []machine.Machine, lost []string, changedAt map[string]time.Time, now time.Time) {
 	for _, m := range machines {
 		if !slices.Contains(lost, m.Metadata.Name) {
 			continue
 		}
-		// Everything else in the status stays as the machine last
-		// wrote it. Those fields are still the machine's last known
-		// facts, and only the machine can revise them. The phase and
-		// the Ready condition change because they are claims about
-		// the present, and the machine has stopped making those
-		// claims.
+		// Only the phase and the Ready condition change. The other
+		// fields stay as the machine last wrote them.
 		status := m.Status
 		status.Phase = api.PhaseLost
-		// The clone matters here. status.Conditions still shares its
-		// backing array with the machines slice, and SetCondition
-		// rewrites an existing entry in place.
+		// SetCondition changes an existing entry in place, and
+		// status.Conditions shares its array with the machines slice.
 		status.Conditions = api.SetCondition(slices.Clone(m.Status.Conditions), api.Condition{
 			Type: "Ready", Status: api.ConditionUnknown, Reason: "HeartbeatStale",
 			ObservedGeneration: m.Metadata.Generation,
-			Message:            "the machine's operator has stopped renewing its heartbeat lease; the machine is presumed down",
+			Message:            "The heartbeat Lease of this machine's operator is stale, so the machine is presumed down",
 		}, now)
-		// A conflict here means the machine just came back and wrote
-		// its own status first. That is the exact outcome this write
-		// exists to allow, so the sweep skips this machine. The sweep
-		// never retries a write onto another machine's status.
+		// A conflict means the machine's operator wrote its own status
+		// first, so the machine is back. The pass skips it and does
+		// not retry.
 		if err := reads.publishStatus(&m, &status); errors.Is(err, apiclient.ErrConflict) {
 			continue
 		} else if err != nil {
-			fmt.Printf("marking %s lost: %v\n", m.Metadata.Name, err)
+			fmt.Printf("writing the Lost phase to Machine %s: %v\n", m.Metadata.Name, err)
 		} else {
-			fmt.Printf("machine %s has gone silent; marked Lost\n", m.Metadata.Name)
-			reads.recorder.Warning(machineReference(&m), reasonMachineLost, lostMessage(heard, m.Metadata.Name))
+			fmt.Printf("Machine %s stopped renewing its heartbeat Lease and is now Lost\n", m.Metadata.Name)
+			reads.recorder.Warning(machineReference(&m), reasonMachineLost, lostMessage(changedAt, m.Metadata.Name))
 		}
 	}
 }
 
-// lostMessage answers the message of a MachineLost Event: when this
-// program last saw the machine renew its heartbeat lease, on this
-// program's clock, or that it never did. The time is the one the
-// verdict measured from, so it is HeartbeatStaleAfter or more before
-// the Event.
-func lostMessage(heard map[string]time.Time, name string) string {
-	renewed, ok := heard[name]
+// lostMessage returns the message of a MachineLost Event. The time in
+// it is when this program last saw the lease's renewTime change, on
+// this program's clock, not the renewTime itself. A machine is Lost
+// only when that time is more than HeartbeatStaleAfter old.
+func lostMessage(changedAt map[string]time.Time, name string) string {
+	renewed, ok := changedAt[name]
 	if !ok {
-		return "the machine has never renewed a heartbeat lease; marked Lost"
+		return "Marked the machine Lost. cluster-operator has never seen it renew a heartbeat Lease"
 	}
-	return "the heartbeat lease was last renewed at " + renewed.UTC().Format(time.RFC3339) + "; marked Lost"
+	return "Marked the machine Lost. cluster-operator last saw its heartbeat Lease renewed at " + renewed.UTC().Format(time.RFC3339)
 }
 
-// publishClusterStatus publishes the sweep's verdict on the Cluster.
-// The MachinesReady condition carries the observation, stamped with
-// the generation of the spec it judged. The Progressing condition
-// reports the rollout, and the FluxTeardown condition appears only
-// while the flux janitor has a refusal to report. The phase
-// summarizes the first two conditions, and the tally is the headcount
-// that the printer shows. This function also
-// derives the release fields: the catalog's newest version, and the
-// channel's last polled version. The sweep is the only writer of the
-// Cluster's status, so deriving every field is its job. The same write
-// carries the grant ledger, status.rebootTurns. The function
-// writes the status only when something actually changed, so a
-// settled fleet causes no write. Each condition that transitioned
-// posts its Event after the write lands, so a refused write posts
-// nothing and the next sweep finds the same transition again.
+// publishClusterStatus writes the pass's result to the Cluster's
+// status: the MachinesReady condition, the Progressing condition from
+// the rollout, the FluxTeardown condition while tearDownFlux refuses,
+// the phase, the ready count, the newest catalog version, the
+// channel's available version, the flux public key, and the reboot
+// turns. The pass is the only writer of these fields, and it writes
+// only when one of them differs. It posts an Event for each condition
+// that changed only after the write succeeds, so the next pass tries
+// a failed change again with its Events.
 //
-// It answers the ledger that the API server holds after the sweep: the
-// one the Cluster already held when nothing changed, the one the
-// write's answer holds, or none when the write failed. A 409 means
-// another copy wrote the status since this sweep read it, so this
-// sweep's grants must not go out.
-func publishClusterStatus(reads *fleetReader, clusterDoc *cluster.Cluster, s fleetSweep, r rollout, fluxTeardown *api.Condition, available, publicKey string, now time.Time) []cluster.RebootTurn {
+// It returns the reboot turns that the API server has stored: the
+// Cluster's existing turns when nothing changed, the turns in the
+// write's response, or nil when the write failed. A 409 means another
+// copy of the operator wrote the status after this pass read it, so
+// nil makes this pass grant no turns.
+func publishClusterStatus(reads *fleetReader, clusterDoc *cluster.Cluster, s fleetDecision, r rollout, fluxTeardown *api.Condition, available, publicKey string, now time.Time) []cluster.RebootTurn {
 	newest := cluster.NewestVersion(clusterDoc.Spec.Releases.Catalog)
 	s.condition.ObservedGeneration = clusterDoc.Metadata.Generation
 	r.progressing.ObservedGeneration = clusterDoc.Metadata.Generation
 	conditions := api.SetCondition(slices.Clone(clusterDoc.Status.Conditions), s.condition, now)
 	conditions = api.SetCondition(conditions, r.progressing, now)
-	// The flux janitor reports only a refusal, so this condition is
-	// present exactly while there is a refusal to report. Removing it
-	// when the janitor returns nothing keeps the list steady, which is
-	// what the comparison below needs to leave a settled cluster
-	// unwritten.
+	// FluxTeardown is present only while tearDownFlux refuses.
 	if fluxTeardown != nil {
 		fluxTeardown.ObservedGeneration = clusterDoc.Metadata.Generation
 		conditions = api.SetCondition(conditions, *fluxTeardown, now)
 	} else {
 		conditions = api.RemoveCondition(conditions, fluxTeardownCondition)
 	}
-	// The deploy key's public half. A declared feature with an empty
-	// answer means this pass could not read the Secret (a permission
-	// still being seeded, a lost mint race); the last published
-	// value is still the fleet's key, so the status keeps it. A
-	// retracted feature clears the section: the Secret keeps the key
-	// for a re-enable, but a status should not advertise a feature
-	// the spec no longer declares.
+	// An empty publicKey with the feature enabled means this pass could
+	// not read the Secret, for example because its Role is not applied
+	// yet or another copy of the operator created it first. The status
+	// then keeps the last published key. When the feature is retracted,
+	// the status drops the key, but the Secret keeps it for when the
+	// feature is enabled again.
 	flux := clusterDoc.Status.Flux
 	if !clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
 		flux = cluster.ClusterFluxStatus{}
 	} else if publicKey != "" {
 		flux = cluster.ClusterFluxStatus{PublicKey: publicKey}
 	}
-	if clusterDoc.Status.Machines != s.tally || clusterDoc.Status.Phase != s.phase ||
+	if clusterDoc.Status.Machines != s.machineCounts || clusterDoc.Status.Phase != s.phase ||
 		clusterDoc.Status.Releases.Newest != newest ||
 		clusterDoc.Status.Releases.Available != available ||
 		clusterDoc.Status.Flux != flux ||
@@ -355,7 +300,7 @@ func publishClusterStatus(reads *fleetReader, clusterDoc *cluster.Cluster, s fle
 		!sameTurns(r.turns, clusterDoc.Status.RebootTurns) ||
 		!slices.Equal(conditions, clusterDoc.Status.Conditions) {
 		updated := *clusterDoc
-		updated.Status.Machines = s.tally
+		updated.Status.Machines = s.machineCounts
 		updated.Status.Phase = s.phase
 		updated.Status.Releases.Newest = newest
 		updated.Status.Releases.Available = available
@@ -365,14 +310,14 @@ func publishClusterStatus(reads *fleetReader, clusterDoc *cluster.Cluster, s fle
 		updated.Status.RebootTurns = r.turns
 		stored, err := reads.publishClusterStatus(&updated)
 		if err != nil {
-			fmt.Printf("publishing cluster status: %v\n", err)
+			fmt.Printf("writing the status of Cluster %s: %v\n", clusterDoc.Metadata.Name, err)
 			return nil
 		}
 		postClusterTransitions(reads.recorder, clusterDoc, clusterDoc.Status.Conditions, conditions)
 		if stored == nil {
 			return nil
 		}
-		if !sameSlots(r.turns, stored.Status.RebootTurns) {
+		if !sameTurnsIgnoringDisruptions(r.turns, stored.Status.RebootTurns) {
 			return schemaPrunedTurns(reads, stored, now)
 		}
 		return stored.Status.RebootTurns
@@ -380,52 +325,53 @@ func publishClusterStatus(reads *fleetReader, clusterDoc *cluster.Cluster, s fle
 	return clusterDoc.Status.RebootTurns
 }
 
-// schemaPrunedTurns reports a Cluster write whose answer lacks the
-// ledger that it sent. The served CRD then comes from a release that
-// does not declare status.rebootTurns, and the API server pruned the
-// field. That happens while a newer cluster-operator runs against an
-// older CRD: in the seconds after the first leader boots a new release,
-// or when a leader on an older release starts k3s again and applies
-// its own copy of the CRD. The sweep grants nothing until the newer
-// schema returns, and the Progressing message says why. The reason
-// stays RollingOut, so the change posts no Event. It answers the
-// ledger the API server stored.
+// schemaPrunedTurns handles a Cluster write whose response does not
+// have the reboot turns that it sent. The served CRD then does not
+// declare status.rebootTurns, and the API server dropped the field.
+// This happens when a newer cluster-operator runs against an older
+// CRD: just after the first leader boots a new release, or when a
+// leader on an older release restarts k3s and applies its own CRD.
+// It writes a Progressing message that says turns wait for the newer
+// schema, and returns the stored turns, so the pass grants no turns
+// until the schema is served. The reason stays RollingOut, so this
+// write is not a condition transition and posts no Event.
 func schemaPrunedTurns(reads *fleetReader, stored *cluster.Cluster, now time.Time) []cluster.RebootTurn {
-	fmt.Println("the served Cluster schema does not store status.rebootTurns; granting no reboot turn")
+	fmt.Println("the served Cluster schema has no status.rebootTurns, so the pass grants no reboot turn")
 	updated := *stored
 	updated.Status.Conditions = api.SetCondition(slices.Clone(stored.Status.Conditions), api.Condition{
 		Type: "Progressing", Status: api.ConditionTrue, Reason: "RollingOut",
 		ObservedGeneration: stored.Metadata.Generation,
-		Message: "reboot turns are waiting for a Cluster schema that stores status.rebootTurns; " +
-			"the served CustomResourceDefinition comes from an older release",
+		Message: "Reboot turns wait for a Cluster schema that stores status.rebootTurns. " +
+			"The served CustomResourceDefinition is from an older release",
 	}, now)
 	if _, err := reads.publishClusterStatus(&updated); err != nil {
-		fmt.Printf("publishing cluster status: %v\n", err)
+		fmt.Printf("writing the status of Cluster %s: %v\n", stored.Metadata.Name, err)
 	}
 	return stored.Status.RebootTurns
 }
 
-// sameTurns reports whether two ledgers hold the same entries in the
-// same order, with the same Disruptions. It compares times with Equal,
-// because a time decoded from the API server carries another location
-// than one the sweep made.
+// sameTurns reports whether two lists of reboot turns have the same
+// entries in the same order, including each entry's Disruptions. It
+// compares times with Equal, because a time decoded from the API
+// server can have a different location from one the pass created.
 func sameTurns(a, b []cluster.RebootTurn) bool {
 	return slices.EqualFunc(a, b, func(x, y cluster.RebootTurn) bool {
-		return sameSlot(x, y) && slices.Equal(x.Disruptions, y.Disruptions)
+		return sameTurn(x, y) && slices.Equal(x.Disruptions, y.Disruptions)
 	})
 }
 
-// sameSlots reports whether two ledgers hold the same entries, with
-// no regard to the Disruptions each entry names. A Cluster schema from
-// the release before the Disruptions stores the entries and prunes
-// their Disruptions, and the entries alone are what keep the budget,
-// so the grants still go out. The next sweep writes the Disruptions
-// again, and the API server prunes them again, until a leader's boot
-// serves the newer schema.
-func sameSlots(a, b []cluster.RebootTurn) bool {
-	return slices.EqualFunc(a, b, sameSlot)
+// sameTurnsIgnoringDisruptions reports whether two lists of reboot turns have the same
+// entries, ignoring each entry's Disruptions. A CRD without the
+// Disruptions field stores the entries and drops their Disruptions.
+// The entries alone enforce the disruption budget, so the pass still
+// grants turns, and it writes the Disruptions again on each pass
+// until a leader boots and serves the newer schema.
+func sameTurnsIgnoringDisruptions(a, b []cluster.RebootTurn) bool {
+	return slices.EqualFunc(a, b, sameTurn)
 }
 
-func sameSlot(x, y cluster.RebootTurn) bool {
+// sameTurn reports whether two reboot turns are for the same Machine
+// at the same resourceVersion and start time.
+func sameTurn(x, y cluster.RebootTurn) bool {
 	return x.Machine == y.Machine && x.MachineResourceVersion == y.MachineResourceVersion && x.Since.Equal(y.Since)
 }

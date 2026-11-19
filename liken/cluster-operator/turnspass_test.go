@@ -1,9 +1,8 @@
 package main
 
-// These tests cover the grant ledger through whole sweeps against a
-// fake API server that checks versions: the order of the writes, a
-// sweep that ends at each of its writes, and the grants an older
-// cluster-operator leaves.
+// These tests run whole passes against a fake API server that rejects
+// an out-of-date resourceVersion, and check the reboot turns that the
+// passes record in the Cluster's status.rebootTurns.
 
 import (
 	"encoding/json"
@@ -26,9 +25,9 @@ const (
 	node2StatusPath   = kubernetes.MachinesPath + "/node-2/status"
 )
 
-// writes answers each write to a Machine or the Cluster that the fake
-// received, as "METHOD path". The reports on the requests and the
-// budgets are left out: they grant nothing.
+// writes returns the writes to a Machine or the Cluster that the fake
+// received, as "METHOD path". Writes to Disruptions and budgets are
+// left out, because they grant no turn.
 func writes(requests []string) []string {
 	return slices.DeleteFunc(slices.Clone(requests), func(request string) bool {
 		return strings.HasPrefix(request, http.MethodGet) ||
@@ -36,12 +35,12 @@ func writes(requests []string) []string {
 	})
 }
 
-// ledgerOf answers the machines that the Cluster's ledger names.
-func ledgerOf(t *testing.T, client *apiclient.Client) []string {
+// storedTurns returns the machines in the stored status.rebootTurns.
+func storedTurns(t *testing.T, client *apiclient.Client) []string {
 	t.Helper()
 	c, err := kubernetes.GetCluster(client, "lab")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Cluster lab: %v", err)
 	}
 	return turnNames(c.Status.RebootTurns)
 }
@@ -49,32 +48,32 @@ func ledgerOf(t *testing.T, client *apiclient.Client) []string {
 func TestTheClusterWriteComesBeforeTheGrant(t *testing.T) {
 	fake := raceFleet(t)
 
-	sweepAt(t, leadingReader(t, fake))
+	reconcileAt(t, leadingReader(t, fake))
 
 	want := []string{"PUT " + clusterStatusPath, "PUT " + node2StatusPath}
 	if got := writes(fake.Requests()); !slices.Equal(got, want) {
 		t.Errorf("writes = %q, want %q", got, want)
 	}
-	if got := ledgerOf(t, testClient(t, fake)); !slices.Equal(got, []string{"node-2"}) {
-		t.Errorf("ledger = %q, want node-2", got)
+	if got := storedTurns(t, testClient(t, fake)); !slices.Equal(got, []string{"node-2"}) {
+		t.Errorf("turns = %q, want node-2", got)
 	}
 }
 
-// A 409 on the Cluster write means another copy wrote the status since
-// this sweep read it, so the sweep sends no grant.
+// A 409 on the Cluster write means that another copy of the operator
+// wrote the status after this pass read it, so the pass writes no
+// grant.
 func TestAClusterWriteThatConflictsSendsNoGrant(t *testing.T) {
 	fake := raceFleet(t)
 
-	sweepAt(t, leadingReader(t, refusing(fake, http.MethodPut, "/clusters/", http.StatusConflict)))
+	reconcileAt(t, leadingReader(t, refusing(fake, http.MethodPut, "/clusters/", http.StatusConflict)))
 
 	if got := writes(fake.Requests()); len(got) != 0 {
 		t.Errorf("writes = %q, want none", got)
 	}
 }
 
-// pruning stands for an API server that serves the Cluster CRD of a
-// release without the ledger: it drops status.rebootTurns from each
-// Cluster status write, and answers the write without the field.
+// pruning removes status.rebootTurns from each Cluster status write,
+// as the API server does when its Cluster CRD schema has no such field.
 func pruning(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut && r.URL.Path == clusterStatusPath {
@@ -88,20 +87,21 @@ func pruning(next http.Handler) http.Handler {
 	})
 }
 
-// A Cluster answer without the ledger proves that the served schema
-// does not store it, so the sweep grants nothing and says why.
-func TestAnOlderSchemaHoldsEveryGrant(t *testing.T) {
+// When the Cluster that the API server returns after a status write has
+// no status.rebootTurns, the pass grants nothing and says why in the
+// Progressing message.
+func TestAnOlderSchemaPreventsEveryGrant(t *testing.T) {
 	fake := raceFleet(t)
 	client := testClient(t, fake)
 
-	sweepAt(t, leadingReader(t, pruning(fake)))
+	reconcileAt(t, leadingReader(t, pruning(fake)))
 
 	if got := grantHolders(t, client); len(got) != 0 {
 		t.Errorf("machines with a grant = %q, want none", got)
 	}
 	c, err := kubernetes.GetCluster(client, "lab")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Cluster lab: %v", err)
 	}
 	progressing := api.FindCondition(c.Status.Conditions, "Progressing")
 	if progressing == nil || !strings.Contains(progressing.Message, "a Cluster schema that stores status.rebootTurns") {
@@ -109,13 +109,14 @@ func TestAnOlderSchemaHoldsEveryGrant(t *testing.T) {
 	}
 }
 
-// A crash stands in front of copy A's API server and ends A at one
-// request. The request lands or not, A never reads an answer, and
-// every later request of A fails, as if the process had ended there.
+// crash makes one copy of the cluster-operator fail at its first PUT
+// to path, as if the process died there. That PUT reaches the API
+// server only when applied is true, its response is a 503, and every
+// later request fails.
 type crash struct {
-	next  http.Handler
-	path  string
-	lands bool
+	next    http.Handler
+	path    string
+	applied bool
 
 	mu    sync.Mutex
 	ended bool
@@ -131,7 +132,7 @@ func (c *crash) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case ended:
 		w.WriteHeader(http.StatusServiceUnavailable)
 	case trigger:
-		if c.lands {
+		if c.applied {
 			c.next.ServeHTTP(httptest.NewRecorder(), r)
 		}
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -140,55 +141,57 @@ func (c *crash) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// finishTurn does what node-2's machine operator does after the
-// reboot: it deletes its request, because nothing is staged, and
-// writes the status of a machine that converged. The grant is still
-// there for the cluster to reclaim.
+// finishTurn does what machine-operator does after the reboot: it
+// deletes the machine's Disruption and removes the SpecConverged
+// condition. The grant stays on the Machine for the cluster-operator to
+// take back.
 func finishTurn(t *testing.T, client *apiclient.Client, name string) {
 	t.Helper()
 	if err := client.RequestJSON(http.MethodDelete, kubernetes.DisruptionsPath+"/"+disruption.OwnName(name), nil, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("deleting the Disruption of the turn: %v", err)
 	}
 	m, err := kubernetes.GetMachine(client, name)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Machine: %v", err)
 	}
 	status := m.Status
 	status.Conditions = api.RemoveCondition(slices.Clone(m.Status.Conditions), "SpecConverged")
 	if _, err := kubernetes.PublishStatus(client, m, &status); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the status of the Machine: %v", err)
 	}
 }
 
-// spentTurn takes node-2 through a whole turn with one copy: the grant,
-// the reboot, and the reclaim. The ledger still names node-2, because
-// only the next sweep's read shows the Machine at another version.
+// spentTurn takes node-2 through a whole turn with one copy of the
+// cluster-operator: the grant, the reboot, and the revoke. The entry
+// for node-2 is still in status.rebootTurns afterward, because only the
+// next pass reads the Machine with no grant and removes the entry.
 func spentTurn(t *testing.T, fake http.Handler) {
 	t.Helper()
 	earlier := leadingReader(t, fake)
-	sweepAt(t, earlier)
+	reconcileAt(t, earlier)
 	finishTurn(t, testClient(t, fake), "node-2")
-	sweepAt(t, earlier)
+	reconcileAt(t, earlier)
 }
 
-// Copy A ends at one write of a sweep, and copy B, with an empty memo,
-// sweeps the state A left, twice. Each row is one row of the crash
-// table in plan 82.
+// One copy of the cluster-operator fails at one write of a pass. Then
+// a new copy, with no state in memory, passes twice. In each case the
+// fleet ends with at most one grant, and status.rebootTurns lists the
+// same machines as the grants.
 func TestTheNextLeaderSettlesEachCrashPoint(t *testing.T) {
 	cases := []struct {
 		name    string
 		spent   bool
 		path    string
-		lands   bool
+		applied bool
 		granted []string
-		ledger  []string
+		turns   []string
 	}{
 		{"before the Cluster write", false, clusterStatusPath, false, []string{"node-2"}, []string{"node-2"}},
-		{"with the Cluster write in flight, which lands", false, clusterStatusPath, true, []string{"node-2"}, []string{"node-2"}},
+		{"with the Cluster write in flight, which is applied", false, clusterStatusPath, true, []string{"node-2"}, []string{"node-2"}},
 		{"after the Cluster write, before the grant", false, node2StatusPath, false, []string{"node-2"}, []string{"node-2"}},
-		{"with the grant in flight, which lands", false, node2StatusPath, true, []string{"node-2"}, []string{"node-2"}},
+		{"with the grant in flight, which is applied", false, node2StatusPath, true, []string{"node-2"}, []string{"node-2"}},
 		{"after the reclaim, before the entry leaves", true, clusterStatusPath, false, nil, nil},
-		{"with the removal in flight, which lands", true, clusterStatusPath, true, nil, nil},
+		{"with the removal in flight, which is applied", true, clusterStatusPath, true, nil, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -198,73 +201,75 @@ func TestTheNextLeaderSettlesEachCrashPoint(t *testing.T) {
 			}
 			client := testClient(t, fake)
 
-			sweepAt(t, leadingReader(t, &crash{next: fake, path: c.path, lands: c.lands}))
+			reconcileAt(t, leadingReader(t, &crash{next: fake, path: c.path, applied: c.applied}))
 			b := leadingReader(t, fake)
-			sweepAt(t, b)
-			sweepAt(t, b)
+			reconcileAt(t, b)
+			reconcileAt(t, b)
 
 			if got := grantHolders(t, client); !slices.Equal(got, c.granted) {
 				t.Errorf("machines with a grant = %q, want %q", got, c.granted)
 			}
-			if got := ledgerOf(t, client); !slices.Equal(got, c.ledger) {
-				t.Errorf("ledger = %q, want %q", got, c.ledger)
+			if got := storedTurns(t, client); !slices.Equal(got, c.turns) {
+				t.Errorf("turns = %q, want %q", got, c.turns)
 			}
 		})
 	}
 }
 
-// grantAsAnOlderRelease writes a grant onto a Machine the way a
-// cluster-operator from before the ledger does: with no entry.
+// grantAsAnOlderRelease grants a turn the way a cluster-operator that
+// does not write status.rebootTurns does: it sets the RebootApproved
+// condition on the Machine and records no entry.
 func grantAsAnOlderRelease(t *testing.T, client *apiclient.Client, name string) {
 	t.Helper()
 	m, err := kubernetes.GetMachine(client, name)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Machine: %v", err)
 	}
 	status := m.Status
 	status.Conditions = api.SetCondition(slices.Clone(m.Status.Conditions), api.Condition{
 		Type: machine.RebootApprovedCondition, Status: api.ConditionTrue, Reason: "DisruptionBudgetAllows",
-	}, sweepNow)
+	}, passTime)
 	if _, err := kubernetes.PublishStatus(client, m, &status); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the status of the Machine: %v", err)
 	}
 }
 
-// dropTheLedger writes the Cluster's status the way a cluster-operator
-// from before the ledger does: from a status struct with no ledger.
-func dropTheLedger(t *testing.T, client *apiclient.Client) {
+// dropTheRebootTurns writes the Cluster's status with no
+// status.rebootTurns, as that older cluster-operator does.
+func dropTheRebootTurns(t *testing.T, client *apiclient.Client) {
 	t.Helper()
 	c, err := kubernetes.GetCluster(client, "lab")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Cluster lab: %v", err)
 	}
 	c.Status.RebootTurns = nil
 	if _, err := kubernetes.PublishClusterStatus(client, c); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the status of the Cluster: %v", err)
 	}
 }
 
-// A grant from an older release enters the ledger before any new turn,
-// and enters it again after an older release's status write removes
-// the ledger. node-1 asks the whole time, and never takes a turn while
-// node-2 holds the budget of one.
-func TestTheLedgerAdoptsTheGrantsOfAnOlderRelease(t *testing.T) {
+// A grant that an older release wrote gets an entry in
+// status.rebootTurns before any new turn, and gets it again after an
+// older release's status write removes the entries. node-1 asks for a
+// turn the whole time and gets none, because node-2 fills the budget of
+// one.
+func TestTheRebootTurnsAdoptTheGrantsOfAnOlderRelease(t *testing.T) {
 	fake := raceFleet(t)
 	client := testClient(t, fake)
 	grantAsAnOlderRelease(t, client, "node-2")
 	askForATurn(t, client, "node-1")
 	r := leadingReader(t, fake)
 
-	sweepAt(t, r)
-	adopted := ledgerOf(t, client)
-	dropTheLedger(t, client)
-	sweepAt(t, r)
+	reconcileAt(t, r)
+	adopted := storedTurns(t, client)
+	dropTheRebootTurns(t, client)
+	reconcileAt(t, r)
 
 	if !slices.Equal(adopted, []string{"node-2"}) {
-		t.Errorf("ledger after the first sweep = %q, want node-2", adopted)
+		t.Errorf("turns after the first pass = %q, want node-2", adopted)
 	}
-	if got := ledgerOf(t, client); !slices.Equal(got, []string{"node-2"}) {
-		t.Errorf("ledger after an older release's write = %q, want node-2", got)
+	if got := storedTurns(t, client); !slices.Equal(got, []string{"node-2"}) {
+		t.Errorf("turns after an older release's write = %q, want node-2", got)
 	}
 	if got := grantHolders(t, client); !slices.Equal(got, []string{"node-2"}) {
 		t.Errorf("machines with a grant = %q, want only node-2", got)

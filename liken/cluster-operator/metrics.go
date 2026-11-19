@@ -1,13 +1,12 @@
 package main
 
-// Layer 3 for the cluster operator: the metrics about the fleet.
-//
-// Each machine's operator publishes its own facts, and this program
-// publishes the three that only a program which sees every machine
-// at once can state. Every one of them comes from the sweep's own
-// verdict, the value that this same pass writes onto the Cluster's
-// status, so a graph and a `kubectl get cluster` can never disagree
-// (fleet.go and rollout.go).
+// The fleet gauges are the cluster operator's domain metrics. The
+// liken/metrics package serves the runtime and reconcile series of
+// every operator, and each program registers its own domain gauges.
+// machine-operator publishes the metrics of its own machine, and these
+// gauges count across every Machine. They are set from the same fleetDecision and rollout that the
+// pass writes to the Cluster's status, so a graph and
+// `kubectl get cluster` agree.
 
 import (
 	"fmt"
@@ -19,21 +18,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// clusterKind is the resource this operator's loop reconciles, and
-// the label its layer 2 duration and error series carry.
+// clusterKind is the `kind` label of the reconcile and watch series,
+// and the Kind of an Event about the Cluster.
 const clusterKind = "Cluster"
 
-// machineKind is what this operator watches. The watch spans the
-// whole fleet, because any machine's transition can change the
-// Cluster's phase, so the watch restart counter carries this kind
-// and the reconcile counters carry Cluster.
+// machineKind is the `kind` label of the Machine watch series, and the
+// Kind of an Event about a Machine.
 const machineKind = "Machine"
 
-// serveMetrics builds this operator's whole registry, the contract's
-// layer 1 and layer 2 beside the fleet's layer 3, and starts the
-// listener that answers a scrape. A listener that cannot bind
-// reports itself and nothing more: the fleet must keep converging
-// whether or not anybody watches it.
+// serveMetrics builds the operator's registry with the runtime,
+// reconcile, and fleet series and starts the listener that serves it. When the listener cannot
+// bind, it prints the error and the operator keeps running, because
+// the fleet must converge whether or not anything scrapes it.
 func serveMetrics(address string) (*metrics.Operator, *clusterMetrics) {
 	o := metrics.NewOperator(component, machine.Version,
 		[]string{clusterKind}, watchKinds)
@@ -46,31 +42,29 @@ func serveMetrics(address string) (*metrics.Operator, *clusterMetrics) {
 	return o, layer
 }
 
-// clusterMetrics holds this operator's layer 3.
 type clusterMetrics struct {
 	machines  *prometheus.GaugeVec
 	approvals prometheus.Gauge
 	behind    prometheus.Gauge
 }
 
-// newClusterMetrics registers layer 3 on the operator's registry.
-// The machine gauge starts with a zero for every phase liken defines.
-// A fleet reports nothing at all in a phase that no machine holds, so
-// without these zeros the first machine to go Lost would draw its
-// first point with no earlier point to fall from.
+// newClusterMetrics registers the fleet gauges and sets the machine
+// gauge to zero for every phase. Without the zeros, a
+// phase with no machines has no series, so the first machine to enter
+// it appears with no earlier sample to compare against.
 func newClusterMetrics(o *metrics.Operator) *clusterMetrics {
 	m := &clusterMetrics{
 		machines: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: metrics.Prefix + "machines",
-			Help: "Machines in the fleet, by the phase the sweep judged them to hold.",
+			Help: "Machines in the fleet, by the phase that cluster-operator uses for each.",
 		}, []string{"phase"}),
 		approvals: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: metrics.Prefix + "disruption_approvals_pending",
-			Help: "Machines that hold a staged change and wait for a person to approve it.",
+			Help: "Machines with a staged change that waits for a person to approve the reboot or restart.",
 		}),
 		behind: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: metrics.Prefix + "machines_behind_target",
-			Help: "Machines that do not run the release the Cluster's spec targets.",
+			Help: "Machines that do not run the release in the Cluster's spec.version.",
 		}),
 	}
 	o.Registry().MustRegister(m.machines, m.approvals, m.behind)
@@ -80,9 +74,9 @@ func newClusterMetrics(o *metrics.Operator) *clusterMetrics {
 	return m
 }
 
-// fleetPhases is the phase vocabulary a machine can hold. The api
-// package defines it and the CRD's enum enforces it, so this label
-// is bounded by a list that only a schema change can grow.
+// fleetPhases lists every phase a machine can have. The `phase` label
+// takes only these values, because the api package defines them and
+// the CRD's enum enforces them.
 var fleetPhases = []api.Phase{
 	api.PhaseReady,
 	api.PhaseBooting,
@@ -95,17 +89,15 @@ var fleetPhases = []api.Phase{
 	api.PhaseUnknown,
 }
 
-// observeSweep publishes the verdict that this pass is about to
-// write onto the Cluster. The phases are the effective phases, the
-// ones the sweep judged from each machine's status and its
-// heartbeat, so a machine that has gone silent counts as Lost here
-// at the same moment it counts as Lost in the headcount.
-func (m *clusterMetrics) observeSweep(s fleetSweep, r rollout) {
+// observePass sets the gauges. The phases in s are effective phases,
+// which decideFleet derives from each Machine's status and
+// heartbeat, so a machine with an old heartbeat counts as Lost on the
+// graph and on the Cluster.
+func (m *clusterMetrics) observePass(s fleetDecision, r rollout) {
 	counts := map[api.Phase]int{}
 	for phase, count := range s.phases {
-		// A Machine that exists and has never published a status
-		// holds no phase at all. Unknown is what that machine is:
-		// the fleet has an object for it and no observation of it.
+		// A Machine that has never published a status has an empty
+		// phase.
 		if phase == "" {
 			phase = api.PhaseUnknown
 		}

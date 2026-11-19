@@ -1,9 +1,9 @@
 package main
 
-// These tests read the Events the cluster operator posts about the
-// Machines and the Cluster from eventstest's fake of the events
-// collection, in a synctest bubble, so the recorder's goroutine runs on
-// the fake clock.
+// These tests read the Events that the cluster operator posts about
+// Machines and the Cluster from eventstest's fake events collection.
+// They run in a synctest bubble so the recorder's goroutine uses the
+// fake clock.
 
 import (
 	"fmt"
@@ -22,8 +22,8 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// recordingReader serves the events fake in front of handler, and
-// answers a fleet reader whose recorder writes through it.
+// recordingReader returns a fleetReader whose recorder posts Events to
+// the events fake, which passes all other requests to handler.
 func recordingReader(t *testing.T, handler http.Handler) (*fleetReader, *eventstest.Events) {
 	t.Helper()
 	recorded := &eventstest.Events{}
@@ -32,8 +32,8 @@ func recordingReader(t *testing.T, handler http.Handler) (*fleetReader, *eventst
 	return &fleetReader{client: client, recorder: recorder}, recorded
 }
 
-// postedAbout answers each Event about one object as
-// "Type Reason: message", in the order the fake received them.
+// postedAbout returns the Events about one object as
+// "Type Reason: message" strings, in the order the fake received them.
 func postedAbout(recorded *eventstest.Events, kind, name string) []string {
 	synctest.Wait()
 	var out []string
@@ -46,7 +46,7 @@ func postedAbout(recorded *eventstest.Events, kind, name string) []string {
 	return out
 }
 
-func TestASweepPostsTheLostMachineAndTheClustersTransitions(t *testing.T) {
+func TestAPassPostsTheLostMachineAndTheClustersTransitions(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
 		clusterDoc.Spec.Leaders = []string{"node-1"}
@@ -58,7 +58,7 @@ func TestASweepPostsTheLostMachineAndTheClustersTransitions(t *testing.T) {
 				labMachine("node-3", api.PhaseReady),
 			},
 			renewals: map[string]time.Time{
-				"node-1": sweepNow.Add(-10 * time.Second),
+				"node-1": passTime.Add(-10 * time.Second),
 				"node-2": time.Date(2026, 7, 6, 11, 55, 0, 0, time.UTC),
 			},
 		}
@@ -66,8 +66,8 @@ func TestASweepPostsTheLostMachineAndTheClustersTransitions(t *testing.T) {
 		fake.sawEachRenewal(reads)
 		cm, _ := fleetMetrics(t)
 
-		if err := sweepFleet(reads, clusterDoc, "", &engineProbe{}, &podSteward{}, cm, sweepNow); err != nil {
-			t.Fatal(err)
+		if err := reconcileFleet(reads, clusterDoc, "", &fluxProbe{}, &overduePodReports{}, cm, passTime); err != nil {
+			t.Fatalf("reconciling the fleet: %v", err)
 		}
 
 		cases := []struct {
@@ -75,16 +75,16 @@ func TestASweepPostsTheLostMachineAndTheClustersTransitions(t *testing.T) {
 			want       []string
 		}{
 			{machineKind, "node-1", nil},
-			{machineKind, "node-2", []string{"Warning MachineLost: the heartbeat lease was last renewed at 2026-07-06T11:55:00Z; marked Lost"}},
-			{machineKind, "node-3", []string{"Warning MachineLost: the machine has never renewed a heartbeat lease; marked Lost"}},
+			{machineKind, "node-2", []string{"Warning MachineLost: Marked the machine Lost. cluster-operator last saw its heartbeat Lease renewed at 2026-07-06T11:55:00Z"}},
+			{machineKind, "node-3", []string{"Warning MachineLost: Marked the machine Lost. cluster-operator has never seen it renew a heartbeat Lease"}},
 			{clusterKind, "lab", []string{
-				"Warning MachinesDegraded: 1/3 machines ready; unwell: node-2, node-3",
-				"Normal RolloutComplete: no machines are waiting for a reboot turn",
+				"Warning MachinesDegraded: 1/3 machines are ready. Not ready and not updating: node-2, node-3",
+				"Normal RolloutComplete: No machine waits for a reboot turn",
 			}},
 		}
 		for _, c := range cases {
 			if got := postedAbout(recorded, c.kind, c.name); !slices.Equal(got, c.want) {
-				t.Errorf("%s %s: got %q, want %q", c.kind, c.name, got, c.want)
+				t.Errorf("the Events about %s %s are %q, want %q", c.kind, c.name, got, c.want)
 			}
 		}
 	})
@@ -98,13 +98,13 @@ func TestARefusedWritePostsNothing(t *testing.T) {
 			http.MethodPut, "/clusters/lab", http.StatusInternalServerError)
 		reads, recorded := recordingReader(t, handler)
 
-		markLost(reads, []machine.Machine{labMachine("node-1", api.PhaseReady)}, []string{"node-1"}, nil, sweepNow)
-		s := decideFleetSweep(nil, nil, sweepNow)
-		publishClusterStatus(reads, clusterDoc, s, rollout{}, nil, "", "", sweepNow)
+		markLost(reads, []machine.Machine{labMachine("node-1", api.PhaseReady)}, []string{"node-1"}, nil, passTime)
+		s := decideFleet(nil, nil, passTime)
+		publishClusterStatus(reads, clusterDoc, s, rollout{}, nil, "", "", passTime)
 
 		synctest.Wait()
 		if got := recorded.List(); len(got) != 0 {
-			t.Errorf("refused writes posted %d Events", len(got))
+			t.Errorf("refused writes posted %d Events, want none", len(got))
 		}
 	})
 }
@@ -116,41 +116,43 @@ func TestCarryingOutTheRolloutPostsEachTurn(t *testing.T) {
 		granted := labMachine("node-4", api.PhaseReady)
 		granted.Status.Conditions = api.SetCondition(nil, api.Condition{
 			Type: machine.RebootApprovedCondition, Status: api.ConditionTrue, Reason: "DisruptionBudgetAllows",
-		}, sweepNow.Add(-time.Minute))
+		}, passTime.Add(-time.Minute))
 		machines := []machine.Machine{labMachine("node-3", api.PhaseUpdatePending), granted}
 
-		carryOutRollout(reads, machines, rollout{grant: []string{"node-3"}, revoke: []string{"node-4"}}, []cluster.RebootTurn{{Machine: "node-3"}}, sweepNow)
+		carryOutRollout(reads, machines, rollout{grant: []string{"node-3"}, revoke: []string{"node-4"}}, []cluster.RebootTurn{{Machine: "node-3"}}, passTime)
 
 		cases := []struct {
 			name string
 			want []string
 		}{
-			{"node-3", []string{"Normal RebootTurnGranted: the cluster's disruption budget allows this machine to take its reboot turn now"}},
-			{"node-4", []string{"Normal RebootTurnReclaimed: the machine is available and asks for no reboot, so its turn returns to the disruption budget"}},
+			{"node-3", []string{"Normal RebootTurnGranted: Granted a reboot turn, because the disruption budgets allow one"}},
+			{"node-4", []string{"Normal RebootTurnReclaimed: Removed the reboot turn grant, because the machine is available and requests no reboot"}},
 		}
 		for _, c := range cases {
 			if got := postedAbout(recorded, machineKind, c.name); !slices.Equal(got, c.want) {
-				t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+				t.Errorf("the Events about Machine %s are %q, want %q", c.name, got, c.want)
 			}
 		}
 	})
 }
 
-// recordingClient serves the events fake in front of handler, for the
-// flux tests that take a client and a recorder apart.
+// recordingClient is recordingReader for the flux tests, which take
+// the client and the recorder as separate arguments.
 func recordingClient(t *testing.T, handler http.Handler) (*apiclient.Client, *events.Recorder, *eventstest.Events) {
 	t.Helper()
 	reads, recorded := recordingReader(t, handler)
 	return reads.client, reads.recorder, recorded
 }
 
-// absentFlux answers the reads of a cluster with no flux engine and
-// no deploy key: 404, or probe for the engine's read. Each create
-// lands, except that the namespace answers namespace.
+// absentFlux serves a cluster with no Flux controllers and no deploy
+// key. Reads return 404, except the read of kustomizeControllerPath, which
+// returns the status code probe. Creates return 201, except the create
+// of the flux-system Namespace, which returns the status code
+// namespace.
 func absentFlux(probe, namespace int) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == engineProbePath:
+		case r.Method == http.MethodGet && r.URL.Path == kustomizeControllerPath:
 			w.WriteHeader(probe)
 		case r.Method == http.MethodGet:
 			http.NotFound(w, r)
@@ -162,15 +164,15 @@ func absentFlux(probe, namespace int) http.Handler {
 	})
 }
 
-func TestTheFluxFeaturePostsTheKeyAndTheEngine(t *testing.T) {
-	objects, err := parseSeed([]byte(testSeed))
+func TestTheFluxFeaturePostsTheKeyAndTheControllers(t *testing.T) {
+	objects, err := parseFluxManifest([]byte(testFluxManifest))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the test Flux manifest: %v", err)
 	}
-	minted := "Normal FluxDeployKeyMinted: minted the flux deploy key; register the public half from status.flux.publicKey at the forge"
-	seeded := func(created, present, failed int) string {
-		return fmt.Sprintf("Normal FluxEngineSeeded: the flux engine was absent; planted its seed: "+
-			"%d objects created, %d present already, %d failed", created, present, failed)
+	minted := "Normal FluxDeployKeyMinted: Created the flux-system Secret with a new deploy key. Register the public key from status.flux.publicKey at the git forge"
+	applied := func(created, present, failed int) string {
+		return fmt.Sprintf("Normal FluxEngineSeeded: Applied the embedded Flux manifest, because the kustomize-controller Deployment was missing: "+
+			"%d objects created, %d already present, %d not created", created, present, failed)
 	}
 	cases := []struct {
 		name             string
@@ -178,9 +180,9 @@ func TestTheFluxFeaturePostsTheKeyAndTheEngine(t *testing.T) {
 		want             []string
 	}{
 		{"a namespace that exists", http.StatusNotFound, http.StatusConflict,
-			[]string{minted, seeded(len(objects)-1, 1, 0)}},
+			[]string{minted, applied(len(objects)-1, 1, 0)}},
 		{"a namespace that fails", http.StatusNotFound, http.StatusInternalServerError,
-			[]string{minted, seeded(len(objects)-1, 0, 1)}},
+			[]string{minted, applied(len(objects)-1, 0, 1)}},
 		{"a probe that fails", http.StatusInternalServerError, http.StatusCreated,
 			[]string{minted}},
 	}
@@ -190,10 +192,10 @@ func TestTheFluxFeaturePostsTheKeyAndTheEngine(t *testing.T) {
 				client, recorder, recorded := recordingClient(t, absentFlux(c.probe, c.namespace))
 
 				ensureFluxDeployKey(client, recorder, fluxCluster())
-				ensureFluxEngine(client, recorder, fluxCluster(), []byte(testSeed), &engineProbe{}, sweepNow)
+				ensureFluxControllers(client, recorder, fluxCluster(), []byte(testFluxManifest), &fluxProbe{}, passTime)
 
 				if got := postedAbout(recorded, clusterKind, "lab"); !slices.Equal(got, c.want) {
-					t.Errorf("got %q, want %q", got, c.want)
+					t.Errorf("the Events about Cluster lab are %q, want %q", got, c.want)
 				}
 			})
 		})

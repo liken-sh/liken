@@ -1,10 +1,11 @@
 package main
 
-// This test runs two copies of this program with real elections, and
-// pauses the leader between its Cluster write and its grant, the way a
-// stalled node pauses a process. The ledger, not the election, keeps
-// the budget: pausedleader_test.go holds the proof, and this test shows
-// that the rules hold under the election's real timings.
+// This test runs two copies of this program with real elections. It
+// pauses copy A after its Cluster status write and before its grant
+// write, as a stalled node pauses a process, until copy B has become
+// leader. The Cluster's status.rebootTurns, not the election, keeps the
+// disruption budget, so A's late grant must fail with a conflict.
+// pausedleader_test.go tests the same rule without elections.
 
 import (
 	"context"
@@ -28,9 +29,9 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// A pause holds every request to its handler while it is paused, and
-// drops a request whose client gave up, the way a stopped process
-// sends nothing.
+// pause blocks every request to its handler while it is stopped, and
+// drops a request whose client gave up, as a stopped process sends
+// nothing.
 type pause struct {
 	next http.Handler
 
@@ -65,9 +66,10 @@ func (p *pause) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.next.ServeHTTP(w, r)
 }
 
-// heldGrant holds copy A's first grant write until the release, pauses
-// A's election when it catches the write, and records the status the
-// API server answers when the write lands.
+// heldGrant blocks copy A's first write of node-2's Machine status, its
+// grant, until released is closed, and stops A's election while it
+// waits. It records the status code that the API server returns for
+// the write.
 type heldGrant struct {
 	next     http.Handler
 	election *pause
@@ -75,7 +77,7 @@ type heldGrant struct {
 	mu       sync.Mutex
 	caught   bool
 	released chan struct{}
-	answered int
+	code     int
 }
 
 func (h *heldGrant) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -89,13 +91,13 @@ func (h *heldGrant) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	h.election.stop()
 	<-h.released
-	answer := httptest.NewRecorder()
-	h.next.ServeHTTP(answer, r)
+	recorded := httptest.NewRecorder()
+	h.next.ServeHTTP(recorded, r)
 	h.mu.Lock()
-	h.answered = answer.Code
+	h.code = recorded.Code
 	h.mu.Unlock()
-	w.WriteHeader(answer.Code)
-	_, _ = w.Write(answer.Body.Bytes())
+	w.WriteHeader(recorded.Code)
+	_, _ = w.Write(recorded.Body.Bytes())
 }
 
 func (h *heldGrant) holding() bool {
@@ -104,10 +106,10 @@ func (h *heldGrant) holding() bool {
 	return h.caught
 }
 
-func (h *heldGrant) answer() int {
+func (h *heldGrant) responseCode() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.answered
+	return h.code
 }
 
 // renewHeartbeats renews each machine's heartbeat Lease every ten
@@ -132,8 +134,8 @@ func renewHeartbeats(ctx context.Context, client *apiclient.Client) {
 	}
 }
 
-// electionConfig serves an election handler, the way electiontest's
-// Config does.
+// electionConfig returns a client config for a fake API server that
+// runs handler.
 func electionConfig(t *testing.T, handler http.Handler) *rest.Config {
 	t.Helper()
 	config := apiservertest.Start(t, handler).Config()
@@ -141,9 +143,9 @@ func electionConfig(t *testing.T, handler http.Handler) *rest.Config {
 	return config
 }
 
-// runCopy runs one copy of this program: its election, and then its
-// sweeps until stop ends. A lost Lease ends stop, as the exit of the
-// process would.
+// runCopy runs one copy of this program: its election, then its passes
+// until stop ends. Losing the Lease calls end, where the process would
+// exit.
 func runCopy(t *testing.T, pod string, config *rest.Config, fleet http.Handler, stop context.Context, end context.CancelFunc) {
 	t.Helper()
 	options := electionOptions(pod, func(string) {})
@@ -159,7 +161,7 @@ func runCopy(t *testing.T, pod string, config *rest.Config, fleet http.Handler, 
 	run(stop, stop, leader, client, watcher, ticks.C, o, newClusterMetrics(o))
 }
 
-func TestTheLedgerHoldsTheBudgetAcrossALeaderChange(t *testing.T) {
+func TestTheRebootTurnsKeepTheBudgetAcrossALeaderChange(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		budget := &budgetWatch{fake: raceFleet(t)}
 		machineOperator := testClient(t, budget)
@@ -179,33 +181,34 @@ func TestTheLedgerHoldsTheBudgetAcrossALeaderChange(t *testing.T) {
 		copies.Go(func() { runCopy(t, "liken-cluster-operator-b", lease.Config(t), budget, stopB, endB) })
 
 		// node-2 waits for a turn from the start. A grants it on its first
-		// tick after it has judged the heartbeats for
-		// HeartbeatStaleAfter.
+		// tick after HeartbeatStaleAfter has passed since it first read
+		// the heartbeats.
 		time.Sleep(kubernetes.HeartbeatStaleAfter + 15*time.Second)
 		if !held.holding() {
-			t.Fatal("copy A never sent its grant")
+			t.Fatal("copy A did not send its grant")
 		}
 		askForATurn(t, machineOperator, "node-1")
 
-		// B takes the Lease 30 to 41 seconds after A's last renewal, and
-		// then judges the heartbeats for HeartbeatStaleAfter before it
-		// confirms A's entry. A stays paused until then.
+		// B takes the Lease 30 to 41 seconds after A's last renewal
+		// (election.Duration). B confirms A's pending entry only after
+		// HeartbeatStaleAfter has passed since its first read of the
+		// heartbeats. A stays paused until then.
 		time.Sleep(2 * time.Minute)
 		close(held.released)
 		paused.resume()
 		synctest.Wait()
 
-		if got := held.answer(); got != http.StatusConflict {
-			t.Errorf("A's late grant was answered %d, want 409", got)
+		if got := held.responseCode(); got != http.StatusConflict {
+			t.Errorf("A's late grant got status %d, want 409", got)
 		}
 		if breaches := budget.exceeded(); len(breaches) > 0 {
-			t.Errorf("the budget of one was exceeded: %q", breaches)
+			t.Errorf("machines with a grant = %q, want at most one", breaches)
 		}
 		if got := grantHolders(t, machineOperator); !slices.Equal(got, []string{"node-2"}) {
 			t.Errorf("machines with a grant = %q, want only node-2", got)
 		}
 		if holder := lease.Holder(); !strings.HasPrefix(holder, "liken-cluster-operator-b_") {
-			t.Errorf("the Lease is held by %q, want copy B", holder)
+			t.Errorf("the Lease holder is %q, want copy B", holder)
 		}
 
 		endB()

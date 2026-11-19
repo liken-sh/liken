@@ -1,27 +1,19 @@
-# The cluster operator domain covers the fleet-level half of
-# operating the OS through the Kubernetes API.
-#
-# This domain builds two artifacts, following the same pattern as the
-# machine operator: the static binary, and the OCI image tarball that
-# image/oci.sh wraps around it. main.go's header comment explains
-# what this program watches, what it writes, and why it elects a
-# leader.
+# Builds the static cluster operator binary and packs it into an OCI
+# image tarball with image/oci.sh, the same way the machine operator
+# is built.
 include ../version.mk
 DIST ?= dist
 
-# A recipe that fails, or a build that is killed during one, leaves its
-# target partly written and newer than its inputs. make deletes that
-# target, so the next build makes it again and does not take it as
-# current.
+# A failed or killed recipe leaves a partly written target that is newer
+# than its inputs, and make would treat it as up to date.
 .DELETE_ON_ERROR:
 
 all: $(DIST)/liken-cluster-operator-image.tar
 
-# The engine seed ships inside the binary (flux.go embeds seed/),
-# because this operator deliberately has no hostPath mounts to read
-# the image's files through. The flux domain renders the seed at its
-# pinned version, and this rule copies it to where go:embed can see
-# it; embed paths cannot leave the package directory.
+# flux.go embeds seed/gotk-components.yaml, the pinned Flux install
+# manifest, so the pod needs no hostPath mount to read it. go:embed
+# cannot read outside the package directory, so this rule copies the
+# file from the flux component's build output.
 FLUX_VERSION := $(strip $(file <../flux/VERSION))
 
 seed/gotk-components.yaml: ../flux/dist/$(FLUX_VERSION)/gotk-components.yaml
@@ -40,10 +32,9 @@ $(DIST)/liken-cluster-operator: ../go.mod ../go.sum $(wildcard *.go) \
 		-ldflags "-X github.com/liken-sh/liken/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-cluster-operator .
 
-# The operator polls release channels over HTTPS. Its image has no
-# base layer to supply root certificates, so the machine's own
-# vendored trust bundle ships in the image. oci.sh explains where the
-# bundle lands.
+# The operator fetches release channels over HTTPS, and its image has
+# no base layer with root certificates, so oci.sh adds the CA bundle
+# that the trust component pins.
 CA_BUNDLE := ../../trust/dist/$(strip $(file <../../trust/VERSION))/cacert.pem
 
 $(DIST)/liken-cluster-operator-image.tar: $(DIST)/liken-cluster-operator ../image/oci.sh $(CA_BUNDLE)

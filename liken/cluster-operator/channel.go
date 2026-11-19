@@ -1,31 +1,22 @@
 package main
 
-// This poller checks the release channel. It shows how a cluster
-// detects that a new version exists.
+// The channel poller fetches channel.yaml from the Cluster's release
+// source, so the Cluster's status can show the newest release on the
+// channel. The version is for display only, because a
+// machine installs a release only from the digest-pinned entry in the
+// Cluster's catalog, never from the channel document. So a stale or
+// missing version does no harm, and the poller
+// keeps the last version when a fetch fails.
 //
-// The channel's root document, channel.yaml, names the latest
-// published version. This poller fetches that document so the sweep
-// can show the answer in the Cluster's status.
+// A pass runs every ten seconds, and a channel changes only when
+// someone publishes a release, so the poller fetches once per
+// channelPollInterval. It fetches at once when the release source
+// changes, or when the Cluster's liken.sh/check-releases annotation
+// takes a new value.
 //
-// Two facts shape this design. First, the answer is advisory. The
-// machine package's channel.go explains why the design keeps the
-// answer outside the trust chain. Because the answer is advisory, a
-// stale or missing answer costs nothing. The poller keeps the last
-// answer it received and tries again later. Second, the sweep runs
-// every ten seconds, but the channel changes about once a week. So
-// the poller fetches the document on a long interval instead of every
-// sweep. Two things make the poller fetch immediately: a new source,
-// or a new value in the Cluster's liken.sh/check-releases annotation.
-// The annotation is a declared request to poll immediately (the
-// cluster package's CheckReleasesAnnotation explains why the request
-// is an annotation and not a spec field).
-//
-// The fetch runs on its own goroutine. The machine operator's release
-// fetcher uses the same method. The sweep must keep judging the fleet
-// at its own speed, and a slow or dead release server must never
-// delay a Lost verdict. The Observe function determines what to do
-// and returns immediately; the goroutine reports its result back
-// through the mutex.
+// The fetch runs on its own goroutine, so a slow or unreachable release
+// server does not delay the rest of the pass, such as marking a
+// machine Lost.
 
 import (
 	"fmt"
@@ -39,26 +30,20 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// channelPollInterval sets how long an answer stays fresh, so the
-// poller does not ask again during this time. People publish releases
-// on a human timescale, and the poll answers the question "should
-// someone think about upgrading?", not a real-time telemetry
-// question. A person who just published a release and wants the
-// answer now can set the check-releases annotation to request an
-// immediate poll.
+// channelPollInterval is the time from the start of one fetch to the
+// next. People publish releases, so six hours is soon enough to show
+// that an upgrade exists. A person who wants to see a new release at
+// once changes the check-releases annotation.
 const channelPollInterval = 6 * time.Hour
 
 type channelPoller struct {
 	mu        sync.Mutex
-	source    string    // the channel this poller last asked
-	check     string    // the last check-releases annotation this poller handled
-	polled    time.Time // when the last attempt started
+	source    string    // the release source that the poller follows
+	check     string    // the last check-releases annotation value seen
+	polled    time.Time // when the last fetch started
 	inFlight  bool
-	available string // the channel's last known answer
+	available string // the latest version from the last successful fetch
 
-	// fetch performs the actual HTTP request. Tests can replace it
-	// with a fake function, so they do not need a real channel
-	// server.
 	fetch func(url string) ([]byte, error)
 }
 
@@ -66,33 +51,27 @@ func newChannelPoller() *channelPoller {
 	return &channelPoller{fetch: fetchChannelDocument}
 }
 
-// Observe runs once per sweep. It receives the spec's current
-// releases section and the Cluster's check-releases annotation. It
-// determines whether a poll is due: the source or the annotation
-// changed, or the last answer is too old. If a poll is due, Observe
-// starts it in the background. Observe never blocks.
+// Observe is called by each pass with the spec's releases section and
+// the Cluster's check-releases annotation. It starts a fetch in the
+// background when one is due and none is running, and it never blocks.
 func (p *channelPoller) Observe(releases cluster.ClusterReleasesSpec, check string, now time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// If there is no source, there is nothing to poll. A cluster
-	// without a channel has no available version, and it does not
-	// keep an available version from a channel it had before.
+	// Without a source there is nothing to fetch, and the version from
+	// a previous source no longer applies.
 	if releases.Source == "" {
 		p.source, p.check, p.available = "", "", ""
 		return
 	}
 
 	if releases.Source != p.source {
-		// A different channel's answer does not apply here. The
-		// poller drops it and asks the new channel immediately.
+		// The old source's version does not describe the new channel.
 		p.source, p.check, p.available = releases.Source, check, ""
 		p.polled = time.Time{}
 	} else if check != p.check {
-		// This is the request to poll immediately. The poller honors
-		// it once, by marking the last answer as stale right away.
-		// The last answer stays visible until the fresh answer
-		// replaces it.
+		// The last version stays available until the fetch replaces
+		// it.
 		p.check = check
 		p.polled = time.Time{}
 	}
@@ -100,24 +79,24 @@ func (p *channelPoller) Observe(releases cluster.ClusterReleasesSpec, check stri
 	if p.inFlight || now.Sub(p.polled) < channelPollInterval {
 		return
 	}
-	// The poller records the time of this attempt before it runs.
-	// This way, a dead server is asked again on the interval, not on
-	// every ten-second sweep.
+	// The time is recorded when the fetch starts, not when it
+	// succeeds, so an unreachable server is retried once per interval
+	// and not on every pass.
 	p.polled = now
 	p.inFlight = true
 	go p.poll(p.source)
 }
 
-// Available returns the latest version the channel last announced.
-// It is empty until a poll succeeds.
+// Available returns the latest version from the last successful
+// fetch, or "" before one succeeds.
 func (p *channelPoller) Available() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.available
 }
 
-// poll fetches and parses the channel document. It keeps the answer
-// only if the sweep is still asking about the same source.
+// poll fetches and parses the channel document, and stores the latest
+// version unless the source changed while the fetch ran.
 func (p *channelPoller) poll(source string) {
 	url := strings.TrimSuffix(source, "/") + "/channel.yaml"
 	raw, err := p.fetch(url)
@@ -136,28 +115,20 @@ func (p *channelPoller) poll(source string) {
 		return
 	}
 	if err != nil {
-		// The last answer stands. Advisory data may be stale. The
-		// interval, or an edit to the check value, will trigger
-		// another poll.
-		fmt.Printf("polling the release channel %s: %v\n", url, err)
+		fmt.Printf("fetching the channel document %s: %v\n", url, err)
 		return
 	}
 	p.available = latest
 }
 
-// fetchChannelDocument sends a GET request for the channel document
-// through the default transport.
 func fetchChannelDocument(url string) ([]byte, error) {
 	return fetchChannelDocumentVia(nil, url)
 }
 
-// fetchChannelDocumentVia sends a GET request for the channel document
-// through transport, or through the default transport when transport
-// is nil, using a client with a bounded size and time limit. The
-// document is only a few lines of YAML, so the size limit is generous.
-// The time limit stops a stuck server from keeping the poll in progress
-// forever. A test passes a transport that reaches its fake server
-// without a socket.
+// fetchChannelDocumentVia fetches url with transport, or with the
+// default transport when transport is nil. The document is a few lines
+// of YAML, so it reads at most 1 MiB. The 30-second timeout keeps a
+// server that never responds from leaving inFlight set forever.
 func fetchChannelDocumentVia(transport http.RoundTripper, url string) ([]byte, error) {
 	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
 	resp, err := client.Get(url)
@@ -166,7 +137,7 @@ func fetchChannelDocumentVia(transport http.RoundTripper, url string) ([]byte, e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", url, resp.Status)
+		return nil, fmt.Errorf("%s returned %s", url, resp.Status)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }

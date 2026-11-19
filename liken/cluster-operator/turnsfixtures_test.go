@@ -1,9 +1,8 @@
 package main
 
-// This file builds the fleet that the tests of the grant ledger share:
-// a fake API server that checks versions as the API server does, and
-// fleet readers that sweep it as copies of this program that hold the
-// Lease (pausedleader_test.go, ledgersweep_test.go).
+// Fixtures for the tests of status.rebootTurns: a fake API server that
+// checks resourceVersions as the real one does, and fleet readers that
+// pass it as the leader does.
 
 import (
 	"encoding/json"
@@ -24,12 +23,12 @@ import (
 )
 
 // leaseRenewed is the renewTime of every machine's heartbeat Lease in
-// the race's fleet. Each reader saw it renewed ten seconds before the
-// sweep, so every machine reads available.
-var leaseRenewed = sweepNow.Add(-10 * time.Second)
+// raceFleet. Each reader saw it ten seconds before the pass, so every
+// machine reads as available.
+var leaseRenewed = passTime.Add(-10 * time.Second)
 
-// fleetMachine is one Machine as the fake stores it: Ready, and asking
-// for a reboot turn when awaiting is true.
+// fleetMachine returns a Ready Machine as the fake stores it. When
+// awaiting is true, the Machine is waiting for a reboot turn.
 func fleetMachine(t *testing.T, name string, awaiting bool) map[string]any {
 	t.Helper()
 	m := machine.Machine{APIVersion: api.APIVersion, Kind: "Machine",
@@ -41,36 +40,37 @@ func fleetMachine(t *testing.T, name string, awaiting bool) map[string]any {
 	return asObject(t, m)
 }
 
-// awaitingTurn adds the condition a machine operator writes when its
-// machine has staged a change and waits for a reboot turn.
+// awaitingTurn adds the condition that a machine operator writes when
+// its machine has staged a change and waits for a reboot turn.
 func awaitingTurn(conditions []api.Condition) []api.Condition {
 	return api.SetCondition(conditions, api.Condition{
 		Type: "SpecConverged", Status: api.ConditionFalse, Reason: "AwaitingTurn",
-	}, sweepNow.Add(-time.Minute))
+	}, passTime.Add(-time.Minute))
 }
 
 func asObject(t *testing.T, v any) map[string]any {
 	t.Helper()
 	raw, err := json.Marshal(v)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the value as JSON: %v", err)
 	}
 	var object map[string]any
 	if err := json.Unmarshal(raw, &object); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the JSON into an object: %v", err)
 	}
 	return object
 }
 
-// raceFleet is a fake API server that checks versions, with three
-// leaders, a disruption budget of one, and node-2 waiting for a turn.
+// raceFleet returns a fake API server that checks resourceVersions. It
+// has three leaders, a disruption budget of one, and node-2 waiting for
+// a reboot turn.
 func raceFleet(t *testing.T) *fakeapi.Server {
 	t.Helper()
 	return raceFleetWith(t, nil)
 }
 
-// raceFleetWith is raceFleet with more collections, such as the
-// Disruptions and the budgets.
+// raceFleetWith is raceFleet with additional collections, such as
+// budgets.
 func raceFleetWith(t *testing.T, more map[string]*fakeapi.Collection) *fakeapi.Server {
 	t.Helper()
 	clusterDoc := cluster.Cluster{APIVersion: api.APIVersion, Kind: "Cluster",
@@ -89,12 +89,12 @@ func raceFleetWith(t *testing.T, more map[string]*fakeapi.Collection) *fakeapi.S
 		kubernetes.ClustersPath: {APIVersion: api.APIVersion, Kind: "Cluster", Items: []map[string]any{asObject(t, clusterDoc)}},
 		"/apis/coordination.k8s.io/v1/namespaces/liken-system/leases": {APIVersion: "coordination.k8s.io/v1", Kind: "Lease",
 			Items: []map[string]any{lease("node-1"), lease("node-2"), lease("node-3")}},
-		// The copies of a program that runs watch these too, and find
-		// nothing to steward.
+		// The pass lists DaemonSets and pods too. Both are empty, so
+		// it evicts no pod.
 		daemonSetsPath:                         {APIVersion: "apps/v1", Kind: "DaemonSet"},
 		"/api/v1/namespaces/liken-system/pods": {APIVersion: "v1", Kind: "Pod"},
-		// node-2's request, which machine-operator files for what it
-		// staged.
+		// node-2's Disruption, which its machine operator creates for
+		// the change it staged.
 		kubernetes.DisruptionsPath: {APIVersion: api.APIVersion, Kind: "Disruption",
 			Items: []map[string]any{requestObject(t, approvedRequest("node-2"))}},
 	}
@@ -104,23 +104,23 @@ func raceFleetWith(t *testing.T, more map[string]*fakeapi.Collection) *fakeapi.S
 	return fake
 }
 
-// leadingReader is a fleet reader with no watches, so it reads the API
-// server, and with an empty memo, as a copy that just took the Lease
-// has. It saw each heartbeat Lease renewed at leaseRenewed, and began
-// reading them long enough ago to judge them.
+// leadingReader returns a fleet reader that has no watches, so it reads
+// from the API server, and that has empty memos, like a process that
+// has just become leader. It saw each heartbeat Lease at leaseRenewed
+// and first read the Leases an hour ago, so the rollout may grant turns.
 func leadingReader(t *testing.T, handler http.Handler) *fleetReader {
 	t.Helper()
 	r := &fleetReader{client: testClient(t, handler), machineVersions: memo.New(), clusterVersions: memo.New()}
-	r.sightings.began = sweepNow.Add(-time.Hour)
+	r.sightings.firstRead = passTime.Add(-time.Hour)
 	for _, name := range []string{"node-1", "node-2", "node-3"} {
 		r.sightings.observe(name, leaseRenewed, leaseRenewed)
 	}
 	return r
 }
 
-// sweepAt runs one sweep of a reader at sweepNow, from a fresh read of
-// the Cluster.
-func sweepAt(t *testing.T, r *fleetReader) {
+// reconcileAt runs one pass of the reader at passTime, using a fresh read
+// of the Cluster.
+func reconcileAt(t *testing.T, r *fleetReader) {
 	t.Helper()
 	clusterDoc, err := r.cluster("lab")
 	if err != nil {
@@ -128,46 +128,48 @@ func sweepAt(t *testing.T, r *fleetReader) {
 		return
 	}
 	cm, _ := fleetMetrics(t)
-	if err := sweepFleet(r, clusterDoc, "", &engineProbe{}, &podSteward{}, cm, sweepNow); err != nil {
-		t.Errorf("sweeping: %v", err)
+	if err := reconcileFleet(r, clusterDoc, "", &fluxProbe{}, &overduePodReports{}, cm, passTime); err != nil {
+		t.Errorf("reconciling the fleet: %v", err)
 	}
 }
 
-// askForATurn writes node-1's status as its machine operator does when
-// the machine stages a change that needs a reboot.
+// askForATurn writes the named machine's status, and creates its
+// Disruption, as its machine operator does when the machine stages a
+// change that needs a reboot.
 func askForATurn(t *testing.T, client *apiclient.Client, name string) {
 	t.Helper()
 	m, err := kubernetes.GetMachine(client, name)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Machine %s: %v", name, err)
 	}
 	status := m.Status
 	status.Conditions = awaitingTurn(slices.Clone(m.Status.Conditions))
 	if _, err := kubernetes.PublishStatus(client, m, &status); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the status of the Machine %s: %v", name, err)
 	}
 	body, err := json.Marshal(requestObject(t, approvedRequest(name)))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the Disruption of %s: %v", name, err)
 	}
 	if err := client.RequestJSON(http.MethodPost, kubernetes.DisruptionsPath, body, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the Disruption of %s: %v", name, err)
 	}
 }
 
-// requestObject is a request as the fake stores it.
+// requestObject returns a Disruption as the fake stores it.
 func requestObject(t *testing.T, d disruption.Disruption) map[string]any {
 	t.Helper()
 	d.Metadata.ResourceVersion = "5"
 	return asObject(t, d)
 }
 
-// grantHolders answers the machines that hold a reboot grant in the fake.
+// grantHolders returns the names of the machines that have a
+// RebootApproved condition in the fake.
 func grantHolders(t *testing.T, client *apiclient.Client) []string {
 	t.Helper()
 	machines, err := kubernetes.List[machine.Machine](client, kubernetes.MachinesPath)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the Machines: %v", err)
 	}
 	var names []string
 	for _, m := range machines {

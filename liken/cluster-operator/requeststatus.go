@@ -1,15 +1,10 @@
 package main
 
-// The conductor's reports on the requests and the budgets: the
-// Approved and Granted conditions of each Disruption, the counts of
-// each MachineDisruptionBudget, the default budget it keeps, and the
-// complete requests it deletes.
-//
-// These are reports for a person. No program acts on a Disruption's
-// Granted condition: the grant is the ledger entry, and a condition on
-// another object could land after the turn it reports ended. So each
-// report reads the ledger that the API server stored on this sweep,
-// and a request reads Granted only once its turn is recorded.
+// A Disruption's Approved and Granted conditions are for people to read,
+// and no program acts on them. A machine's reboot turn is its entry in
+// the Cluster's status.rebootTurns. So Granted is True only when the
+// status.rebootTurns that the API server stored in this pass has an
+// entry that lists the Disruption.
 
 import (
 	"encoding/json"
@@ -29,20 +24,18 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// completeRequestTTL is how long a complete request stays before the
-// conductor deletes it. A day leaves a person time to read what
-// rebooted the machine overnight. The Events of its transitions carry
-// the history for the hour the API server keeps them.
+// completeRequestTTL is how long a complete Disruption stays before
+// this program deletes it. A day gives a person time to read what
+// rebooted a machine overnight. The API server keeps the Events of its
+// transitions for only an hour.
 const completeRequestTTL = 24 * time.Hour
 
-// The reasons of the Events that are not condition transitions.
+// Reasons of the Events that do not report a condition transition.
 const (
 	reasonRequestDeleted = "DisruptionDeleted"
 	reasonBudgetCreated  = "MachineDisruptionBudgetCreated"
 )
 
-// requestConditions composes a request's Approved and Granted
-// conditions from its machine and the stored ledger.
 func requestConditions(d *disruption.Disruption, m *machine.Machine, r rollout, stored []cluster.RebootTurn) (approved, granted api.Condition) {
 	a := approve(d, m)
 	approved = api.Condition{Type: disruption.ApprovedCondition, Status: api.ConditionTrue, Reason: a.reason, Message: a.message}
@@ -53,29 +46,29 @@ func requestConditions(d *disruption.Disruption, m *machine.Machine, r rollout, 
 	switch {
 	case entry >= 0 && slices.Contains(stored[entry].Disruptions, d.Metadata.Name):
 		granted = api.Condition{Type: disruption.GrantedCondition, Status: api.ConditionTrue, Reason: "TurnGranted",
-			Message: "the machine's turn in the Cluster's status.rebootTurns grants this request"}
+			Message: "The machine's entry in the Cluster's status.rebootTurns covers this request"}
 	case !a.approved:
 		granted = api.Condition{Type: disruption.GrantedCondition, Status: api.ConditionFalse, Reason: "AwaitingApproval",
-			Message: "the request waits for its approval"}
+			Message: "The request is not approved yet"}
 	case r.waits[d.Spec.Machine] != "":
 		granted = api.Condition{Type: disruption.GrantedCondition, Status: api.ConditionFalse, Reason: "AwaitingTurn",
 			Message: r.waits[d.Spec.Machine]}
 	case !available(m.Status.Phase):
 		granted = api.Condition{Type: disruption.GrantedCondition, Status: api.ConditionFalse, Reason: "AwaitingTurn",
-			Message: fmt.Sprintf("%s is %s, out of service with no turn, and takes its turn when it is back", d.Spec.Machine, m.Status.Phase)}
+			Message: fmt.Sprintf("Machine %s is %s and out of service with no turn. It gets a turn when it is available again", d.Spec.Machine, m.Status.Phase)}
 	default:
 		granted = api.Condition{Type: disruption.GrantedCondition, Status: api.ConditionFalse, Reason: "AwaitingTurn",
-			Message: "waiting for the cluster's next sweep to grant the turn"}
+			Message: "Waiting for the next cluster-operator pass to grant the turn"}
 	}
 	approved.ObservedGeneration = d.Metadata.Generation
 	granted.ObservedGeneration = d.Metadata.Generation
 	return approved, granted
 }
 
-// reportRequests writes each open request's conditions, and deletes
-// each request that completed more than a day ago. A request whose
-// Machine is gone is left to the garbage collector, which deletes it
-// with its owner.
+// reportRequests writes the conditions of each open Disruption and
+// deletes each one that completed more than completeRequestTTL ago. It
+// skips a Disruption whose Machine is gone, because the garbage
+// collector deletes a Disruption with the Machine that owns it.
 func reportRequests(reads *fleetReader, machines []machine.Machine, q fleetRequests, r rollout, stored []cluster.RebootTurn, now time.Time) {
 	for i := range q.disruptions {
 		d := &q.disruptions[i]
@@ -99,7 +92,7 @@ func reportRequests(reads *fleetReader, machines []machine.Machine, q fleetReque
 		updated.Status.Conditions = written
 		if err := reads.publishRequestStatus(&updated); err != nil {
 			if !apiclient.Stale(err) {
-				fmt.Printf("reporting on the Disruption %s: %v\n", d.Metadata.Name, err)
+				fmt.Printf("writing the status of the Disruption %s: %v\n", d.Metadata.Name, err)
 			}
 			continue
 		}
@@ -109,9 +102,9 @@ func reportRequests(reads *fleetReader, machines []machine.Machine, q fleetReque
 	}
 }
 
-// requestBadStatus answers the status of a request's condition that
-// needs a person: a Manual machine's request that waits for its
-// approval.
+// requestBadStatus makes a transition's Event a Warning when the
+// condition needs a person to act: a Disruption of a Manual machine
+// that waits for approval.
 func requestBadStatus(c api.Condition) conditions.Status {
 	if c.Reason == "AwaitingApproval" {
 		return c.Status
@@ -126,18 +119,18 @@ func requestReference(d *disruption.Disruption) events.ObjectReference {
 func deleteRequest(reads *fleetReader, d *disruption.Disruption) {
 	err := reads.client.RequestJSON(http.MethodDelete, disruptionPath(d.Metadata.Name), nil, nil)
 	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
-		fmt.Printf("deleting the complete Disruption %s: %v\n", d.Metadata.Name, err)
+		fmt.Printf("deleting the completed Disruption %s: %v\n", d.Metadata.Name, err)
 		return
 	}
 	if err == nil {
 		reads.recorder.Normal(requestReference(d), reasonRequestDeleted,
-			fmt.Sprintf("the request completed more than %s ago", completeRequestTTL))
+			fmt.Sprintf("Deleted the request, which completed more than %s ago", completeRequestTTL))
 	}
 }
 
-// reportBudgets writes what each budget counted on this sweep, and
-// creates the default budget when the cluster serves the kind and has
-// none.
+// reportBudgets writes the counts that decideRollout computed in this
+// pass to each budget's status. It creates the default budget
+// when the API server serves the kind and no budget has that name.
 func reportBudgets(reads *fleetReader, clusterDoc *cluster.Cluster, q fleetRequests, r rollout, now time.Time) {
 	if q.budgetsServed && !slices.ContainsFunc(q.budgets, func(b disruption.Budget) bool { return b.Metadata.Name == disruption.DefaultBudget }) {
 		createDefaultBudget(reads, clusterDoc)
@@ -162,7 +155,7 @@ func reportBudgets(reads *fleetReader, clusterDoc *cluster.Cluster, q fleetReque
 		updated.Status = counted
 		if err := reads.publishBudgetStatus(&updated); err != nil {
 			if !apiclient.Stale(err) {
-				fmt.Printf("reporting on the MachineDisruptionBudget %s: %v\n", b.Metadata.Name, err)
+				fmt.Printf("writing the status of the MachineDisruptionBudget %s: %v\n", b.Metadata.Name, err)
 			}
 			continue
 		}
@@ -186,32 +179,34 @@ func createDefaultBudget(reads *fleetReader, clusterDoc *cluster.Cluster) {
 	case err == nil:
 		fmt.Printf("created the default MachineDisruptionBudget with maxUnavailable %d\n", defaultBudgetLimit)
 		reads.recorder.Normal(clusterReference(clusterDoc), reasonBudgetCreated,
-			fmt.Sprintf("created the MachineDisruptionBudget default, which allows %d machine out of service at a time; edit the budget to change the limit", defaultBudgetLimit))
+			fmt.Sprintf("Created the MachineDisruptionBudget default, which allows %d machine out of service at a time. Edit the budget to change the limit", defaultBudgetLimit))
 	case errors.Is(err, apiclient.ErrConflict), errors.Is(err, apiclient.ErrNotFound), errors.Is(err, apiclient.ErrForbidden):
 	default:
 		fmt.Printf("creating the default MachineDisruptionBudget: %v\n", err)
 	}
 }
 
-// publishRequestStatus writes a Disruption's status and notes the
-// version for the Disruptions' copy.
+// publishRequestStatus writes a Disruption's status and records the
+// resourceVersion it returns, so a later read does not take an older
+// version from the Disruption watch cache.
 func (r *fleetReader) publishRequestStatus(d *disruption.Disruption) error {
 	return r.disruptionVersions.Send(d.Metadata.Name, func() (string, error) {
 		return replaceStatus(r.client, disruptionPath(d.Metadata.Name)+"/status", d)
 	})
 }
 
-// publishBudgetStatus writes a budget's status and notes the version
-// for the budgets' copy.
+// publishBudgetStatus writes a budget's status and records the
+// resourceVersion it returns, so a later read does not take an older
+// version from the budget watch cache.
 func (r *fleetReader) publishBudgetStatus(b *disruption.Budget) error {
 	return r.budgetVersions.Send(b.Metadata.Name, func() (string, error) {
 		return replaceStatus(r.client, budgetPath(b.Metadata.Name)+"/status", b)
 	})
 }
 
-// replaceStatus writes a status subresource, conditional on the
-// object's resourceVersion, and answers the version the API server
-// stored.
+// replaceStatus replaces a status subresource with a PUT that sends
+// the object's resourceVersion, so a stale write fails. It returns the
+// resourceVersion that the API server stored.
 func replaceStatus(c *apiclient.Client, path string, object any) (string, error) {
 	body, err := json.Marshal(object)
 	if err != nil {

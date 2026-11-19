@@ -1,8 +1,5 @@
 package main
 
-// This file tests the rollout's decision table: who gets a reboot
-// turn, in what order, and when the rollout pauses entirely.
-
 import (
 	"slices"
 	"strings"
@@ -15,10 +12,9 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// A rolloutEntry describes one machine as the rollout sees it: its
-// phase, its heartbeat age (a negative value means no lease), whether
-// it is asking for a reboot turn, and how long ago it was granted one
-// (a negative value means no grant is outstanding).
+// A rolloutEntry describes one machine: its phase, the age of its
+// heartbeat (negative means no Lease), whether it requests a reboot
+// turn, and how long ago it was granted one (negative means no grant).
 type rolloutEntry struct {
 	name       string
 	phase      api.Phase
@@ -36,23 +32,23 @@ func rolloutInputs(entries ...rolloutEntry) ([]machine.Machine, map[string]time.
 		if e.awaiting {
 			m.Status.Conditions = api.SetCondition(m.Status.Conditions, api.Condition{
 				Type: "SpecConverged", Status: "False", Reason: "AwaitingTurn",
-			}, sweepNow)
+			}, passTime)
 		}
 		if e.grantedAgo >= 0 {
 			m.Status.Conditions = api.SetCondition(m.Status.Conditions, api.Condition{
 				Type: "RebootApproved", Status: "True", Reason: "DisruptionBudgetAllows",
-			}, sweepNow.Add(-e.grantedAgo))
+			}, passTime.Add(-e.grantedAgo))
 		}
 		machines = append(machines, m)
 		if e.age >= 0 {
-			renewals[e.name] = sweepNow.Add(-e.age)
+			renewals[e.name] = passTime.Add(-e.age)
 		}
 	}
 	return machines, renewals
 }
 
-// labCluster declares node-1 and node-2 the leaders, so every other
-// name in these tests is a worker.
+// labCluster declares node-1 and node-2 the leaders. Every other
+// machine is a worker.
 func labCluster(maxUnavailable int) *cluster.Cluster {
 	c := &cluster.Cluster{}
 	c.Spec.Leaders = []string{"node-1", "node-2"}
@@ -60,9 +56,7 @@ func labCluster(maxUnavailable int) *cluster.Cluster {
 	return c
 }
 
-// targetingCluster is labCluster with a version rollout in progress:
-// the fleet's target release, for the gate tests to compare
-// appliedVersion against.
+// targetingCluster is labCluster with a target release.
 func targetingCluster(maxUnavailable int, target string) *cluster.Cluster {
 	c := labCluster(maxUnavailable)
 	c.Spec.Version = target
@@ -76,12 +70,12 @@ func TestRolloutGrantsAWaitingMachine(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-3", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-3"}) {
-		t.Errorf("got grants %v", r.grant)
+		t.Errorf("grants are %v, want [node-3]", r.grant)
 	}
 	if r.progressing.Status != "True" || r.progressing.Reason != "RollingOut" {
-		t.Errorf("got %s/%s", r.progressing.Status, r.progressing.Reason)
+		t.Errorf("Progressing is %s/%s, want %s/%s", r.progressing.Status, r.progressing.Reason, "True", "RollingOut")
 	}
 }
 
@@ -90,12 +84,12 @@ func TestRolloutAtRestIsComplete(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-3", api.PhaseReady, fresh, false, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
 	if len(r.grant) != 0 || len(r.revoke) != 0 {
-		t.Errorf("nothing to do here: grant %v revoke %v", r.grant, r.revoke)
+		t.Errorf("grants are %v and revokes are %v, want none of either", r.grant, r.revoke)
 	}
 	if r.progressing.Status != "True" || r.progressing.Reason != "RolloutComplete" {
-		t.Errorf("got %s/%s", r.progressing.Status, r.progressing.Reason)
+		t.Errorf("Progressing is %s/%s, want %s/%s", r.progressing.Status, r.progressing.Reason, "True", "RolloutComplete")
 	}
 }
 
@@ -105,12 +99,12 @@ func TestRolloutHonorsTheDefaultBudgetOfOne(t *testing.T) {
 		rolloutEntry{"node-3", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-3"}) {
-		t.Errorf("one turn at a time by default: %v", r.grant)
+		t.Errorf("grants are %v, want [node-3] because the default budget is 1", r.grant)
 	}
 	if !strings.Contains(r.progressing.Message, "node-4") {
-		t.Errorf("the condition should name who is still waiting: %s", r.progressing.Message)
+		t.Errorf("the Progressing message is %q, want it to name node-4", r.progressing.Message)
 	}
 }
 
@@ -121,9 +115,9 @@ func TestRolloutABiggerBudgetGrantsMoreTurns(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(2), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(2), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-3", "node-4"}) {
-		t.Errorf("got %v", r.grant)
+		t.Errorf("grants are %v, want [node-3 node-4]", r.grant)
 	}
 }
 
@@ -132,9 +126,9 @@ func TestRolloutGrantsWorkersBeforeLeaders(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
-		t.Errorf("the worker goes first: %v", r.grant)
+		t.Errorf("grants are %v, want [node-4], the worker", r.grant)
 	}
 }
 
@@ -143,15 +137,14 @@ func TestRolloutGrantsInNameOrder(t *testing.T) {
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
-		t.Errorf("deterministic order, lowest name first: %v", r.grant)
+		t.Errorf("grants are %v, want [node-4], the lowest name", r.grant)
 	}
 }
 
-// A machine that asks again after each turn does not keep a machine
-// that asked before it waiting: the oldest request goes first, and the
-// worker goes ahead of a leader only when they asked at the same time.
+// A worker goes ahead of a leader only when their requests were
+// created in the same second.
 func TestRolloutGrantsTheOldestRequestFirst(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -169,12 +162,12 @@ func TestRolloutGrantsTheOldestRequestFirst(t *testing.T) {
 				rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1},
 				rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 			)
-			q := asking(machines)
-			q.disruptions[0].Metadata.CreationTimestamp = sweepNow.Add(-c.leaderAsked)
-			q.disruptions[1].Metadata.CreationTimestamp = sweepNow.Add(-c.workerAsked)
+			q := requestsOfAwaitingMachines(machines)
+			q.disruptions[0].Metadata.CreationTimestamp = passTime.Add(-c.leaderAsked)
+			q.disruptions[1].Metadata.CreationTimestamp = passTime.Add(-c.workerAsked)
 			q.budgets = []disruption.Budget{*disruption.NewDefaultBudget(1)}
 
-			r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", q, sweepNow)
+			r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", q, passTime)
 
 			if !slices.Equal(r.grant, []string{c.want}) {
 				t.Errorf("granted %v, want %s", r.grant, c.want)
@@ -188,9 +181,9 @@ func TestRolloutOneLeaderAtATimeRegardlessOfBudget(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-2", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(3), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(3), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-1"}) {
-		t.Errorf("quorum is arithmetic: %v", r.grant)
+		t.Errorf("grants are %v, want only [node-1] because two leaders must not reboot together", r.grant)
 	}
 }
 
@@ -199,9 +192,9 @@ func TestRolloutNeverGrantsALeaderWhileAnotherLeaderIsDown(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-2", api.PhaseLost, 5 * time.Minute, false, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(3), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(3), "", passTime)
 	if len(r.grant) != 0 {
-		t.Errorf("a downed leader freezes leader turns: %v", r.grant)
+		t.Errorf("grants are %v, want none while node-2 is down", r.grant)
 	}
 }
 
@@ -211,61 +204,59 @@ func TestRolloutUnplannedTroubleConsumesTheBudget(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseLost, 5 * time.Minute, false, -1},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
 	if len(r.grant) != 0 {
-		t.Errorf("a hurting fleet pauses its own rollout: %v", r.grant)
+		t.Errorf("grants are %v, want none while node-4 is Lost", r.grant)
 	}
 }
 
-func TestRolloutAnOutstandingGrantConsumesTheBudget(t *testing.T) {
+func TestRolloutCountsAnExistingGrantAgainstTheBudget(t *testing.T) {
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, time.Minute},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
 	if len(r.grant) != 0 {
-		t.Errorf("node-4 already holds the turn: %v", r.grant)
+		t.Errorf("grants are %v, want none while node-4 holds a turn", r.grant)
 	}
 	if len(r.revoke) != 0 {
-		t.Errorf("node-4 is still waiting to use it: %v", r.revoke)
+		t.Errorf("revokes are %v, want none while node-4 still waits to reboot", r.revoke)
 	}
 }
 
-func TestRolloutKeepsTheGrantThroughTheReboot(t *testing.T) {
-	// The granted machine has gone silent. That silence is the
-	// reboot that this program asked for, not a loss. So the grant
-	// stands, and the budget stays consumed.
+func TestRolloutKeepsTheGrantWhileTheMachineReboots(t *testing.T) {
+	// node-4's heartbeat stopped because it is rebooting on its grant,
+	// for less than rolloutStallAfter.
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-4", api.PhaseUpdating, 3 * time.Minute, false, 3 * time.Minute},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
 	if len(r.grant) != 0 || len(r.revoke) != 0 {
-		t.Errorf("mid-reboot means wait: grant %v revoke %v", r.grant, r.revoke)
+		t.Errorf("grants are %v and revokes are %v, want none while node-4 reboots", r.grant, r.revoke)
 	}
 	if r.progressing.Reason != "RollingOut" {
-		t.Errorf("got %s", r.progressing.Reason)
+		t.Errorf("Progressing reason is %s, want RollingOut", r.progressing.Reason)
 	}
 }
 
-// The reclaim does not free the slot in the same sweep. The ledger
-// keeps node-4's entry until a later sweep reads the Machine without
-// the grant, at another version, because only then can no grant that
-// the entry covers still land.
+// The reclaim does not free node-4's place in the budget in the same
+// pass. Its entry counts until a later pass reads the Machine without
+// the grant.
 func TestRolloutRevokesAfterTheMachineConverges(t *testing.T) {
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-4", api.PhaseReady, fresh, false, 5 * time.Minute},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.revoke, []string{"node-4"}) {
-		t.Errorf("the turn is spent: %v", r.revoke)
+		t.Errorf("revokes are %v, want [node-4]", r.revoke)
 	}
 	if len(r.grant) != 0 {
-		t.Errorf("node-4's entry still holds the slot, so nobody takes a turn yet: %v", r.grant)
+		t.Errorf("grants are %v, want none while node-4's entry still counts against the budget", r.grant)
 	}
 }
 
@@ -275,150 +266,134 @@ func TestRolloutStallsOnAMachineThatNeverReturns(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdating, 12 * time.Minute, false, 12 * time.Minute},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(3), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(3), "", passTime)
 	if len(r.grant) != 0 {
-		t.Errorf("a stalled rollout grants nothing: %v", r.grant)
+		t.Errorf("grants are %v, want none for a stalled rollout", r.grant)
 	}
 	if r.progressing.Status != "False" || r.progressing.Reason != "RolloutStalled" {
-		t.Errorf("got %s/%s", r.progressing.Status, r.progressing.Reason)
+		t.Errorf("Progressing is %s/%s, want %s/%s", r.progressing.Status, r.progressing.Reason, "False", "RolloutStalled")
 	}
 	if !strings.Contains(r.progressing.Message, "node-4") {
-		t.Errorf("the condition should name the machine holding things up: %s", r.progressing.Message)
+		t.Errorf("the Progressing message is %q, want it to name node-4", r.progressing.Message)
 	}
 }
 
-func TestRolloutAManualMachineDoesNotHoldTheQueue(t *testing.T) {
-	// A Manual machine reports RebootPending, not AwaitingTurn. It is
-	// waiting on a person, not on the cluster, so it gets no grant
-	// and blocks nobody.
+func TestRolloutAManualMachineBlocksNoOtherMachine(t *testing.T) {
+	// node-4 has a staged change but no request, as with
+	// rebootPolicy Manual, so it does not count against the budget.
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, false, -1},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-5"}) {
-		t.Errorf("got %v", r.grant)
+		t.Errorf("grants are %v, want [node-5]", r.grant)
 	}
 }
 
 func TestRolloutRevokesAGrantTheMachineNoLongerWants(t *testing.T) {
-	// The machine was granted a turn, then the edit was reverted, or
-	// the policy changed to Manual, before the machine acted. The
-	// machine is available and no longer asking, so the grant comes
-	// back.
+	// node-4's change was reverted, or its policy set to Manual, after
+	// its grant and before it rebooted.
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-4", api.PhaseReady, fresh, false, time.Minute},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.revoke, []string{"node-4"}) {
-		t.Errorf("got %v", r.revoke)
+		t.Errorf("revokes are %v, want [node-4]", r.revoke)
 	}
 }
 
-// The gate: while the applied system-pod template lags the fleet's
-// target release, only a leader's boot can advance it, so a waiting
-// leader is granted the turn a worker would otherwise have taken.
-
-func TestRolloutGateSendsAWaitingLeaderFirst(t *testing.T) {
+func TestRolloutGrantsAWaitingLeaderFirstWhileTheTemplateLags(t *testing.T) {
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1}, // leader
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1}, // worker
 	)
-	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.01-001", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.01-001", passTime)
 	if !slices.Equal(r.grant, []string{"node-1"}) {
-		t.Errorf("the leader should go first while the template lags: %v", r.grant)
+		t.Errorf("grants are %v, want [node-1] while the template lags", r.grant)
 	}
 	if !strings.Contains(r.progressing.Message, "node-4") {
-		t.Errorf("the worker should be named as waiting: %s", r.progressing.Message)
+		t.Errorf("the Progressing message is %q, want it to name node-4", r.progressing.Message)
 	}
 	for _, version := range []string{"2026.08.01-001", "2026.08.12-002"} {
 		if !strings.Contains(r.progressing.Message, version) {
-			t.Errorf("the message should name both versions: %s", r.progressing.Message)
+			t.Errorf("the Progressing message is %q, want it to name %s", r.progressing.Message, version)
 		}
 	}
 }
 
-func TestRolloutGateGrantsWorkersWhenNoLeaderIsWaiting(t *testing.T) {
-	// Every leader's rebootPolicy is Manual, or a leader is already
-	// down, so no leader carries AwaitingTurn. The gate must not
-	// starve the rollout, so workers proceed in today's order.
+func TestRolloutGrantsWorkersWhenNoLeaderWaitsAndTheTemplateLags(t *testing.T) {
+	// No leader requests a turn, so workers do not wait for one.
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.01-001", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.01-001", passTime)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
-		t.Errorf("a worker should still be granted: %v", r.grant)
+		t.Errorf("grants are %v, want [node-4]", r.grant)
 	}
 }
 
-func TestRolloutGateHoldsWorkersThroughTheLeaderTurn(t *testing.T) {
-	// node-1 holds an unspent grant and is rebooting into the target.
-	// The hold must outlive the sweep that granted the leader, so
-	// even with budget to spare, the waiting worker sits out this
-	// sweep too, and the message keeps saying why.
+func TestRolloutHoldsWorkersThroughALeaderTurnWhileTheTemplateLags(t *testing.T) {
+	// node-1 is rebooting on its grant. The worker waits for the whole
+	// of the leader's turn, not only in the pass that granted it, even
+	// with room in the budget.
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseUpdating, 3 * time.Minute, false, 3 * time.Minute},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, targetingCluster(2, "2026.08.12-002"), "2026.08.01-001", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, targetingCluster(2, "2026.08.12-002"), "2026.08.01-001", passTime)
 	if len(r.grant) != 0 {
-		t.Errorf("the worker waits while the leader's turn runs: %v", r.grant)
+		t.Errorf("grants are %v, want none while the leader's turn runs", r.grant)
 	}
-	if !strings.Contains(r.progressing.Message, "lags the fleet's target") {
-		t.Errorf("the message should keep the explanation: %s", r.progressing.Message)
+	if !strings.Contains(r.progressing.Message, "workers wait") {
+		t.Errorf("the Progressing message is %q, want it to say that workers wait", r.progressing.Message)
 	}
 }
 
-func TestRolloutGateStandsAsideForALeaderStuckWithoutAGrant(t *testing.T) {
-	// node-2 is down with no grant, so no leader turn is advancing
-	// the template, and node-1 cannot be granted while another
-	// leader is down. Holding the workers here would stall the
-	// rollout on a machine that may never return; the guard carries
-	// their lag instead.
+func TestRolloutGrantsWorkersWhenALeaderIsDownAndTheTemplateLags(t *testing.T) {
+	// node-2 is down with no grant, so node-1 cannot get a turn, and
+	// no leader turn will update the template. Workers that waited
+	// would wait for a machine that may never return.
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-2", api.PhaseLost, 5 * time.Minute, false, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, targetingCluster(2, "2026.08.12-002"), "2026.08.01-001", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, targetingCluster(2, "2026.08.12-002"), "2026.08.01-001", passTime)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
-		t.Errorf("the worker proceeds; nothing can advance the template now: %v", r.grant)
+		t.Errorf("grants are %v, want [node-4] because no leader turn can advance the template", r.grant)
 	}
 }
 
-func TestRolloutGateDoesNotHoldWithNoAppliedVersion(t *testing.T) {
-	// No DaemonSet has applied anything yet, so there is nothing to
-	// compare against, and the rollout runs in today's order.
+func TestRolloutGrantsWorkersFirstWithNoAppliedVersion(t *testing.T) {
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1}, // leader
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1}, // worker
 	)
-	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
-		t.Errorf("the worker goes first without an applied version to compare: %v", r.grant)
+		t.Errorf("grants are %v, want [node-4] when no applied version exists", r.grant)
 	}
 }
 
-func TestRolloutGateDoesNotHoldWhenTheTemplateAlreadyMatches(t *testing.T) {
+func TestRolloutGrantsWorkersFirstWhenTheTemplateMatches(t *testing.T) {
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1}, // leader
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1}, // worker
 	)
-	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.12-002", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.12-002", passTime)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
-		t.Errorf("the worker goes first once the template has caught up: %v", r.grant)
+		t.Errorf("grants are %v, want [node-4] when the template matches the target", r.grant)
 	}
 }
 
-func TestRolloutSequencesARequestedRebootLikeAnyOther(t *testing.T) {
-	// A reboot a person asked for waits on the same condition reason
-	// as a staged change, so it takes a turn from the same budget.
-	// The conductor never learns the difference, and it must not:
-	// two machines rebooting on request at once is the same outage
-	// as two rebooting on an upgrade.
+func TestRolloutGivesARequestedRebootATurnLikeAnyOther(t *testing.T) {
+	// A requested reboot counts against the same budget as a staged
+	// change, because two machines rebooting on request at once cause
+	// the same outage as two rebooting for an upgrade.
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-3", api.PhaseUpdatePending, fresh, false, -1},
@@ -430,13 +405,13 @@ func TestRolloutSequencesARequestedRebootLikeAnyOther(t *testing.T) {
 		}
 		machines[i].Status.Conditions = api.SetCondition(machines[i].Status.Conditions, api.Condition{
 			Type: "RebootRequestHonored", Status: "False", Reason: "AwaitingTurn",
-		}, sweepNow)
+		}, passTime)
 	}
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-3"}) {
-		t.Errorf("one requested reboot at a time, like every other reboot: %v", r.grant)
+		t.Errorf("grants are %v, want only [node-3]", r.grant)
 	}
 	if !strings.Contains(r.progressing.Message, "node-4") {
-		t.Errorf("the condition should name who is still waiting: %s", r.progressing.Message)
+		t.Errorf("the Progressing message is %q, want it to name node-4", r.progressing.Message)
 	}
 }

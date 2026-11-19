@@ -26,47 +26,46 @@ func fluxCluster() *cluster.Cluster {
 	return c
 }
 
-// The minted pair must round-trip through the same library Flux's
-// git client uses to read it, and the two halves must agree.
+// Flux's git client parses keys with the same ssh library, so the
+// generated keys must parse with it and be halves of one key.
 func TestMintDeployKeyProducesAMatchedPair(t *testing.T) {
 	pub, priv, err := mintDeployKey("lab")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the deploy key: %v", err)
 	}
 	parsedPub, comment, _, _, err := ssh.ParseAuthorizedKey([]byte(pub))
 	if err != nil {
-		t.Fatalf("the public half must parse as an authorized_keys line: %v", err)
+		t.Fatalf("parsing the public half as an authorized_keys line: %v", err)
 	}
 	if comment != "liken:lab" {
-		t.Errorf("the comment should name the cluster, got %q", comment)
+		t.Errorf("the key comment is %q, want liken:lab", comment)
 	}
 	signer, err := ssh.ParsePrivateKey([]byte(priv))
 	if err != nil {
-		t.Fatalf("the private half must parse as an SSH private key: %v", err)
+		t.Fatalf("parsing the private half as an SSH private key: %v", err)
 	}
 	if string(signer.PublicKey().Marshal()) != string(parsedPub.Marshal()) {
-		t.Error("the two halves must be the same key")
+		t.Error("the public half and the private half are different keys, want one key")
 	}
 }
 
 func TestEnsureFluxDeployKeyDoesNothingWithoutTheFeature(t *testing.T) {
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("no API call should happen: %s %s", r.Method, r.URL.Path)
+		t.Errorf("the request %s %s was sent, want no request", r.Method, r.URL.Path)
 	}))
 	plain := &cluster.Cluster{}
 	plain.Metadata.Name = "lab"
 	if got := ensureFluxDeployKey(c, nil, plain); got != "" {
-		t.Errorf("no feature, no key: got %q", got)
+		t.Errorf("the key is %q with the feature off, want empty", got)
 	}
 }
 
 func TestEnsureFluxDeployKeyReadsAnExistingKey(t *testing.T) {
-	// data values arrive base64-encoded from the API: the public key
-	// line, and the known_hosts value that already matches the
-	// declared one, so no write of any kind should happen.
+	// The API returns data values base64-encoded. known_hosts already
+	// matches the declaration, so the function must write nothing.
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("an existing, current key must only be read: %s %s", r.Method, r.URL.Path)
+			t.Errorf("the request %s %s was sent, want only reads when the key and known_hosts are current", r.Method, r.URL.Path)
 		}
 		w.Write([]byte(`{"type": "Opaque", "data": {
 			"identity.pub": "c3NoLWVkMjU1MTkgQUFBQSBsaWtlbjpsYWI=",
@@ -74,14 +73,13 @@ func TestEnsureFluxDeployKeyReadsAnExistingKey(t *testing.T) {
 	}))
 	got := ensureFluxDeployKey(c, nil, fluxCluster())
 	if got != "ssh-ed25519 AAAA liken:lab" {
-		t.Errorf("got %q", got)
+		t.Errorf("the public key is %q, want the key in the Secret", got)
 	}
 }
 
-// The declared knownHosts can change after the mint: a forge rotates
-// its host key, or the first declaration was wrong. The key itself
-// never changes here, but the Secret's known_hosts entry follows the
-// declaration.
+// The Cluster's knownHosts can change after the key is created, for
+// example when a forge rotates its host key. The key pair stays the
+// same and the Secret's known_hosts entry is updated.
 func TestEnsureFluxDeployKeyRefreshesStaleKnownHosts(t *testing.T) {
 	var patched string
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -94,14 +92,14 @@ func TestEnsureFluxDeployKeyRefreshesStaleKnownHosts(t *testing.T) {
 			body, _ := io.ReadAll(r.Body)
 			patched = string(body)
 		default:
-			t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
+			t.Errorf("the request %s %s was sent, want only GET and PATCH", r.Method, r.URL.Path)
 		}
 	}))
 	if got := ensureFluxDeployKey(c, nil, fluxCluster()); got != "ssh-ed25519 AAAA liken:lab" {
-		t.Errorf("got %q", got)
+		t.Errorf("the public key is %q, want the key in the Secret", got)
 	}
 	if !strings.Contains(patched, "forge.example ssh-ed25519 HOSTKEY") {
-		t.Errorf("the patch should carry the declared known_hosts, got %q", patched)
+		t.Errorf("the patch body is %q, want the declared known_hosts", patched)
 	}
 }
 
@@ -119,30 +117,30 @@ func TestEnsureFluxDeployKeyMintsIntoTheSecret(t *testing.T) {
 			http.NotFound(w, r)
 		case http.MethodPost:
 			if err := json.NewDecoder(r.Body).Decode(&created); err != nil {
-				t.Fatal(err)
+				t.Fatalf("decoding the created Secret: %v", err)
 			}
 			w.WriteHeader(http.StatusCreated)
 		}
 	}))
 	got := ensureFluxDeployKey(c, nil, fluxCluster())
 	if created.Metadata.Name != "flux-system" || created.Metadata.Namespace != "flux-system" {
-		t.Errorf("the Secret must use Flux's conventional name: %+v", created.Metadata)
+		t.Errorf("the created Secret is %+v, want name and namespace flux-system", created.Metadata)
 	}
 	if !strings.HasPrefix(created.StringData["identity"], "-----BEGIN OPENSSH PRIVATE KEY-----") {
-		t.Errorf("identity must carry the private half: %q", created.StringData["identity"])
+		t.Errorf("identity is %q, want the private half", created.StringData["identity"])
 	}
 	if !strings.HasPrefix(created.StringData["identity.pub"], "ssh-ed25519 ") {
-		t.Errorf("identity.pub must carry the public half: %q", created.StringData["identity.pub"])
+		t.Errorf("identity.pub is %q, want the public half", created.StringData["identity.pub"])
 	}
 	if created.StringData["known_hosts"] != "forge.example ssh-ed25519 HOSTKEY" {
-		t.Errorf("known_hosts must carry the declared host keys: %q", created.StringData["known_hosts"])
+		t.Errorf("known_hosts is %q, want the declared host keys", created.StringData["known_hosts"])
 	}
 	if got != created.StringData["identity.pub"] {
-		t.Errorf("the returned key must be the minted one: %q vs %q", got, created.StringData["identity.pub"])
+		t.Errorf("the returned key is %q, want the created identity.pub %q", got, created.StringData["identity.pub"])
 	}
 }
 
-const testSeed = `---
+const testFluxManifest = `---
 # This manifest was generated by flux. DO NOT EDIT.
 apiVersion: v1
 kind: Namespace
@@ -161,23 +159,23 @@ metadata:
   namespace: flux-system
 `
 
-func TestParseSeedReadsEveryDocument(t *testing.T) {
-	objects, err := parseSeed([]byte(testSeed))
+func TestParseFluxManifestReadsEveryDocument(t *testing.T) {
+	objects, err := parseFluxManifest([]byte(testFluxManifest))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the test Flux manifest: %v", err)
 	}
 	if len(objects) != 3 {
-		t.Fatalf("expected three objects, got %d", len(objects))
+		t.Fatalf("the Flux manifest has %d objects, want 3", len(objects))
 	}
 	if objects[0].Kind != "Namespace" || objects[0].Name != "flux-system" {
-		t.Errorf("first object: %+v", objects[0])
+		t.Errorf("the first object is %+v, want Namespace flux-system", objects[0])
 	}
 	if objects[2].Namespace != "flux-system" {
-		t.Errorf("the Deployment must keep its namespace: %+v", objects[2])
+		t.Errorf("the Deployment is %+v, want namespace flux-system", objects[2])
 	}
 }
 
-func TestSeedCollectionPaths(t *testing.T) {
+func TestCollectionPathOfEachManifestKind(t *testing.T) {
 	for _, tc := range []struct {
 		apiVersion, kind, namespace, want string
 	}{
@@ -188,74 +186,73 @@ func TestSeedCollectionPaths(t *testing.T) {
 		{"rbac.authorization.k8s.io/v1", "ClusterRoleBinding", "", "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings"},
 		{"networking.k8s.io/v1", "NetworkPolicy", "flux-system", "/apis/networking.k8s.io/v1/namespaces/flux-system/networkpolicies"},
 	} {
-		got, err := collectionPath(seedObject{APIVersion: tc.apiVersion, Kind: tc.kind, Namespace: tc.namespace})
+		got, err := collectionPath(manifestObject{APIVersion: tc.apiVersion, Kind: tc.kind, Namespace: tc.namespace})
 		if err != nil {
-			t.Errorf("%s: %v", tc.kind, err)
+			t.Errorf("collectionPath for %s returned the error %v", tc.kind, err)
 		}
 		if got != tc.want {
-			t.Errorf("%s: got %q, want %q", tc.kind, got, tc.want)
+			t.Errorf("collectionPath for %s is %q, want %q", tc.kind, got, tc.want)
 		}
 	}
-	if _, err := collectionPath(seedObject{APIVersion: "v1", Kind: "Pod"}); err == nil {
-		t.Error("a kind outside the seed's vocabulary must be an error")
+	if _, err := collectionPath(manifestObject{APIVersion: "v1", Kind: "Pod"}); err == nil {
+		t.Error("collectionPath for a Pod returned no error, want an error because manifestKinds has no Pod")
 	}
 }
 
-// When the build has copied the real seed (make always does), every
-// one of its documents must parse and map in the planter's table,
-// and the probe object must be among them. This is the test that
-// fails when a Flux version bump introduces a kind the table does
-// not map.
-// realSeed is the engine seed that the binary embeds. The flux domain
-// renders it, and `make test-go` copies it into seed/ before the tests
-// run. A plain `go test` in a checkout that has not fetched the flux
-// domain skips, because the embed then holds only the README. Under CI
-// the seed's absence fails the test: CI runs `make test-go`, and a skip
-// there would pass a Flux bump that breaks the seed with no test of it.
-func realSeed(t *testing.T) []byte {
+// realFluxManifest returns the Flux manifest that the binary embeds. The flux
+// component renders it, and `make test-go` copies it into seed/ before
+// the tests run. A plain `go test` in a checkout without the rendered
+// manifest skips the test, because the embed holds only the README.
+// Under CI a missing manifest fails the test instead, because a skip
+// would let a Flux upgrade that breaks the manifest pass.
+func realFluxManifest(t *testing.T) []byte {
 	t.Helper()
-	seed, err := engineSeed()
+	manifest, err := fluxManifest()
 	if err == nil {
-		return seed
+		return manifest
 	}
 	if os.Getenv("CI") != "" {
-		t.Fatalf("CI ran the tests with no seed: %v. `make test-go` copies it from the flux domain", err)
+		t.Fatalf("the Flux manifest is missing under CI: %v. Run make test-go, which copies the Flux manifest from the flux component", err)
 	}
-	t.Skip("no seed copied yet; `make test-go` supplies it")
+	t.Skip("the Flux manifest is not copied yet. make test-go copies it")
 	return nil
 }
 
+// Every document of the real Flux manifest must parse and have a kind in
+// manifestKinds, and the Flux manifest must contain the kustomize-controller
+// Deployment that the probe looks for. This test fails when a Flux
+// upgrade adds a kind that manifestKinds does not map.
 func TestTheRealSeedParsesAndMapsWhole(t *testing.T) {
-	seed := realSeed(t)
-	objects, err := parseSeed(seed)
+	manifest := realFluxManifest(t)
+	objects, err := parseFluxManifest(manifest)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the real Flux manifest: %v", err)
 	}
 	probeSeen := false
 	for _, o := range objects {
 		if _, err := collectionPath(o); err != nil {
-			t.Error(err)
+			t.Errorf("the Flux manifest object %s %s has no collection path: %v", o.Kind, o.Name, err)
 		}
 		if o.Kind == "Deployment" && o.Name == "kustomize-controller" {
 			probeSeen = true
 		}
 	}
 	if !probeSeen {
-		t.Error("the seed must contain the probe object, the kustomize-controller Deployment")
+		t.Error("the Flux manifest has no kustomize-controller Deployment, want one because the Flux probe reads it")
 	}
 }
 
-func TestEnsureFluxEngineLeavesAPresentEngineAlone(t *testing.T) {
+func TestEnsureFluxControllersLeavesPresentControllersAlone(t *testing.T) {
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("a present engine is git's, never re-planted: %s %s", r.Method, r.URL.Path)
+			t.Errorf("the request %s %s was sent, want only reads when the Flux controllers are present", r.Method, r.URL.Path)
 		}
 		w.Write([]byte(`{"metadata": {"name": "kustomize-controller"}}`))
 	}))
-	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), &engineProbe{}, sweepNow)
+	ensureFluxControllers(c, nil, fluxCluster(), []byte(testFluxManifest), &fluxProbe{}, passTime)
 }
 
-func TestEnsureFluxEnginePlantsWhenAbsent(t *testing.T) {
+func TestEnsureFluxControllersCreatesThemWhenAbsent(t *testing.T) {
 	var created []string
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -263,8 +260,8 @@ func TestEnsureFluxEnginePlantsWhenAbsent(t *testing.T) {
 			http.NotFound(w, r)
 		case http.MethodPost:
 			created = append(created, r.URL.Path)
-			// The namespace already exists (liken owns it), so
-			// ensureFluxEngine must accept the conflict and continue.
+			// The namespace already exists, so ensureFluxControllers must
+			// accept the conflict and continue.
 			if r.URL.Path == "/api/v1/namespaces" {
 				w.WriteHeader(http.StatusConflict)
 				return
@@ -272,47 +269,45 @@ func TestEnsureFluxEnginePlantsWhenAbsent(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 		}
 	}))
-	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), &engineProbe{}, sweepNow)
+	ensureFluxControllers(c, nil, fluxCluster(), []byte(testFluxManifest), &fluxProbe{}, passTime)
 	want := []string{
 		"/api/v1/namespaces",
 		"/apis/apiextensions.k8s.io/v1/customresourcedefinitions",
 		"/apis/apps/v1/namespaces/flux-system/deployments",
 	}
 	if !slices.Equal(created, want) {
-		t.Errorf("created %v, want %v", created, want)
+		t.Errorf("the created paths are %v, want %v", created, want)
 	}
 }
 
-// The probe is the fleet's most frequent request, so it asks on its
-// own interval, not on every ten-second sweep. One probe carries the
-// three answers in order: the first sweep asks, a sweep inside the
-// interval does not, and a sweep at the interval asks again.
-func TestEnsureFluxEngineProbesOnceAnInterval(t *testing.T) {
+// The first pass probes, a pass inside fluxProbeInterval does
+// not, and a pass at the interval probes again.
+func TestEnsureFluxControllersProbesOnceAnInterval(t *testing.T) {
 	probes := 0
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		probes++
 		w.Write([]byte(`{"metadata": {"name": "kustomize-controller"}}`))
 	}))
-	probe := &engineProbe{}
+	probe := &fluxProbe{}
 
-	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), probe, sweepNow)
+	ensureFluxControllers(c, nil, fluxCluster(), []byte(testFluxManifest), probe, passTime)
 	if probes != 1 {
-		t.Fatalf("the first sweep probes: %d", probes)
+		t.Fatalf("after the first pass there were %d probes, want 1", probes)
 	}
-	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), probe, sweepNow.Add(50*time.Second))
+	ensureFluxControllers(c, nil, fluxCluster(), []byte(testFluxManifest), probe, passTime.Add(50*time.Second))
 	if probes != 1 {
-		t.Errorf("a sweep inside the interval asks nothing: %d", probes)
+		t.Errorf("after a pass inside the interval there were %d probes, want 1", probes)
 	}
-	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), probe, sweepNow.Add(engineProbeInterval))
+	ensureFluxControllers(c, nil, fluxCluster(), []byte(testFluxManifest), probe, passTime.Add(fluxProbeInterval))
 	if probes != 2 {
-		t.Errorf("a sweep at the interval asks again: %d", probes)
+		t.Errorf("after a pass at the interval there were %d probes, want 2", probes)
 	}
 }
 
-// Planting counts as an ask, because the probe records the ask before
-// it reads the answer. The sweep that planted asks nothing again
-// until the interval passes.
-func TestEnsureFluxEngineCountsAPlantAsAnAsk(t *testing.T) {
+// Creating the Flux manifest counts as a probe, because the probe time is
+// recorded before the check runs. The next pass, ten seconds later,
+// does not probe again.
+func TestEnsureFluxControllersCountsACreateAsAProbe(t *testing.T) {
 	probes, creates := 0, 0
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -324,40 +319,39 @@ func TestEnsureFluxEngineCountsAPlantAsAnAsk(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 		}
 	}))
-	probe := &engineProbe{}
+	probe := &fluxProbe{}
 
-	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), probe, sweepNow)
-	ensureFluxEngine(c, nil, fluxCluster(), []byte(testSeed), probe, sweepNow.Add(10*time.Second))
+	ensureFluxControllers(c, nil, fluxCluster(), []byte(testFluxManifest), probe, passTime)
+	ensureFluxControllers(c, nil, fluxCluster(), []byte(testFluxManifest), probe, passTime.Add(10*time.Second))
 	if probes != 1 {
-		t.Errorf("probes: %d, want 1", probes)
+		t.Errorf("there were %d probes, want 1", probes)
 	}
 	if creates != 3 {
-		t.Errorf("the one plant creates the whole seed: %d, want 3", creates)
+		t.Errorf("there were %d creates, want 3 for the whole Flux manifest", creates)
 	}
 }
 
-// The feature gate comes before the probe's interval, so a cluster
-// that never declares flux asks nothing and uses up no interval. The
-// untouched asked time is what makes the first sweep after an opt-in
-// probe at once.
-func TestEnsureFluxEngineDoesNothingWithoutTheFeature(t *testing.T) {
+// A cluster without the flux feature makes no request and does not
+// record a probe time, so the first pass after the feature is
+// declared probes at once.
+func TestEnsureFluxControllersDoesNothingWithoutTheFeature(t *testing.T) {
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("no API call should happen: %s %s", r.Method, r.URL.Path)
+		t.Errorf("the request %s %s was sent, want no request", r.Method, r.URL.Path)
 	}))
 	plain := &cluster.Cluster{}
 	plain.Metadata.Name = "lab"
-	probe := &engineProbe{}
+	probe := &fluxProbe{}
 
-	ensureFluxEngine(c, nil, plain, []byte(testSeed), probe, sweepNow)
+	ensureFluxControllers(c, nil, plain, []byte(testFluxManifest), probe, passTime)
 
-	if !probe.asked.IsZero() {
-		t.Errorf("an undeclared feature must not spend the interval: %v", probe.asked)
+	if !probe.lastProbe.IsZero() {
+		t.Errorf("lastProbe is %v with the feature off, want the zero time", probe.lastProbe)
 	}
 }
 
-// A conflicting create means another leader's operator minted first.
-// The sweep returns nothing this pass and reads the winner's key on
-// the next one; both copies then publish the same value.
+// A conflict on create means another leader's operator created the
+// Secret first. This pass returns no key, and the next pass reads the
+// other operator's key, so both operators publish the same value.
 func TestEnsureFluxDeployKeyYieldsToAConcurrentMint(t *testing.T) {
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -369,24 +363,24 @@ func TestEnsureFluxDeployKeyYieldsToAConcurrentMint(t *testing.T) {
 		}
 	}))
 	if got := ensureFluxDeployKey(c, nil, fluxCluster()); got != "" {
-		t.Errorf("a lost race publishes nothing this pass: got %q", got)
+		t.Errorf("the key is %q after a conflict on create, want empty", got)
 	}
 }
 
-// Retraction's other half of the seed contract: every cluster-scoped
-// object the seed creates must be on the janitor's teardown list,
-// and the operator's standing rights must name it. A Flux version
-// bump that adds a CRD fails here until both keep up. Namespaced
-// objects need no entry: the namespace's own deletion sweeps them.
-func TestTheTeardownAndItsRightsCoverTheSeed(t *testing.T) {
-	seed := realSeed(t)
-	objects, err := parseSeed(seed)
+// Every cluster-scoped object that the Flux manifest creates must be in
+// fluxTeardownPaths, and manifests/cluster-operator.yaml must name it
+// in the operator's RBAC rules. A Flux upgrade that adds a CRD fails
+// here until both are updated. Namespaced objects need no entry,
+// because deleting the namespace deletes them.
+func TestTheTeardownAndItsRightsCoverTheFluxManifest(t *testing.T) {
+	manifest := realFluxManifest(t)
+	objects, err := parseFluxManifest(manifest)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the real Flux manifest: %v", err)
 	}
 	rights, err := os.ReadFile("manifests/cluster-operator.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the operator manifest: %v", err)
 	}
 	for _, o := range objects {
 		var path string
@@ -401,10 +395,10 @@ func TestTheTeardownAndItsRightsCoverTheSeed(t *testing.T) {
 			continue
 		}
 		if !slices.Contains(fluxTeardownPaths, path) {
-			t.Errorf("the teardown must cover %s %s", o.Kind, o.Name)
+			t.Errorf("fluxTeardownPaths has no path for %s %s, want one", o.Kind, o.Name)
 		}
 		if !strings.Contains(string(rights), o.Name) {
-			t.Errorf("the operator's standing rights must name %s %s", o.Kind, o.Name)
+			t.Errorf("the RBAC rules in manifests/cluster-operator.yaml do not name %s %s, want it named", o.Kind, o.Name)
 		}
 	}
 }

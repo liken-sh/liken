@@ -1,14 +1,12 @@
 package main
 
-// What the fleet asks for, and the limits it keeps: the Disruptions
-// and the MachineDisruptionBudgets that the rollout conductor reads on
-// each sweep (rollout.go).
-//
-// A machine asks for a turn with a Disruption, and the conductor grants
-// a turn to a machine with a request that is approved and not done.
-// The ledger entry names each such request, and the entry stays while
-// one of them is open, so a request that arrives during the turn
-// joins it.
+// A Disruption requests a reboot turn for one machine, and a
+// MachineDisruptionBudget limits how many of the machines it selects
+// can be out of service at once. The rollout (rollout.go) grants a turn
+// to a machine that has an open request: one that is approved and not
+// done. The machine's entry in the Cluster's status.rebootTurns lists
+// the requests that the turn covers, and a request that is opened
+// during the turn joins it.
 
 import (
 	"fmt"
@@ -23,21 +21,21 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// fleetRequests is what a sweep read of the Disruptions and the
-// budgets. A cluster that does not serve the kinds, because its leaders
-// run a release from before them, reads as none of either, and the
-// conductor keeps the one budget that spec.disruption declares.
+// fleetRequests is the set of Disruptions and MachineDisruptionBudgets
+// that a pass read. When the cluster has no budget named default, which
+// includes a cluster that does not serve the kinds, budgetsOf adds an
+// unsaved default budget with defaultBudgetLimit.
 type fleetRequests struct {
 	disruptions []disruption.Disruption
 	budgets     []disruption.Budget
 
-	// budgetsServed says the cluster serves the budgets, and lets this
-	// program read them, so the conductor can create the default one.
+	// budgetsServed is true when the API server serves the budget kind,
+	// so the default budget can be created.
 	budgetsServed bool
 }
 
-// of answers the Disruptions that name a machine, in name order.
-func (q fleetRequests) of(name string) []disruption.Disruption {
+// forMachine returns the Disruptions for a machine, in name order.
+func (q fleetRequests) forMachine(name string) []disruption.Disruption {
 	var mine []disruption.Disruption
 	for _, d := range q.disruptions {
 		if d.Spec.Machine == name {
@@ -48,34 +46,34 @@ func (q fleetRequests) of(name string) []disruption.Disruption {
 	return mine
 }
 
-// An approval is whether a request may take a turn, and the reason a
-// person reads on the request's Approved condition.
+// approval reports whether approve approved a request, with the
+// reason and message for the request's Approved condition.
 type approval struct {
 	approved bool
 	reason   string
 	message  string
 }
 
-// approve judges one request against its machine. A machine on
-// rebootPolicy Auto approves every request, and a Manual machine's
-// request is approved while its approvedHash names its hash.
+// approve approves every request of a machine whose rebootPolicy is
+// Auto. On a Manual machine it approves a request whose
+// spec.approvedHash matches its spec.hash.
 func approve(d *disruption.Disruption, m *machine.Machine) approval {
 	if m.Spec.RebootPolicyOrDefault() == machine.RebootAuto {
-		return approval{true, "AutoPolicy", "the machine's rebootPolicy is Auto, which approves every request"}
+		return approval{true, "AutoPolicy", "The machine's rebootPolicy is Auto, which approves every request"}
 	}
 	if d.ApprovedByHash() {
-		return approval{true, "HashApproved", fmt.Sprintf("spec.approvedHash names spec.hash (%.12s)", d.Spec.Hash)}
+		return approval{true, "HashApproved", fmt.Sprintf("spec.approvedHash matches spec.hash (%.12s)", d.Spec.Hash)}
 	}
 	return approval{false, "AwaitingApproval",
-		fmt.Sprintf("the machine's rebootPolicy is Manual; approve the request with `liken approve-reboot`, or set spec.approvedHash to spec.hash (%.12s)", d.Spec.Hash)}
+		fmt.Sprintf("The machine's rebootPolicy is Manual. Approve the request with liken approve-reboot, or set spec.approvedHash to spec.hash (%.12s)", d.Spec.Hash)}
 }
 
-// open answers the names of a machine's requests that are approved and
-// not done, in name order. These are the requests a turn grants.
+// open returns the names of a machine's requests that are approved and
+// not done, in name order.
 func (q fleetRequests) open(m *machine.Machine) []string {
 	bootID := machine.BootID(m.Status.Boot)
 	var names []string
-	for _, d := range q.of(m.Metadata.Name) {
+	for _, d := range q.forMachine(m.Metadata.Name) {
 		if !d.Done(bootID) && approve(&d, m).approved {
 			names = append(names, d.Metadata.Name)
 		}
@@ -83,13 +81,13 @@ func (q fleetRequests) open(m *machine.Machine) []string {
 	return names
 }
 
-// oldestOpen answers when the machine's oldest open request was made,
-// to the second the API server records. The conductor serves the
-// oldest request first.
+// oldestOpen returns the creation time of the machine's oldest open
+// request, truncated to the second, or the zero time when it has none.
+// The rollout grants the machine with the oldest request first.
 func (q fleetRequests) oldestOpen(m *machine.Machine) time.Time {
 	open := q.open(m)
 	var oldest time.Time
-	for _, d := range q.of(m.Metadata.Name) {
+	for _, d := range q.forMachine(m.Metadata.Name) {
 		if slices.Contains(open, d.Metadata.Name) && (oldest.IsZero() || d.Metadata.CreationTimestamp.Before(oldest)) {
 			oldest = d.Metadata.CreationTimestamp
 		}
@@ -97,7 +95,8 @@ func (q fleetRequests) oldestOpen(m *machine.Machine) time.Time {
 	return oldest.Truncate(time.Second)
 }
 
-// compareLeader orders a worker ahead of a leader.
+// compareLeader orders a worker before a leader. a and b are true for
+// a leader.
 func compareLeader(a, b bool) int {
 	switch {
 	case a == b:
@@ -108,9 +107,9 @@ func compareLeader(a, b bool) int {
 	return -1
 }
 
-// joined answers an entry's Disruptions with each open request of its
-// machine added, so a request that arrives during the turn shares it.
-func joined(entry []string, open []string) []string {
+// withOpenRequests returns the Disruption names of a machine's
+// status.rebootTurns entry with its open requests added, sorted.
+func withOpenRequests(entry []string, open []string) []string {
 	names := slices.Clone(entry)
 	for _, name := range open {
 		if !slices.Contains(names, name) {
@@ -121,14 +120,15 @@ func joined(entry []string, open []string) []string {
 	return names
 }
 
-// holdsEntry reports whether an entry that names Disruptions stays in
-// the ledger although its Machine holds no grant at the recorded
-// version: the machine is unavailable, so its turn is not over, or one
-// of the entry's requests is still open. A release whose
-// machine-operator acts on the entry alone needs the entry to stay
-// for as long as it works on the turn, with no grant on the Machine to
-// show it.
-func holdsEntry(turn cluster.RebootTurn, open []string, phase api.Phase) bool {
+// requestsKeepTurn reports whether the Disruptions of a
+// status.rebootTurns entry keep the entry. decideRollout asks only
+// when the Machine shows no grant and its resourceVersion differs from
+// the entry's, which otherwise ends the turn. An entry with no
+// Disruptions is never kept this way. One with Disruptions is kept
+// while the machine is unavailable, because its turn is not over, and
+// while any of the entry's requests is open, because machine-operator
+// can act on the entry with no grant on the Machine.
+func requestsKeepTurn(turn cluster.RebootTurn, open []string, phase api.Phase) bool {
 	if len(turn.Disruptions) == 0 {
 		return false
 	}
@@ -138,20 +138,19 @@ func holdsEntry(turn cluster.RebootTurn, open []string, phase api.Phase) bool {
 	return slices.ContainsFunc(turn.Disruptions, func(name string) bool { return slices.Contains(open, name) })
 }
 
-// downloading reports whether the machine's release is still on its
-// way to the machine. A turn waits for it, so the release joins the
-// turn's one drain and one reboot. A fetch that failed and waits to
-// retry reports the reason DownloadRetrying, so a release server that
-// is down holds no turn.
+// downloading reports whether the machine is downloading its new
+// release. A turn waits for the download, so that the new release
+// installs in the same drain and reboot. A download that failed and
+// waits to retry has the reason DownloadRetrying and does not count, so
+// an unreachable release server does not delay a turn.
 func downloading(m *machine.Machine) bool {
 	c := api.FindCondition(m.Status.Conditions, "VersionConverged")
 	return c != nil && c.Reason == "Downloading"
 }
 
-// budgetsOf answers the budgets that limit the fleet. The default
-// budget always limits it: until the cluster serves a budget named
-// default, a stand-in of one machine at a time takes its place, the
-// limit the conductor creates it with.
+// budgetsOf returns the budgets that limit the fleet, in name order.
+// Until the cluster has a budget named default, an unsaved default
+// budget with defaultBudgetLimit takes its place.
 func (q fleetRequests) budgetsOf() []disruption.Budget {
 	budgets := slices.Clone(q.budgets)
 	if !slices.ContainsFunc(budgets, func(b disruption.Budget) bool { return b.Metadata.Name == disruption.DefaultBudget }) {
@@ -161,46 +160,45 @@ func (q fleetRequests) budgetsOf() []disruption.Budget {
 	return budgets
 }
 
-// defaultBudgetLimit is the limit the default budget starts with: one
-// machine at a time, the safest rollout.
+// defaultBudgetLimit is the maxUnavailable that the default budget is
+// created with.
 const defaultBudgetLimit = 1
 
-// A budgetBook counts each budget's room through one sweep. It starts
-// from the machines that are already out of service, and each grant
-// takes a slot of every budget that selects the machine.
-type budgetBook struct {
-	budgets  []disruption.Budget
-	selected [][]string
-	out      [][]string
+// budgetCounts counts the machines that each budget has out of service
+// during one pass. It starts with the machines that are already out of
+// service, and add counts each machine that the pass grants a turn.
+type budgetCounts struct {
+	budgets     []disruption.Budget
+	selected    [][]string
+	unavailable [][]string
 }
 
-func newBudgetBook(budgets []disruption.Budget, machines []machine.Machine, occupying []string) *budgetBook {
-	book := &budgetBook{budgets: budgets, selected: make([][]string, len(budgets)), out: make([][]string, len(budgets))}
+func newBudgetCounts(budgets []disruption.Budget, machines []machine.Machine, outOfService []string) *budgetCounts {
+	counts := &budgetCounts{budgets: budgets, selected: make([][]string, len(budgets)), unavailable: make([][]string, len(budgets))}
 	for i, b := range budgets {
 		for _, m := range machines {
 			if !b.Spec.Selector.Selects(m.Metadata.Labels) {
 				continue
 			}
-			book.selected[i] = append(book.selected[i], m.Metadata.Name)
-			if slices.Contains(occupying, m.Metadata.Name) {
-				book.out[i] = append(book.out[i], m.Metadata.Name)
+			counts.selected[i] = append(counts.selected[i], m.Metadata.Name)
+			if slices.Contains(outOfService, m.Metadata.Name) {
+				counts.unavailable[i] = append(counts.unavailable[i], m.Metadata.Name)
 			}
 		}
 	}
-	return book
+	return counts
 }
 
-// refusal answers why a machine cannot take a turn now: the first
-// budget, in name order, that selects it and has no room. It answers
-// the empty string when every budget that selects the machine has
-// room.
-func (b *budgetBook) refusal(name string) string {
+// refusal returns why a machine cannot take a turn: the first budget,
+// in name order, that selects it and is full. It returns "" when every
+// budget that selects the machine has room.
+func (b *budgetCounts) refusal(name string) string {
 	for i, budget := range b.budgets {
-		if !slices.Contains(b.selected[i], name) || len(b.out[i]) < budget.Spec.MaxUnavailable {
+		if !slices.Contains(b.selected[i], name) || len(b.unavailable[i]) < budget.Spec.MaxUnavailable {
 			continue
 		}
-		return fmt.Sprintf("the %s budget allows %d out of service, and %s %s",
-			budget.Metadata.Name, budget.Spec.MaxUnavailable, strings.Join(b.out[i], ", "), isOrAre(len(b.out[i])))
+		return fmt.Sprintf("The %s budget allows %d out of service, and %s %s",
+			budget.Metadata.Name, budget.Spec.MaxUnavailable, strings.Join(b.unavailable[i], ", "), isOrAre(len(b.unavailable[i])))
 	}
 	return ""
 }
@@ -212,30 +210,31 @@ func isOrAre(n int) string {
 	return "are out"
 }
 
-// take records a grant in every budget that selects the machine.
-func (b *budgetBook) take(name string) {
+// add counts a granted machine as out of service in every budget
+// that selects it.
+func (b *budgetCounts) add(name string) {
 	for i := range b.budgets {
-		if slices.Contains(b.selected[i], name) && !slices.Contains(b.out[i], name) {
-			b.out[i] = append(b.out[i], name)
+		if slices.Contains(b.selected[i], name) && !slices.Contains(b.unavailable[i], name) {
+			b.unavailable[i] = append(b.unavailable[i], name)
 		}
 	}
 }
 
-// statuses answers what each budget the cluster serves reports after
-// the sweep. The stand-in for a missing default budget reports
-// nothing, because there is no object to report on.
-func (b *budgetBook) statuses(served []disruption.Budget) map[string]disruption.BudgetStatus {
+// statuses returns the status to write for each budget in served,
+// after the pass's grants. The unsaved default budget of budgetsOf is
+// not in served, so it gets no status.
+func (b *budgetCounts) statuses(served []disruption.Budget) map[string]disruption.BudgetStatus {
 	statuses := map[string]disruption.BudgetStatus{}
 	for i, budget := range b.budgets {
 		if !slices.ContainsFunc(served, func(s disruption.Budget) bool { return s.Metadata.Name == budget.Metadata.Name }) {
 			continue
 		}
-		out := slices.Sorted(slices.Values(b.out[i]))
+		out := slices.Sorted(slices.Values(b.unavailable[i]))
 		allowed := max(budget.Spec.MaxUnavailable-len(out), 0)
 		condition := api.Condition{
 			Type: disruption.AllowedCondition, Status: api.ConditionTrue, Reason: "BudgetHasRoom",
 			ObservedGeneration: budget.Metadata.Generation,
-			Message:            fmt.Sprintf("%d of %d out of service", len(out), budget.Spec.MaxUnavailable),
+			Message:            fmt.Sprintf("%d of %d allowed machines are out of service", len(out), budget.Spec.MaxUnavailable),
 		}
 		if len(out) > 0 {
 			condition.Message += ": " + strings.Join(out, ", ")

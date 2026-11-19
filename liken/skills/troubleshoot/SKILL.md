@@ -176,7 +176,7 @@ request of the machine:
   `cluster-operator` starts. A message that says the machine is out
   of service with no turn names its phase, such as `Lost` or
   `Degraded`: the request waits until the machine is back. A message
-  that says it waits for the next sweep clears within seconds.
+  that says it waits for the next cluster-operator pass clears within seconds.
 
 When a budget has no room, read the budgets:
 

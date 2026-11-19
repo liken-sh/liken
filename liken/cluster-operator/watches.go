@@ -1,59 +1,52 @@
 package main
 
-// The cluster operator's watches, and the reads a sweep makes through
-// them.
+// Each pass reads the whole fleet: every Machine, every heartbeat
+// Lease, the Cluster, the DaemonSets in liken-system, and the pods of
+// each DaemonSet in refreshedDaemonSets. The ticker in main.go runs a
+// pass every ten seconds, because only a pass marks a machine Lost
+// when its heartbeat ages and reports a rollout whose granted turn has
+// stalled. Status writes across the fleet start more passes. Reading
+// every collection from the API server on each pass would send one
+// request per collection each time. So the operator watches each
+// collection, caches it in memory, and the pass reads the caches.
 //
-// A sweep judges the whole fleet: every Machine, every heartbeat Lease,
-// the Cluster, the OS DaemonSets in liken-system, and the pods of the
-// two stewarded DaemonSets. The sweep runs at least every ten seconds,
-// because the ticker is the clock that ages heartbeats into Lost
-// verdicts and granted turns into a stalled rollout. A sweep that read
-// each of these from the API server would send about ten requests
-// every ten seconds, and one more full sweep for every status write in
-// the fleet. So the operator watches each collection, keeps a copy in
-// memory, and the sweep reads the copies.
+// Each watch's handler decides whether a change starts a pass at once:
 //
-// A watch also decides whether a change wakes the loop at once:
+//   - Any change to a Machine starts one, because it can change the
+//     Cluster's phase, the disruption budget, or a Lost phase.
+//   - The Cluster starts one only on a spec change. This program
+//     writes the Cluster's status, and that write must not start
+//     another pass.
+//   - A DaemonSet starts one only on a spec change. A leader's boot
+//     writes a new pod template, and the pass then runs refreshOSPods
+//     to evict the pods made from the old template. The DaemonSet
+//     controller writes status often, and the pass does not read it.
+//   - A Disruption or a MachineDisruptionBudget starts one on a spec
+//     change or a deletion: a new or deleted request, an approval, or a
+//     new limit. This program writes the status of both. When
+//     machine-operator marks a request Complete after the reboot, the
+//     Machine's new boot is a Machine change, which starts a pass.
+//   - Heartbeat Leases and pods start nothing. The ticker checks each
+//     heartbeat's age, and refreshOSPods acts on a machine's version,
+//     which arrives as a Machine change. The Lease handler records when
+//     each Lease's renewTime changed, on this program's clock, and the pass
+//     measures a heartbeat's age from that record (heartbeats.go).
 //
-//   - A Machine wakes the loop on every change. Any machine's
-//     transition can change the Cluster's phase, a rollout's budget,
-//     or a Lost verdict, and those are status writes.
-//   - The Cluster wakes the loop only on an edit to its spec. This
-//     program is the only writer of the Cluster's status, and its own
-//     write must not start another sweep.
-//   - A DaemonSet wakes the loop only on an edit to its spec. A
-//     leader's boot writes the new release's template, and the steward
-//     refreshes pods from it. The DaemonSet controller writes status
-//     all the time, and none of it concerns the sweep.
-//   - A Disruption and a MachineDisruptionBudget wake the loop on an
-//     edit: a new request, an approval, a deleted request, and a new
-//     limit. This program writes the status of both, and its own write
-//     must not start another sweep. machine-operator's write of a
-//     person's Complete condition arrives with the new boot, which
-//     changes the Machine.
-//   - The heartbeat Leases and the pods wake nothing. The ticker is the
-//     clock that judges a heartbeat's age, and the steward acts on a
-//     machine's version, which arrives as a Machine change. The
-//     Leases' handler records when each Lease's renewTime changed, on
-//     this program's clock, and the sweep measures a heartbeat's age
-//     from that record (heartbeats.go).
+// The pass reads a cache only while it has synced and its last watch
+// has not failed, and reads the API server otherwise. That covers the
+// first seconds after this process becomes leader, a binary that runs
+// under the previous release's RBAC, and an API server restart. After a
+// failed watch, client-go's reflector waits up to a minute before it
+// watches again, and the cache misses every write in that time, such as
+// a machine's Degraded status, which the disruption budget must count.
 //
-// A copy that cannot answer, because its watch has not synced or its
-// last watch failed, is never read as the truth. The sweep reads the
-// API server instead. That covers the first seconds after this process
-// takes the lead, a release skew, where this binary runs under the
-// previous release's RBAC, and an API server restart. After a failed
-// watch, the reflector waits out a backoff of up to a minute before it
-// watches again, and a copy then misses each write made in that time,
-// such as a machine's Degraded status, which the budget must count.
-//
-// Two reads stay direct on every sweep. The flux deploy key Secret is
-// read only while the flux feature is declared, and the permission to
-// read it arrives with the feature's own manifests, so a watch would
-// be refused on every fleet without GitOps. The flux-system Namespace
-// is read only while the feature is not declared, to find an
-// installation to tear down, and this program may read that one
-// Namespace by name only.
+// The pass always reads the flux deploy key Secret and the
+// flux-system Namespace from the API server. It reads the Secret only
+// while the flux feature is declared, and the RBAC that allows the read
+// comes with the feature's manifests, so a watch would be refused on
+// every fleet without flux. It reads the Namespace only while the
+// feature is not declared, to find an installation to remove, and this
+// program may read that Namespace only by name.
 
 import (
 	"context"
@@ -80,7 +73,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// The kinds this operator watches, as the dynamic client names them.
+// The resources this operator watches, as the dynamic client names them.
 var (
 	likenVersion       = schema.GroupVersion{Group: "liken.sh", Version: strings.TrimPrefix(api.APIVersion, "liken.sh/")}
 	machineResource    = likenVersion.WithResource("machines")
@@ -92,7 +85,7 @@ var (
 	budgetResource     = likenVersion.WithResource("machinedisruptionbudgets")
 )
 
-// The kind labels of liken_watch_restarts_total, one for each watch.
+// The values of the kind label of liken_watch_restarts_total.
 const (
 	leaseKind      = "Lease"
 	daemonSetKind  = "DaemonSet"
@@ -101,62 +94,60 @@ const (
 	budgetKind     = "MachineDisruptionBudget"
 )
 
-// watchKinds lists every kind label, so the counter reports a zero for
+// watchKinds lists every kind label, so the counter reports zero for
 // each watch before its first restart.
 var watchKinds = []string{machineKind, clusterKind, leaseKind, daemonSetKind, podKind, disruptionKind, budgetKind}
 
-// appLabel is the label each stewarded DaemonSet puts on its pods. The
-// pod copy is indexed by it, so the steward reads one DaemonSet's pods
-// without a scan.
+// appLabel is the pod label that names a DaemonSet in
+// refreshedDaemonSets. The pod
+// cache is indexed by it, so reading one DaemonSet's pods does not scan
+// every pod.
 const appLabel = "app"
 
-// fleetReader reads each API object a sweep judges: from the copy a
-// watch keeps, or from the API server when the copy cannot answer. A
-// fleetReader with no copies at all reads the API server every time,
-// which is what the tests of a sweep use.
+// fleetReader reads each API object a pass needs, from the watch's
+// cache when the cache is usable and from the API server otherwise. A
+// fleetReader with no caches reads the API server every time, which is
+// how most pass tests construct it.
 type fleetReader struct {
 	client *apiclient.Client
 
 	// recorder posts the Events about the Machines and the Cluster
-	// (events.go). It is here because every part of a sweep that acts
-	// reads through the fleet reader. A nil recorder posts nothing.
+	// (events.go). It is here because every part of a pass that writes
+	// already has the fleetReader. A nil recorder posts nothing.
 	recorder *events.Recorder
 
-	machineCopy    *informer.Collection
-	clusterCopy    *informer.Collection
-	leaseCopy      *informer.Collection
-	daemonSetCopy  *informer.Collection
-	podCopy        *informer.Collection
-	disruptionCopy *informer.Collection
-	budgetCopy     *informer.Collection
+	machineCache    *informer.Collection
+	clusterCache    *informer.Collection
+	leaseCache      *informer.Collection
+	daemonSetCache  *informer.Collection
+	podCache        *informer.Collection
+	disruptionCache *informer.Collection
+	budgetCache     *informer.Collection
 
-	// machineVersions and clusterVersions are the memos of this
-	// program's own status writes to the Machines and the Cluster, and
-	// of its reads of them from the API server (kubernetes/memo). The
-	// watch delivers a write a moment after the API server answers it.
-	// A sweep that decided from a copy without its own last grant would
-	// count one fewer machine in flight, and could grant a turn beyond
-	// the disruption budget. So a copy answers only at the version of
-	// this program's last write or read of the object, and the sweep
-	// otherwise reads that one object from the API server.
+	// machineVersions and clusterVersions record the resourceVersion of
+	// each Machine and Cluster that this program last wrote or read
+	// from the API server (kubernetes/memo). The watch receives a write
+	// some time after the API server accepts it. A pass that read a
+	// cache without its own last grant would count one fewer machine
+	// rebooting, and could grant a turn beyond the disruption budget.
+	// So the pass uses a cached object only at the recorded version,
+	// and reads that object from the API server otherwise.
 	machineVersions *memo.Versions
 	clusterVersions *memo.Versions
 
-	// disruptionVersions and budgetVersions are the same memos for this
-	// program's status writes to the Disruptions and the budgets, so a
-	// sweep does not judge a Granted condition or a count from a copy
-	// older than its own last write.
+	// disruptionVersions and budgetVersions do the same for this
+	// program's status writes to Disruptions and budgets.
 	disruptionVersions *memo.Versions
 	budgetVersions     *memo.Versions
 
 	// sightings records when this program saw each heartbeat Lease
-	// change (heartbeats.go). The Leases' watch writes it, and each
-	// read of the heartbeats passes through it.
+	// change (heartbeats.go). The Lease watch's handler writes it.
 	sightings heartbeatSightings
 }
 
-// watchFleet opens the watches and returns the reader over their
-// copies. Each change that needs a sweep calls wake.
+// watchFleet starts the watches and returns the reader over their
+// caches. wake is called for each change that needs a pass, and
+// restarted is called with a watch's kind each time its watch reopens.
 func watchFleet(ctx context.Context, watcher dynamic.Interface, client *apiclient.Client,
 	wake func(), restarted func(kind string)) *fleetReader {
 	start := func(kind string, source informer.Source, handler cache.ResourceEventHandler, indexers cache.Indexers) *informer.Collection {
@@ -164,14 +155,16 @@ func watchFleet(ctx context.Context, watcher dynamic.Interface, client *apiclien
 			Handler:  handler,
 			Synced:   wake,
 			Reopened: func() { restarted(kind) },
-			// A copy stops answering after any failed watch, as the
-			// head of this file says.
+			// A cache misses every write from a failed watch until
+			// the reflector watches again, so the pass reads the API
+			// server in that time.
 			UnreadyOnWatchError: true,
 			Indexers:            indexers,
 		}
 		// A cluster whose leaders run a release from before the
-		// Disruption kinds does not serve them, and its copies hold
-		// none until the definitions arrive with a leader's boot.
+		// Disruption kinds does not serve them. The watch treats a 404
+		// as an absent collection until a leader's boot installs the
+		// definitions.
 		if kind == disruptionKind || kind == budgetKind {
 			options.Absent = apierrors.IsNotFound
 		}
@@ -182,106 +175,103 @@ func watchFleet(ctx context.Context, watcher dynamic.Interface, client *apiclien
 	leases := informer.Source{Resource: leaseResource, Namespace: "liken-system"}
 	daemonSets := informer.Source{Resource: daemonSetResource, Namespace: "liken-system"}
 	pods := informer.Source{Resource: podResource, Namespace: "liken-system",
-		LabelSelector: appLabel + " in (" + strings.Join(stewardedDaemonSets, ",") + ")"}
+		LabelSelector: appLabel + " in (" + strings.Join(refreshedDaemonSets, ",") + ")"}
 
 	r := &fleetReader{
 		client:          client,
-		machineCopy:     start(machineKind, machines, watch.WakeOnChange[machine.Machine](machines, wake), nil),
-		clusterCopy:     start(clusterKind, clusters, watch.WakeOnEdit[cluster.Cluster](clusters, wake), nil),
-		daemonSetCopy:   start(daemonSetKind, daemonSets, watch.WakeOnEdit[featureWorkload](daemonSets, wake), nil),
-		podCopy:         start(podKind, pods, nil, cache.Indexers{appLabel: watch.LabelIndex(appLabel)}),
+		machineCache:    start(machineKind, machines, watch.WakeOnChange[machine.Machine](machines, wake), nil),
+		clusterCache:    start(clusterKind, clusters, watch.WakeOnEdit[cluster.Cluster](clusters, wake), nil),
+		daemonSetCache:  start(daemonSetKind, daemonSets, watch.WakeOnEdit[annotatedObject](daemonSets, wake), nil),
+		podCache:        start(podKind, pods, nil, cache.Indexers{appLabel: watch.LabelIndex(appLabel)}),
 		machineVersions: memo.New(),
 		clusterVersions: memo.New(),
 	}
 	disruptions := informer.Source{Resource: disruptionResource}
 	budgets := informer.Source{Resource: budgetResource}
-	r.disruptionCopy = start(disruptionKind, disruptions, watch.WakeOnEdit[disruption.Disruption](disruptions, wake), nil)
-	r.budgetCopy = start(budgetKind, budgets, watch.WakeOnEdit[disruption.Budget](budgets, wake), nil)
+	r.disruptionCache = start(disruptionKind, disruptions, watch.WakeOnEdit[disruption.Disruption](disruptions, wake), nil)
+	r.budgetCache = start(budgetKind, budgets, watch.WakeOnEdit[disruption.Budget](budgets, wake), nil)
 	r.disruptionVersions, r.budgetVersions = memo.New(), memo.New()
-	r.leaseCopy = start(leaseKind, leases, r.sightings.handler(leases), nil)
+	r.leaseCache = start(leaseKind, leases, r.sightings.handler(leases), nil)
 	return r
 }
 
-// current answers the view of a copy the sweep may read, or a view
-// that answers nothing when the copies may be behind the API server.
+// current returns the view of a cache that the pass may read, or an
+// empty view, which makes the caller read the API server.
 //
-// Every watch of this process shares one HTTP/2 connection. When the
-// API server behind it loses power or leaves the network, the stream
-// goes quiet, and client-go closes it only about 45 seconds after the
-// last frame. The copies look current the whole time. A sweep that
-// judged heartbeats from them would find every machine's heartbeat
-// aging, and mark live machines Lost after 40 seconds, through a
-// write that reaches a live API server on another connection.
+// All watches of this process share one HTTP/2 connection. When the
+// API server at the other end loses power or leaves the network, the
+// stream stops sending, and client-go closes it only about 45 seconds
+// after the last frame (a 30-second read idle timeout, then a
+// 15-second ping timeout). The caches look current the whole time. A
+// pass that read heartbeats from them would see every heartbeat age,
+// and would mark live machines Lost after HeartbeatStaleAfter, through
+// a status write to another API server on a new connection.
 //
-// The Leases' copy carries its own proof of freshness. The leader
-// election renews this program's own Lease in liken-system every five
-// seconds, and the Leases' copy receives each renewal. When the copy's
-// view of that renewal is older than one renewal deadline and one retry
-// period, fifteen seconds, the stream or the renewals have stopped, and
-// the sweep reads the API server instead. A heartbeat then ages at most
-// fifteen seconds in the copy, well inside its 40. client-go gives the
-// election and the watches one shared connection, so a stalled
-// connection stops the renewals too: the write guard then refuses every
-// write after ten seconds, and the process exits when the election
-// gives up.
+// So current first reads this program's leader Lease from the Lease
+// cache. Leader election renews that Lease every RetryPeriod, and the
+// watch receives each renewal. When the cached renewal is
+// cacheFreshness old or older, the stream or the renewals have
+// stopped, and the pass reads the API server. A cached heartbeat is
+// then at most cacheFreshness behind, which is less than
+// HeartbeatStaleAfter. The election uses the same connection, so its
+// write guard also refuses every write once the last renewal is
+// RenewDeadline old, and the process exits when the election gives up.
 //
-// That proof covers a quiet connection, not a failed watch. Each
-// reflector recovers from a failed watch on its own backoff, so a fresh
-// Leases' copy says nothing about the Machines' copy. A failed watch
-// makes its own copy stop answering instead
-// (informer.Options.UnreadyOnWatchError), and this check comes on top
-// of that.
+// This check finds a stalled connection. A failed watch is a separate
+// case, which informer.Options.UnreadyOnWatchError handles, because
+// each reflector recovers on its own backoff.
 //
-// A copy that holds every object of its kind, with no selector, is
-// Whole, so a list from it also reads each object this program wrote
-// that the copy does not hold yet.
+// The view of the Machine, Cluster, Disruption, and budget caches is
+// marked Whole. Their watches have no selector, so informer.List also
+// reads from the API server each object that this program wrote and
+// the cache has not received yet. The other caches are read without a
+// version record, so the flag has no effect on them.
 func (r *fleetReader) current(held *informer.Collection) informer.View {
 	if held == nil {
 		return informer.View{}
 	}
-	lease, found, ok := watch.Get[kubernetes.Lease](r.leaseCopy.View(), leaseNamespace+"/"+leaseName)
+	lease, found, ok := watch.Get[kubernetes.Lease](r.leaseCache.View(), leaseNamespace+"/"+leaseName)
 	if !ok || !found {
 		return informer.View{}
 	}
 	renewed, err := time.Parse(time.RFC3339Nano, lease.Spec.RenewTime)
-	if err != nil || time.Since(renewed) >= copyFreshness {
+	if err != nil || time.Since(renewed) >= cacheFreshness {
 		return informer.View{}
 	}
 	view := held.View()
-	view.Whole = held == r.machineCopy || held == r.clusterCopy || held == r.disruptionCopy || held == r.budgetCopy
+	view.Whole = held == r.machineCache || held == r.clusterCache || held == r.disruptionCache || held == r.budgetCache
 	return view
 }
 
-// copyFreshness is how old the copy's view of this program's own
-// leader Lease may be before the sweep stops reading the copies.
-var copyFreshness = election.RenewDeadline + election.RetryPeriod
+// cacheFreshness is the age of the leader Lease's last renewal in the
+// Lease cache at which the pass stops reading the caches.
+var cacheFreshness = election.RenewDeadline + election.RetryPeriod
 
-// machines reads every Machine in the fleet. A copy at another version
-// than this program's own last write or read of the Machine, such as a
-// copy without the grant the last sweep wrote, is read again from the
-// API server, which holds the write. While the copy cannot answer, the
-// list comes from the API server and notes each Machine's version, so a
-// copy that answers later at an older version is read again.
+// machines reads every Machine in the fleet. It reads a Machine from
+// the API server when the cached version differs from the version this
+// program last wrote or read, such as a Machine without the grant the
+// last pass wrote. While the cache is unusable, it lists every Machine
+// from the API server and records each version, so the pass does not
+// use a cache that recovers at an older version of that Machine.
 func (r *fleetReader) machines() ([]machine.Machine, error) {
-	held := informer.Held{View: r.current(r.machineCopy), Versions: r.machineVersions}
+	held := informer.Held{View: r.current(r.machineCache), Versions: r.machineVersions}
 	machines, err := informer.List[machine.Machine](r.client, held, kubernetes.MachinesPath, machinePath)
 	if err != nil {
 		return nil, err
 	}
-	settleMemo(held, machines)
+	forgetSettledVersions(held, machines)
 	return machines, nil
 }
 
-// readTurns reads from the API server each Machine that the ledger
-// names and whose copy holds no grant, and answers the list with each
-// fresh copy in place of the old one. A Machine the API server no
-// longer holds leaves the list. The decision to free a ledger entry's
-// slot compares the Machine's version with the entry's, and a copy
-// older than the entry can differ from it while the grant can still
-// land, so this read must see every write at once. A Machine whose
-// copy holds a grant needs no read, because its slot stays in use
-// either way. A settled fleet has an empty ledger, so this costs about
-// one read for each finished turn.
+// readTurns replaces in machines each Machine that has a turn in the
+// Cluster's status.rebootTurns and shows no grant, with a read from the
+// API server, and removes a Machine that the API server no longer has.
+// decideRollout ends such a turn when the Machine's resourceVersion
+// differs from the turn's. A stale cached Machine also differs while
+// the grant write can still succeed, so the version must come from the
+// API server. A Machine that shows a grant needs no read, because its
+// turn counts against the budget either way. When no machine waits for
+// a reboot, status.rebootTurns is empty and readTurns sends nothing.
 func (r *fleetReader) readTurns(turns []cluster.RebootTurn, machines []machine.Machine) ([]machine.Machine, error) {
 	machines = slices.Clone(machines)
 	for _, turn := range turns {
@@ -310,15 +300,15 @@ func machinePath(name string) string { return kubernetes.MachinesPath + "/" + na
 
 func clusterPath(name string) string { return kubernetes.ClustersPath + "/" + name }
 
-// settleMemo drops the memo's record of each object that the list left
-// out and the store no longer holds: a Machine somebody deleted, whose
-// record would otherwise stay for the life of the process. It also
-// drops the record of each object whose copy in the store is at the
-// noted version (informer.ForgetStored), so a later write from another writer
-// costs no read. A list from the API server settles nothing, because
-// no ready store compares with it. The records that list noted stay
-// until a ready store holds their versions.
-func settleMemo[T any, P informer.Object[T]](held informer.Held, items []T) {
+// forgetSettledVersions removes recorded versions after a list. It removes the
+// record of each object that is in neither the list nor the store, such
+// as a deleted Machine, which would otherwise stay for the life of the
+// process. It also removes the record of each object that the store has
+// at the recorded version (informer.ForgetStored), so a later write by
+// another writer does not force a read. When the view is not ready, the
+// list came from the API server and there is no store to compare with,
+// so the records stay.
+func forgetSettledVersions[T any, P informer.Object[T]](held informer.Held, items []T) {
 	if !held.View.Ready() {
 		return
 	}
@@ -333,22 +323,20 @@ func settleMemo[T any, P informer.Object[T]](held informer.Held, items []T) {
 	informer.ForgetStored(held, keys...)
 }
 
-// publishStatus writes a Machine's status, and notes the version the
-// API server answered for the Machines' copy. A write that fails notes
-// that this program holds no current copy: a request that timed out can
-// still have landed, so the next read of that Machine goes to the API
-// server.
+// publishStatus writes a Machine's status and records the version the
+// API server returned. After a failed write, the next read of that
+// Machine goes to the API server, because a request that timed out can
+// still have been applied.
 func (r *fleetReader) publishStatus(m *machine.Machine, status *machine.MachineStatus) error {
 	return r.machineVersions.Send(m.Metadata.Name, func() (string, error) {
 		return kubernetes.PublishStatus(r.client, m, status)
 	})
 }
 
-// publishClusterStatus writes the Cluster's status, and notes the
-// version for the Clusters' copy, so the next sweep does not compare
-// its verdict against a status older than its own last write. It
-// answers the Cluster the API server stored, or nil when the answer
-// held none.
+// publishClusterStatus writes the Cluster's status and records the
+// returned version, so the next pass does not compare its result with
+// a status older than its own last write. It returns the Cluster as the
+// API server stored it, or nil when the write returned no Cluster.
 func (r *fleetReader) publishClusterStatus(clusterDoc *cluster.Cluster) (*cluster.Cluster, error) {
 	var stored *cluster.Cluster
 	err := r.clusterVersions.Send(clusterDoc.Metadata.Name, func() (string, error) {
@@ -362,81 +350,77 @@ func (r *fleetReader) publishClusterStatus(clusterDoc *cluster.Cluster) (*cluste
 	return stored, err
 }
 
-// clusters reads every Cluster. A fleet has one.
+// clusters reads every Cluster.
 func (r *fleetReader) clusters() ([]cluster.Cluster, error) {
-	held := informer.Held{View: r.current(r.clusterCopy), Versions: r.clusterVersions}
+	held := informer.Held{View: r.current(r.clusterCache), Versions: r.clusterVersions}
 	clusters, err := informer.List[cluster.Cluster](r.client, held, kubernetes.ClustersPath, clusterPath)
 	if err != nil {
 		return nil, err
 	}
-	settleMemo(held, clusters)
+	forgetSettledVersions(held, clusters)
 	return clusters, nil
 }
 
-// cluster reads the Cluster this program operates.
 func (r *fleetReader) cluster(name string) (*cluster.Cluster, error) {
 	return informer.ReadSelected[cluster.Cluster](r.client,
-		informer.Held{View: r.current(r.clusterCopy), Versions: r.clusterVersions}, name, clusterPath(name))
+		informer.Held{View: r.current(r.clusterCache), Versions: r.clusterVersions}, name, clusterPath(name))
 }
 
-// heartbeats answers, for each machine's heartbeat Lease, when this
-// program last saw its renewTime change, on this program's clock
-// (heartbeats.go). now is the sweep's clock, and it stamps a change
-// that this read finds before the watch delivers it.
+// heartbeats returns, for each machine's heartbeat Lease, when this
+// program last saw its renewTime change, by this program's clock
+// (heartbeats.go). A change that this read finds before the watch
+// handler receives it is recorded at now.
 func (r *fleetReader) heartbeats(now time.Time) (map[string]time.Time, error) {
-	if leases, ok := watch.List[kubernetes.Lease](r.current(r.leaseCopy)); ok {
-		return r.sightings.heard(kubernetes.Renewals(leases), now), nil
+	if leases, ok := watch.List[kubernetes.Lease](r.current(r.leaseCache)); ok {
+		return r.sightings.changeTimes(kubernetes.Renewals(leases), now), nil
 	}
 	renewals, err := kubernetes.ListHeartbeats(r.client)
 	if err != nil {
 		return nil, err
 	}
-	return r.sightings.heard(renewals, now), nil
+	return r.sightings.changeTimes(renewals, now), nil
 }
 
-// workloads reads one kind of workload in liken-system for the feature
-// janitor. The DaemonSets come from their copy, which the steward
-// reads too.
-func (r *fleetReader) workloads(listPath string) ([]featureWorkload, error) {
+// workloads lists one kind of workload in liken-system, for the removal
+// of retracted features (janitor.go). DaemonSets come from the
+// DaemonSet cache.
+func (r *fleetReader) workloads(listPath string) ([]annotatedObject, error) {
 	if listPath == daemonSetsPath {
-		if daemonSets, ok := watch.List[featureWorkload](r.current(r.daemonSetCopy)); ok {
+		if daemonSets, ok := watch.List[annotatedObject](r.current(r.daemonSetCache)); ok {
 			return daemonSets, nil
 		}
 	}
-	return kubernetes.List[featureWorkload](r.client, listPath)
+	return kubernetes.List[annotatedObject](r.client, listPath)
 }
 
-// daemonSet reads one DaemonSet in liken-system.
-func (r *fleetReader) daemonSet(name string) (*featureWorkload, error) {
-	if ds, found, ok := watch.Get[featureWorkload](r.current(r.daemonSetCopy), "liken-system/"+name); ok {
+func (r *fleetReader) daemonSet(name string) (*annotatedObject, error) {
+	if ds, found, ok := watch.Get[annotatedObject](r.current(r.daemonSetCache), "liken-system/"+name); ok {
 		if !found {
 			return nil, apiclient.ErrNotFound
 		}
 		return ds, nil
 	}
-	return apiclient.Get[featureWorkload](r.client, daemonSetsPath+"/"+name)
+	return apiclient.Get[annotatedObject](r.client, daemonSetsPath+"/"+name)
 }
 
-// daemonSetPods reads the pods of one stewarded DaemonSet.
 func (r *fleetReader) daemonSetPods(name string) ([]kubernetes.Pod, error) {
-	if pods, ok := watch.ByIndex[kubernetes.Pod](r.current(r.podCopy), appLabel, name); ok {
+	if pods, ok := watch.ByIndex[kubernetes.Pod](r.current(r.podCache), appLabel, name); ok {
 		return pods, nil
 	}
 	return kubernetes.List[kubernetes.Pod](r.client, daemonSetPodsPath(name))
 }
 
-// requests reads every Disruption and every MachineDisruptionBudget. A
-// cluster that does not serve the kinds, or an RBAC from the release
-// before them, reads as none of either, and the sweep keeps the old
-// protocol alone. Any other failure fails the read, because a sweep
-// that missed a budget could grant a turn past it.
+// requests reads every Disruption and every MachineDisruptionBudget. On
+// a cluster that does not serve a kind, or whose RBAC does not allow it,
+// requests returns none of that kind. Any other error fails the read,
+// because a pass that missed a budget could grant a turn beyond it.
 func (r *fleetReader) requests() (fleetRequests, error) {
-	disruptions, _, err := readKind[disruption.Disruption](r, r.disruptionCopy, r.disruptionVersions,
+	disruptions, _, err := readKind[disruption.Disruption](r, r.disruptionCache, r.disruptionVersions,
 		kubernetes.DisruptionsPath, disruptionPath)
 	if err != nil {
 		return fleetRequests{}, fmt.Errorf("reading the Disruptions: %w", err)
 	}
-	budgets, served, err := readKind[disruption.Budget](r, r.budgetCopy, r.budgetVersions,
+	budgets, served, err := readKind[disruption.Budget](r, r.budgetCache, r.budgetVersions,
 		kubernetes.BudgetsPath, budgetPath)
 	if err != nil {
 		return fleetRequests{}, fmt.Errorf("reading the MachineDisruptionBudgets: %w", err)
@@ -444,12 +428,12 @@ func (r *fleetReader) requests() (fleetRequests, error) {
 	return fleetRequests{disruptions: disruptions, budgets: budgets, budgetsServed: served}, nil
 }
 
-// readKind lists one of the two kinds through its copy, and answers
-// none for a kind the cluster does not serve or does not let this
-// program read. served is false in that case.
-func readKind[T any, P informer.Object[T]](r *fleetReader, copy *informer.Collection, versions *memo.Versions,
+// readKind lists Disruptions or budgets through their cache. For a kind
+// that the cluster does not serve, or that this program may not read,
+// it returns no items and served false.
+func readKind[T any, P informer.Object[T]](r *fleetReader, cached *informer.Collection, versions *memo.Versions,
 	listPath string, path func(string) string) (items []T, served bool, err error) {
-	held := informer.Held{View: r.current(copy), Versions: versions}
+	held := informer.Held{View: r.current(cached), Versions: versions}
 	if held.View.Ready() && held.View.Absent {
 		return nil, false, nil
 	}
@@ -460,7 +444,7 @@ func readKind[T any, P informer.Object[T]](r *fleetReader, copy *informer.Collec
 	if err != nil {
 		return nil, false, err
 	}
-	settleMemo[T, P](held, items)
+	forgetSettledVersions[T, P](held, items)
 	return items, true, nil
 }
 

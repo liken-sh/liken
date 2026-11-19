@@ -1,11 +1,11 @@
 package main
 
-// These tests replay the race between a paused former leader and the
-// leader that took its place. Copy A decides to grant node-2 a reboot
-// turn, and its write is held. node-1 then asks for a turn, and copy B
-// sweeps the fleet. When A's write lands at last, the disruption
-// budget of one must still hold. The ledger in the Cluster's status
-// (rollout.go) is what keeps it.
+// These tests replay a race between a paused former leader and the
+// leader that replaced it. Copy A decides to grant node-2 a reboot
+// turn, and one of its writes is held back. node-1 then requests a
+// turn, and copy B reconciles the fleet. When A's write goes through, the
+// disruption budget of one must still hold. The Cluster's
+// status.rebootTurns enforces it (rollout.go).
 
 import (
 	"bytes"
@@ -25,10 +25,9 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// A budgetWatch passes each request to the fake, and after each write
-// counts the machines that hold a reboot grant or are not Ready. It
-// records every count above the budget of one, and every moment two
-// leaders are out at once.
+// budgetWatch passes each request to the fake. After each write it
+// counts the machines that have a RebootApproved condition or are not
+// Ready, and records each time that count exceeds the budget of one.
 type budgetWatch struct {
 	fake *fakeapi.Server
 
@@ -64,12 +63,12 @@ func (b *budgetWatch) exceeded() []string {
 	return slices.Clone(b.breaches)
 }
 
-// A gate stands in front of copy A's API server. It holds the first
-// request that matches, the way a stopped process or a slow API server
-// holds a write, until the test releases it. An abandoning gate
-// answers the request at once with a timeout, the way a client that
-// gave up sees it, and still applies the request at the release.
-type gate struct {
+// requestBlocker wraps copy A's API server. It blocks the first matching request
+// until the test calls release, as a stopped process or a slow API
+// server would. With abandon set, it returns a 504 at once, as a client
+// that gave up sees it, and applies the request when the test calls
+// release.
+type requestBlocker struct {
 	next    http.Handler
 	method  string
 	path    string
@@ -82,11 +81,11 @@ type gate struct {
 	lateBody []byte
 }
 
-func newGate(next http.Handler, method, path string, abandon bool) *gate {
-	return &gate{next: next, method: method, path: path, abandon: abandon, released: make(chan struct{})}
+func newRequestBlocker(next http.Handler, method, path string, abandon bool) *requestBlocker {
+	return &requestBlocker{next: next, method: method, path: path, abandon: abandon, released: make(chan struct{})}
 }
 
-func (g *gate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (g *requestBlocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	catch := !g.caught && r.Method == g.method && r.URL.Path == g.path
 	g.caught = g.caught || catch
@@ -108,8 +107,8 @@ func (g *gate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.next.ServeHTTP(w, r)
 }
 
-// release lets a held request through, or applies an abandoned one.
-func (g *gate) release() {
+// release lets a blocked request through, or applies an abandoned one.
+func (g *requestBlocker) release() {
 	close(g.released)
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -119,9 +118,6 @@ func (g *gate) release() {
 	}
 }
 
-// Copy A stops or is slowed at one write, copy B sweeps while A waits,
-// A's write is released, and B sweeps again. The budget of one holds
-// at every write, and one machine holds the turn.
 func TestAPausedLeaderCannotExceedTheBudget(t *testing.T) {
 	grantPath := kubernetes.MachinesPath + "/node-2/status"
 	clusterPath := kubernetes.ClustersPath + "/lab/status"
@@ -129,12 +125,12 @@ func TestAPausedLeaderCannotExceedTheBudget(t *testing.T) {
 		name    string
 		path    string
 		abandon bool
-		// bSweeps is how many sweeps B runs before A's write goes on.
-		bSweeps int
+		// bPasses is how many passes B runs before A's write is released.
+		bPasses int
 		granted []string
 	}{
 		{"A stops after its Cluster write, before its grant", grantPath, false, 1, []string{"node-2"}},
-		{"A's grant is held in the API server and lands after B's sweeps", grantPath, false, 2, []string{"node-2"}},
+		{"A's grant is held in the API server and lands after B's passes", grantPath, false, 2, []string{"node-2"}},
 		{"A's Cluster write is held and lands after B's write", clusterPath, false, 1, []string{"node-1"}},
 		{"A's client abandons its grant and the API server applies it later", grantPath, true, 1, []string{"node-2"}},
 	}
@@ -142,7 +138,7 @@ func TestAPausedLeaderCannotExceedTheBudget(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				budget := &budgetWatch{fake: raceFleet(t)}
-				held := newGate(budget, http.MethodPut, c.path, c.abandon)
+				held := newRequestBlocker(budget, http.MethodPut, c.path, c.abandon)
 				a := leadingReader(t, held)
 				b := leadingReader(t, budget)
 				machineOperator := testClient(t, budget)
@@ -150,19 +146,19 @@ func TestAPausedLeaderCannotExceedTheBudget(t *testing.T) {
 				done := make(chan struct{})
 				go func() {
 					defer close(done)
-					sweepAt(t, a)
+					reconcileAt(t, a)
 				}()
 				synctest.Wait()
 				askForATurn(t, machineOperator, "node-1")
-				for range c.bSweeps {
-					sweepAt(t, b)
+				for range c.bPasses {
+					reconcileAt(t, b)
 				}
 				held.release()
 				<-done
-				sweepAt(t, b)
+				reconcileAt(t, b)
 
 				if breaches := budget.exceeded(); len(breaches) > 0 {
-					t.Errorf("the budget of one was exceeded: %q", breaches)
+					t.Errorf("machines with a grant = %q, want at most one", breaches)
 				}
 				if got := grantHolders(t, machineOperator); !slices.Equal(got, c.granted) {
 					t.Errorf("machines with a grant = %q, want %q", got, c.granted)

@@ -1,15 +1,5 @@
 package main
 
-// This file computes a machine's phase as the fleet should read it.
-//
-// Each machine derives its own phase from its own conditions (see
-// machine-operator/phase.go). But a written status is only as
-// current as the machine that wrote it, and a silent machine may no
-// longer exist. This file makes the fleet-side correction: trust the
-// machine's claim while its heartbeat is fresh, and read silence as
-// Lost. The one phase a machine can never derive for itself is
-// exactly the phase this program exists to write.
-
 import (
 	"time"
 
@@ -18,24 +8,22 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// effectivePhase returns a machine's phase, corrected for liveness.
-// It returns the machine's own claim when its heartbeat is fresh,
-// and Lost when the machine has gone silent. heard maps each heartbeat
-// Lease to when this program last saw its renewTime change, on this
-// program's clock (heartbeats.go), so a machine whose clock differs
-// from this program's reads neither Lost early nor Lost late. A machine
-// with no lease at all has never been heard from. This function judges
-// every machine the same way, including whichever machine hosts this
-// program's pod: this program is not itself a machine, so no machine
-// is exempt. Both the fleet sweep and the rollout use this function
-// to judge machines.
+// effectivePhase returns the phase that the fleet uses for a machine.
+// Each machine writes its own phase to its status, but a machine that
+// stops running cannot update it. So the written phase counts only
+// while the machine's heartbeat Lease is fresh, and otherwise the
+// machine is Lost.
 //
-// Silence does not always mean trouble. A machine holding a reboot
-// grant (see rollout.go) was told to go down. So until the grant is
-// old enough to count as a stall, the sweep treats the machine's
-// silence as a reboot in progress.
-func effectivePhase(m *machine.Machine, heard map[string]time.Time, now time.Time) api.Phase {
-	changed, ok := heard[m.Metadata.Name]
+// changedAt maps each Lease name to the time this program saw its
+// renewTime change, on this program's clock (heartbeatSightings.changeTimes).
+// Freshness uses this program's clock, not the renewTime itself, so a
+// machine with a wrong clock does not read Lost too early or too late.
+//
+// A machine that holds a reboot grant goes silent while it reboots, so
+// it reads Updating instead of Lost until the grant is older than
+// rolloutStallAfter.
+func effectivePhase(m *machine.Machine, changedAt map[string]time.Time, now time.Time) api.Phase {
+	changed, ok := changedAt[m.Metadata.Name]
 	if ok && now.Sub(changed) <= kubernetes.HeartbeatStaleAfter {
 		return m.Status.Phase
 	}

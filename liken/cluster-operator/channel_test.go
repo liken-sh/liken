@@ -1,10 +1,5 @@
 package main
 
-// Tests for the channel poller. Each test injects the fetch
-// function, then calls Observe the way the sweep does, and checks
-// what the poller asks for and remembers. A separate test checks the
-// HTTP fetch against a fake server.
-
 import (
 	"errors"
 	"fmt"
@@ -23,8 +18,8 @@ func channelDocument(latest string) []byte {
 	return []byte(fmt.Sprintf("apiVersion: liken.sh/v1alpha1\nkind: Channel\nmetadata:\n  name: liken\nlatest: %s\n", latest))
 }
 
-// pollerWith returns a poller whose fetch function serves the given
-// latest version. It counts how many times the fetch function runs.
+// pollerWith returns a poller whose fetch function returns a channel
+// document with the given latest version and counts its calls.
 func pollerWith(latest string, calls *atomic.Int64) *channelPoller {
 	p := newChannelPoller()
 	p.fetch = func(url string) ([]byte, error) {
@@ -34,10 +29,9 @@ func pollerWith(latest string, calls *atomic.Int64) *channelPoller {
 	return p
 }
 
-// awaitAvailable waits until the poller's background poll finishes,
-// and checks the version it made available. Each test runs in a
-// synctest bubble, so synctest.Wait returns once the poll's goroutine
-// has ended.
+// awaitAvailable waits for the background poll to finish and checks the
+// version the poller reports. synctest.Wait returns when every
+// goroutine in the bubble is blocked or has ended.
 func awaitAvailable(t *testing.T, p *channelPoller, want string) {
 	t.Helper()
 	synctest.Wait()
@@ -46,19 +40,19 @@ func awaitAvailable(t *testing.T, p *channelPoller, want string) {
 	}
 }
 
-// awaitCalls waits until the poller's background poll finishes, and
-// checks that the fake fetch function has run n times.
+// awaitCalls waits for the background poll to finish and checks that
+// the fake fetch function ran n times.
 func awaitCalls(t *testing.T, calls *atomic.Int64, n int64) {
 	t.Helper()
 	synctest.Wait()
 	if got := calls.Load(); got != n {
-		t.Fatalf("fetches: %d, want %d", got, n)
+		t.Fatalf("the poller fetched %d times, want %d", got, n)
 	}
 }
 
 var channelSpec = cluster.ClusterReleasesSpec{Source: "https://releases.example/"}
 
-func TestPollerLearnsTheChannelsLatest(t *testing.T) {
+func TestPollerReportsTheChannelsLatestVersion(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls atomic.Int64
 		p := pollerWith("2026.07.13-002", &calls)
@@ -68,25 +62,25 @@ func TestPollerLearnsTheChannelsLatest(t *testing.T) {
 	})
 }
 
-func TestPollerIsLazyBetweenSweeps(t *testing.T) {
+func TestPollerFetchesOncePerInterval(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls atomic.Int64
 		p := pollerWith("2026.07.13-002", &calls)
 
-		// Sweeps run every ten seconds. The channel is asked once per
-		// interval, not once per sweep.
+		// Passes run every ten seconds, but the poller fetches once per
+		// interval.
 		now := time.Now()
 		p.Observe(channelSpec, "", now)
 		awaitAvailable(t, p, "2026.07.13-002")
 		p.Observe(channelSpec, "", now.Add(10*time.Second))
 		p.Observe(channelSpec, "", now.Add(20*time.Second))
 		if calls.Load() != 1 {
-			t.Errorf("fetches: %d, want 1", calls.Load())
+			t.Errorf("the poller fetched %d times, want 1", calls.Load())
 		}
 	})
 }
 
-func TestPollerReasksWhenTheAnswerAgesOut(t *testing.T) {
+func TestPollerFetchesAgainAfterTheInterval(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls atomic.Int64
 		p := pollerWith("2026.07.13-002", &calls)
@@ -100,7 +94,7 @@ func TestPollerReasksWhenTheAnswerAgesOut(t *testing.T) {
 	})
 }
 
-func TestCheckAnnotationForcesAnImmediatePoll(t *testing.T) {
+func TestChangedCheckAnnotationFetchesAtOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls atomic.Int64
 		p := pollerWith("2026.07.13-002", &calls)
@@ -109,28 +103,28 @@ func TestCheckAnnotationForcesAnImmediatePoll(t *testing.T) {
 		p.Observe(channelSpec, "", now)
 		awaitAvailable(t, p, "2026.07.13-002")
 
-		// One sweep later, the Cluster carries a new check-releases
-		// annotation. The poll happens now, not at the next interval.
+		// A later pass sees a new check-releases value, and the poller
+		// fetches at once instead of waiting for the interval.
 		p.Observe(channelSpec, "again please", now.Add(10*time.Second))
 		awaitCalls(t, &calls, 2)
 
-		// The same annotation on later sweeps is not a new signal.
+		// The same value on a later pass does not fetch again.
 		p.Observe(channelSpec, "again please", now.Add(20*time.Second))
 		if calls.Load() != 2 {
-			t.Errorf("fetches after a repeated check: %d, want 2", calls.Load())
+			t.Errorf("after a repeated check, the poller fetched %d times, want 2", calls.Load())
 		}
 	})
 }
 
-func TestANewSourceDropsTheOldAnswer(t *testing.T) {
+func TestANewSourceDropsTheOldSourcesVersion(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls atomic.Int64
 		p := newChannelPoller()
 		p.fetch = func(url string) ([]byte, error) {
 			calls.Add(1)
-			// This blocks the second channel's answer, so the test can
-			// show the gap. The old channel's latest version must not
-			// stay while the poller is still asking the new one.
+			// The second source fails, so the test can check that the
+			// old source's version is gone before the new source
+			// returns one.
 			if calls.Load() > 1 {
 				return nil, errors.New("unreachable")
 			}
@@ -147,7 +141,7 @@ func TestANewSourceDropsTheOldAnswer(t *testing.T) {
 	})
 }
 
-func TestAFailedPollKeepsTheLastAnswer(t *testing.T) {
+func TestAFailedFetchKeepsTheLastVersion(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls atomic.Int64
 		p := newChannelPoller()
@@ -162,13 +156,13 @@ func TestAFailedPollKeepsTheLastAnswer(t *testing.T) {
 		p.Observe(channelSpec, "", now)
 		awaitAvailable(t, p, "2026.07.13-002")
 		p.Observe(channelSpec, "", now.Add(channelPollInterval))
-		// The failed poll must finish and leave the answer unchanged.
+		// The failed fetch leaves the version unchanged.
 		awaitCalls(t, &calls, 2)
 		awaitAvailable(t, p, "2026.07.13-002")
 	})
 }
 
-func TestNoSourceMeansNothingAvailable(t *testing.T) {
+func TestNoSourceClearsTheVersionAndFetchesNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls atomic.Int64
 		p := pollerWith("2026.07.13-002", &calls)
@@ -177,17 +171,15 @@ func TestNoSourceMeansNothingAvailable(t *testing.T) {
 		p.Observe(channelSpec, "", now)
 		awaitAvailable(t, p, "2026.07.13-002")
 
-		// The channel is removed from the spec entirely. The stale
-		// answer goes with it, and the poller fetches nothing.
 		p.Observe(cluster.ClusterReleasesSpec{}, "", now.Add(10*time.Second))
 		awaitAvailable(t, p, "")
 		if calls.Load() != 1 {
-			t.Errorf("fetches: %d, want 1", calls.Load())
+			t.Errorf("the poller fetched %d times, want 1", calls.Load())
 		}
 	})
 }
 
-func TestFetchChannelDocumentSpeaksHTTP(t *testing.T) {
+func TestFetchChannelDocumentRequestsTheDocumentOverHTTP(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/releases/channel.yaml" {
@@ -199,18 +191,18 @@ func TestFetchChannelDocumentSpeaksHTTP(t *testing.T) {
 
 		raw, err := fetchChannelDocumentVia(server, apiservertest.Host+"/releases/channel.yaml")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("fetching the channel document: %v", err)
 		}
 		channel, err := machine.ParseChannel(raw)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("parsing the channel document: %v", err)
 		}
 		if channel.Latest != "2026.07.13-002" {
-			t.Errorf("latest: %q", channel.Latest)
+			t.Errorf("the channel's latest version is %q, want 2026.07.13-002", channel.Latest)
 		}
 
 		if _, err := fetchChannelDocumentVia(server, apiservertest.Host+"/absent/channel.yaml"); err == nil {
-			t.Error("a 404 must be an error, not an empty document")
+			t.Error("fetching a channel document that returns 404 returned no error, want one")
 		}
 	})
 }

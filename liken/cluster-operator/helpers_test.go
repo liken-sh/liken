@@ -1,9 +1,9 @@
 package main
 
-// This file provides the shared test fixtures: a scrape of a metrics
-// registry, and a client wired to a fake API server that apiservertest
-// serves over in-memory connections, so a test in a synctest bubble
-// can use it.
+// This file has the test helpers that several test files share: a
+// metrics scrape, a client for a fake API server, and builders for
+// reboot requests. apiservertest serves the fake API server over
+// in-memory connections, so tests in a synctest bubble can use it.
 
 import (
 	"io"
@@ -23,10 +23,10 @@ import (
 	"github.com/liken-sh/liken/liken/metrics"
 )
 
-// fleetMetrics builds one operator registry with the fleet's layer 3
-// on it. It returns the layer that a sweep publishes into, and a
-// function that scrapes the registry the way Prometheus does: one
-// HTTP GET, and the text document that comes back.
+// fleetMetrics creates an operator metrics registry with the cluster
+// metrics on it. It returns the clusterMetrics that a pass publishes
+// into and a function that returns the registry's current text
+// exposition.
 func fleetMetrics(t *testing.T) (*clusterMetrics, func() string) {
 	t.Helper()
 	o := metrics.NewOperator(component, machine.Version, []string{clusterKind}, []string{machineKind})
@@ -35,45 +35,42 @@ func fleetMetrics(t *testing.T) (*clusterMetrics, func() string) {
 	return layer, func() string { return scrapeHandler(t, o.Handler()) }
 }
 
-// scrapeHandler reads a registry the way Prometheus reads it: one
-// HTTP GET against the real handler, and the text document that
-// comes back. apiservertest serves the handler over in-memory
-// connections, so a test in a synctest bubble can scrape too.
+// scrapeHandler sends one GET to /metrics on handler and returns the
+// response body.
 func scrapeHandler(t *testing.T, handler http.Handler) string {
 	t.Helper()
 	server := apiservertest.Start(t, handler)
 
 	resp, err := server.Client().Get(apiservertest.Host + "/metrics")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("requesting /metrics: %v", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the /metrics response: %v", err)
 	}
 	return string(body)
 }
 
-// testClient wires a client to a test server. The client has a
-// credentials directory holding a token, the same way kubelet would
-// mount one.
+// testClient returns an API client for a fake server that runs
+// handler. The client reads its token from a temporary credentials
+// directory, as it does from the service account volume in a pod.
 func testClient(t *testing.T, handler http.Handler) *apiclient.Client {
 	t.Helper()
 	server := apiservertest.Start(t, handler)
 
 	credentials := t.TempDir()
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("test-token"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the token file: %v", err)
 	}
 	return apiclient.New(apiservertest.Host, server.Client(), credentials)
 }
 
-// asking answers the requests of the machines that ask for a turn:
-// one approved request of machine-operator's for each machine that
-// reports AwaitingTurn, the way machine-operator files one for what it
-// staged.
-func asking(machines []machine.Machine) fleetRequests {
+// requestsOfAwaitingMachines returns one approved reboot request for each machine that
+// has a condition with the reason AwaitingTurn. Machine-operator
+// creates such a request when it has staged an update.
+func requestsOfAwaitingMachines(machines []machine.Machine) fleetRequests {
 	var q fleetRequests
 	for i := range machines {
 		if !slices.ContainsFunc(machines[i].Status.Conditions, func(c api.Condition) bool { return c.Reason == "AwaitingTurn" }) {
@@ -84,8 +81,9 @@ func asking(machines []machine.Machine) fleetRequests {
 	return q
 }
 
-// approvedRequest is machine-operator's request for a machine, approved
-// by its approvedHash whatever the machine's rebootPolicy.
+// approvedRequest returns a reboot request from machine-operator for
+// the named machine. Its spec.approvedHash equals its spec.hash, so it
+// is approved whatever the machine's rebootPolicy.
 func approvedRequest(name string) disruption.Disruption {
 	d := disruption.New(disruption.OwnName(name), &machine.Machine{Metadata: api.ObjectMeta{Name: name, UID: "uid-" + name}},
 		disruption.Spec{Machine: name, Requester: disruption.MachineOperator, Kind: disruption.KindReboot,
@@ -93,12 +91,12 @@ func approvedRequest(name string) disruption.Disruption {
 	return *d
 }
 
-// decideFor decides a rollout over the requests of the machines that
-// ask for a turn, with a default budget of the limit the test's
-// Cluster declares in spec.disruption.
-func decideFor(machines []machine.Machine, heard map[string]time.Time, heardSince time.Time,
+// decideFor runs decideRollout with the requests from requestsOfAwaitingMachines and a
+// default budget set to the maxUnavailable limit in the Cluster's
+// spec.disruption.
+func decideFor(machines []machine.Machine, heartbeats map[string]time.Time, leasesFirstRead time.Time,
 	c *cluster.Cluster, appliedVersion string, now time.Time) rollout {
-	q := asking(machines)
+	q := requestsOfAwaitingMachines(machines)
 	q.budgets = []disruption.Budget{*disruption.NewDefaultBudget(c.Spec.Disruption.MaxUnavailableOrDefault())}
-	return decideRollout(machines, heard, heardSince, c, appliedVersion, q, now)
+	return decideRollout(machines, heartbeats, leasesFirstRead, c, appliedVersion, q, now)
 }

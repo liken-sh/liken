@@ -1,9 +1,9 @@
 package main
 
-// This file tests the acting halves against a miniature API server:
-// one sweep pass listing the fleet, marking the silent machine Lost,
-// carrying out the rollout's grants and revocations, and publishing
-// the Cluster's status.
+// This file tests the writing half of the pass against a fake API
+// server: listing the fleet, marking a silent machine Lost, applying
+// the rollout's grants and revocations, and publishing the Cluster's
+// status.
 
 import (
 	"context"
@@ -18,17 +18,17 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// fleetAPI is a miniature API server holding a fleet: machines,
-// their heartbeat leases, and the cluster. It answers the sweep's
-// list requests and remembers every status it publishes.
+// fleetAPI is a fake API server that serves a fleet (machines, their
+// heartbeat leases, and the Cluster) and records every status the
+// pass writes.
 type fleetAPI struct {
 	clusterDoc *cluster.Cluster
 	machines   []machine.Machine
 	renewals   map[string]time.Time
 
-	// statuses records each machine-status PUT by machine name.
-	// clusterStatus records the cluster's status, and stays nil
-	// until something writes it.
+	// statuses records each Machine status PUT by machine name.
+	// clusterStatus stays nil until the pass writes the Cluster's
+	// status.
 	statuses      map[string]*machine.Machine
 	clusterStatus *cluster.Cluster
 }
@@ -72,12 +72,11 @@ func (fake *fleetAPI) handler() http.Handler {
 	})
 }
 
-// sawEachRenewal records each of the fake's Lease renewals as seen at
-// the moment the machine made it, the way the Leases' watch of a
-// program that has led since before those renewals records them. A
-// program that sees a Lease for the first time counts it as renewed at
-// that moment (heartbeats.go), so a sweep with no record reads no
-// machine Lost.
+// sawEachRenewal records each of the fake's Lease renewals as seen
+// when it was made, as the Lease watch of an operator that has been
+// leader since before the renewals would. An operator that first sees
+// a Lease treats it as renewed at that moment (heartbeats.go), so
+// without these records no machine would be marked Lost.
 func (fake *fleetAPI) sawEachRenewal(r *fleetReader) *fleetReader {
 	for name, renewed := range fake.renewals {
 		r.sightings.observe(name, renewed, renewed)
@@ -91,7 +90,7 @@ func labMachine(name string, phase api.Phase) machine.Machine {
 	return m
 }
 
-func TestSweepFleetMarksTheSilentMachineAndPublishesTheCluster(t *testing.T) {
+func TestReconcileFleetMarksTheSilentMachineAndPublishesTheCluster(t *testing.T) {
 	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
 	clusterDoc.Spec.Leaders = []string{"node-1"}
 	fake := &fleetAPI{
@@ -101,131 +100,126 @@ func TestSweepFleetMarksTheSilentMachineAndPublishesTheCluster(t *testing.T) {
 			labMachine("node-2", api.PhaseReady),
 		},
 		renewals: map[string]time.Time{
-			"node-1": sweepNow.Add(-10 * time.Second),
-			"node-2": sweepNow.Add(-5 * time.Minute),
+			"node-1": passTime.Add(-10 * time.Second),
+			"node-2": passTime.Add(-5 * time.Minute),
 		},
 	}
 	client := testClient(t, fake.handler())
 
 	cm, _ := fleetMetrics(t)
-	sweepFleet(fake.sawEachRenewal(&fleetReader{client: client}), clusterDoc, "", &engineProbe{}, &podSteward{}, cm, sweepNow)
+	reconcileFleet(fake.sawEachRenewal(&fleetReader{client: client}), clusterDoc, "", &fluxProbe{}, &overduePodReports{}, cm, passTime)
 
 	lost := fake.statuses["node-2"]
 	if lost == nil || lost.Status.Phase != api.PhaseLost {
-		t.Fatalf("the silent machine should be marked Lost: %+v", lost)
+		t.Fatalf("node-2 status is %+v, want phase Lost because its heartbeat is stale", lost)
 	}
 	if c := api.FindCondition(lost.Status.Conditions, "Ready"); c == nil || c.Reason != "HeartbeatStale" {
-		t.Errorf("the Lost verdict explains itself: %+v", c)
+		t.Errorf("node-2 Ready condition is %+v, want reason HeartbeatStale", c)
 	}
 	if _, wrote := fake.statuses["node-1"]; wrote {
-		t.Error("a fresh machine's status is its own to write")
+		t.Error("the pass wrote node-1's status, want no write because its heartbeat is fresh")
 	}
 	if fake.clusterStatus == nil {
-		t.Fatal("the sweep publishes the cluster's status")
+		t.Fatal("the pass wrote no Cluster status, want one")
 	}
 	if fake.clusterStatus.Status.Machines.Summary != "1/2" || fake.clusterStatus.Status.Phase != api.PhaseDegraded {
-		t.Errorf("got %+v", fake.clusterStatus.Status)
+		t.Errorf("Cluster status is %+v, want machine summary 1/2 and phase Degraded", fake.clusterStatus.Status)
 	}
 }
 
-func TestSweepPublishesTheChannelsAvailableVersion(t *testing.T) {
-	// The poller's answer is part of the same status write as
-	// everything else the sweep derives. A fresh answer alone is a
-	// change worth writing, and it lands at status.releases.available.
+func TestReconcileFleetPublishesTheChannelsAvailableVersion(t *testing.T) {
+	// A new version from the channel poller is enough to make the
+	// pass write the Cluster's status.
 	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
 	clusterDoc.Spec.Leaders = []string{"node-1"}
 	fake := &fleetAPI{
 		clusterDoc: clusterDoc,
 		machines:   []machine.Machine{labMachine("node-1", api.PhaseReady)},
-		renewals:   map[string]time.Time{"node-1": sweepNow.Add(-10 * time.Second)},
+		renewals:   map[string]time.Time{"node-1": passTime.Add(-10 * time.Second)},
 	}
 	client := testClient(t, fake.handler())
 
 	cm, _ := fleetMetrics(t)
-	sweepFleet(&fleetReader{client: client}, clusterDoc, "2026.07.13-002", &engineProbe{}, &podSteward{}, cm, sweepNow)
+	reconcileFleet(&fleetReader{client: client}, clusterDoc, "2026.07.13-002", &fluxProbe{}, &overduePodReports{}, cm, passTime)
 
 	if fake.clusterStatus == nil || fake.clusterStatus.Status.Releases.Available != "2026.07.13-002" {
-		t.Fatalf("the channel's answer should reach the status: %+v", fake.clusterStatus)
+		t.Fatalf("Cluster status is %+v, want releases.available 2026.07.13-002", fake.clusterStatus)
 	}
 }
 
-func TestSweepFleetWritesNothingOnASettledFleet(t *testing.T) {
-	// The cluster's status already says what this sweep observes.
-	// So the pass must not write it again. A settled fleet causes no
-	// write.
+func TestReconcileFleetWritesNothingWhenNothingChanged(t *testing.T) {
 	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
 	clusterDoc.Spec.Leaders = []string{"node-1"}
 	clusterDoc.Status.Phase = api.PhaseReady
 	clusterDoc.Status.Machines = cluster.MachineTally{Ready: 1, Total: 1, Summary: "1/1"}
 	clusterDoc.Status.Conditions = api.SetCondition(nil, api.Condition{
 		Type: "MachinesReady", Status: api.ConditionTrue, Reason: "AllMachinesReady",
-		Message: "all 1 machines are ready",
-	}, sweepNow.Add(-time.Hour))
+		Message: "All 1 machines are ready",
+	}, passTime.Add(-time.Hour))
 	clusterDoc.Status.Conditions = api.SetCondition(clusterDoc.Status.Conditions, api.Condition{
 		Type: "Progressing", Status: api.ConditionTrue, Reason: "RolloutComplete",
-		Message: "no machines are waiting for a reboot turn",
-	}, sweepNow.Add(-time.Hour))
+		Message: "No machine waits for a reboot turn",
+	}, passTime.Add(-time.Hour))
 	fake := &fleetAPI{
 		clusterDoc: clusterDoc,
 		machines:   []machine.Machine{labMachine("node-1", api.PhaseReady)},
-		renewals:   map[string]time.Time{"node-1": sweepNow.Add(-10 * time.Second)},
+		renewals:   map[string]time.Time{"node-1": passTime.Add(-10 * time.Second)},
 	}
 	client := testClient(t, fake.handler())
 
 	cm, _ := fleetMetrics(t)
-	sweepFleet(&fleetReader{client: client}, clusterDoc, "", &engineProbe{}, &podSteward{}, cm, sweepNow)
+	reconcileFleet(&fleetReader{client: client}, clusterDoc, "", &fluxProbe{}, &overduePodReports{}, cm, passTime)
 
 	if fake.clusterStatus != nil {
-		t.Errorf("nothing changed, so nothing should be written: %+v", fake.clusterStatus.Status)
+		t.Errorf("the pass wrote Cluster status %+v, want no write because nothing changed", fake.clusterStatus.Status)
 	}
 	if len(fake.statuses) != 0 {
-		t.Errorf("no machine verdicts either: %v", fake.statuses)
+		t.Errorf("the pass wrote Machine statuses %v, want none because nothing changed", fake.statuses)
 	}
 }
 
-// The flux janitor's refusal reaches the operator through the
-// Cluster's conditions, beside the two the sweep always writes.
-func TestPublishClusterStatusCarriesTheFluxRefusal(t *testing.T) {
+// A tearDownFlux refusal appears as a Cluster condition, next to the
+// MachinesReady and Progressing conditions.
+func TestPublishClusterStatusWritesTheFluxRefusal(t *testing.T) {
 	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
 	fake := &fleetAPI{clusterDoc: clusterDoc}
 	client := testClient(t, fake.handler())
 
-	publishClusterStatus(&fleetReader{client: client}, clusterDoc, fleetSweep{}, rollout{}, declinedFluxTeardown(), "", "", sweepNow)
+	publishClusterStatus(&fleetReader{client: client}, clusterDoc, fleetDecision{}, rollout{}, declinedFluxTeardown(), "", "", passTime)
 
 	if fake.clusterStatus == nil {
-		t.Fatal("a refusal is news, so the status is written")
+		t.Fatal("the pass wrote no Cluster status, want one because the flux refusal is new")
 	}
 	c := api.FindCondition(fake.clusterStatus.Status.Conditions, fluxTeardownCondition)
 	if c == nil || c.Reason != "NotPlantedByLiken" {
-		t.Fatalf("got %+v", fake.clusterStatus.Status.Conditions)
+		t.Fatalf("conditions are %+v, want %s with reason NotPlantedByLiken", fake.clusterStatus.Status.Conditions, fluxTeardownCondition)
 	}
 	if !strings.Contains(c.Message, "kubectl annotate namespace flux-system") {
-		t.Errorf("the message must name the remedy: %q", c.Message)
+		t.Errorf("the message is %q, want it to give the kubectl annotate command", c.Message)
 	}
 }
 
-// The condition is a report of a refusal, not a standing
-// observation, so it disappears once there is no refusal to make.
+// The FluxTeardown condition is removed when tearDownFlux no longer
+// has a refusal to report.
 func TestPublishClusterStatusDropsTheFluxRefusalWhenItEnds(t *testing.T) {
 	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
-	clusterDoc.Status.Conditions = api.SetCondition(nil, *declinedFluxTeardown(), sweepNow.Add(-time.Hour))
+	clusterDoc.Status.Conditions = api.SetCondition(nil, *declinedFluxTeardown(), passTime.Add(-time.Hour))
 	fake := &fleetAPI{clusterDoc: clusterDoc}
 	client := testClient(t, fake.handler())
 
-	publishClusterStatus(&fleetReader{client: client}, clusterDoc, fleetSweep{}, rollout{}, nil, "", "", sweepNow)
+	publishClusterStatus(&fleetReader{client: client}, clusterDoc, fleetDecision{}, rollout{}, nil, "", "", passTime)
 
 	if fake.clusterStatus == nil {
-		t.Fatal("dropping the condition is a change worth writing")
+		t.Fatal("the pass wrote no Cluster status, want one that drops the ended flux refusal")
 	}
 	if c := api.FindCondition(fake.clusterStatus.Status.Conditions, fluxTeardownCondition); c != nil {
-		t.Errorf("the refusal must be gone: %+v", c)
+		t.Errorf("the status still has %+v, want no flux refusal condition", c)
 	}
 }
 
-// refusing wraps a handler so that requests matching one method and
-// path fragment are refused with the given status, and everything
-// else passes through. This models a sweep that meets one failing
-// endpoint on an otherwise healthy API server.
+// refusing wraps a handler so that a request with the given method,
+// whose path contains fragment, gets the status, and every other
+// request goes to inner.
 func refusing(inner http.Handler, method, fragment string, status int) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == method && strings.Contains(r.URL.Path, fragment) {
@@ -236,9 +230,9 @@ func refusing(inner http.Handler, method, fragment string, status int) http.Hand
 	})
 }
 
-// silentFleet is a two-machine fleet whose node-2 has stopped
-// renewing its heartbeat. It is the smallest fleet that has both a
-// Lost verdict to write and a cluster status worth publishing.
+// silentFleet is a fleet of node-1 and node-2 where node-2's
+// heartbeat lease is stale, so the pass has a Lost phase to write
+// and a Cluster status to publish.
 func silentFleet(clusterDoc *cluster.Cluster) *fleetAPI {
 	return &fleetAPI{
 		clusterDoc: clusterDoc,
@@ -247,62 +241,61 @@ func silentFleet(clusterDoc *cluster.Cluster) *fleetAPI {
 			labMachine("node-2", api.PhaseReady),
 		},
 		renewals: map[string]time.Time{
-			"node-1": sweepNow.Add(-10 * time.Second),
-			"node-2": sweepNow.Add(-5 * time.Minute),
+			"node-1": passTime.Add(-10 * time.Second),
+			"node-2": passTime.Add(-5 * time.Minute),
 		},
 	}
 }
 
-func TestSweepFleetStopsWhenTheMachineListFails(t *testing.T) {
+func TestReconcileFleetStopsWhenTheMachineListFails(t *testing.T) {
 	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
 	fake := silentFleet(clusterDoc)
 	client := testClient(t, refusing(fake.handler(), http.MethodGet, "/machines", http.StatusInternalServerError))
 
 	cm, _ := fleetMetrics(t)
-	sweepFleet(&fleetReader{client: client}, clusterDoc, "", &engineProbe{}, &podSteward{}, cm, sweepNow)
+	reconcileFleet(&fleetReader{client: client}, clusterDoc, "", &fluxProbe{}, &overduePodReports{}, cm, passTime)
 
 	if fake.clusterStatus != nil {
-		t.Errorf("a sweep that cannot see the fleet must not judge it: %+v", fake.clusterStatus.Status)
+		t.Errorf("the pass wrote Cluster status %+v, want no write because the Machine list failed", fake.clusterStatus.Status)
 	}
 	if len(fake.statuses) != 0 {
-		t.Errorf("and must not write any machine verdicts: %v", fake.statuses)
+		t.Errorf("the pass wrote Machine statuses %v, want none because the Machine list failed", fake.statuses)
 	}
 }
 
-func TestSweepFleetStopsWhenTheHeartbeatListFails(t *testing.T) {
+func TestReconcileFleetStopsWhenTheHeartbeatListFails(t *testing.T) {
 	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
 	fake := silentFleet(clusterDoc)
 	client := testClient(t, refusing(fake.handler(), http.MethodGet, "/leases", http.StatusInternalServerError))
 
 	cm, _ := fleetMetrics(t)
-	sweepFleet(&fleetReader{client: client}, clusterDoc, "", &engineProbe{}, &podSteward{}, cm, sweepNow)
+	reconcileFleet(&fleetReader{client: client}, clusterDoc, "", &fluxProbe{}, &overduePodReports{}, cm, passTime)
 
 	if fake.clusterStatus != nil {
-		t.Errorf("without heartbeats there is no liveness verdict to publish: %+v", fake.clusterStatus.Status)
+		t.Errorf("the pass wrote Cluster status %+v, want no write because the Lease list failed", fake.clusterStatus.Status)
 	}
 	if len(fake.statuses) != 0 {
-		t.Errorf("and no machine may be judged silent: %v", fake.statuses)
+		t.Errorf("the pass wrote Machine statuses %v, want none because the Lease list failed", fake.statuses)
 	}
 }
 
-func TestSweepFleetToleratesAClusterStatusWriteFailure(t *testing.T) {
+func TestReconcileFleetContinuesAfterAClusterStatusWriteFailure(t *testing.T) {
 	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
 	fake := silentFleet(clusterDoc)
 	client := testClient(t, refusing(fake.handler(), http.MethodPut, "/clusters", http.StatusInternalServerError))
 
 	cm, _ := fleetMetrics(t)
-	sweepFleet(fake.sawEachRenewal(&fleetReader{client: client}), clusterDoc, "", &engineProbe{}, &podSteward{}, cm, sweepNow)
+	reconcileFleet(fake.sawEachRenewal(&fleetReader{client: client}), clusterDoc, "", &fluxProbe{}, &overduePodReports{}, cm, passTime)
 
 	if lost := fake.statuses["node-2"]; lost == nil || lost.Status.Phase != api.PhaseLost {
-		t.Errorf("the machine verdicts land even when the cluster write fails: %+v", lost)
+		t.Errorf("node-2 status is %+v, want phase Lost even though the Cluster write failed", lost)
 	}
 }
 
 func TestMarkLostContinuesWhenTheMachineWritesFirst(t *testing.T) {
-	// A conflict on the Lost write means the machine came back and
-	// wrote its own status first. That is exactly the outcome this
-	// write exists to allow, so the sweep moves on to the next
-	// machine.
+	// A conflict on the Lost write means the machine's operator wrote
+	// its own status first, so the pass skips that machine and marks
+	// the next one.
 	fake := &fleetAPI{}
 	client := testClient(t, refusing(fake.handler(), http.MethodPut, "/machines/node-1", http.StatusConflict))
 	machines := []machine.Machine{
@@ -310,17 +303,17 @@ func TestMarkLostContinuesWhenTheMachineWritesFirst(t *testing.T) {
 		labMachine("node-2", api.PhaseReady),
 	}
 
-	markLost(&fleetReader{client: client}, machines, []string{"node-1", "node-2"}, nil, sweepNow)
+	markLost(&fleetReader{client: client}, machines, []string{"node-1", "node-2"}, nil, passTime)
 
 	if _, wrote := fake.statuses["node-1"]; wrote {
-		t.Error("the conflicting write must not land")
+		t.Error("node-1 status was written, want no write because its Lost write conflicted")
 	}
 	if fake.statuses["node-2"] == nil {
-		t.Error("one machine's conflict must not stop the next verdict")
+		t.Error("node-2 status was not written, want Lost after node-1's write conflicted")
 	}
 }
 
-func TestMarkLostCarriesOnPastAFailedWrite(t *testing.T) {
+func TestMarkLostContinuesAfterAFailedWrite(t *testing.T) {
 	fake := &fleetAPI{}
 	client := testClient(t, refusing(fake.handler(), http.MethodPut, "/machines/node-1", http.StatusInternalServerError))
 	machines := []machine.Machine{
@@ -328,13 +321,13 @@ func TestMarkLostCarriesOnPastAFailedWrite(t *testing.T) {
 		labMachine("node-2", api.PhaseReady),
 	}
 
-	markLost(&fleetReader{client: client}, machines, []string{"node-1", "node-2"}, nil, sweepNow)
+	markLost(&fleetReader{client: client}, machines, []string{"node-1", "node-2"}, nil, passTime)
 
 	if _, wrote := fake.statuses["node-1"]; wrote {
-		t.Error("the failed write must not land")
+		t.Error("node-1 status was written, want no write because the API server refused it")
 	}
 	if fake.statuses["node-2"] == nil {
-		t.Error("one machine's write failure must not stop the next verdict")
+		t.Error("node-2 status was not written, want Lost after node-1's write was refused")
 	}
 }
 
@@ -345,59 +338,58 @@ func TestCarryOutRolloutGrantsAndRevokes(t *testing.T) {
 	granted := labMachine("node-4", api.PhaseReady)
 	granted.Status.Conditions = api.SetCondition(nil, api.Condition{
 		Type: machine.RebootApprovedCondition, Status: api.ConditionTrue, Reason: "DisruptionBudgetAllows",
-	}, sweepNow.Add(-time.Minute))
+	}, passTime.Add(-time.Minute))
 	machines := []machine.Machine{labMachine("node-3", api.PhaseUpdatePending), granted}
 
-	carryOutRollout(&fleetReader{client: client}, machines, rollout{grant: []string{"node-3"}, revoke: []string{"node-4"}}, []cluster.RebootTurn{{Machine: "node-3"}}, sweepNow)
+	carryOutRollout(&fleetReader{client: client}, machines, rollout{grant: []string{"node-3"}, revoke: []string{"node-4"}}, []cluster.RebootTurn{{Machine: "node-3"}}, passTime)
 
 	grant := fake.statuses["node-3"]
 	if grant == nil || api.FindCondition(grant.Status.Conditions, machine.RebootApprovedCondition) == nil {
-		t.Errorf("the grant lands on the machine: %+v", grant)
+		t.Errorf("node-3 status is %+v, want a RebootApproved condition", grant)
 	}
 	revoked := fake.statuses["node-4"]
 	if revoked == nil || api.FindCondition(revoked.Status.Conditions, machine.RebootApprovedCondition) != nil {
-		t.Errorf("the spent grant disappears: %+v", revoked)
+		t.Errorf("node-4 status is %+v, want no RebootApproved condition", revoked)
 	}
 }
 
-func TestSweepReadsTheClusterFreshEachPass(t *testing.T) {
+func TestReconcileReadsTheClusterOnEachPass(t *testing.T) {
 	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
 	fake := &fleetAPI{
 		clusterDoc: clusterDoc,
 		machines:   []machine.Machine{labMachine("node-1", api.PhaseReady)},
-		renewals:   map[string]time.Time{"node-1": sweepNow.Add(-10 * time.Second)},
+		renewals:   map[string]time.Time{"node-1": passTime.Add(-10 * time.Second)},
 	}
 	client := testClient(t, fake.handler())
 	cm, _ := fleetMetrics(t)
-	sweep(&fleetReader{client: client}, "lab", newChannelPoller(), &engineProbe{}, &podSteward{}, cm)
+	reconcile(&fleetReader{client: client}, "lab", newChannelPoller(), &fluxProbe{}, &overduePodReports{}, cm)
 	if fake.clusterStatus == nil {
-		t.Error("a pass over a fleet with news publishes the cluster's status")
+		t.Error("the pass wrote no Cluster status, want one because the fleet changed")
 	}
 }
 
-func TestSweepSkipsThePassWhenTheClusterReadFails(t *testing.T) {
-	// Every pass reads the Cluster fresh, because its spec drives
-	// the rollout. A pass that cannot read the Cluster has no spec
-	// to act on, and must do nothing at all.
+func TestReconcileSkipsThePassWhenTheClusterReadFails(t *testing.T) {
+	// The rollout needs the Cluster's spec, so a pass that cannot read
+	// the Cluster writes nothing.
 	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
 	fake := silentFleet(clusterDoc)
 	client := testClient(t, refusing(fake.handler(), http.MethodGet, "/clusters", http.StatusInternalServerError))
 
 	cm, _ := fleetMetrics(t)
-	sweep(&fleetReader{client: client}, "lab", newChannelPoller(), &engineProbe{}, &podSteward{}, cm)
+	reconcile(&fleetReader{client: client}, "lab", newChannelPoller(), &fluxProbe{}, &overduePodReports{}, cm)
 
 	if fake.clusterStatus != nil {
-		t.Errorf("no cluster status without a cluster: %+v", fake.clusterStatus.Status)
+		t.Errorf("the pass wrote Cluster status %+v, want no write because the Cluster read failed", fake.clusterStatus.Status)
 	}
 	if len(fake.statuses) != 0 {
-		t.Errorf("and no machine verdicts either: %v", fake.statuses)
+		t.Errorf("the pass wrote Machine statuses %v, want none because the Cluster read failed", fake.statuses)
 	}
 }
 
 func TestAwaitClusterRetriesAfterAFailingList(t *testing.T) {
-	// A real failure, not the expected 404 of an unserved CRD, is
-	// printed and retried the same way. The wait only ends when a
-	// Cluster actually appears.
+	// awaitCluster prints a 500, unlike the 404 of a CRD that is not
+	// served yet, and retries both. The wait ends only when a Cluster
+	// exists.
 	calls := 0
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -411,14 +403,13 @@ func TestAwaitClusterRetriesAfterAFailingList(t *testing.T) {
 	}))
 	clusterDoc := awaitCluster(&fleetReader{client: client}, oneWake(), t.Context())
 	if clusterDoc == nil || clusterDoc.Metadata.Name != "lab" || calls != 2 {
-		t.Errorf("got %q after %d calls", clusterDoc.Metadata.Name, calls)
+		t.Errorf("awaitCluster = %+v after %d list calls, want Cluster lab after 2", clusterDoc, calls)
 	}
 }
 
 func TestAwaitClusterWaitsForTheFirstCluster(t *testing.T) {
-	// The CRD is not served at first, so the first request returns a
-	// 404. Then the machine operators seed the object, and the wait
-	// resolves itself.
+	// While the CRD is not served the list returns 404. Once the
+	// machine operators create the Cluster, the next list finds it.
 	calls := 0
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -432,19 +423,18 @@ func TestAwaitClusterWaitsForTheFirstCluster(t *testing.T) {
 	}))
 	clusterDoc := awaitCluster(&fleetReader{client: client}, oneWake(), t.Context())
 	if clusterDoc == nil || clusterDoc.Metadata.Name != "lab" || calls != 2 {
-		t.Errorf("got %q after %d calls", clusterDoc.Metadata.Name, calls)
+		t.Errorf("awaitCluster = %+v after %d list calls, want Cluster lab after 2", clusterDoc, calls)
 	}
 }
 
-// oneWake is a wake channel that holds one wake, the one the Clusters'
-// copy sends when the first Cluster arrives.
+// oneWake returns a channel with one wake already queued, like the
+// wake sent when the Cluster watch first sees a Cluster.
 func oneWake() <-chan struct{} {
 	wakes := make(chan struct{}, 1)
 	wakes <- struct{}{}
 	return wakes
 }
 
-// A shutdown while no Cluster exists ends the wait with no Cluster.
 func TestAwaitClusterEndsAtAShutdown(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

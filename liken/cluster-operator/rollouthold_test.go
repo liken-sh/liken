@@ -1,10 +1,9 @@
 package main
 
-// These tests run a new process's first sweeps against a fleet with a
-// rollout already waiting, in a synctest bubble. A new process records
-// every heartbeat Lease as seen when it starts, so for its first
-// HeartbeatStaleAfter a machine that is already down reads its last
-// status, and the rollout must grant no turn until that time passes.
+// A newly started process treats every heartbeat Lease as just renewed,
+// so for its first HeartbeatStaleAfter a machine that is already down
+// still reads as the phase it last wrote. These tests check that the
+// rollout grants no reboot turn until that time has passed.
 
 import (
 	"encoding/json"
@@ -21,62 +20,60 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// awaitTurn makes node-2, the worker of newFleetAPI's fleet, ask for a
+// awaitTurn makes node-2, the worker of newFleetAPI's fleet, request a
 // reboot turn.
 func awaitTurn(t *testing.T, client *apiclient.Client) {
 	t.Helper()
 	awaitTurnOf(t, client, "node-2")
 }
 
-// awaitTurnOf makes one machine of newFleetAPI's fleet ask for a
-// reboot turn.
 func awaitTurnOf(t *testing.T, client *apiclient.Client, name string) {
 	t.Helper()
 	waiting, err := kubernetes.GetMachine(client, name)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading Machine %s: %v", name, err)
 	}
 	status := waiting.Status
 	status.Conditions = []api.Condition{{Type: "SpecConverged", Status: api.ConditionFalse, Reason: "AwaitingTurn"}}
 	if _, err := kubernetes.PublishStatus(client, waiting, &status); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the status of Machine %s: %v", name, err)
 	}
 	fileRequest(t, client, name)
 	synctest.Wait()
 }
 
-// fileRequest files an approved request for a machine, as its machine
-// operator does for what it staged.
+// fileRequest creates an approved Disruption for a machine, as its
+// machine-operator does for the update it staged.
 func fileRequest(t *testing.T, client *apiclient.Client, name string) {
 	t.Helper()
 	body, err := json.Marshal(requestObject(t, approvedRequest(name)))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the Disruption of Machine %s: %v", name, err)
 	}
 	if err := client.RequestJSON(http.MethodPost, kubernetes.DisruptionsPath, body, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the Disruption of Machine %s: %v", name, err)
 	}
 }
 
-// sweepFresh runs one sweep, and answers node-1 and node-2 and the
-// Cluster as the sweep left them in the API server.
-func sweepFresh(t *testing.T, r *fleetReader, client *apiclient.Client) (*machine.Machine, *machine.Machine, *cluster.Cluster) {
+// reconcileAndRead runs one pass, then reads node-1, node-2, and the Cluster
+// from the API server.
+func reconcileAndRead(t *testing.T, r *fleetReader, client *apiclient.Client) (*machine.Machine, *machine.Machine, *cluster.Cluster) {
 	t.Helper()
 	cm, _ := fleetMetrics(t)
-	if err := sweep(r, "lab", newChannelPoller(), &engineProbe{}, &podSteward{}, cm); err != nil {
-		t.Fatal(err)
+	if err := reconcile(r, "lab", newChannelPoller(), &fluxProbe{}, &overduePodReports{}, cm); err != nil {
+		t.Fatalf("running the pass: %v", err)
 	}
 	leader, err := kubernetes.GetMachine(client, "node-1")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading Machine node-1: %v", err)
 	}
 	worker, err := kubernetes.GetMachine(client, "node-2")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading Machine node-2: %v", err)
 	}
 	clusterDoc, err := apiclient.Get[cluster.Cluster](client, clusterPath("lab"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading Cluster lab: %v", err)
 	}
 	return leader, worker, clusterDoc
 }
@@ -85,10 +82,8 @@ func granted(m *machine.Machine) bool {
 	return api.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition) != nil
 }
 
-// A new process grants no turn while its record of the heartbeats is
-// younger than HeartbeatStaleAfter, even when every machine reads
-// Ready, and says so on the Cluster's Progressing condition.
-func TestANewProcessGrantsNoTurnUntilItCanJudgeTheHeartbeats(t *testing.T) {
+// The Progressing condition of the Cluster gives the reason for the wait.
+func TestANewProcessGrantsNoTurnUntilItCanTrustTheHeartbeats(t *testing.T) {
 	for _, after := range []time.Duration{0, kubernetes.HeartbeatStaleAfter - time.Second} {
 		t.Run(after.String(), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -96,28 +91,26 @@ func TestANewProcessGrantsNoTurnUntilItCanJudgeTheHeartbeats(t *testing.T) {
 				awaitTurn(t, client)
 				renewFor(t, client, after, []string{"node-1", "node-2"})
 
-				leader, worker, clusterDoc := sweepFresh(t, r, client)
+				leader, worker, clusterDoc := reconcileAndRead(t, r, client)
 
 				if leader.Status.Phase != api.PhaseReady {
-					t.Errorf("node-1 reads %s, want %s", leader.Status.Phase, api.PhaseReady)
+					t.Errorf("node-1 phase is %s, want %s", leader.Status.Phase, api.PhaseReady)
 				}
 				if granted(worker) {
-					t.Errorf("node-2 holds a reboot turn %s after the process started", after)
+					t.Errorf("node-2 has a reboot turn %s after the process started, want none", after)
 				}
 				progressing := api.FindCondition(clusterDoc.Status.Conditions, "Progressing")
 				if progressing == nil || !strings.Contains(progressing.Message, "heartbeat") {
-					t.Errorf("the Progressing condition gives no reason for the hold: %+v", progressing)
+					t.Errorf("the Progressing condition is %+v, want a message that mentions heartbeat", progressing)
 				}
 			})
 		})
 	}
 }
 
-// Once the first sweep's read of the Leases is older than
-// HeartbeatStaleAfter, a machine whose
-// Lease never changed reads Lost and fills the disruption budget, and
-// a fleet whose machines all renew gets its turn as before.
-func TestANewProcessGrantsTurnsOnceItCanJudgeTheHeartbeats(t *testing.T) {
+// After HeartbeatStaleAfter, a machine whose Lease never changed reads
+// Lost and uses up the disruption budget, so node-2 gets no turn.
+func TestANewProcessGrantsTurnsOnceItCanTrustTheHeartbeats(t *testing.T) {
 	cases := []struct {
 		name        string
 		renewing    []string
@@ -132,13 +125,13 @@ func TestANewProcessGrantsTurnsOnceItCanJudgeTheHeartbeats(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				r, client := startWatching(t, time.Now().Add(-time.Hour))
 				awaitTurn(t, client)
-				sweepFresh(t, r, client)
+				reconcileAndRead(t, r, client)
 				renewFor(t, client, kubernetes.HeartbeatStaleAfter+time.Second, c.renewing)
 
-				leader, worker, _ := sweepFresh(t, r, client)
+				leader, worker, _ := reconcileAndRead(t, r, client)
 
 				if leader.Status.Phase != c.leaderPhase {
-					t.Errorf("node-1 reads %s, want %s", leader.Status.Phase, c.leaderPhase)
+					t.Errorf("node-1 phase is %s, want %s", leader.Status.Phase, c.leaderPhase)
 				}
 				if granted(worker) != c.grant {
 					t.Errorf("node-2 granted = %v, want %v", granted(worker), c.grant)

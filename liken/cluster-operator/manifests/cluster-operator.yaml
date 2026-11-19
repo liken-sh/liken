@@ -1,20 +1,14 @@
-# This is the cluster operator's deployment: the fleet's one
-# observer, running as an ordinary Kubernetes workload.
+# The cluster operator works on the whole fleet through the API server,
+# so it runs as an ordinary pod with no hostPath mounts, host network,
+# or privilege, and Kubernetes can move it to any liken node. The
+# machine operator runs on each machine because it needs that
+# machine's files.
 #
-# The machine operator's manifest is shaped by running directly on
-# the machine: a privileged DaemonSet with hostPath mounts. This
-# manifest is different. It is shaped by deliberately depending on no
-# single machine: a single-replica Deployment with no volumes, no
-# host network, and no privilege. The API is its only input and
-# output, so the scheduler may place it on any liken node, and
-# Kubernetes itself replaces it when its node dies.
-#
-# Only one copy of the program acts at a time. Each copy competes for
-# the liken-cluster-operator Lease in liken-system, and only the copy
-# that holds it watches the fleet and writes (cluster-operator/leader.go).
-# A replica count cannot give that guarantee: a rolling update, a
-# partitioned node, and a person who scales the Deployment each run a
-# second copy.
+# Only the copy that holds the liken-cluster-operator Lease in
+# liken-system watches the fleet and writes (leader.go). The replica
+# count alone cannot keep a second copy from acting, because a rolling
+# update, a partitioned node, or a person who scales the Deployment can
+# each start one.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -22,46 +16,42 @@ metadata:
   name: liken-cluster-operator
   namespace: liken-system
 ---
-# These are the cluster operator's permissions: broad reads across
-# the fleet, and writes only to the fields whose whole point is that
-# no single machine can write them. Note the asymmetry with the
-# machine operator's role. This role may update any Machine's status,
-# for Lost verdicts and reboot grants, but it can never create a
-# Machine, change a spec, or modify a Node. The machine operators may
-# do all of those to themselves, but they cannot write the Cluster's
-# status. Each program holds exactly the authority its verdicts
-# need.
+# The cluster operator reads the whole fleet and writes only the
+# decisions that need a view of every machine. It can update any
+# Machine's status, to mark the machine Lost or approve its reboot, but
+# it cannot create a Machine, change a spec, or modify a Node. Each
+# machine operator does those things for its own machine, and cannot
+# write the Cluster's status.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: liken-cluster-operator
 rules:
-  # The fleet: watch every Machine, which is the sweep's wake
-  # signal and the copy it reads, and write statuses for the two
-  # condition-and-phase verdicts that this program owns: the Lost
-  # phase and the RebootApproved grant.
+  # A change to any Machine starts a pass, and the pass reads the
+  # Machines from the watch's cache. The operator writes a Machine's
+  # status only to set the Lost phase or the RebootApproved condition.
   - apiGroups: [liken.sh]
     resources: [machines]
     verbs: [get, list, watch]
   - apiGroups: [liken.sh]
     resources: [machines/status]
     verbs: [update]
-  # The Cluster: the watch keeps the copy every sweep reads, and the
-  # copy is how the operator finds the one Cluster it serves, because
-  # it takes no configuration. get and list are the reads a sweep
-  # sends while the copy cannot answer. Its status is this program's
-  # alone to write. This role has no create permission, because the
-  # machine operators seed the object from the image's manifest.
+  # The operator has no configuration, so it finds the Cluster through
+  # its watch. A pass reads the Cluster from the watch's cache and
+  # sends get or list only when the cache cannot serve the read. Only
+  # this program writes the Cluster's status. The machine operators
+  # create the Cluster from the boot manifest, so this role has no
+  # create.
   - apiGroups: [liken.sh]
     resources: [clusters]
     verbs: [get, list, watch]
   - apiGroups: [liken.sh]
     resources: [clusters/status]
     verbs: [update]
-  # The requests and the budgets (requests.go, requeststatus.go): read
-  # every Disruption and MachineDisruptionBudget, report on each in
-  # its status, delete a request a day after it completed, and create
-  # the default budget when it is missing.
+  # The operator reads every Disruption and MachineDisruptionBudget and
+  # writes the status of each (requests.go, requeststatus.go). It
+  # deletes a Disruption a day after it completes, and creates the
+  # default MachineDisruptionBudget when none exists.
   - apiGroups: [liken.sh]
     resources: [disruptions]
     verbs: [get, list, watch, delete]
@@ -74,44 +64,36 @@ rules:
   - apiGroups: [liken.sh]
     resources: [machinedisruptionbudgets/status]
     verbs: [update]
-  # The pod steward (steward.go): watch the OS DaemonSets' pods and
-  # evict the stale ones after an upgrade. This role uses eviction
-  # instead of delete for the same reason the drain does: the API
-  # server refuses an eviction that would violate a
-  # PodDisruptionBudget.
+  # After an upgrade, the operator (steward.go) evicts the OS
+  # DaemonSets' pods that the old release created. It evicts, as a
+  # drain does, instead of deleting, because the API server refuses an
+  # eviction that would violate a PodDisruptionBudget.
   - apiGroups: [""]
     resources: [pods]
     verbs: [list, watch]
   - apiGroups: [""]
     resources: [pods/eviction]
     verbs: [create]
-  # The steward reads each stewarded DaemonSet to determine which
-  # release's manifests are actually applied, from the
-  # liken.sh/os-version annotation. This is the release that its pod
-  # refreshes aim to match. The feature janitor (janitor.go) lists
-  # the same DaemonSets, looking for liken.sh/feature annotations,
-  # and deletes the ones whose feature the cluster document no
-  # longer declares. Delete is a broad permission for an observer to
-  # hold, so the janitor's own judgment stays narrow: it only ever
-  # deletes an object carrying the annotation, and only feature
-  # manifests carry one.
+  # The operator compares each pod with its DaemonSet's
+  # liken.sh/os-version annotation, which records the release whose
+  # manifests are applied. It also deletes (janitor.go) a DaemonSet
+  # whose liken.sh/feature annotation names a feature that the Cluster
+  # no longer declares. Only a feature's manifests set that annotation,
+  # so the operator deletes no other DaemonSet.
   - apiGroups: [apps]
     resources: [daemonsets]
     verbs: [get, list, watch, delete]
-  # The flux janitor (janitor.go): the teardown rights for a
-  # retracted flux feature. These are standing, unlike the planter's
-  # grant, which the feature's own manifests deliver: the janitor's
-  # job begins exactly when those delivered grants disappear, so
-  # delivered rights could never clean up after the feature that
-  # delivered them. Every rule is held to exact names, and the whole
-  # set can only remove the engine, never create or read anything.
-  # The CRD and RBAC names must match the engine seed; the parity
-  # test in flux_test.go holds them to it. The sync objects also
-  # need patch, to strip their finalizers once no controller exists
-  # to honor them. The namespace needs get as well as delete: it
-  # carries the liken.sh/feature annotation that records liken as the
-  # planter of this Flux, and the janitor reads that annotation before
-  # it deletes anything.
+  # When the Cluster stops declaring the flux feature, the operator
+  # (janitor.go) deletes the Flux installation. The rules for that are
+  # in this role, not in the feature's manifests, because the teardown
+  # deletes that RBAC before it finishes. Each rule names the exact
+  # objects, and none grants create or list. The CRD and RBAC names must match
+  # seed/gotk-components.yaml, and flux_test.go checks that they do.
+  # The GitRepository and the Kustomization need patch, because the
+  # operator removes their finalizers once no Flux controller is left to
+  # do it. The flux-system Namespace needs get, because the operator
+  # deletes nothing unless the Namespace has a liken.sh/feature
+  # annotation, which shows that liken installed this Flux.
   - apiGroups: [apps]
     resources: [deployments]
     resourceNames: [source-controller, kustomize-controller]
@@ -147,12 +129,12 @@ rules:
     resources: [clusterrolebindings]
     resourceNames: [cluster-reconciler-flux-system, crd-controller-flux-system, liken-engine-planter]
     verbs: [delete]
-  # The Events about the Machines and the Cluster (events.go). Both
-  # kinds are cluster-scoped, and the API server accepts an Event about a cluster-scoped object only
-  # in default or kube-system, so the operator posts every Event in
-  # default. The ClusterRole grants it, so the manifests bind nothing in
-  # default. create writes a new Event, and patch raises the count of a
-  # repeat within ten minutes.
+  # Events about Machines and the Cluster (events.go). Both kinds are
+  # cluster-scoped, and the API server accepts an Event about a
+  # cluster-scoped object only in default or kube-system, so the
+  # operator writes every Event in default. Because this ClusterRole
+  # grants the access, no RoleBinding in default is needed. patch
+  # raises the count of an Event that repeats within ten minutes.
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]
@@ -170,13 +152,12 @@ subjects:
     name: liken-cluster-operator
     namespace: liken-system
 ---
-# The Leases in liken-system. This program judges the fleet's
-# liveness by watching the machines' heartbeat leases, and it never
-# writes one. The machine operators hold the matching role that writes
-# a machine's own heartbeat. The one Lease this program writes is its
-# own leader election Lease, by name. create cannot be limited to a
-# name, because RBAC checks a create before the object has one, so the
-# role grants create on leases and update on the one name.
+# The operator watches each machine's heartbeat Lease in liken-system
+# to find machines that stopped reporting, and writes only its own
+# leader election Lease. RBAC cannot limit create to a resource name,
+# because the request is checked before the object has one, so the
+# role grants create on every Lease and update only on
+# liken-cluster-operator.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -213,30 +194,23 @@ metadata:
   labels:
     app.kubernetes.io/name: liken-cluster-operator
     app.kubernetes.io/part-of: liken
-  # This is the release that these manifests shipped with, the same
-  # annotation that the DaemonSets carry. Here, though, it serves two
-  # purposes. A DaemonSet needs the pod steward to refresh its pods
-  # after an upgrade, because OnDelete means an applied template
-  # never recreates anything by itself. A Deployment needs no
-  # steward at all. When a new release's manifests land, this
-  # annotation changes in the pod template below, and the Deployment
-  # replaces its own pod without help.
+  # The release that these manifests shipped with, as on the OS
+  # DaemonSets. Those DaemonSets use OnDelete, so cluster-operator must
+  # evict their old pods. This Deployment replaces its own pod, because
+  # the same annotation is in the pod template and a new release
+  # changes it.
   annotations:
     liken.sh/os-version: "LIKEN_VERSION"
 spec:
-  # A rolling update starts the new pod beside the old one. The new
-  # pod waits for the leader election Lease, and the old pod releases
-  # it on SIGTERM after its last sweep, so the new pod takes over
-  # within about eleven seconds. maxUnavailable 0 keeps the old pod
-  # until the new one runs, and maxSurge 1 allows the one extra pod.
+  # A rolling update starts the new pod before it stops the old one.
+  # The old pod releases the leader election Lease on SIGTERM after its
+  # last pass, and the new pod takes it within about 11 seconds.
   #
-  # One replica is enough. Two replicas are safe once every node runs
-  # a release with the election, because the Lease lets only one of
-  # them act, and the second one takes over in 30 to 41 seconds when
-  # the first one's node dies, without waiting for the scheduler. The
-  # image tag resolves on each node to the build that node's OS
-  # carries, so while a node still runs a release from before the
-  # election, a pod there acts with no Lease at all.
+  # A second replica would take over 30 to 41 seconds after the
+  # leader's node dies, without waiting for the scheduler. It is not
+  # safe until every node runs a release with leader election, because
+  # a pod on a node with an older build (see the image comment below)
+  # acts without the Lease.
   replicas: 1
   strategy:
     type: RollingUpdate
@@ -256,35 +230,26 @@ spec:
         liken.sh/os-version: "LIKEN_VERSION"
     spec:
       serviceAccountName: liken-cluster-operator
-      # A shutdown finishes the sweep in flight, whose requests each
-      # stop after 15 seconds, and then releases the Lease, which
-      # takes up to 16 seconds more. The default of 30 seconds could
-      # end the process before the release, and the next copy would
-      # then wait out the Lease's whole duration.
+      # On SIGTERM the operator finishes its pass, whose requests each
+      # time out after 15 seconds, and then releases the Lease, which
+      # can take up to 16 seconds more. With the default of 30 seconds
+      # the kubelet can kill it before the release, and the next copy
+      # then waits out the whole Lease duration.
       terminationGracePeriodSeconds: 60
-      # This is the priority class for control-plane workloads that
-      # are cluster-wide rather than node-local. The machine operator
-      # uses system-node-critical, because a node needs its own copy.
-      # This deployment uses system-cluster-critical, because the
-      # cluster needs one copy somewhere.
+      # system-cluster-critical, not system-node-critical, because the
+      # cluster needs this operator on some node, not on every node.
       priorityClassName: system-cluster-critical
-      # Only liken nodes carry the image, because of
-      # imagePullPolicy: Never below. See the machine operator's
-      # manifest for the full explanation.
+      # Only liken nodes have the image, because imagePullPolicy is Never
+      # (see the machine operator's manifest).
       nodeSelector:
         liken.sh/machine: "true"
-      # This sets how long the pod may sit on an unreachable node
-      # before Kubernetes schedules its replacement elsewhere. The
-      # default is five minutes, tuned for workloads where a false
-      # eviction is expensive. This pod is stateless and cheap to
-      # move, and five minutes of fleet blindness is exactly what
-      # this setting exists to prevent. Fifteen seconds puts failover
-      # on the same timescale as the forty-second Lost threshold. A
-      # machine death that also takes down the observer pod costs
-      # roughly a minute of stale Cluster status. During that
-      # minute, `kubectl get nodes` still reports accurate node
-      # status, because Kubernetes' own node controller does not
-      # depend on this program.
+      # The pod leaves a not-ready or unreachable node after 15 seconds
+      # instead of the default five minutes. It is stateless, and the
+      # Cluster status goes stale while it is down. When its node dies,
+      # those 15 seconds plus the 40 seconds before a heartbeat counts
+      # as stale leave the Cluster status stale for about a minute. The
+      # Node objects stay current, because the Kubernetes node
+      # controller updates them.
       tolerations:
         - key: node.kubernetes.io/not-ready
           operator: Exists
@@ -296,26 +261,17 @@ spec:
           tolerationSeconds: 15
       containers:
         - name: operator
-          # This is the stable tag. Each node resolves it against
-          # whatever build that node's OS imported, the same airgap
-          # arrangement as every OS image, explained in the machine
-          # operator's manifest. Mid-upgrade, the pod may land on a
-          # node whose OS carries an older build than these
-          # manifests shipped with. That version gap is a normal
-          # part of a fleet mid-upgrade, and every release's operator
-          # must tolerate its neighbors running older versions
-          # anyway.
+          # The installed tag resolves on each node to the build that
+          # the node's OS imported (see the machine operator's manifest).
+          # During an upgrade the pod can start on a node with an older
+          # build than these manifests, so the operator must work beside
+          # machines on older releases.
           image: liken.sh/cluster-operator:installed
           imagePullPolicy: Never
-          # The Prometheus port.
-          # `plans/completed/65-prometheus-metrics.md` at the top of the
-          # repository gives every process on the cluster network this
-          # port, and the binary carries it as the default of its
-          # --metrics-address argument. This entry names the port, so a
-          # PodMonitor selects it by name
-          # (deploy/monitoring/podmonitors.yaml). This pod has its own
-          # port space, so it shares the number with no other pod on the
-          # node. To turn the listener off, add
+          # --metrics-address defaults to :9200, the port where every
+          # liken process serves /metrics. The PodMonitor in
+          # deploy/monitoring/podmonitors.yaml selects the port by its
+          # name. To turn the listener off, add
           # `args: ["--metrics-address="]` to this container.
           ports:
             - name: metrics

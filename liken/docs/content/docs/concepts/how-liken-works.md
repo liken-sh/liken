@@ -89,7 +89,7 @@ request's `spec.approvedHash` names its `spec.hash`. `liken
 approve-reboot` sets that field for you. `Granted` is `True`
 while the machine holds a turn that covers the request. While the
 request waits, the message of `Granted` names what it waits for, for
-example `the default budget allows 1 out of service, and node-3 is
+example `The default budget allows 1 out of service, and node-3 is
 out`.
 
 A [`MachineDisruptionBudget`](/docs/reference/machinedisruptionbudget/)

@@ -37,90 +37,79 @@ func refreshNames(pods []kubernetes.Pod) []string {
 	return names
 }
 
-func TestStewardRefreshesStalePodOnUpgradedMachine(t *testing.T) {
+func TestDecideRefreshEvictsAnOldPodOnAnUpgradedMachine(t *testing.T) {
 	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
 	pods := []kubernetes.Pod{operatorPod("op-1", "node-1", "0.1.0")}
 	refresh := decideRefresh("0.2.2", machines, pods)
 	if got := refreshNames(refresh); len(got) != 1 || got[0] != "op-1" {
-		t.Fatalf("expected [op-1], got %v", got)
+		t.Fatalf("refreshed pods = %v, want [op-1]", got)
 	}
 }
 
-func TestStewardRefreshesPodWithNoVersionAnnotation(t *testing.T) {
+func TestDecideRefreshEvictsAPodWithNoVersionAnnotation(t *testing.T) {
 	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
 	pods := []kubernetes.Pod{operatorPod("op-1", "node-1", "")}
 	refresh := decideRefresh("0.2.2", machines, pods)
 	if len(refresh) != 1 {
-		t.Fatalf("expected one refresh, got %v", refreshNames(refresh))
+		t.Fatalf("refreshed pods = %v, want one", refreshNames(refresh))
 	}
 }
 
-func TestStewardLeavesFreshPodsAlone(t *testing.T) {
+func TestDecideRefreshLeavesCurrentPodsAlone(t *testing.T) {
 	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
 	pods := []kubernetes.Pod{operatorPod("op-1", "node-1", "0.2.2")}
 	if refresh := decideRefresh("0.2.2", machines, pods); len(refresh) != 0 {
-		t.Fatalf("expected no refreshes, got %v", refreshNames(refresh))
+		t.Fatalf("refreshed pods = %v, want none", refreshNames(refresh))
 	}
 }
 
-func TestStewardWaitsForTheMachineToUpgrade(t *testing.T) {
-	// The machine still runs 0.1.0. Its old pod is the only operator
-	// image the machine has, and evicting it would leave the machine
-	// with no operator to drive its own upgrade.
+func TestDecideRefreshWaitsForTheMachineToUpgrade(t *testing.T) {
 	machines := []machine.Machine{machineRunning("node-1", "0.1.0")}
 	pods := []kubernetes.Pod{operatorPod("op-1", "node-1", "0.1.0")}
 	if refresh := decideRefresh("0.2.2", machines, pods); len(refresh) != 0 {
-		t.Fatalf("expected no refreshes, got %v", refreshNames(refresh))
+		t.Fatalf("refreshed pods = %v, want none", refreshNames(refresh))
 	}
 }
 
-func TestStewardWaitsForTheManifestsToCatchUp(t *testing.T) {
-	// The machine is ahead of the applied manifests. Workers upgrade
-	// before any leader has applied the new release's DaemonSet. A
-	// refresh now would just recreate another stale pod, repeating
-	// every sweep until the leaders catch up.
+func TestDecideRefreshWaitsForTheManifestsOfTheMachinesRelease(t *testing.T) {
+	// A worker can upgrade before any leader has applied the new
+	// release's manifests.
 	machines := []machine.Machine{machineRunning("node-1", "0.2.3")}
 	pods := []kubernetes.Pod{operatorPod("op-1", "node-1", "0.2.2")}
 	if refresh := decideRefresh("0.2.2", machines, pods); len(refresh) != 0 {
-		t.Fatalf("expected no refreshes, got %v", refreshNames(refresh))
+		t.Fatalf("refreshed pods = %v, want none", refreshNames(refresh))
 	}
 }
 
-func TestStewardDoesNothingWithoutAVersionedDaemonSet(t *testing.T) {
-	// A DaemonSet with no os-version annotation predates this
-	// design. There is no release to refresh toward.
+func TestDecideRefreshDoesNothingWithoutAVersionedDaemonSet(t *testing.T) {
 	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
 	pods := []kubernetes.Pod{operatorPod("op-1", "node-1", "0.1.0")}
 	if refresh := decideRefresh("", machines, pods); len(refresh) != 0 {
-		t.Fatalf("expected no refreshes, got %v", refreshNames(refresh))
+		t.Fatalf("refreshed pods = %v, want none", refreshNames(refresh))
 	}
 }
 
-func TestStewardLeavesATerminatingPodAlone(t *testing.T) {
-	// An earlier sweep already evicted this pod, and it is still
-	// shutting down. The sweeps that run before it leaves the pod copy
-	// must not evict it again.
+func TestDecideRefreshLeavesATerminatingPodAlone(t *testing.T) {
 	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
 	pod := operatorPod("op-1", "node-1", "0.1.0")
 	pod.Metadata.DeletionTimestamp = "2026-09-29T06:40:41Z"
 	if refresh := decideRefresh("0.2.2", machines, []kubernetes.Pod{pod}); len(refresh) != 0 {
-		t.Fatalf("expected no refreshes, got %v", refreshNames(refresh))
+		t.Fatalf("refreshed pods = %v, want none", refreshNames(refresh))
 	}
 }
 
-func TestStewardIgnoresPodsOnUnknownMachines(t *testing.T) {
+func TestDecideRefreshIgnoresPodsOnUnknownMachines(t *testing.T) {
 	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
 	pods := []kubernetes.Pod{operatorPod("op-x", "node-9", "0.1.0")}
 	if refresh := decideRefresh("0.2.2", machines, pods); len(refresh) != 0 {
-		t.Fatalf("expected no refreshes, got %v", refreshNames(refresh))
+		t.Fatalf("refreshed pods = %v, want none", refreshNames(refresh))
 	}
 }
 
-// stewardServer fakes the part of the API that the steward uses.
-// Each named DaemonSet exists with the given os-version annotation,
-// every DaemonSet's pod listing returns one stale pod on node-1, and
-// evictions are recorded. A lookup of a DaemonSet that is not in the
-// map returns a 404.
+// stewardServer serves each DaemonSet in daemonSets with that
+// os-version annotation, and 404 for any other. Every pod listing
+// returns one pod of release 0.1.0 on node-1, and each eviction is
+// appended to evicted.
 func stewardServer(t *testing.T, daemonSets map[string]string, evicted *[]string) *apiclient.Client {
 	t.Helper()
 	return testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -146,15 +135,13 @@ func stewardServer(t *testing.T, daemonSets map[string]string, evicted *[]string
 			pod := operatorPod(strings.TrimPrefix(app, "app=")+"-pod", "node-1", "0.1.0")
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []kubernetes.Pod{pod}})
 		default:
-			t.Errorf("unexpected request: %s", r.URL)
+			t.Errorf("refreshOSPods requested %s, which the test server does not serve", r.URL)
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 }
 
-// The acting half sweeps every OS DaemonSet, the operator's and the
-// relays', and refreshes each one's stale pods.
-func TestStewardSweepsEveryOSDaemonSet(t *testing.T) {
+func TestRefreshOSPodsEvictsFromEveryOSDaemonSet(t *testing.T) {
 	var evicted []string
 	client := stewardServer(t, map[string]string{
 		"liken-machine-operator": "0.2.2",
@@ -162,33 +149,30 @@ func TestStewardSweepsEveryOSDaemonSet(t *testing.T) {
 	}, &evicted)
 
 	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
-	stewardOSPods(&fleetReader{client: client}, machines, &podSteward{}, sweepNow)
+	refreshOSPods(&fleetReader{client: client}, machines, &overduePodReports{}, passTime)
 	if len(evicted) != 2 || evicted[0] != "liken-machine-operator-pod" || evicted[1] != "machine-logs-pod" {
-		t.Errorf("expected evictions from both DaemonSets, got %v", evicted)
+		t.Errorf("evicted pods = %v, want one from each DaemonSet", evicted)
 	}
 }
 
-// A DaemonSet that does not exist, for example during a partial
-// rollout or on a cluster from before the relays, is skipped without
-// complaint or eviction.
-func TestStewardSkipsMissingDaemonSets(t *testing.T) {
+func TestRefreshOSPodsSkipsMissingDaemonSets(t *testing.T) {
 	var evicted []string
 	client := stewardServer(t, map[string]string{
 		"liken-machine-operator": "0.2.2",
 	}, &evicted)
 
 	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
-	stewardOSPods(&fleetReader{client: client}, machines, &podSteward{}, sweepNow)
+	refreshOSPods(&fleetReader{client: client}, machines, &overduePodReports{}, passTime)
 	if len(evicted) != 1 || evicted[0] != "liken-machine-operator-pod" {
-		t.Errorf("expected only the operator's eviction, got %v", evicted)
+		t.Errorf("evicted pods = %v, want only the machine-operator pod, because machine-logs does not exist", evicted)
 	}
 }
 
-func TestStewardHandlesTheWholeFleetMidRollout(t *testing.T) {
+func TestDecideRefreshEvictsOnlyTheOldPodsOfUpgradedMachines(t *testing.T) {
 	machines := []machine.Machine{
-		machineRunning("node-1", "0.2.2"), // upgraded, stale pod: refresh
-		machineRunning("node-2", "0.1.0"), // not yet upgraded: leave it
-		machineRunning("node-3", "0.2.2"), // upgraded, fresh pod: leave it
+		machineRunning("node-1", "0.2.2"), // upgraded, old pod: evict
+		machineRunning("node-2", "0.1.0"), // not upgraded: keep
+		machineRunning("node-3", "0.2.2"), // upgraded, current pod: keep
 	}
 	pods := []kubernetes.Pod{
 		operatorPod("op-1", "node-1", "0.1.0"),
@@ -197,6 +181,6 @@ func TestStewardHandlesTheWholeFleetMidRollout(t *testing.T) {
 	}
 	refresh := decideRefresh("0.2.2", machines, pods)
 	if got := refreshNames(refresh); len(got) != 1 || got[0] != "op-1" {
-		t.Fatalf("expected [op-1], got %v", got)
+		t.Fatalf("refreshed pods = %v, want [op-1]", got)
 	}
 }
