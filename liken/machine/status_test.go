@@ -14,13 +14,24 @@ func TestRoleAddressesEveryRoleAndNothingElse(t *testing.T) {
 		}
 		rs.Backing = BackingPartition
 	}
-	// Each name reached a distinct field.
-	if s.MachineState.Backing != BackingPartition ||
-		s.MachineEphemeral.Backing != BackingPartition ||
-		s.ClusterState.Backing != BackingPartition ||
-		s.PodStorage.Backing != BackingPartition ||
-		s.PodEphemeral.Backing != BackingPartition {
-		t.Errorf("setting each role through Role(name) left a field unset, want all five set to partition: %+v", s)
+	// Each name reached a distinct field. AllRolesInMemory sets each
+	// backing through Role too, so a field that no name reaches has an
+	// empty backing.
+	fields := map[string]StorageRoleStatus{
+		"BIOSBoot":         s.BIOSBoot,
+		"BootHome":         s.BootHome,
+		"SystemA":          s.SystemA,
+		"SystemB":          s.SystemB,
+		"MachineState":     s.MachineState,
+		"MachineEphemeral": s.MachineEphemeral,
+		"ClusterState":     s.ClusterState,
+		"PodStorage":       s.PodStorage,
+		"PodEphemeral":     s.PodEphemeral,
+	}
+	for field, rs := range fields {
+		if rs.Backing != BackingPartition {
+			t.Errorf("after Role(name) set each role to partition, %s has the backing %q, want %q", field, rs.Backing, BackingPartition)
+		}
 	}
 	if s.Role("archive") != nil {
 		t.Error(`Role("archive") is not nil, want nil for a name that is not a role`)

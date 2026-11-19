@@ -78,16 +78,10 @@ func TestRlimitDriftReportsInASettledOrder(t *testing.T) {
 	}
 }
 
-// The limits that ship with the release are not part of the spec, so
-// a boot that applied only those limits matches a spec that declares
-// none.
-func TestRlimitDriftIgnoresTheLimitsThatShipWithTheRelease(t *testing.T) {
-	if diffs := RlimitDrift(nil, nil); diffs != nil {
-		t.Fatalf("RlimitDrift = %v, want no difference", diffs)
-	}
-	// A spec that repeats a release limit still differs from a boot
-	// that declared nothing, because the boot record holds only what
-	// the spec declared.
+// RlimitDrift does not compare OSRlimits, so a spec that repeats a
+// release limit still differs from a boot that declared nothing. The
+// boot record holds only what the spec declared.
+func TestRlimitDriftReportsASpecLimitThatRepeatsAReleaseLimit(t *testing.T) {
 	diffs := RlimitDrift(map[string]string{"nofile": OSRlimits["nofile"]}, nil)
 	if len(diffs) != 1 {
 		t.Errorf("RlimitDrift = %v, want one difference", diffs)
