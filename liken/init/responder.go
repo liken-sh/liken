@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -104,17 +105,28 @@ func respondTo(request []byte, clk *clock, now time.Time) []byte {
 	// across strata.
 
 	// The reference ID is the kiss code at stratum 0, and "LOCL" for a
-	// free-running clock. For a synced clock it is the source's IPv4
-	// address when the source is configured as one, and zero when the
-	// source is a hostname.
+	// free-running clock. For a synced clock, RFC 5905 section 7.3 sets
+	// it to the IPv4 address that answered, or to the first four bytes
+	// of the MD5 hash of the IPv6 address, so a client can detect a
+	// timing loop. A measurement with no answering address falls back
+	// to the source as configured, and a hostname there leaves zero.
 	switch {
 	case leap == leapAlarm:
 		copy(response[12:16], "INIT")
 	case lastSync == nil:
 		copy(response[12:16], "LOCL")
 	default:
-		if ip := net.ParseIP(lastSync.source); ip != nil && ip.To4() != nil {
+		ip := lastSync.address
+		if ip == nil {
+			ip = net.ParseIP(lastSync.source)
+		}
+		switch {
+		case ip == nil:
+		case ip.To4() != nil:
 			copy(response[12:16], ip.To4())
+		default:
+			hash := md5.Sum(ip.To16())
+			copy(response[12:16], hash[:4])
 		}
 	}
 

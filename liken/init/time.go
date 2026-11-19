@@ -79,7 +79,11 @@ const (
 // stepped the clock at boot is marked, because its offset is the
 // error from before the step.
 type timeSync struct {
-	source  string
+	source string
+	// address is the address that answered, which differs from source
+	// when source is a hostname. The responder sends it as its
+	// reference ID.
+	address net.IP
 	stratum int
 	offset  time.Duration
 	delay   time.Duration
@@ -208,7 +212,18 @@ func timeStatus(sync *timeSync, sources []string) machine.TimeStatus {
 func querySources(sources []string) (*timeSync, error) {
 	var lastErr error
 	for _, source := range sources {
-		response, err := ntp.QueryWithOptions(source, ntp.QueryOptions{})
+		var address net.IP
+		dial := func(local, remote string) (net.Conn, error) {
+			conn, err := dialTimeSource(local, remote)
+			if err != nil {
+				return nil, err
+			}
+			if udp, ok := conn.RemoteAddr().(*net.UDPAddr); ok {
+				address = udp.IP
+			}
+			return conn, nil
+		}
+		response, err := ntp.QueryWithOptions(source, ntp.QueryOptions{Dialer: dial})
 		if err == nil {
 			err = response.Validate()
 		}
@@ -218,6 +233,7 @@ func querySources(sources []string) (*timeSync, error) {
 		}
 		return &timeSync{
 			source:  source,
+			address: address,
 			stratum: int(response.Stratum),
 			offset:  response.ClockOffset,
 			delay:   response.RTT,
@@ -271,11 +287,31 @@ func stepClockAtBoot(sources []string) *timeSync {
 // assign to them.
 var (
 	queryTimeSources  = querySources
+	dialTimeSource    = dialUDP
 	setSystemClock    = clockSettime
 	slewSystemClock   = slewClock
 	pendingSlew       = readPendingSlew
 	saveHardwareClock = writeRTC
 )
+
+// dialUDP opens the socket of one query. It resolves the address as
+// beevik/ntp's own dialer does, so the answering address is the one
+// that the library would use.
+func dialUDP(localAddress, remoteAddress string) (net.Conn, error) {
+	var laddr *net.UDPAddr
+	if localAddress != "" {
+		var err error
+		laddr, err = net.ResolveUDPAddr("udp", net.JoinHostPort(localAddress, "0"))
+		if err != nil {
+			return nil, err
+		}
+	}
+	raddr, err := net.ResolveUDPAddr("udp", remoteAddress)
+	if err != nil {
+		return nil, err
+	}
+	return net.DialUDP("udp", laddr, raddr)
+}
 
 func clockSettime(t time.Time) error {
 	ts := unix.NsecToTimespec(t.UnixNano())
