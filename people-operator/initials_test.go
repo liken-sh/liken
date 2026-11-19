@@ -16,6 +16,7 @@ func TestInitials(t *testing.T) {
 		{"the nickname over the display name", personSpec{DisplayName: "Ada Lovelace", Nickname: "countess"}, "C"},
 		{"a letter outside ASCII", personSpec{DisplayName: "élodie"}, "É"},
 		{"no name", personSpec{DisplayName: "  "}, ""},
+		{"a nickname of only spaces", personSpec{DisplayName: "Ada Lovelace", Nickname: " "}, "AL"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

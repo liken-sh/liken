@@ -51,11 +51,13 @@ func personColour(name string) color.RGBA {
 
 // initials returns the letters to draw for a Person. A nickname gives
 // the first letter of its first word. Without one, the display name
-// gives the first letters of its first and last words.
+// gives the first letters of its first and last words. The CRD accepts
+// a nickname of only spaces, which has no word, so such a nickname
+// counts as none.
 func initials(spec personSpec) string {
 	words := strings.Fields(spec.DisplayName)
-	if spec.Nickname != "" {
-		words = strings.Fields(spec.Nickname)[:1]
+	if nickname := strings.Fields(spec.Nickname); len(nickname) > 0 {
+		words = nickname[:1]
 	}
 	if len(words) == 0 {
 		return ""

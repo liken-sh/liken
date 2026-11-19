@@ -112,8 +112,14 @@ func (b *bakers) result(baker pod, known pictureVersion) (reading, error) {
 		return reading{}, failure(reasonBakeFailed, fmt.Errorf("reading the result in the log of the baker pod %s/%s: %w",
 			baker.Metadata.Namespace, baker.Metadata.Name, err))
 	}
-	if line.Error != "" || line.Thumbnail == "" {
+	if line.Error != "" {
 		return reading{}, &sourceError{reason: bakeReason(line.Reason), err: errors.New(line.Error)}
+	}
+	// The bake command sets Error or Thumbnail on every path, so a line
+	// with neither came from another program or another version.
+	if line.Thumbnail == "" {
+		return reading{}, &sourceError{reason: bakeReason(line.Reason), err: fmt.Errorf("the baker pod %s/%s wrote no thumbnail and no error",
+			baker.Metadata.Namespace, baker.Metadata.Name)}
 	}
 	version := pictureVersion{LastModified: line.ModTime, Size: line.Size}
 	if version == known {

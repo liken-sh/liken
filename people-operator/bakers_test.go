@@ -131,6 +131,24 @@ func TestABakerPodsResultBecomesTheStatus(t *testing.T) {
 	}
 }
 
+// A baker pod whose line holds neither a thumbnail nor an error still
+// gives AvatarReady a cause, so a person learns which pod to read.
+func TestABakerLineWithNoThumbnailAndNoErrorNamesThePod(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.api.putPerson(ada("claim://media/pictures/ada.png"))
+		w.waitForIdle()
+
+		w.api.finishPod("media", bakerPodName("ada"), podSucceeded, "{}\n")
+		w.waitForIdle()
+
+		message := w.api.person(t, "ada").Status.ready().Message
+		if !strings.Contains(message, "media/"+bakerPodName("ada")) {
+			t.Errorf("the AvatarReady message is %q, want it to name the baker pod media/%s, because its line held no thumbnail and no error", message, bakerPodName("ada"))
+		}
+	})
+}
+
 // A baker pod that has not finished when bakeDeadline passes is
 // deleted, and AvatarReady reports BakeFailed.
 func TestABakerPodThatDoesNotFinishIsDeleted(t *testing.T) {
