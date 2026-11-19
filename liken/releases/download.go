@@ -58,8 +58,12 @@ func Get(ctx context.Context, client *http.Client, url string) (*http.Response, 
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		// The cause is read before stop, because stop cancels the
+		// context with context.Canceled, and causeOf would then report
+		// that in place of the transport's error.
+		err = causeOf(ctx, err)
 		stop()
-		return nil, causeOf(ctx, err)
+		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()

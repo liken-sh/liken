@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -132,6 +133,21 @@ func TestADownloadReportsTheServersRefusal(t *testing.T) {
 
 		if got.err == nil || !strings.Contains(got.err.Error(), "404 Not Found") {
 			t.Errorf("err = %v, want the server's status", got.err)
+		}
+	})
+}
+
+// A request that cannot connect ends with the transport's error, so a
+// caller can match a refused connection with errors.Is.
+func TestADownloadThatCannotConnectReportsTheRefusedConnection(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		server := apiservertest.Start(t, http.NotFoundHandler())
+		server.SetDown(true)
+
+		got := readAll(t.Context(), server.Client(), apiservertest.Host+"/channel.yaml")
+
+		if !errors.Is(got.err, syscall.ECONNREFUSED) || errors.Is(got.err, context.Canceled) {
+			t.Errorf("err = %v, want ECONNREFUSED and not context.Canceled", got.err)
 		}
 	})
 }
