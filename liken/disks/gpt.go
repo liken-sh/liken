@@ -500,17 +500,46 @@ func writeTableBytes(devPath string, totalSectors uint64, t *Table) (*os.File, e
 		}
 	}
 
-	for _, chunk := range chunks {
-		if _, err := f.WriteAt(chunk.Data, int64(chunk.LBA)*SectorSize); err != nil {
-			f.Close()
-			return nil, fmt.Errorf("writing at LBA %d: %w", chunk.LBA, err)
-		}
-	}
-	if err := f.Sync(); err != nil {
+	if err := writeChunks(f, chunks); err != nil {
 		f.Close()
 		return nil, err
 	}
 	return f, nil
+}
+
+// tableDevice is the part of a block device that a table write uses.
+type tableDevice interface {
+	io.WriterAt
+	Sync() error
+}
+
+// writeChunks writes the backup copy of a table, syncs it, and then
+// writes the primary copy and the protective MBR and syncs them. A
+// drive can put the writes between two syncs on the medium in any
+// order, so a power cut can tear every copy that is written in the
+// same step. With a sync between the copies, one copy is always
+// complete. UEFI specification 2.10, section 5.3.2, says that software
+// updates the backup GPT before the primary GPT. Growth shows why: the
+// new backup is at the new end of the disk, where ReadGPT looks for
+// it, and the old backup is at the old end, where nothing looks. If the
+// primary went first, a cut that tore it would leave no copy that
+// ReadGPT finds.
+func writeChunks(dev tableDevice, chunks []Chunk) error {
+	isPrimary := func(c Chunk) bool { return c.LBA < ReservedLBAs }
+	for _, primary := range []bool{false, true} {
+		for _, chunk := range chunks {
+			if isPrimary(chunk) != primary {
+				continue
+			}
+			if _, err := dev.WriteAt(chunk.Data, int64(chunk.LBA)*SectorSize); err != nil {
+				return fmt.Errorf("writing at LBA %d: %w", chunk.LBA, err)
+			}
+		}
+		if err := dev.Sync(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Write lays a brand-new partition table onto a blank disk being
