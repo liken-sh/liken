@@ -38,9 +38,6 @@ const wpaAttached = "LIKEN-ATTACHED"
 
 // wpaEvent is one message the supplicant pushed to an attached client.
 type wpaEvent struct {
-	// level is the message's priority, or -1 when it has none.
-	level int
-
 	// name is the first word of the message, for example
 	// CTRL-EVENT-CONNECTED.
 	name string
@@ -65,12 +62,8 @@ func parseWPAEvent(message string) (wpaEvent, bool) {
 	if rest, found := strings.CutPrefix(text, "IFNAME="); found {
 		_, text, _ = strings.Cut(rest, " ")
 	}
-	level := -1
 	if strings.HasPrefix(text, "<") {
 		if end := strings.Index(text, ">"); end > 0 {
-			if _, err := fmt.Sscanf(text[1:end], "%d", &level); err != nil {
-				level = -1
-			}
 			text = text[end+1:]
 		}
 	}
@@ -78,7 +71,7 @@ func parseWPAEvent(message string) (wpaEvent, bool) {
 		return wpaEvent{}, false
 	}
 	name, _, _ := strings.Cut(text, " ")
-	return wpaEvent{level: level, name: name, fields: parseWPAFields(text), text: text}, true
+	return wpaEvent{name: name, fields: parseWPAFields(text), text: text}, true
 }
 
 // parseWPAFields returns the key=value pairs of one message. It splits

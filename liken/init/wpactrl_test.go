@@ -16,13 +16,10 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-func TestParseWPAEventReadsThePriorityAndTheName(t *testing.T) {
+func TestParseWPAEventStripsThePriorityAndReadsTheName(t *testing.T) {
 	event, ok := parseWPAEvent("<3>CTRL-EVENT-CONNECTED - Connection to 04:4a:2c:11:22:33 completed [id=0 id_str=]")
 	if !ok {
 		t.Fatal("parseWPAEvent refused the message, want an event")
-	}
-	if event.level != 3 {
-		t.Errorf("level is %d, want 3", event.level)
 	}
 	if event.name != "CTRL-EVENT-CONNECTED" {
 		t.Errorf("name is %q, want the event name", event.name)
@@ -78,8 +75,8 @@ func TestParseWPAEventFindsTheReasonPastAnAwkwardName(t *testing.T) {
 
 func TestParseWPAEventToleratesAMessageWithNoPriority(t *testing.T) {
 	event, ok := parseWPAEvent("CTRL-EVENT-TERMINATING ")
-	if !ok || event.name != "CTRL-EVENT-TERMINATING" || event.level != -1 {
-		t.Errorf("event is %+v, want CTRL-EVENT-TERMINATING with level -1", event)
+	if !ok || event.name != "CTRL-EVENT-TERMINATING" {
+		t.Errorf("event is %+v, want CTRL-EVENT-TERMINATING", event)
 	}
 }
 
