@@ -166,7 +166,12 @@ spec:
                     changes, or when the catalog's file changes and
                     offers different releases for the GUIDs that the
                     machine reported. After a `Failed` scan, it does not
-                    scan the machine again until one of these changes.
+                    scan the machine again until one of these changes. A
+                    scan whose pod the kubelet ended for a reason other
+                    than a node shutdown, such as an eviction, did not
+                    fail. It runs again in a new pod while the machine
+                    still needs the same scan, at most five pods for one
+                    scan.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [machine]
                   items:
@@ -214,12 +219,18 @@ spec:
                         type: string
                         enum: [Running, Scanned, Failed, CatalogMoved]
                         description: >-
-                          `Running` while the scan pod runs. `Scanned`
+                          `Running` while the scan pod runs, and while
+                          `firmware-operator` waits to run the scan again
+                          in a new pod after the kubelet ended its pod for
+                          a reason other than a node shutdown.
+                          `Scanned`
                           when the scan finished, and the `Firmware`
                           objects that `firmware-operator` created describe
                           its devices. `Failed` when the scan failed, did
                           not finish within ten minutes of the pod's
-                          creation, or its pod was deleted. `CatalogMoved`
+                          creation, or its pod was deleted, or when the
+                          kubelet ended its pod at a node shutdown or ended
+                          its fifth pod. `CatalogMoved`
                           when the jcat named a different file from the one
                           the scan was given, and `firmware-operator` then
                           reads the jcat at once.

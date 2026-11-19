@@ -138,7 +138,7 @@ func (o *operator) approveAll(rules []firmware, w observed, catalogs map[string]
 // Disruptions and the waiting apply pods in line with the records it
 // wrote, and deletes each finished rehearsal and apply pod.
 func (o *operator) reconcileUpdate(f *firmware, w observed, catalogs map[string]*catalog, now time.Time) (time.Time, error) {
-	ends, busy, due, err := o.rehearsalEnds(f, w.rehearsals[f.Metadata.Name], now)
+	ends, retries, busy, due, err := o.rehearsalEnds(f, w.rehearsals[f.Metadata.Name], w, catalogs, now)
 	problems := []error{err}
 	steps, finished, applyDue, err := o.applyEnds(f, w.applies[f.Metadata.Name], now)
 	due, problems = earliest(due, applyDue), append(problems, err)
@@ -154,6 +154,7 @@ func (o *operator) reconcileUpdate(f *firmware, w observed, catalogs map[string]
 	var approvedMoved, rehearsedMoved, appliedMoved bool
 	var notices, applyNotices []notice
 	var records []applyRecord
+	var rehearsalRecords []rehearsal
 	written, err := informer.SettleStatus[firmware](o.client, o.firmwares.Versions, firmwarePath(f.Metadata.Name), f, func(current *firmware) bool {
 		next := current.Status
 		next.Conditions = slices.Clone(current.Status.Conditions)
@@ -161,9 +162,9 @@ func (o *operator) reconcileUpdate(f *firmware, w observed, catalogs map[string]
 		var present bool
 		approved, pending, present = approval(current.Spec.Update, current.Spec.Machines, current.Status.Machines, w.machines)
 		next.Counts = counts{UpdateCounts: updateCounts(current.Status.Machines, len(pending))}
-		next.Rehearsals, notices = composeRehearsals(current, pending, ends, starts, now)
+		next.Rehearsals, notices = composeRehearsals(current, pending, ends, retries, starts, now)
 		next.Applies, applyNotices = composeApplies(current, pending, steps, now)
-		records = next.Applies
+		records, rehearsalRecords = next.Applies, next.Rehearsals
 		approvedMoved = setOrClearCondition(&next.Conditions, approvedCondition, approved, present, current.Metadata.Generation, now)
 		var rehearsing, applying bool
 		rehearsals, rehearsing = rehearsed(next.Rehearsals, pending)
@@ -204,6 +205,7 @@ func (o *operator) reconcileUpdate(f *firmware, w observed, catalogs map[string]
 	for _, p := range finished {
 		problems = append(problems, o.remove(p))
 	}
+	problems = append(problems, o.replaceEndedRehearsals(f, rehearsalRecords, retries, now))
 	return due, errors.Join(problems...)
 }
 

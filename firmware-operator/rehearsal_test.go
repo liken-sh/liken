@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -261,4 +262,93 @@ func TestAnEntryWithNoDeviceIDStartsNoRehearsal(t *testing.T) {
 	if e, offered := offeredEntry(entries, "node-2", approved); offered {
 		t.Errorf("offeredEntry returned %+v, want none for an entry with no device ID", e)
 	}
+}
+
+// A rehearsal pod that the kubelet rejected leaves the record Running
+// and Rehearsed Unknown. After 10 seconds the operator rehearses again
+// in a new pod of the same attempt.
+func TestARejectedRehearsalRunsAgainAfterTenSeconds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := approvedWorld(t)
+		first := w.onlyRehearsal(t)
+		w.api.endByKubelet(t, first.Metadata.Name, "Evicted", "The node had condition: [DiskPressure].")
+		w.settle()
+
+		records := w.api.firmware(t, biosObjectName).Status.Rehearsals
+		if len(records) != 1 || records[0].Result != resultRunning || !strings.Contains(records[0].Message, "DiskPressure") {
+			t.Errorf("while the rehearsal waits the rehearsals are %+v, want node-2 Running with the kubelet's reason", records)
+		}
+		if rc, _ := rehearsedOf(t, w); rc.Status != conditions.Unknown {
+			t.Errorf("while the rehearsal waits Rehearsed is %+v, want Unknown", rc)
+		}
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+
+		second := w.onlyRehearsal(t)
+		if second.Metadata.Name == first.Metadata.Name || second.Metadata.Annotations[triesKey] != "1" || rehearsalOf(second) != rehearsalOf(first) {
+			t.Errorf("after 10 seconds the rehearsal pod is %+v, want a new pod of the same attempt with tries 1", second.Metadata)
+		}
+		w.api.finishPod(t, second.Metadata.Name, rehearsalContainer, podSucceeded, rehearsalLog(passed))
+		w.settle()
+
+		if c, _ := rehearsedOf(t, w); c.Status != conditions.True {
+			t.Errorf("after the second pod Rehearsed is %+v, want True", c)
+		}
+		if got := w.postedAbout(biosObjectName); !containsPosted(got, posted{"Normal", reasonRehearsalPodRecreated}) {
+			t.Errorf("the operator posted %v, want a Normal RehearsalPodRecreated", got)
+		}
+	})
+}
+
+// At a node shutdown the kubelet ends the rehearsal pod before the
+// Machine reports the new boot. The rehearsal is not run again for the
+// boot that ended: the record is Failed with the kubelet's reason.
+func TestARehearsalEndedAtAShutdownIsNotRunAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := approvedWorld(t)
+		w.api.endByKubelet(t, w.onlyRehearsal(t).Metadata.Name, "Terminated", "Pod was terminated in response to imminent node shutdown.")
+		w.settle()
+		time.Sleep(time.Minute)
+		synctest.Wait()
+
+		if got := len(w.api.rehearsals(t)); got != 0 {
+			t.Errorf("before the new boot %d rehearsal pods exist, want none", got)
+		}
+		records := w.api.firmware(t, biosObjectName).Status.Rehearsals
+		if len(records) != 1 || records[0].Result != resultFailed || !strings.Contains(records[0].Message, "imminent node shutdown") {
+			t.Errorf("before the new boot the rehearsals are %+v, want Failed with the kubelet's reason", records)
+		}
+		w.api.putFleetMachine("node-2", machineReady, secondBoot)
+		w.settle()
+
+		if p := w.onlyRehearsal(t); rehearsalOf(p).boot != secondBoot || p.Metadata.Annotations[triesKey] != "" {
+			t.Errorf("after the new boot the rehearsal pod is %+v, want the first pod of a rehearsal of the new boot", p.Metadata)
+		}
+	})
+}
+
+// After the kubelet ended maxTaskPods rehearsal pods of one attempt, the
+// record is Failed, with the kubelet's reason and the count.
+func TestARehearsalStopsAfterTheKubeletEndedFivePods(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := approvedWorld(t)
+		before := w.api.created(operatorPodsPath)
+		for range maxTaskPods {
+			w.api.endByKubelet(t, w.onlyRehearsal(t).Metadata.Name, "Evicted", "Usage of EmptyDir volume \"rehearsal\" exceeds the limit \"256Mi\".")
+			time.Sleep(maxRetryWait)
+			synctest.Wait()
+		}
+
+		records := w.api.firmware(t, biosObjectName).Status.Rehearsals
+		if len(records) != 1 || records[0].Result != resultFailed || !strings.Contains(records[0].Message, "EmptyDir") ||
+			!strings.Contains(records[0].Message, fmt.Sprintf("%d rehearsal pods", maxTaskPods)) {
+			t.Errorf("the rehearsals are %+v, want Failed with the kubelet's reason and the count of pods", records)
+		}
+		if got := w.api.created(operatorPodsPath) - before; got != maxTaskPods-1 {
+			t.Errorf("the operator created %d more rehearsal pods, want %d after the first", got, maxTaskPods-1)
+		}
+		if got := w.postedAbout(biosObjectName); !containsPosted(got, posted{"Warning", reasonRehearsalFailed}) {
+			t.Errorf("the operator posted %v, want a Warning RehearsalFailed", got)
+		}
+	})
 }

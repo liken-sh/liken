@@ -19,18 +19,19 @@ const component = "firmware-operator"
 // objects, which change no condition. The reasons of conditions, and
 // of rehearsal and apply Events, are next to the code that sets them.
 const (
-	reasonUploadStarted   = "UploadStarted"
-	reasonLoaded          = "Loaded"
-	reasonUploadFailed    = "UploadFailed"
-	reasonConflict        = "Conflict"
-	reasonDiscovered      = "Discovered"
-	reasonDeleted         = "Deleted"
-	reasonUpdateAvailable = "UpdateAvailable"
-	reasonScanStarted     = "ScanStarted"
-	reasonScanned         = "Scanned"
-	reasonScanFailed      = "ScanFailed"
-	reasonCatalogMoved    = "CatalogMoved"
-	reasonManyComponents  = "ManyComponents"
+	reasonUploadStarted    = "UploadStarted"
+	reasonLoaded           = "Loaded"
+	reasonUploadFailed     = "UploadFailed"
+	reasonConflict         = "Conflict"
+	reasonDiscovered       = "Discovered"
+	reasonDeleted          = "Deleted"
+	reasonUpdateAvailable  = "UpdateAvailable"
+	reasonScanStarted      = "ScanStarted"
+	reasonScanPodRecreated = "ScanPodRecreated"
+	reasonScanned          = "Scanned"
+	reasonScanFailed       = "ScanFailed"
+	reasonCatalogMoved     = "CatalogMoved"
+	reasonManyComponents   = "ManyComponents"
 )
 
 type eventReference = events.ObjectReference

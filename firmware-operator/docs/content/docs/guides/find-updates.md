@@ -48,8 +48,12 @@ hour, because LVFS publishes no feed of its changes. The operator's
 `--catalog-interval` flag sets the interval.
 
 The operator does not retry a failed scan until the machine's boot,
-its device names, the catalog file, or the scan image changes. No
-command forces a scan. To scan a machine again,
+its device names, the catalog file, or the scan image changes. A scan
+pod that the kubelet evicted or refused, for a reason other than a
+node shutdown, did not fail, so the operator scans the machine again
+in a new pod, at most five pods for one scan, as
+[A pod that the kubelet ended](../troubleshoot/#a-pod-that-the-kubelet-ended)
+describes. No command forces a scan. To scan a machine again,
 reboot it. To scan every machine again, delete the `FirmwareCatalog`
 and apply it again. The new object has no scan records, so the operator
 scans each `Ready` machine. The discovered `Firmware` objects stay, and
@@ -254,6 +258,7 @@ kinds are cluster-scoped. `kubectl describe firmwarecatalog lvfs` and
 |---|---|---|
 | `FirmwareCatalog` | `Fetched`, `JcatUnreadable`, `FileUnreadable`, or `ChecksumMismatch` | The `Ready` condition changed. A change to `False` is a `Warning`. |
 | `FirmwareCatalog` | `ScanStarted` | The operator created a scan pod. |
+| `FirmwareCatalog` | `ScanPodRecreated` | The kubelet ended a scan pod before the scan finished, and the operator created the scan's first next pod. Later pods of the same scan post none. |
 | `FirmwareCatalog` | `Scanned` | A scan finished. The message gives the machine and what it found. |
 | `FirmwareCatalog` | `ScanFailed` | A scan failed. This is a `Warning`. |
 | `FirmwareCatalog` | `CatalogMoved` | A scan found another file in the jcat than the file it was given. |

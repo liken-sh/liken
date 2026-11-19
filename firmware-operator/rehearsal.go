@@ -6,8 +6,10 @@ package main
 // write. A rehearsal starts when the machine is pending (approval.go),
 // its phase is Ready, and its last scan read the FirmwareCatalog's
 // current file, so that fwupd in the rehearsal offers the same releases
-// that the scan found. Each attempt runs once. A new boot, a new
-// approval, or a new catalog file is a new attempt.
+// that the scan found. Each attempt runs once, except that an attempt
+// whose pod the kubelet ended for a reason other than a node shutdown
+// runs again in a next pod (retry.go). A new boot, a new approval, or a
+// new catalog file is a new attempt.
 //
 // status.rehearsals has one record for each pending machine. The
 // Rehearsed condition is True when the install passed on every pending
@@ -99,6 +101,7 @@ const (
 	reasonRehearsalPassed       = "RehearsalPassed"
 	reasonRehearsalRefused      = "RehearsalRefused"
 	reasonRehearsalFailed       = "RehearsalFailed"
+	reasonRehearsalPodRecreated = "RehearsalPodRecreated"
 )
 
 // rehearsalEnd is the outcome of one finished rehearsal.
@@ -155,17 +158,14 @@ func (o *operator) startRehearsals(f *firmware, pending map[string]bool, w obser
 	var starts []rehearsalAttempt
 	var problems []error
 	for _, name := range sortedKeys(pending) {
-		m, known := w.fleet[name]
-		if !known || m.Status.Phase != machineReady || busy[name] {
+		m := w.fleet[name]
+		if m.Status.Phase != machineReady || busy[name] {
 			continue
 		}
-		e, offered := offeredEntry(f.Status.Machines, name, u)
-		c := catalogs[e.Catalog]
-		if !offered || c == nil || c.Status.File != e.File || c.Status.SHA256 == "" {
+		a, c, needed := currentRehearsal(f, name, w, catalogs)
+		if !needed {
 			continue
 		}
-		a := rehearsalAttempt{firmware: f.Metadata.Name, machine: name, boot: m.Status.Boot.Time, device: e.DeviceID,
-			version: u.Version, cabinet: u.Cabinet.SHA256, catalog: e.Catalog, file: e.File}
 		if r, found := rehearsalRecord(f.Status.Rehearsals, name); found && a.is(r) {
 			continue
 		}
@@ -184,6 +184,28 @@ func (o *operator) startRehearsals(f *firmware, pending map[string]bool, w obser
 		starts = append(starts, a)
 	}
 	return starts, errors.Join(problems...)
+}
+
+// currentRehearsal returns the attempt that a rehearsal of the machine
+// runs now, with the machine's boot, the approval, and the catalog file
+// of the machine's last scan, and the FirmwareCatalog of that scan. It
+// returns false when the machine needs no rehearsal now: no Machine
+// names it, no approval names a cabinet, the catalog offers the machine
+// no approved release, or the machine's last scan read an older file
+// than the FirmwareCatalog's.
+func currentRehearsal(f *firmware, machine string, w observed, catalogs map[string]*catalog) (rehearsalAttempt, *catalog, bool) {
+	u := f.Spec.Update
+	m, known := w.fleet[machine]
+	if !known || u == nil || u.Cabinet == nil {
+		return rehearsalAttempt{}, nil, false
+	}
+	e, offered := offeredEntry(f.Status.Machines, machine, u)
+	c := catalogs[e.Catalog]
+	if !offered || c == nil || c.Status.File != e.File || c.Status.SHA256 == "" {
+		return rehearsalAttempt{}, nil, false
+	}
+	return rehearsalAttempt{firmware: f.Metadata.Name, machine: machine, boot: m.Status.Boot.Time, device: e.DeviceID,
+		version: u.Version, cabinet: u.Cabinet.SHA256, catalog: e.Catalog, file: e.File}, c, true
 }
 
 // offeredEntry returns the machine's entry for a device that the
@@ -213,10 +235,10 @@ func rehearsalRecord(records []rehearsal, machine string) (rehearsal, bool) {
 }
 
 // composeRehearsals returns the records of the pending machines with
-// this pass's ended and started rehearsals applied, and an Event for
-// each change. It drops the records of machines that are not pending
-// and the records of another approval.
-func composeRehearsals(f *firmware, pending map[string]bool, ends []rehearsalEnd, starts []rehearsalAttempt, now time.Time) ([]rehearsal, []notice) {
+// this pass's ended, waiting, and started rehearsals applied, and an
+// Event for each change other than a wait. It drops the records of
+// machines that are not pending and the records of another approval.
+func composeRehearsals(f *firmware, pending map[string]bool, ends []rehearsalEnd, retries []retry, starts []rehearsalAttempt, now time.Time) ([]rehearsal, []notice) {
 	u := f.Spec.Update
 	if u == nil || u.Version == "" || u.Cabinet == nil {
 		return nil, nil
@@ -238,6 +260,19 @@ func composeRehearsals(f *firmware, pending map[string]bool, ends []rehearsalEnd
 		}
 		records[end.attempt.machine] = recordOfRehearsal(end.attempt, end.result, now)
 		notices = append(notices, rehearsalNotice(end))
+	}
+	for _, r := range retries {
+		a := rehearsalOf(r.ended)
+		previous, found := records[a.machine]
+		if !current(a) || (found && (!a.is(previous) || previous.Result != resultRunning)) {
+			continue
+		}
+		record := runningRecord(a, now)
+		record.Message = rehearsalRetryMessage(r)
+		if found && previous.Message == record.Message {
+			continue
+		}
+		records[a.machine] = record
 	}
 	for _, a := range starts {
 		if previous, found := records[a.machine]; found && a.is(previous) {
@@ -310,17 +345,32 @@ func rehearsed(records []rehearsal, pending map[string]bool) (condition, bool) {
 }
 
 // rehearsalEnds reads a Firmware's rehearsal pods and returns the
-// attempts that ended, the machines that have a rehearsal pod, and the
-// earliest deadline among the rehearsals still running. A Running
+// attempts that ended, the rehearsal pods that the kubelet ended, the
+// machines that have a rehearsal pod, and the earliest deadline among
+// the rehearsals still running or waiting for their next pod. A Running
 // record whose pod is gone ends as Failed.
-func (o *operator) rehearsalEnds(f *firmware, pods []pod, now time.Time) ([]rehearsalEnd, map[string]bool, time.Time, error) {
+func (o *operator) rehearsalEnds(f *firmware, pods []pod, w observed, catalogs map[string]*catalog, now time.Time) ([]rehearsalEnd, []retry, map[string]bool, time.Time, error) {
 	var ends []rehearsalEnd
+	var retries []retry
 	var problems []error
 	var due time.Time
 	busy := map[string]bool{}
 	for _, p := range pods {
 		busy[rehearsalOf(p).machine] = true
 		if p.Metadata.DeletionTimestamp != "" {
+			continue
+		}
+		// An attempt that the machine no longer needs, such as one of
+		// an earlier boot, another approval, or an older catalog file,
+		// is not run again. Its end is judged, and startRehearsals
+		// starts the attempt that the machine needs after the pod is
+		// deleted.
+		if a, _, needed := currentRehearsal(f, rehearsalOf(p).machine, w, catalogs); p.retryable() && needed && a == rehearsalOf(p) {
+			r := retryOf(p, now)
+			if !r.due(now) {
+				due = earliest(due, r.at)
+			}
+			retries = append(retries, r)
 			continue
 		}
 		end, decided, deadline, err := o.judgeRehearsal(p, now)
@@ -335,6 +385,7 @@ func (o *operator) rehearsalEnds(f *firmware, pods []pod, now time.Time) ([]rehe
 		if end.result.Result == resultCatalogMoved {
 			o.catalogMoved(end.attempt.catalog)
 		}
+		end.result.Message = stoppedAfter(end.result.Message, p, "rehearsal")
 		ends = append(ends, end)
 	}
 	for _, r := range f.Status.Rehearsals {
@@ -352,7 +403,48 @@ func (o *operator) rehearsalEnds(f *firmware, pods []pod, now time.Time) ([]rehe
 				Message: "the rehearsal pod no longer exists, and the operator does not run this rehearsal again until the machine reboots, the approval changes, or the machine's next scan reads another catalog file"}})
 		}
 	}
-	return ends, busy, due, errors.Join(problems...)
+	return ends, retries, busy, due, errors.Join(problems...)
+}
+
+// rehearsalRetryMessage is the record's message while a rehearsal waits
+// for its next pod and while that pod runs.
+func rehearsalRetryMessage(r retry) string {
+	return fmt.Sprintf("the kubelet ended the rehearsal pod %s: %s, so the operator rehearses again in the rehearsal pod %s from %s",
+		r.ended.Metadata.Name, r.ended.kubeletEnd(), nextTry(r.ended).Metadata.Name, stamp(r.at))
+}
+
+// replaceEndedRehearsals creates the next pod of each rehearsal whose
+// pod the kubelet ended and whose wait is over, and deletes the ended
+// pod. records are the rehearsals that the status write left. The
+// operator deletes the ended pod of a rehearsal that has no Running
+// record there, such as one whose machine is no longer pending, and
+// creates no next pod for it.
+func (o *operator) replaceEndedRehearsals(f *firmware, records []rehearsal, retries []retry, now time.Time) error {
+	var problems []error
+	var notices []notice
+	for _, r := range retries {
+		a := rehearsalOf(r.ended)
+		if record, found := rehearsalRecord(records, a.machine); !found || !a.is(record) || record.Result != resultRunning {
+			problems = append(problems, o.remove(r.ended))
+			continue
+		}
+		if !r.due(now) {
+			continue
+		}
+		next := nextTry(r.ended)
+		created, err := o.replaceEnded(r.ended, next)
+		if err != nil {
+			problems = append(problems, err)
+			continue
+		}
+		if created && r.first() {
+			notices = append(notices, notice{reason: reasonRehearsalPodRecreated, message: fmt.Sprintf(
+				"%s: the kubelet ended the rehearsal pod %s: %s, so the operator created the rehearsal pod %s for the same rehearsal",
+				a.machine, r.ended.Metadata.Name, r.ended.kubeletEnd(), next.Metadata.Name)})
+		}
+	}
+	o.post(f, condition{}, notices, false)
+	return errors.Join(problems...)
 }
 
 // judgeRehearsal reads the result of a rehearsal pod the way judgeScan

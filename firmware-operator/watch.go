@@ -9,7 +9,9 @@ package main
 // it needs from the stores.
 //
 // Each timer is a deadline: of an upload, a scan, a rehearsal, or an
-// apply in progress, or the wait before a failed pass runs again. The
+// apply in progress, the wait before the next pod of a scan or a
+// rehearsal whose pod the kubelet ended (retry.go), or the wait before
+// a failed pass runs again. The
 // exception is the read of each FirmwareCatalog's jcat once per
 // -catalog-interval, because LVFS publishes no feed of its changes
 // (catalogfetch.go).

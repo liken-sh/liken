@@ -54,7 +54,9 @@ const scanDeadline = 10 * time.Minute
 
 // scanAttempt is one scan of one machine against one FirmwareCatalog,
 // identified by the boot, the device set, the catalog file, and the
-// scan image. An attempt runs once.
+// scan image. An attempt runs once. When the kubelet ends its pod for a
+// reason other than a node shutdown, the same attempt runs again in a
+// next pod (retry.go), because the scan did not run to its end.
 type scanAttempt struct {
 	catalog string
 	machine string

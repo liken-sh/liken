@@ -1,6 +1,6 @@
 ---
 name: troubleshoot
-description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a FirmwareCatalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Find why an approval's Approved condition is False: CabinetDiffers, NotOffered, or MachinesInvalid, and why the API server refuses an approval. Find why the Rehearsed condition is False with Refused or Failed, or stays Unknown, from the message of each record in status.rehearsals. Find why the Applied condition is False with Refused or Failed, or stays Unknown, from the message of each record in status.applies and the Disruption that requests the machine's turn to reboot, and release a machine that stays drained. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get firmwarecatalog shows Ready False, when a machine has no scan record, when kubectl get firmware shows Approved False, when it shows Rehearsed or Applied False or Unknown, or when a machine stays drained in a turn that the operator holds."
+description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a FirmwareCatalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Find why an approval's Approved condition is False: CabinetDiffers, NotOffered, or MachinesInvalid, and why the API server refuses an approval. Find why the Rehearsed condition is False with Refused or Failed, or stays Unknown, from the message of each record in status.rehearsals. Find why the Applied condition is False with Refused or Failed, or stays Unknown, from the message of each record in status.applies and the Disruption that requests the machine's turn to reboot, and release a machine that stays drained. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get firmwarecatalog shows Ready False, when a machine has no scan record, when kubectl get firmware shows Approved False, when it shows Rehearsed or Applied False or Unknown, or when a machine stays drained in a turn that the operator holds. Find why a scan or a rehearsal record stays Running after the kubelet evicted or refused its pod."
 ---
 
 This skill is the guide at https://liken.sh/firmware/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -15,6 +15,68 @@ machine, against a copy of the machine's firmware variables. An apply
 is the real install. It runs while the machine is drained in a reboot
 turn, which `machine-operator` grants through a `Disruption`, as
 [Apply the update](https://liken.sh/firmware/docs/guides/approve-an-update/#apply-the-update) describes.
+
+## A pod that the kubelet ended
+
+The kubelet can end a pod for a reason that is not the pod's own
+program. It evicts a pod when the node runs low on memory or disk, it
+refuses a pod at admission when the node has no room for it, and it
+ends each pod when the node shuts down. The scheduler can also preempt
+a pod. Such a pod has the phase `Failed` and a pod-level `reason`, such
+as `Evicted`, `OutOfcpu`, `OutOfmemory`, `NodeAffinity`, `Terminated`,
+or `Shutdown`, or the condition `DisruptionTarget`. A pod that ends
+with `DeadlineExceeded`, or whose program exits with a code other than
+0, failed on its own, and the sections below describe it.
+
+A scan pod and a rehearsal pod write nothing to the machine's
+firmware, so when the kubelet ends one, the operator records no
+failure and runs the same scan or rehearsal again in a next pod. The
+next pod has the annotations of the ended pod, and the annotation
+`firmware.liken.sh/tries` counts the earlier pods of the attempt that
+the kubelet ended. Until the next pod ends, the record stays `Running`,
+and its message names the ended pod, the kubelet's reason, the next
+pod, and when the next pod starts:
+
+```text
+the kubelet ended the scan pod liken-system/lvfs-node-2-1e9f42f0e0cd: OutOfcpu: Node didn't have enough resource: cpu, requested: 10, used: 3990, capacity: 4000, so the operator scans the machine again in the scan pod liken-system/lvfs-node-2-5d0b7c2e91a4 from 2026-11-19T10:00:10Z
+```
+
+Both pods name their machine in `spec.nodeName`, so the scheduler does
+not check them, and the kubelet can refuse the next pod for the same
+reason. So the next pod starts 10 seconds after the creation of the
+pod that the kubelet ended, and the wait doubles for each later pod of
+the same attempt, up to 5 minutes. An eviction can also be the pod's
+own fault, so an attempt runs at most five pods. When the kubelet ends
+the fifth, the record is `Failed`, and its message gives the kubelet's
+reason and says that the operator stopped after five pods.
+`kubectl describe node <machine>` shows the node's conditions and
+taints.
+
+The operator does not run these again:
+
+- **A pod that the kubelet ended for a node shutdown**, with the reason
+  `Terminated` or `Shutdown`, or refused while the node shut down, with
+  the reason `NodeShutdown`. The kubelet ends the pod before the
+  machine reboots, and the machine's next boot needs a scan and a
+  rehearsal of its own. The record is `Failed` with the kubelet's
+  reason, and the operator starts the new boot's scan when the machine
+  is `Ready` again.
+- **A pod of an attempt that the machine no longer needs**, because its
+  devices, the catalog file, the scan image, or the approval changed.
+  The record is `Failed` with the kubelet's reason, and the attempt
+  that the machine needs now starts.
+- **An upload pod or an apply pod.** Each of them writes to a device,
+  and the kubelet can end one at a node shutdown before the `Machine`
+  reports the new boot. A next pod could then write on a boot that its
+  attempt was not made for. So the entry or the record is `Failed`, as
+  for any other end, and an apply pod that the kubelet ended after the
+  signal to write is `Uncertain`.
+
+The operator posts one `Normal` `Event` for each attempt, when it
+creates the attempt's first next pod: `ScanPodRecreated` on the
+`FirmwareCatalog`, and `RehearsalPodRecreated` on the `Firmware`. It
+posts none for the later pods of the same attempt, and the record's
+message names the latest one.
 
 ## Uploads
 
@@ -365,6 +427,10 @@ A pending machine waits for its rehearsal. Check each of these:
   jcat again immediately, and the machine rehearses again against the
   new file, after a new scan when the file offers the machine other
   releases.
+- **The kubelet ended the rehearsal pod.** The record's message starts
+  with `the kubelet ended the rehearsal pod`, and the operator
+  rehearses again in a next pod. See
+  [A pod that the kubelet ended](#a-pod-that-the-kubelet-ended).
 - **The API server refuses the rehearsal pod.** The pod mounts a
   `hostPath` volume, which the `baseline` Pod Security level forbids.
   So a cluster that labels `liken-system` with a level below

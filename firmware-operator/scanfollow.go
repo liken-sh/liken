@@ -97,18 +97,50 @@ func podFailure(p pod, kind, container string) string {
 	return message
 }
 
-// endsOf returns a FirmwareCatalog's scan attempts that ended, the
-// machines that have a scan pod, and the earliest deadline among the
-// scans still running. A Running record whose pod is gone ends as
-// Failed, and the operator does not run that attempt again.
-func (o *operator) endsOf(c *catalog, scans []pod, now time.Time) ([]scanEnd, map[string]bool, time.Time, error) {
+// currentScan returns the attempt that a scan of the machine runs now,
+// with the machine's boot and devices, the FirmwareCatalog's file, and
+// the operator's scan image. A machine that no Machine names has none.
+func (o *operator) currentScan(c *catalog, machine string, w observed) scanAttempt {
+	m, exists := w.fleet[machine]
+	if !exists {
+		return scanAttempt{}
+	}
+	return scanAttempt{catalog: c.Metadata.Name, machine: machine, boot: m.Status.Boot.Time, devices: w.deviceSets[machine], file: c.Status.File, image: o.discovery.scanImage}
+}
+
+// scanRetryMessage is the record's message while a scan waits for its
+// next pod and while that pod runs.
+func scanRetryMessage(r retry, namespace string) string {
+	return fmt.Sprintf("the kubelet ended the scan pod %s/%s: %s, so the operator scans the machine again in the scan pod %s/%s from %s",
+		namespace, r.ended.Metadata.Name, r.ended.kubeletEnd(), namespace, nextTry(r.ended).Metadata.Name, stamp(r.at))
+}
+
+// endsOf returns a FirmwareCatalog's scan attempts that ended, the scan
+// pods that the kubelet ended, the machines that have a scan pod, and
+// the earliest deadline among the scans still running or waiting for
+// their next pod. A Running record whose pod is gone ends as Failed,
+// and the operator does not run that attempt again.
+func (o *operator) endsOf(c *catalog, scans []pod, w observed, now time.Time) ([]scanEnd, []retry, map[string]bool, time.Time, error) {
 	var ends []scanEnd
+	var retries []retry
 	var problems []error
 	var due time.Time
 	busy := map[string]bool{}
 	for _, p := range scans {
 		busy[scanOf(p).machine] = true
 		if p.Metadata.DeletionTimestamp != "" {
+			continue
+		}
+		// An attempt that the machine no longer needs, such as one of
+		// an earlier boot or an older catalog file, is not run again. Its
+		// end is judged, and schedule starts the attempt that the
+		// machine needs after the pod is deleted.
+		if p.retryable() && scanOf(p) == o.currentScan(c, scanOf(p).machine, w) {
+			r := retryOf(p, now)
+			if !r.due(now) {
+				due = earliest(due, r.at)
+			}
+			retries = append(retries, r)
 			continue
 		}
 		end, decided, deadline, err := o.judgeScan(p, now)
@@ -120,6 +152,7 @@ func (o *operator) endsOf(c *catalog, scans []pod, now time.Time) ([]scanEnd, ma
 			due = earliest(due, deadline)
 			continue
 		}
+		end.message = stoppedAfter(end.message, p, "scan")
 		ends = append(ends, end)
 	}
 	for _, r := range c.Status.Machines {
@@ -137,7 +170,7 @@ func (o *operator) endsOf(c *catalog, scans []pod, now time.Time) ([]scanEnd, ma
 				message: "the scan pod no longer exists, and the operator does not run this scan again until the machine's boot, its devices, the catalog file, or the scan image changes"})
 		}
 	}
-	return ends, busy, due, errors.Join(problems...)
+	return ends, retries, busy, due, errors.Join(problems...)
 }
 
 // recordOf returns the machine record for an attempt's end. A Scanned

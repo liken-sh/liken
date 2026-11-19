@@ -15,7 +15,9 @@ package main
 // the machine's last scan, the operator moves the record and the
 // machine's discovered entries to the new file and starts no scan
 // (discovered.go). A failed scan runs again only after one of those
-// values changes.
+// values changes. A scan whose pod the kubelet ended for a reason other
+// than a node shutdown did not fail, and runs again in a next pod
+// (retry.go).
 
 import (
 	"context"
@@ -72,9 +74,9 @@ func (o *operator) discover(ctx context.Context, rules *[]firmware, w observed, 
 }
 
 func (o *operator) reconcileCatalog(ctx context.Context, c *catalog, rules *[]firmware, w observed, now time.Time) (time.Time, error) {
-	ends, busy, due, err := o.endsOf(c, w.scans[c.Metadata.Name], now)
+	ends, retries, busy, due, err := o.endsOf(c, w.scans[c.Metadata.Name], w, now)
 	problems := []error{err}
-	if err := o.recordEnds(ctx, c, ends, rules, w, now); err != nil {
+	if err := o.recordEnds(ctx, c, ends, retries, rules, w, now); err != nil {
 		return due, errors.Join(append(problems, err)...)
 	}
 	moved := slices.ContainsFunc(ends, func(end scanEnd) bool { return end.result == resultCatalogMoved })
@@ -85,10 +87,12 @@ func (o *operator) reconcileCatalog(ctx context.Context, c *catalog, rules *[]fi
 
 // recordEnds writes the result of each finished scan to the
 // FirmwareCatalog's status, and drops the record of each machine whose
-// Machine is deleted. Then it writes the devices of each successful
-// scan to the discovered Firmware objects and deletes the finished scan
-// pods.
-func (o *operator) recordEnds(ctx context.Context, c *catalog, ends []scanEnd, rules *[]firmware, w observed, now time.Time) error {
+// Machine is deleted. A scan whose pod the kubelet ended keeps its
+// Running record, with a message that names the next pod. Then
+// recordEnds writes the devices of each successful scan to the
+// discovered Firmware objects, deletes the finished scan pods, and
+// replaces each pod that the kubelet ended whose wait is over.
+func (o *operator) recordEnds(ctx context.Context, c *catalog, ends []scanEnd, retries []retry, rules *[]firmware, w observed, now time.Time) error {
 	releases := map[string]string{}
 	for _, end := range ends {
 		if end.result == resultScanned && end.attempt.file == c.Status.File {
@@ -120,6 +124,16 @@ func (o *operator) recordEnds(ctx context.Context, c *catalog, ends []scanEnd, r
 			records[end.attempt.machine] = recordOf(end, previous, releases[end.attempt.machine], now)
 			notices = append(notices, endNotice(end))
 		}
+		for _, r := range retries {
+			a := scanOf(r.ended)
+			previous, found := records[a.machine]
+			_, exists := w.fleet[a.machine]
+			message := scanRetryMessage(r, o.namespace)
+			if !exists || (found && a.is(previous) && (previous.Result != resultRunning || previous.Message == message)) {
+				continue
+			}
+			records[a.machine] = recordOf(scanEnd{attempt: a, result: resultRunning, message: message}, previous, "", now)
+		}
 		current.Machines = sortedRecords(records)
 		return current
 	})
@@ -143,6 +157,38 @@ func (o *operator) recordEnds(ctx context.Context, c *catalog, ends []scanEnd, r
 			problems = append(problems, o.remove(*end.scan))
 		}
 	}
+	problems = append(problems, o.replaceEndedScans(c, retries, w, now))
+	return errors.Join(problems...)
+}
+
+// replaceEndedScans creates the next pod of each scan whose pod the
+// kubelet ended and whose wait is over, and deletes the ended pod. A
+// scan of a machine whose Machine is deleted gets no next pod.
+func (o *operator) replaceEndedScans(c *catalog, retries []retry, w observed, now time.Time) error {
+	var problems []error
+	var notices []notice
+	for _, r := range retries {
+		a := scanOf(r.ended)
+		if _, exists := w.fleet[a.machine]; !exists {
+			problems = append(problems, o.remove(r.ended))
+			continue
+		}
+		if !r.due(now) {
+			continue
+		}
+		next := nextTry(r.ended)
+		created, err := o.replaceEnded(r.ended, next)
+		if err != nil {
+			problems = append(problems, err)
+			continue
+		}
+		if created && r.first() {
+			notices = append(notices, notice{reason: reasonScanPodRecreated, message: fmt.Sprintf(
+				"%s: the kubelet ended the scan pod %s/%s: %s, so the operator created the scan pod %s/%s for the same scan",
+				a.machine, o.namespace, r.ended.Metadata.Name, r.ended.kubeletEnd(), o.namespace, next.Metadata.Name)})
+		}
+	}
+	o.postCatalog(c, condition{}, notices, false)
 	return errors.Join(problems...)
 }
 
@@ -172,7 +218,8 @@ func (o *operator) schedule(ctx context.Context, c *catalog, moved bool, busy ma
 			if m.Status.Phase != machineReady || busy[name] {
 				continue
 			}
-			a := scanAttempt{catalog: c.Metadata.Name, machine: name, boot: m.Status.Boot.Time, devices: w.deviceSets[name], file: file, image: o.discovery.scanImage}
+			a := o.currentScan(c, name, w)
+			a.file = file
 			r, found := c.Status.record(name)
 			if found && a.is(r) {
 				continue

@@ -458,7 +458,10 @@ spec:
                     runs the install against an in-memory copy of the machine's firmware
                     variables and records what the install would write. It runs once for
                     each combination of the machine's boot, the device, the approved
-                    version and cabinet, and the catalog file. A record is removed when
+                    version and cabinet, and the catalog file. When the kubelet ends the
+                    pod for a reason other than a node shutdown, such as an eviction, and
+                    the combination is still the machine's, it runs again in a new pod, at
+                    most five pods for one combination. A record is removed when
                     its machine is no longer pending or when the approval changes.
                   items:
                     type: object
@@ -489,7 +492,10 @@ spec:
                         type: string
                         enum: [Running, Passed, Refused, Failed, CatalogMoved]
                         description: >-
-                          `Running` while the rehearsal pod runs. `Passed` when a Secure Boot
+                          `Running` while the rehearsal pod runs, and while `firmware-operator`
+                          waits to rehearse again in a new pod after the kubelet ended its pod
+                          for a reason other than a node shutdown.
+                          `Passed` when a Secure Boot
                           database install wrote only authenticated appends to its device's own
                           variable and the variable store has room for them, or when a capsule
                           install wrote only the variables and ESP files that a capsule needs
@@ -497,7 +503,8 @@ spec:
                           anything else, when the store or the ESP has no room, or when fwupd
                           updates the device through a plugin that a rehearsal does not cover.
                           `Failed` when the rehearsal could not run, for example when the
-                          cabinet's SHA-256 is not the pinned one. `CatalogMoved` when the
+                          cabinet's SHA-256 is not the pinned one, or when the kubelet ended the
+                          pod at a node shutdown or ended its fifth pod. `CatalogMoved` when the
                           catalog's jcat lists a different file from the one the machine's scan
                           read. That is not a failure. The operator reads the jcat again at
                           once and rehearses the machine again against the new file. When the

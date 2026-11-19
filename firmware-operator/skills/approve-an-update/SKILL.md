@@ -395,6 +395,8 @@ shows in `kubectl describe firmware <name>` and in
 It also posts these `Event`s about the rehearsal:
 
 - `RehearsalStarted` when a rehearsal pod starts.
+- `RehearsalPodRecreated` when the kubelet ended a rehearsal pod and
+  the operator created the rehearsal's first next pod.
 - `RehearsalPassed` when a rehearsal passes.
 - `RehearsalCatalogMoved` when a rehearsal finds that LVFS published a
   new catalog since the machine's scan.

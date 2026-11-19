@@ -73,7 +73,10 @@ const (
 // rehearsalAttempt identifies a rehearsal by the machine's boot, the
 // device, the approved version and cabinet, and the catalog file of the
 // machine's last scan. Each attempt runs once, so a failed rehearsal is
-// not retried until one of these fields changes.
+// not retried until one of these fields changes. When the kubelet ends
+// its pod for a reason other than a node shutdown, the same attempt
+// runs again in a next pod (retry.go), because the rehearsal did not
+// run to its end.
 type rehearsalAttempt struct {
 	firmware string
 	machine  string

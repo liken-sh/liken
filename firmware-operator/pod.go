@@ -5,7 +5,10 @@ package main
 // own structs for the objects it writes, and imports k8s.io/api only
 // for the device attribute types that the CEL compiler reads.
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 type pod struct {
 	APIVersion string     `json:"apiVersion,omitempty"`
@@ -173,6 +176,7 @@ type podStatus struct {
 type podCondition struct {
 	Type   string `json:"type"`
 	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type containerStatus struct {
@@ -242,4 +246,63 @@ func podPath(namespace, name string) string {
 func mustJSON(object any) []byte {
 	body, _ := json.Marshal(object)
 	return body
+}
+
+// endedByKubelet reports whether the kubelet ended the pod for a reason
+// that is not the pod's own program: an eviction for pressure on the
+// node, a rejection at admission such as OutOfcpu or NodeAffinity, a
+// graceful node shutdown, or a preemption. Each of these leaves the pod
+// Failed with a DisruptionTarget condition or a pod-level reason. A
+// container that exits non-zero leaves the pod-level reason empty, and
+// DeadlineExceeded is the pod's own activeDeadlineSeconds, so both are
+// failures of the attempt.
+func (p pod) endedByKubelet() bool {
+	if p.Status.Phase != podFailed {
+		return false
+	}
+	return p.conditionTrue("DisruptionTarget") || (p.Status.Reason != "" && p.Status.Reason != "DeadlineExceeded")
+}
+
+// endedAtShutdown reports whether the kubelet ended the pod because its
+// node shuts down. The reasons Terminated and Shutdown mean a graceful
+// node shutdown, and NodeShutdown means that the kubelet rejected the
+// pod at admission while the node shut down. The condition
+// DisruptionTarget with the reason TerminationByKubelet also marks an
+// eviction and a preemption for a critical pod, so the condition alone
+// means a shutdown only when the pod's reason is neither Evicted nor
+// Preempting.
+func (p pod) endedAtShutdown() bool {
+	if !p.endedByKubelet() {
+		return false
+	}
+	switch p.Status.Reason {
+	case "Terminated", "Shutdown", "NodeShutdown":
+		return true
+	case "Evicted", "Preempting":
+		return false
+	}
+	for _, c := range p.Status.Conditions {
+		if c.Type == "DisruptionTarget" && c.Status == "True" && c.Reason == "TerminationByKubelet" {
+			return true
+		}
+	}
+	return false
+}
+
+// kubeletEnd describes why the kubelet ended the pod, for a status
+// message: the pod's reason and message, or the DisruptionTarget
+// condition when the pod has no reason. The kubelet ends its message
+// with a period, and the operator joins the description into a
+// sentence, so the period is dropped.
+func (p pod) kubeletEnd() string {
+	var parts []string
+	for _, part := range []string{p.Status.Reason, p.Status.Message} {
+		if part = strings.TrimSuffix(strings.TrimSpace(part), "."); part != "" {
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		return "DisruptionTarget"
+	}
+	return strings.Join(parts, ": ")
 }
