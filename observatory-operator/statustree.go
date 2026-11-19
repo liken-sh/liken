@@ -87,7 +87,10 @@ func (o *operator) telescopePhase(t *tree, telescope string) (observatory.Phase,
 	switch r.Status.Phase {
 	case observatory.ReservationReady:
 		return observatory.PhaseReady, r
-	case observatory.ReservationDeactivating:
+	case observatory.ReservationDeactivating, observatory.ReservationReleased:
+		// A Released reservation has finished every step, and its
+		// runner releases the telescope after the status write, so the
+		// telescope is leaving and no longer in use.
 		return observatory.PhaseDeactivating, r
 	case observatory.ReservationFailed:
 		return observatory.PhaseError, r
@@ -189,9 +192,11 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 		},
 	}
 	// The observatory is Deactivating while a reservation of one of its
-	// telescopes deactivates and no telescope in it is Ready, Activating,
-	// or in Error. The StopSite step (stopSite) then disconnects the
-	// observatory's devices.
+	// telescopes deactivates and no telescope in it keeps it
+	// (keepsObservatory). The same test decides the StopSite step
+	// (siteStopFor in sitestop.go), so the observatory reads
+	// Deactivating exactly when one of the deactivating reservations is
+	// to disconnect its devices.
 	var keeping bool
 	var leaving []string
 	for _, telescope := range sortedNames(t.telescopes) {
@@ -200,11 +205,11 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 			if holder, ok := o.claims.holderOf(telescope); ok {
 				next.Reservations = append(next.Reservations, holder)
 			}
-			switch phase, _ := o.telescopePhase(t, telescope); phase {
-			case observatory.PhaseDeactivating:
+			switch phase, _ := o.telescopePhase(t, telescope); {
+			case phase == observatory.PhaseDeactivating:
 				holder, _ := o.claims.holderOf(telescope)
 				leaving = append(leaving, holder)
-			case observatory.PhaseReady, observatory.PhaseActivating, observatory.PhaseError:
+			case keepsObservatory(phase):
 				keeping = true
 			}
 		}

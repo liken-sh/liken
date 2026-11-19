@@ -322,6 +322,11 @@ func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn step
 	s.StopTime = &finish
 	dawn, atDawn := asDawnError(err)
 	switch {
+	case errors.Is(err, errSiteChanged):
+		// The step waits again before it starts (sitestop.go).
+		s.State, s.StartTime, s.StopTime, s.Summary = observatory.StepPending, nil, nil, ""
+		r.save(ctx)
+		return err
 	case atDawn:
 		// Dawn came before the step's requirement was met
 		// (requires.go). Mark the step Skipped with what it waited

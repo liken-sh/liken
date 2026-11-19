@@ -279,8 +279,11 @@ spec:
                   enum: [Wait, StartSite, Requires, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, StopWork, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite, Abort]
                   description: >-
                     The step that is running, or the step that failed.
-                    It is empty while the phase is `Ready` or
-                    `Released`.
+                    While the reservation waits for other reservations
+                    of its observatory to release their telescopes
+                    before it stops the observatory, it is `StopSite`,
+                    and that step is `Pending`. It is empty while the
+                    phase is `Ready` or `Released`.
                 steps:
                   type: array
                   description: >-

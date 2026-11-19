@@ -52,7 +52,6 @@ func (r *runner) deactivate(ctx context.Context) {
 		observatory.StepDisconnect:   r.disconnect,
 		observatory.StepStopDevices:  r.stopTelescopeDevices,
 		observatory.StepPowerOff:     r.powerOff,
-		observatory.StepStopSite:     r.stopSite,
 	}
 	for _, name := range observatory.DeactivationSteps {
 		switch r.step(name).State {
@@ -60,6 +59,14 @@ func (r *runner) deactivate(ctx context.Context) {
 			continue
 		case observatory.StepFailed:
 			return
+		}
+		if name == observatory.StepStopSite {
+			// sitestop.go: the wait for the other reservations of the
+			// observatory comes before the step starts.
+			if !r.runStopSite(ctx) {
+				return
+			}
+			continue
 		}
 		if err := r.runStep(ctx, name, steps[name]); err != nil {
 			return
@@ -294,10 +301,14 @@ func (r *runner) powerOff(ctx context.Context, w *stepWork) (outcome, error) {
 
 // stopSite disconnects the Observatory's devices, switches off the
 // outputs that no device on another server uses, and stops the
-// Observatory's server. It does nothing while another Telescope of the
-// same Observatory is held by a Reservation. It does not park the dome,
-// because the Deactivation step already ran the dome's park procedure
-// while the mounts were connected.
+// Observatory's server. runStopSite starts it only when siteStopFor
+// (sitestop.go) chose this reservation to stop the Observatory, and
+// stopSite asks siteStopFor again under the site's lock. So a telescope
+// that became Ready, Activating, or in Error, or a reservation that
+// began to deactivate since the wait, cannot make two reservations stop
+// the Observatory, or none. It does not park the dome, because the
+// Deactivation step already ran the dome's park procedure while the
+// mounts were connected.
 func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 	t := r.o.snapshot()
 	telescope, ok := t.telescopes[r.res.Spec.Telescope]
@@ -310,11 +321,12 @@ func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 		return outcome{}, err
 	}
 	defer lock.release()
-	for other := range r.o.claims.held() {
-		if scope, ok := t.telescopes[other]; ok && other != telescope.Metadata.Name && scope.Spec.Observatory == site {
-			holder, _ := r.o.claims.holderOf(other)
-			return skipped("in use by Reservation %s", holder)
-		}
+	t = r.o.snapshot()
+	switch stop := r.o.siteStopFor(t, r.res); stop.action {
+	case siteInUse, siteStoppedByOther:
+		return skipped("%s", stop.skipMessage())
+	case siteWait:
+		return outcome{}, errSiteChanged
 	}
 	ref := serverRef{observatory.ObservatoryKind, site}
 	if _, running := t.pods[ref.String()]; !running {
