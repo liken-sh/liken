@@ -154,6 +154,21 @@ connect the screen to a machine with more memory.
 
     kubectl describe pod den-idle
 
+When the kubelet evicts the idle pod, for example because the machine
+ran short of memory, the pod is `Failed` with the reason `Evicted`. The
+operator deletes the pod, creates it again, and posts a `PodRecreated`
+Warning `Event` on the `Player` with the kubelet's reason and message.
+The claim binds the screen of that machine, so the new pod stays
+`Pending` until the scheduler can place it on that machine. When the
+kubelet rejects each new pod at once, for example with the reason
+`OutOfcpu`, the operator waits before each next pod, 10 seconds at
+first and twice as long each time, to a limit of 5 minutes. The
+rejected pod stays during the wait, so `kubectl describe pod den-idle`
+shows its reason. An edit to the `Player` or to the container
+resources that changes the idle pod replaces the rejected pod at once.
+
+    kubectl describe player den
+
 ## 5. Prove it plays
 
 Create a `Play` for the `Player`, with one file that the machine can

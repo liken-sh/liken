@@ -11,6 +11,9 @@ package main
 // pass built. Comparing live specs does not work, because the API server
 // sets defaults on fields the builder leaves empty, so a live spec never
 // equals the built one without a list of every defaulted field.
+//
+// A pod that the kubelet ended is replaced too, after a wait
+// (endedpod.go).
 
 import (
 	"encoding/json"
@@ -19,6 +22,7 @@ import (
 	"strconv"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // templateHashAnnotation holds the hash of the spec the operator built.
@@ -59,9 +63,11 @@ func stampTemplateHash(metadata *ObjectMeta, spec any) error {
 type persistentPair struct {
 	// subject is the owner, such as "player den/tv", for the log lines
 	// of a create or a delete. absent is the reason the pass wants no
-	// pod, for the log line of its delete.
+	// pod, for the log line of its delete. owner is the object that the
+	// Event of a pod created again goes on.
 	subject string
 	absent  string
+	owner   events.ObjectReference
 
 	namespace string
 	claimName string
@@ -72,9 +78,10 @@ type persistentPair struct {
 
 // newPersistentPair returns a persistentPair with both a claim and a pod, for a
 // Remote or for an idle screen that this operator draws itself.
-func newPersistentPair(subject string, claim *ResourceClaim, pod *Pod) persistentPair {
+func newPersistentPair(subject string, owner events.ObjectReference, claim *ResourceClaim, pod *Pod) persistentPair {
 	return persistentPair{
 		subject:   subject,
+		owner:     owner,
 		namespace: claim.Metadata.Namespace,
 		claimName: claim.Metadata.Name,
 		claim:     claim,
@@ -225,7 +232,8 @@ func (o *operator) livePersistent(want persistentPair) (persistentObjects, error
 
 // persistentSettled reports whether found needs no create or delete: each
 // object exists with the hash of want's object or is absent from both,
-// or either object is already being deleted.
+// the kubelet has not ended the pod, or either object is already being
+// deleted.
 func persistentSettled(want persistentPair, found persistentObjects) bool {
 	if found.claim != nil && found.claim.Metadata.deleting() {
 		return true
@@ -250,7 +258,7 @@ func podSettled(wanted, found *Pod) bool {
 	if wanted == nil || found == nil {
 		return wanted == nil && found == nil
 	}
-	return sameTemplate(&found.Metadata, &wanted.Metadata)
+	return sameTemplate(&found.Metadata, &wanted.Metadata) && !podEnded(found)
 }
 
 // settlePersistent creates or deletes objects to match want, from a read
@@ -282,14 +290,29 @@ func (o *operator) settlePersistent(want persistentPair, live persistentObjects)
 		if err := DeleteResourceClaim(o.client, namespace, want.claimName); err != nil {
 			return err
 		}
-		o.logPersistent(want, "deleted claim "+want.claimName+" and the pods that hold it", want.claim == nil)
+		reason := templateChanged
+		if want.claim == nil {
+			reason = want.absent
+		}
+		logLine(o.log, "%s: deleted claim %s and the pods that hold it, because %s", want.subject, want.claimName, reason)
 		return nil
+	}
+	// An ended pod is replaced in this pass, so the Event names the
+	// kubelet's cause. When its hash differs too, a person changed the
+	// object, perhaps to fix what the kubelet refused, so the
+	// replacement does not wait and starts a new count.
+	if podExists && want.pod != nil && podEnded(livePod) {
+		return o.replaceEnded(want, livePod, !sameTemplate(&livePod.Metadata, &want.pod.Metadata))
 	}
 	if podExists && (want.pod == nil || !sameTemplate(&livePod.Metadata, &want.pod.Metadata)) {
 		if err := DeletePod(o.client, namespace, want.podName); err != nil {
 			return err
 		}
-		o.logPersistent(want, "deleted pod "+want.podName, want.pod == nil)
+		reason := templateChanged
+		if want.pod == nil {
+			reason = want.absent
+		}
+		logLine(o.log, "%s: deleted pod %s, because %s", want.subject, want.podName, reason)
 		return nil
 	}
 	// A pod from an older release can have the current hash and no
@@ -320,15 +343,9 @@ func (o *operator) settlePersistent(want persistentPair, live persistentObjects)
 	return nil
 }
 
-// logPersistent logs one delete with its reason: want.absent when the pass
-// no longer wants the object, and a changed hash otherwise.
-func (o *operator) logPersistent(want persistentPair, deleted string, unwanted bool) {
-	reason := "its template changed with a spec edit or a new release"
-	if unwanted {
-		reason = want.absent
-	}
-	logLine(o.log, "%s: %s, because %s", want.subject, deleted, reason)
-}
+// templateChanged is the reason in the log line of an object deleted for
+// a changed hash.
+const templateChanged = "its template changed with a spec edit or a new release"
 
 // deleteClaimHolders deletes every pod that holds claim, before the
 // caller deletes the claim. A claim in use has a finalizer until its

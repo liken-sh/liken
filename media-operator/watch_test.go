@@ -306,7 +306,8 @@ func TestAChangeToAPlayWakesThePass(t *testing.T) {
 }
 
 // Deleting any of the operator's pods wakes the pass. A change to a
-// playback pod's status wakes it too. No other pod change does.
+// playback pod's status wakes it too, and so does an idle or reader pod
+// that the kubelet ended. No other pod change does.
 func TestAPodWakesThePassWhenItEndsOrAPlaybackPodMoves(t *testing.T) {
 	restarted := labeledPod("movie-playback", playbackLabelValue, podRunning)
 	restarted.Status.ContainerStatuses = []ContainerStatus{{Name: displayContainer, RestartCount: 3}}
@@ -335,8 +336,18 @@ func TestAPodWakesThePassWhenItEndsOrAPlaybackPodMoves(t *testing.T) {
 			after: labeledPod("movie-playback", playbackLabelValue, podSucceeded), want: true},
 		{name: "this operator creates a playback pod",
 			after: labeledPod("movie-playback", playbackLabelValue, podPending), want: false},
+		{name: "an idle pod starts running", before: labeledPod("theater-idle", idleLabelValue, podPending),
+			after: labeledPod("theater-idle", idleLabelValue, podRunning), want: false},
 		{name: "an idle pod fails", before: labeledPod("theater-idle", idleLabelValue, podRunning),
-			after: labeledPod("theater-idle", idleLabelValue, podFailed), want: false},
+			after: labeledPod("theater-idle", idleLabelValue, podFailed), want: true},
+		{name: "a reader pod fails", before: labeledPod("sofa-remote", remoteLabelValue, podRunning),
+			after: labeledPod("sofa-remote", remoteLabelValue, podFailed), want: true},
+		{name: "an idle pod succeeds", before: labeledPod("theater-idle", idleLabelValue, podRunning),
+			after: labeledPod("theater-idle", idleLabelValue, podSucceeded), want: true},
+		{name: "a succeeded reader pod the watch had not seen",
+			after: labeledPod("sofa-remote", remoteLabelValue, podSucceeded), want: true},
+		{name: "a failed reader pod the watch had not seen",
+			after: labeledPod("sofa-remote", remoteLabelValue, podFailed), want: true},
 		{name: "this operator creates a reader pod",
 			after: labeledPod("sofa-remote", remoteLabelValue, podPending), want: false},
 	}

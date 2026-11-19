@@ -204,23 +204,31 @@ var televisionRule = changeRule[Television]{
 // the mark the same. The mark leaves out the labels, because this operator
 // writes the media.liken.sh/ending label.
 //
-// The pass reads nothing in the status of any other pod, such as an idle
-// pod, so the mark of such a pod is empty and only its deletion wakes the
-// pass. A new pod wakes the pass only when it is a playback pod past the
-// Pending phase. That case comes from a gap in the watch, when the
-// informer reports a pod that it had not cached as an add event. The pod
-// that this operator creates starts Pending, so its add event wakes
+// Of any other pod, such as an idle pod or a reader pod, the pass reads
+// only whether the kubelet ended it, because it replaces such a pod
+// (endedpod.go). So the mark of such a pod is empty until the pod is
+// Failed or Succeeded, and a move between Pending and Running wakes
+// nothing. A new pod wakes the pass when it is a playback pod past the
+// Pending phase or any other pod that the kubelet ended. That case comes from a gap in the watch, when
+// the informer reports a pod that it had not cached as an add event. The
+// pod that this operator creates starts Pending, so its add event wakes
 // nothing.
 var podRule = changeRule[Pod]{
 	what: "the pods",
 	mark: func(pod Pod) string {
-		if !isPlaybackPod(pod) {
-			return ""
+		if isPlaybackPod(pod) {
+			return identity(pod.Metadata) + "|" + markOf(pod.Status)
 		}
-		return identity(pod.Metadata) + "|" + markOf(pod.Status)
+		if podEnded(&pod) {
+			return identity(pod.Metadata) + "|" + pod.Status.Phase
+		}
+		return ""
 	},
 	added: func(pod Pod) bool {
-		return isPlaybackPod(pod) && pod.Status.Phase != "" && pod.Status.Phase != podPending
+		if isPlaybackPod(pod) {
+			return pod.Status.Phase != "" && pod.Status.Phase != podPending
+		}
+		return podEnded(&pod)
 	},
 }
 

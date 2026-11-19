@@ -328,6 +328,7 @@ func (o *operator) reconcileIdle(player *Player, timeZone string, defaultIdle *I
 	screen := persistentPair{
 		subject:   "player " + namespace + "/" + name,
 		absent:    "the idle screen went to controller " + idle.Controller,
+		owner:     playerRef(player),
 		namespace: namespace,
 		claimName: claim.Metadata.Name,
 		podName:   idlePodName(name),

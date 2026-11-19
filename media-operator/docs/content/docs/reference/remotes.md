@@ -154,6 +154,18 @@ each distinct error. The message contains the compiler's error.
 the last key table that compiled, so the controller keeps working with
 that table.
 
+When the kubelet ends the `Remote`'s pod, for example for an eviction,
+the pod stays `Failed` or `Succeeded`. The operator deletes the pod,
+creates it again, and posts a `PodRecreated` Warning `Event` on the
+`Remote`. The message gives the phase, the reason, and the message that
+the kubelet wrote on the pod. The controller sends no input until the
+new pod runs. When the kubelet ends each new pod soon after it starts,
+the operator waits before each next pod, 10 seconds at first and twice
+as long each time, to a limit of 5 minutes. It posts no further `Event`
+until a pod has run for longer than 5 minutes before the kubelet ended
+it. An edit to the `Remote` that changes its pod replaces an ended pod
+at once, with no wait.
+
 ## On the bus
 
 Each `Remote` has its own branch of the [bus](/docs/reference/bus/)

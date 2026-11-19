@@ -37,7 +37,9 @@ const (
 	// not resolve, or a Remote the pod needs does not exist.
 	reasonInvalidSpec = "InvalidSpec"
 	// The operator created the playback pod again because the old pod
-	// failed, was deleted, or no longer matched the Player's spec.
+	// failed, was deleted, or no longer matched the Player's spec. The
+	// same reason goes on a Player or a Remote when the operator replaces
+	// its idle pod or reader pod that the kubelet ended (endedpod.go).
 	reasonPodRecreated = "PodRecreated"
 	// The pod failed again soon after being recreated, so the operator
 	// waits longer before the next recreate.

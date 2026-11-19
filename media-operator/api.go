@@ -979,10 +979,13 @@ type PodStatus struct {
 
 // The scheduler writes why it cannot place a pod, such as a missing
 // claim, in the `PodScheduled` condition and not in the pod's message.
+// The kubelet sets the `DisruptionTarget` condition when it ends a pod,
+// and its lastTransitionTime is when the pod stopped running.
 type PodCondition struct {
-	Type    string `json:"type"`
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
+	Type               string `json:"type"`
+	Status             string `json:"status"`
+	Message            string `json:"message,omitempty"`
+	LastTransitionTime string `json:"lastTransitionTime,omitempty"`
 }
 
 // LastState shows how a restarting sidecar last exited, which its
@@ -1003,9 +1006,10 @@ type ContainerState struct {
 type ContainerStateRunning struct{}
 
 type ContainerStateTerminated struct {
-	ExitCode int    `json:"exitCode"`
-	Reason   string `json:"reason,omitempty"`
-	Message  string `json:"message,omitempty"`
+	ExitCode   int    `json:"exitCode"`
+	Reason     string `json:"reason,omitempty"`
+	Message    string `json:"message,omitempty"`
+	FinishedAt string `json:"finishedAt,omitempty"`
 }
 
 const (

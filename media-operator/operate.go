@@ -1519,9 +1519,10 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		return running, false, nil
 	}
 	if running.Status.Phase == podFailed {
-		// mpv exited with a non-zero status. The recreate backoff keeps
-		// a file that crashes at the same position from being recreated
-		// without end.
+		// The pod is Failed when mpv exited with a non-zero status, or
+		// when the kubelet ended the pod, such as for an eviction. Both
+		// cases recreate the pod. The recreate backoff keeps a file that
+		// crashes at the same position from being recreated without end.
 		if !o.mayResume(key) {
 			return running, false, nil
 		}

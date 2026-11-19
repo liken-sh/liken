@@ -122,5 +122,5 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddre
 func (o *operator) reconcileRemote(remote *Remote, known claimRead) error {
 	claim := buildRemoteClaim(remote)
 	pod := o.resources.apply(buildRemotePod(remote, claim, o.sidecarImage, o.busAddress, o.topicBase))
-	return o.reconcilePersistent(newPersistentPair("remote "+remote.Metadata.Namespace+"/"+remote.Metadata.Name, claim, pod), known)
+	return o.reconcilePersistent(newPersistentPair("remote "+remote.Metadata.Namespace+"/"+remote.Metadata.Name, remoteRef(remote), claim, pod), known)
 }

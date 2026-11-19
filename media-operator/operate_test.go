@@ -281,6 +281,11 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			if pod.Metadata.UID == "" {
 				pod.Metadata.UID = "pod-uid-" + strconv.Itoa(len(f.requests))
 			}
+			// The API server writes the creation time, which the wait
+			// before replacing an ended pod counts from.
+			if pod.Metadata.CreationTimestamp == "" {
+				pod.Metadata.CreationTimestamp = time.Now().UTC().Format(time.RFC3339)
+			}
 			f.pods[pod.Metadata.Name] = pod
 			_ = json.NewEncoder(w).Encode(pod)
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/pods/"):
