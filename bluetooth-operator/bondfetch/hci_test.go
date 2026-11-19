@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"errors"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -119,6 +120,25 @@ func TestWaitForAdapterGivesUp(t *testing.T) {
 			})
 		})
 	}
+}
+
+// The kernel answers HCIGETDEVINFO with ENODEV for an index that has no
+// adapter. Any other error, such as EFAULT for a request buffer that is
+// wrong, is the same on every read, so the wait ends at once and names
+// it.
+func TestWaitForAdapterStopsAtAnErrorOtherThanNoDevice(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		read := func(uint16) (deviceInfo, error) { return deviceInfo{}, unix.EFAULT }
+		start := time.Now()
+
+		_, err := waitForAdapter(read)
+		if !errors.Is(err, unix.EFAULT) {
+			t.Errorf("waitForAdapter returned %v, want the kernel's EFAULT", err)
+		}
+		if waited := time.Since(start); waited != 0 {
+			t.Errorf("the wait took %s, want no wait because the error does not clear", waited)
+		}
+	})
 }
 
 func TestWaitForAdapterSkipsIndexesWithNoAdapter(t *testing.T) {

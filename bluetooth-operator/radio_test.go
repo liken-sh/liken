@@ -214,12 +214,16 @@ func (r *fakeRadio) Snapshot() (radioSnapshot, error) {
 
 func (r *fakeRadio) SetAdapterAlias(alias string) error {
 	r.record("SetAdapterAlias %s", alias)
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.snapshot.Adapter.Alias = alias
 	return nil
 }
 
 func (r *fakeRadio) SetAdapterConnectable(connectable bool) error {
 	r.record("SetAdapterConnectable %t", connectable)
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.snapshot.Adapter.Connectable = connectable
 	return nil
 }
@@ -238,6 +242,8 @@ func (r *fakeRadio) SetDeviceTrusted(device bonds.Address, trusted bool) error {
 
 func (r *fakeRadio) OpenWindow(window time.Duration) error {
 	r.record("OpenWindow %s", window)
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.windowErr != nil {
 		return r.windowErr
 	}
@@ -249,6 +255,8 @@ func (r *fakeRadio) OpenWindow(window time.Duration) error {
 
 func (r *fakeRadio) CloseWindow() error {
 	r.record("CloseWindow")
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.snapshot.Adapter.Discoverable = false
 	r.snapshot.Adapter.Pairable = false
 	r.snapshot.Adapter.Discovering = false
@@ -257,8 +265,11 @@ func (r *fakeRadio) CloseWindow() error {
 
 func (r *fakeRadio) Pair(device bonds.Address) error {
 	r.record("Pair %s", device.Key())
-	if r.pairErr != nil {
-		return r.pairErr
+	r.mu.Lock()
+	failure := r.pairErr
+	r.mu.Unlock()
+	if failure != nil {
+		return failure
 	}
 	r.update(device, func(state *deviceState) { state.Paired, state.Bonded = true, true })
 	return nil
@@ -341,6 +352,43 @@ func testRadio(t *testing.T, devices ...deviceState) *fakeRadio {
 		Devices: devices,
 	}}
 }
+
+// The connector calls Connect on its own goroutine while a pass opens
+// and closes the pairing window, so each method that writes the
+// adapter's snapshot takes mu. record takes mu before the write, and
+// that orders most interleavings with Snapshot, so each case calls its
+// method and Snapshot many times at once, and go test -race reports a
+// write that does not hold mu.
+func TestTheFakeRadioTakesItsLockInEveryMethod(t *testing.T) {
+	cases := []struct {
+		name string
+		call func(*fakeRadio)
+	}{
+		{name: "SetAdapterAlias", call: func(r *fakeRadio) { _ = r.SetAdapterAlias("liken-2") }},
+		{name: "SetAdapterConnectable", call: func(r *fakeRadio) { _ = r.SetAdapterConnectable(false) }},
+		{name: "OpenWindow", call: func(r *fakeRadio) { _ = r.OpenWindow(time.Minute) }},
+		{name: "CloseWindow", call: func(r *fakeRadio) { _ = r.CloseWindow() }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			radio := testRadio(t)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				for range fakeRadioRounds {
+					c.call(radio)
+				}
+			}()
+			for range fakeRadioRounds {
+				_, _ = radio.Snapshot()
+			}
+			<-done
+		})
+	}
+}
+
+// fakeRadioRounds is how many times each side of the race test runs.
+const fakeRadioRounds = 2000
 
 // pairedDevice returns a connected controller that has a bond.
 func pairedDevice(t *testing.T, address string) deviceState {

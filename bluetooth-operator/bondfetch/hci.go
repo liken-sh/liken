@@ -10,6 +10,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"time"
 	"unsafe"
@@ -116,7 +117,11 @@ func parseDeviceInfo(buffer []byte) deviceInfo {
 func waitForAdapter(read adapterReader) (deviceInfo, error) {
 	deadline := time.Now().Add(adapterTimeout)
 	for {
-		if adapter, ok := readyAdapter(read); ok {
+		adapter, ok, err := readyAdapter(read)
+		if err != nil {
+			return deviceInfo{}, err
+		}
+		if ok {
 			return adapter, nil
 		}
 		if !time.Now().Before(deadline) {
@@ -127,20 +132,33 @@ func waitForAdapter(read adapterReader) (deviceInfo, error) {
 }
 
 // readyAdapter returns the adapter with the lowest index that reports a
-// non-zero address, and skips an index that fails. It reads every index
-// below maxAdapters, because an adapter that is unplugged and plugged in
-// again gets a higher index and leaves the lower one empty.
+// non-zero address, and skips an index with no adapter. It reads every
+// index below maxAdapters, because an adapter that is unplugged and
+// plugged in again gets a higher index and leaves the lower one empty.
+//
+// The kernel answers HCIGETDEVINFO with ENODEV for an index with no
+// adapter. Its other answers are EFAULT, EBADFD, and ENOTTY, and none of
+// them clears by itself: EFAULT, for example, means that the request
+// buffer is wrong, which is the same at every index and on every read.
+// So readyAdapter returns them, and the wait ends with the kernel's
+// error and not at adapterTimeout.
 //
 // The lowest index is the right adapter only on a node with one adapter.
 // On a node with several, this does not select the USB device that the
 // pod's claim allocated.
-func readyAdapter(read adapterReader) (deviceInfo, bool) {
+func readyAdapter(read adapterReader) (deviceInfo, bool, error) {
 	for index := uint16(0); index < maxAdapters; index++ {
 		adapter, err := read(index)
-		if err != nil || adapter.Address.IsZero() {
+		if errors.Is(err, unix.ENODEV) {
 			continue
 		}
-		return adapter, true
+		if err != nil {
+			return deviceInfo{}, false, fmt.Errorf("reading Bluetooth adapter %d: %w", index, err)
+		}
+		if adapter.Address.IsZero() {
+			continue
+		}
+		return adapter, true, nil
 	}
-	return deviceInfo{}, false
+	return deviceInfo{}, false, nil
 }
