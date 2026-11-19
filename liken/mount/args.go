@@ -90,7 +90,7 @@ func (p *parser) value(name, attached string) (string, error) {
 		return attached, nil
 	}
 	if p.at+1 >= len(p.argv) {
-		return "", fmt.Errorf("%s needs a value", name)
+		return "", fmt.Errorf("option %s needs a value", name)
 	}
 	p.at++
 	return p.argv[p.at], nil
@@ -118,10 +118,10 @@ func parseArgs(argv []string) (*request, error) {
 	case 2:
 		p.req.source, p.req.target = p.paths[0], p.paths[1]
 	default:
-		return nil, fmt.Errorf("too many paths: %s", strings.Join(p.paths, " "))
+		return nil, fmt.Errorf("too many paths, mount takes at most a source and a target: %s", strings.Join(p.paths, " "))
 	}
 	if p.req.target == "" {
-		return nil, fmt.Errorf("no mount point given")
+		return nil, fmt.Errorf("no mount point in the command line")
 	}
 	return &p.req, nil
 }
@@ -136,7 +136,7 @@ func (p *parser) argument(arg string) error {
 		p.at = len(p.argv)
 		return nil
 	case arg == "-a" || arg == "--all":
-		return fmt.Errorf("-a mounts what /etc/fstab lists, and this system has no fstab; name what to mount")
+		return fmt.Errorf("-a mounts the filesystems that /etc/fstab lists, and this machine has no /etc/fstab, so name the filesystem to mount")
 	case strings.HasPrefix(arg, "--"):
 		return p.longOption(arg)
 	case strings.HasPrefix(arg, "-") && arg != "-":

@@ -16,7 +16,7 @@ func helpers(t *testing.T, names ...string) string {
 	dir := t.TempDir()
 	for _, name := range names {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
-			t.Fatalf("installing %s: %v", name, err)
+			t.Fatalf("installing the helper %s: %v", name, err)
 		}
 	}
 	original := helperDir
@@ -29,7 +29,7 @@ func TestHelperChosenForAFilesystemThatHasOne(t *testing.T) {
 	dir := helpers(t, "mount.nfs", "mount.nfs4")
 	req := &request{fstype: "nfs", source: "filer:/export", target: "/mnt"}
 	if got, want := req.helper(0), filepath.Join(dir, "mount.nfs"); got != want {
-		t.Errorf("helper: got %q, want %q", got, want)
+		t.Errorf("the helper is %q, want %q", got, want)
 	}
 }
 
@@ -39,7 +39,7 @@ func TestHelperFollowsTheTypeName(t *testing.T) {
 	dir := helpers(t, "mount.nfs", "mount.nfs4")
 	req := &request{fstype: "nfs4", target: "/mnt"}
 	if got, want := req.helper(0), filepath.Join(dir, "mount.nfs4"); got != want {
-		t.Errorf("helper: got %q, want %q", got, want)
+		t.Errorf("the helper is %q, want %q", got, want)
 	}
 }
 
@@ -63,7 +63,7 @@ func TestNoHelperMeansTheSyscall(t *testing.T) {
 			helpers(t, "mount.nfs")
 			req := &request{fstype: tc.fstype, target: "/mnt"}
 			if got := req.helper(tc.flags); got != "" {
-				t.Errorf("helper: got %q, want none", got)
+				t.Errorf("the helper is %q, want none", got)
 			}
 		})
 	}
@@ -75,10 +75,10 @@ func TestNoHelperMeansTheSyscall(t *testing.T) {
 func TestUnexecutableHelperIsIgnored(t *testing.T) {
 	dir := helpers(t)
 	if err := os.WriteFile(filepath.Join(dir, "mount.nfs"), []byte("not a program"), 0o644); err != nil {
-		t.Fatalf("writing the file: %v", err)
+		t.Fatalf("writing the non-executable mount.nfs: %v", err)
 	}
 	req := &request{fstype: "nfs", target: "/mnt"}
 	if got := req.helper(0); got != "" {
-		t.Errorf("helper: got %q, want none", got)
+		t.Errorf("the helper is %q, want none", got)
 	}
 }

@@ -1,26 +1,27 @@
 # The Disruption API, declared to Kubernetes.
 #
-# A Disruption asks for one machine to go out of service: to reboot,
-# or to restart k3s. Every reboot and restart that liken makes waits
-# for a turn that the cluster grants from its machine disruption
-# budgets, and a Disruption is the record of each request. machine-
-# operator keeps one for a machine's staged documents, and a person
-# files one with `liken request-reboot`. The grant itself is the entry
-# in the Cluster's status.rebootTurns (cluster-operator/rollout.go).
+# A Disruption is a request to take one machine out of service, either
+# to reboot it or to restart k3s on it. Every reboot and restart that
+# liken makes waits for a turn, and the cluster grants turns within the
+# limits of the MachineDisruptionBudgets. machine-operator creates a
+# Disruption when it has staged documents for its machine, and a person
+# creates one with `liken request-reboot`. cluster-operator grants a
+# turn by writing an entry in the Cluster's status.rebootTurns
+# (cluster-operator/rollout.go).
 #
-# This file goes in liken's subdirectory of k3s's auto-deploy
-# manifests and applies at every startup, like the Machine CRD.
+# k3s applies this file at every startup from liken's subdirectory of
+# its auto-deploy manifests, as it does the Machine CRD.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: disruptions.liken.sh
   annotations:
-    # init keeps whichever copy of this file declares the higher
-    # revision, so an older slot's boot cannot downgrade the schema
-    # the cluster serves (init/schemarevision.go). Raise it in the same
-    # change that changes the schema below; a test holds the two
-    # together.
-    liken.sh/schema-revision: "3"
+    # init applies the copy of this file that has the higher revision,
+    # so booting an older boot slot does not replace the schema that the
+    # cluster serves with an older one (init/schemarevision.go). Raise
+    # the revision in the same change that changes the schema below. A
+    # test checks that the two change together.
+    liken.sh/schema-revision: "4"
 spec:
   group: liken.sh
   names:
@@ -35,15 +36,15 @@ spec:
     - name: v1alpha1
       served: true
       storage: true
-      # The requester writes the spec, and the operators write the
-      # status: cluster-operator the approval and the grant, and
-      # machine-operator the hold and the completion of a person's
+      # The requester writes the spec. cluster-operator writes the
+      # Approved and Granted conditions, and machine-operator writes
+      # the Held condition and the Complete condition of a person's
       # reboot.
       subresources:
         status: {}
-      # Each machine's operator lists and watches only its own
-      # machine's requests, with the field selector spec.machine, so no
-      # other machine's request wakes it.
+      # machine-operator lists and watches with the field selector
+      # spec.machine, so it receives only the requests for its own
+      # machine.
       selectableFields:
         - jsonPath: .spec.machine
       additionalPrinterColumns:
@@ -80,136 +81,157 @@ spec:
         openAPIV3Schema:
           type: object
           description: >-
-            A Disruption asks for one machine to reboot or to restart
-            k3s. The request waits until its machine's rebootPolicy
-            approves it and every MachineDisruptionBudget that selects
-            the machine has room, and then the machine takes a turn:
-            cluster-operator records the turn in the Cluster's
-            status.rebootTurns, and machine-operator drains the
-            machine and reboots it. Every request pending for a machine
-            when it takes its turn shares the one drain and the one
-            reboot.
+            A request to reboot one machine or to restart k3s on it.
+            The request waits until it is approved and every
+            MachineDisruptionBudget that selects the machine has room.
+            Under rebootPolicy Auto, every request is approved at once.
+            Under rebootPolicy Manual, a person approves it with
+            spec.approvedHash. Then cluster-operator records a turn
+            for the machine in the Cluster's status.rebootTurns, and
+            machine-operator drains and reboots the machine, or
+            restarts k3s for a Restart. Every request that is pending
+            for the machine when its turn starts is served by the same
+            drain and reboot.
           properties:
             spec:
               type: object
               description: >-
-                The request: which machine, who asks, what for, and
-                the approval of a machine whose rebootPolicy is Manual.
+                Which machine to take out of service, who made the request, what
+                kind of request it is, and, for a machine whose
+                rebootPolicy is Manual, the approval.
               required: [machine, requester, kind]
               x-kubernetes-validations:
-                # Only machine-operator asks for a k3s restart. It
-                # knows which staged change a restart applies, and a
-                # restart leaves no new boot behind to mark a person's
-                # request complete.
+                # Only machine-operator requests a k3s restart, because
+                # a restart applies a change that machine-operator
+                # staged. A person's request is complete only when the
+                # machine boots again, and a restart does not boot it.
                 - rule: self.kind == 'Reboot' || self.requester == 'liken.sh/machine-operator'
-                  message: only liken.sh/machine-operator requests a Restart; ask for a Reboot
-                # A restart drains nothing, so it has no drained
-                # machine to hold.
+                  message: kind Restart is only for requests from liken.sh/machine-operator. Set kind to Reboot
+                # A restart does not drain the machine, so hold has no
+                # drain to pause after.
                 - rule: "!has(self.hold) || !self.hold || self.kind == 'Reboot'"
-                  message: spec.hold stops a reboot after its drain; a Restart has no drain to stop after
-                # A restart does not boot, so it has no BootNext to keep.
+                  message: spec.hold needs kind Reboot, because a Restart does not drain the machine
+                # A restart does not reboot the machine, so BootNext
+                # has no effect on it.
                 - rule: "!has(self.keepBootNext) || !self.keepBootNext || self.kind == 'Reboot'"
-                  message: spec.keepBootNext keeps BootNext for a reboot; a Restart does not boot
+                  message: spec.keepBootNext needs kind Reboot, because a Restart does not reboot the machine
               properties:
                 machine:
                   type: string
                   minLength: 1
                   description: >-
-                    The name of the Machine to take out of service. It
-                    does not change after the request is created.
+                    The name of the Machine to take out of service. The
+                    value cannot change after the request is created.
                   x-kubernetes-validations:
                     - rule: self == oldSelf
-                      message: spec.machine does not change; create another Disruption
+                      message: spec.machine cannot change after the request is created. Create another Disruption for another machine
                 requester:
                   type: string
                   minLength: 1
                   description: >-
-                    Who asked: a key with a domain prefix for a
-                    program, such as liken.sh/machine-operator, and the
-                    Kubernetes user name for a person. It does not
-                    change after the request is created.
+                    Who made the request. For a program, a key with a
+                    domain prefix, such as liken.sh/machine-operator.
+                    For a person, the Kubernetes user name. The value
+                    cannot change after the request is created.
                   x-kubernetes-validations:
                     - rule: self == oldSelf
-                      message: spec.requester does not change; create another Disruption
+                      message: spec.requester cannot change after the request is created. Create another Disruption
                 kind:
                   type: string
                   enum: [Reboot, Restart]
                   description: >-
                     Reboot reboots the machine. Restart restarts k3s
-                    and nothing else, so the pods keep running and the
-                    machine is not drained. A reboot covers a restart,
-                    so a machine with both pending only reboots.
+                    and does not drain or reboot the machine, so its
+                    pods keep running. A reboot also restarts k3s, so a
+                    machine that has both kinds pending only reboots.
                 reason:
                   type: string
-                  description: Why the machine goes out of service, for the person who reads the request.
+                  description: Why the machine needs to go out of service, in words for a person who reads the request.
                 hash:
                   type: string
                   description: >-
-                    What the request applies. For machine-operator's
-                    request, the hash of the documents it staged. For a
-                    person's reboot, the identity of the boot it was
-                    filed against, so the request is spent when the
-                    machine boots again.
+                    Identifies what the request applies. In a request
+                    from machine-operator, it is the hash of the
+                    documents that machine-operator staged. In a
+                    person's reboot request, it is the ID of the boot
+                    that was running when the request was made: the
+                    hex SHA-256 of the Machine's status.boot.time,
+                    written in UTC in RFC 3339 format with nanoseconds.
+                    When a person's request has no hash, machine-operator
+                    writes it. The request is complete when the machine
+                    boots again, because the new boot has another ID.
                 approvedHash:
                   type: string
                   description: >-
-                    The approval of a machine whose rebootPolicy is
-                    Manual. The request is approved while this names
-                    spec.hash, as the full hash or a prefix of 12
-                    characters or more. When the request changes to
-                    apply other bytes, its hash changes and the
-                    approval no longer matches. `liken approve-reboot`
-                    sets it. A machine whose rebootPolicy is Auto
-                    approves every request and ignores this field.
+                    Approves the request on a machine whose
+                    rebootPolicy is Manual. The request is approved
+                    while this value equals spec.hash, or is a prefix
+                    of it at least 12 characters long. When the request
+                    changes to apply different documents, spec.hash
+                    changes and the approval stops matching.
+                    `liken approve-reboot` sets this field. A machine
+                    whose rebootPolicy is Auto approves every request
+                    and ignores this field.
                 hold:
                   type: boolean
                   description: >-
-                    Stops the machine's turn after the drain and before
-                    the reboot. When the machine is drained,
-                    machine-operator sets the Held condition to True,
-                    and the requester does its work on the machine from
-                    a pod that tolerates the cordon. The requester
-                    removes hold when it has checked its work, and the
-                    machine reboots. A hold has no deadline: until it
-                    is removed, the machine stays drained, and the
-                    budgets that select it stay full. A person who
-                    removes hold releases the turn.
+                    Pauses the machine's turn after the drain and
+                    before the reboot. When the drain ends,
+                    machine-operator sets the Held condition to True.
+                    The requester then does its work on the machine
+                    from a pod that tolerates the cordon. When the
+                    requester has checked its work, it removes hold and
+                    the machine reboots. The pause has no time limit.
+                    Until hold is removed, the machine stays drained
+                    and counts against every budget that selects it.
+                    When the requester never removes hold, a person can
+                    remove it, and the machine then reboots.
                 keepBootNext:
                   type: boolean
                   description: >-
-                    Says that the requester set the firmware's BootNext
-                    for this request's reboot, such as fwupd's updater
-                    for a UEFI capsule. The requester sets BootNext
-                    while it holds the drained machine, and sets this
-                    field when it removes hold. On that reboot, init
-                    leaves BootNext as it finds it and arms no release
-                    trial, so the firmware boots the requester's entry
-                    once, and a staged release takes a later reboot.
-                    Init refuses, and aims BootNext at the proven slot
-                    as on any reboot, unless the machine's
+                    Tells init that the requester set the firmware's
+                    BootNext variable for this request's reboot, as the
+                    fwupd updater does for a UEFI capsule. The requester
+                    sets BootNext while the machine is drained and held,
+                    and sets this field when it removes hold. On that
+                    reboot, init leaves BootNext as it is and does not
+                    start a trial of a new release, so the firmware
+                    boots the requester's boot entry once. A staged
+                    release is tried on a later reboot. init honors
+                    this field only when the machine's
                     status.firmware.bootOrderKept is true, BootNext does
-                    not name the slot that is not proven, and the
-                    proven slot holds its fallback loader.
+                    not point at the boot slot that is not proven, and
+                    the proven slot has the fallback loader at the
+                    firmware's default boot path. Otherwise init does
+                    an ordinary reboot and prints the reason on the boot
+                    console.
             status:
               type: object
-              description: Where the request stands.
+              description: The state of the request.
               properties:
                 conditions:
                   type: array
                   description: >-
-                    Approved, written by cluster-operator, is True when
-                    the machine's rebootPolicy or approvedHash approves
-                    the request. Granted, written by cluster-operator,
-                    is True while the machine's turn in the Cluster's
-                    status.rebootTurns names the request, and its
-                    message names what a waiting request waits for.
-                    Complete, written by machine-operator, is True when
-                    a person's reboot has happened. Held, written by
-                    machine-operator, is True from the end of the drain
-                    until the requester removes spec.hold. machine-operator
-                    deletes its own request when nothing is staged, and
-                    cluster-operator deletes a complete request a day
-                    after it completed.
+                    cluster-operator writes Approved. It is True when
+                    the machine's rebootPolicy is Auto, or when
+                    spec.approvedHash matches spec.hash.
+
+                    cluster-operator writes Granted. It is True while
+                    the machine's turn in the Cluster's
+                    status.rebootTurns is for this request. While the
+                    request waits, its message says what it waits for.
+
+                    machine-operator writes Held. It is True from the
+                    end of the drain until the requester removes
+                    spec.hold.
+
+                    machine-operator writes Complete. It is True when
+                    the machine has booted again after a person's
+                    reboot request.
+
+                    machine-operator deletes its own request when
+                    nothing is staged. cluster-operator deletes a
+                    complete request 24 hours after it completed.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

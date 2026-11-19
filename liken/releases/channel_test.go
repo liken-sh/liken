@@ -280,8 +280,8 @@ func TestBundleRefusesAReleaseThatOutgrowsItsSlots(t *testing.T) {
 		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"),
 		filepath.Join(src, "LICENSES.md"), filepath.Join(src, "sbom.cdx.json"),
 		channel, "2026.07.11-001", "32Mi", testComponents, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "outgrow") {
-		t.Fatalf("an oversized release must be refused by the budget: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "do not fit in a boot slot") {
+		t.Fatalf("Bundle of an oversized release returned %v, want an error that it does not fit in a boot slot", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(channel, "2026.07.11-001")); !os.IsNotExist(statErr) {
 		t.Error("a refused bundle must not leave the version directory behind")

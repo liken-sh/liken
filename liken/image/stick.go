@@ -105,7 +105,7 @@ func Stick(releaseDir, layerPath, out string, consoles []string, log io.Writer) 
 		if !slices.ContainsFunc(release.Artifacts, func(a machine.ReleaseArtifact) bool {
 			return a.Name == required
 		}) {
-			return fmt.Errorf("release %s carries no %s; use a newer release",
+			return fmt.Errorf("release %s has no %s, so use a newer release",
 				release.Metadata.Name, required)
 		}
 	}

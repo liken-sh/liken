@@ -14,7 +14,7 @@ func catalog(t *testing.T, aliases string, shipped, builtin []string) *Catalog {
 	t.Helper()
 	table, err := LoadAliasTable(aliasFile(t, aliases))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the alias table: %v", err)
 	}
 	set := func(names []string) map[string]bool {
 		s := map[string]bool{}
@@ -64,7 +64,7 @@ func TestUnclaimedNamesTheFixWhenTheImageLacksTheDriver(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("Unclaimed = %+v, want 1 entry", got)
 	}
-	if got[0].Message != "usb_storage or uas would drive it, but this image carries neither; use an image that does" {
+	if got[0].Message != "usb_storage or uas would drive it, but this image has neither module, so use an image that does" {
 		t.Errorf("Message = %q", got[0].Message)
 	}
 }
@@ -135,7 +135,7 @@ func TestLoadModuleSetReadsBuiltinLists(t *testing.T) {
 	dir := t.TempDir()
 	builtin := filepath.Join(dir, "modules.builtin")
 	if err := os.WriteFile(builtin, []byte("kernel/drivers/usb/core/usbcore.ko\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing modules.builtin: %v", err)
 	}
 
 	resident := LoadModuleSet(builtin)
@@ -147,17 +147,17 @@ func TestLoadModuleSetReadsBuiltinLists(t *testing.T) {
 func TestLoadShippedModulesUsesFilesNotTheIndex(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "kernel/drivers/usb/storage"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the module directory: %v", err)
 	}
 	aboard := filepath.Join(dir, "kernel/drivers/usb/storage/usb-storage.ko.zst")
 	if err := os.WriteFile(aboard, []byte("not a real module"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the module file: %v", err)
 	}
 	dep := filepath.Join(dir, "modules.dep")
 	if err := os.WriteFile(dep, []byte(
 		"kernel/drivers/usb/storage/usb-storage.ko.zst:\n"+
 			"kernel/drivers/usb/storage/uas.ko.zst:\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing modules.dep: %v", err)
 	}
 
 	shipped := LoadShippedModules(dir)

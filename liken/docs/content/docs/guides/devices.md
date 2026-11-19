@@ -68,19 +68,19 @@ Each entry is one device you can claim:
 
 This machine publishes three devices for one GPU.
 
-* `pci-0000-00-02-0` delivers the render node,
+* `pci-0000-00-02-0` provides the render node,
   `/dev/dri/renderD128`. More than one claim can allocate it, so
   several workloads encode, decode, and compute on this GPU at the
   same time.
-* `pci-0000-00-02-0-display` delivers the card node,
-  `/dev/dri/card0`, which provides modesetting. One claim allocates it,
+* `pci-0000-00-02-0-display` provides the card node,
+  `/dev/dri/card0`, which sets the display mode. Only one claim can hold it,
   because one process at a time can drive a display.
-* `pci-0000-00-02-0-i2c-dev` delivers the i2c monitor-control buses
-  that i915 registers for each display output. One claim allocates it,
+* `pci-0000-00-02-0-i2c-dev` provides the i2c monitor-control buses
+  that i915 registers for each display output. Only one claim can hold it,
   because two writers on one of those buses have no arbitration.
 
 All three have the same `address`, because they are one card. A claim
-uses that to ask for halves of the same GPU. See
+can use that to request two devices of the same GPU. See
 [Two requests, one card](#two-requests-one-card).
 
 If the hardware you expect is not in the list, usually no driver is
@@ -101,18 +101,18 @@ in the machine's manifest:
 
 Apply the manifest, and the machine loads the module. Most modules
 load without a reboot. The Machine's `SpecConverged` condition shows
-when the change has an effect. The device is in the node's slice in a
-few seconds.
+when the machine has applied the change, and the device appears in the
+node's slice a few seconds later.
 
-The hardware report names these modules for you, as comments, when you
+The hardware report lists these modules for you, as comments, when you
 install the machine. See
 [Install a cluster](/docs/guides/install/#first-run-the-hardware-report).
 
-The `uhid` module is for a whole stack. Declare it on
-a machine whose Bluetooth adapter serves BLE input devices, such as a
-remote or a keyboard. The adapter's claim then delivers `/dev/uhid`.
-The [device reference](/docs/reference/devices/#bluetooth-adapters)
-states why.
+Declare the `uhid` module on a machine whose Bluetooth adapter serves
+BLE input devices, such as a remote or a keyboard. The adapter's claim
+then provides `/dev/uhid`. The
+[device reference](/docs/reference/devices/#bluetooth-adapters)
+explains why.
 
 A USB-CEC adapter needs a `spec.serio` entry beside its modules,
 because its driver binds only after the machine attaches the
@@ -124,8 +124,8 @@ describes the two devices the adapter publishes.
 
 ## 3. Say what your workload needs
 
-A `DeviceClass` is a named set of conditions on hardware. Write one
-for each kind of device that your deployments ask for.
+A `DeviceClass` is a named set of selectors that match devices. Write
+one for each kind of device that your deployments request.
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -139,7 +139,7 @@ for each kind of device that your deployments ask for.
               has(device.attributes["liken.sh"].renderNode)
 
 `liken` publishes an attribute only when it is true of the hardware, so
-`has()` is the complete test. Guard an attribute a device may lack
+`has()` alone is enough to test for it. Guard an attribute a device may lack
 with `has()` before you read it. The Kubernetes API treats an
 unguarded read of a missing attribute as an evaluation error, and an
 evaluation error aborts the whole allocation.
@@ -148,20 +148,18 @@ Do not select on `driver` alone, and do not select on `subsystem`
 alone. Every device that `liken` publishes for one GPU has the same
 `driver`, and the card node has the same `subsystem: drm` as the
 render node. A class that matches more than one of them can allocate
-the monitor buses, or the display, to your transcoder. `renderNode`
-is the attribute that names the half you want, and only that half has
-it.
+the monitor buses, or the display, to your transcoder. Only the render
+node has the `renderNode` attribute, so select on it.
 
 This class matches any GPU with a DRM render node, on any machine in
-the fleet. A selector that asks for a vendor and a product ID names
+the fleet. A selector on a vendor and a product ID matches
 one model, and it stops matching on the next machine you buy.
 
 ## 4. Claim the GPU for a deployment
 
-The deployment writes a claim against the class, and the claim
-allocates the GPU. The claim is also what places the pod: the
-scheduler picks a machine whose `ResourceSlice` offers a matching
-device.
+Write a `ResourceClaim` that requests a device of the class. The claim
+also decides where the pod runs: the scheduler places the pod on a
+machine whose `ResourceSlice` has a matching device.
 
     apiVersion: resource.k8s.io/v1
     kind: ResourceClaim
@@ -175,8 +173,8 @@ device.
             exactly:
               deviceClassName: gpu-render
 
-The pod names the claim, and each container that needs the device
-names the pod's entry:
+The pod references the claim, and each container that needs the device
+references the pod's entry:
 
     spec:
       template:
@@ -191,32 +189,30 @@ names the pod's entry:
                 claims:
                   - name: gpu
 
-The container receives every node the published device delivers. For
+The container receives every device node that the published device provides. For
 the GPU above, that is `/dev/dri/renderD128` only. The card node and
 the `/dev/i2c-*` monitor-control nodes belong to the companion
-devices, and each companion needs its own request. Nothing else
-changes: no privilege, and no host mount. Your image supplies the
+devices, and each companion needs its own request. The pod needs no
+privilege and no host mount. Your image supplies the
 userspace driver, and the image's user must be able to open the node.
 Check what the container received:
 
     kubectl exec deploy/transcoder -- ls -l /dev/dri
 
-A device that has `allowMultipleAllocations: true` allocates to more
-than one claim: a second deployment writes its own `ResourceClaim`
-against the same `DeviceClass`, and both deployments run. The
-integrated GPU above has it, so more than one transcoder can
-allocate the render node at once.
+Because the render node has `allowMultipleAllocations: true`, a second
+deployment can write its own `ResourceClaim` against the same
+`DeviceClass`, and both deployments run on the same GPU.
 
 Give a deployment that holds a claim like this the `Recreate`
 strategy. A rolling update runs the old pod and the new pod at once,
-and both name the same claim. Kubernetes gives a claim's device to
-every pod that names the claim. `Recreate` stops the old pod first,
+and both reference the same claim. Kubernetes gives a claim's device to
+every pod that references the claim. `Recreate` stops the old pod first,
 so one pod holds the device at a time.
 
 ### A workload that drives a display
 
 A player or a kiosk sets the video mode, so it needs the card node as
-well. Write a second `DeviceClass` for the display half:
+well. Write a second `DeviceClass` for the display device:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -247,23 +243,22 @@ of both devices:
             exactly:
               deviceClassName: gpu-display
 
-The display device allocates to one claim, so a second player waits
-until the first claim ends. This is the correct behavior: the kernel
-gives modesetting to one process for each card, and a second player
-that started would fail when it opened the card node.
+Only one claim can hold the display device, so a second player waits
+until the first claim ends. The kernel lets one process at a time set
+the mode of a card, so a second player would fail when it opened the
+card node.
 
-Sound is a third device. The audio controller has its own PCI
-address, so a player that plays HDMI audio adds a request for it.
-That device is shareable, so a second player does not wait for it.
+A player that plays HDMI audio adds a request for the GPU's audio
+controller, which has its own PCI address. That device is shareable,
+so a second player does not wait for it.
 
 ### Two requests, one card
 
-On a machine with two GPUs, the two requests above can allocate halves
-of different cards. A `constraints` block pairs them. Each constraint
-names the requests it applies to and one attribute. The scheduler
-then allocates devices whose value for that attribute is the same.
-The attribute to use is `address`, which is the device's address on
-its bus:
+On a machine with two GPUs, the two requests above can allocate the
+render node of one card and the card node of the other. Add a
+`constraints` block. A constraint lists requests and one attribute,
+and the scheduler allocates only devices that have the same value of
+that attribute. Use `address`, the device's address on its bus:
 
     spec:
       devices:
@@ -280,7 +275,7 @@ its bus:
 
 Every device that `liken` publishes for one card has that card's
 address, and two cards in a machine have different addresses. The
-render node and the card node the claim allocates are now halves of
+render node and the card node that the claim allocates now belong to
 the same GPU.
 
 Leave the audio controller out of the list. It has an address of its
@@ -288,7 +283,7 @@ own, so a constraint that included its request would never match.
 
 `liken.sh/address` pairs only the devices of `liken`. To pair the
 render node with a device that another driver publishes for the same
-card, such as media-operator's statement of what a GPU decodes, use
+card, such as the device that `media-operator` publishes to describe what a GPU decodes, use
 `matchAttribute: resource.kubernetes.io/pciBusID`. Kubernetes defines
 that attribute, and both drivers publish it with the card's PCI
 address.
@@ -296,7 +291,7 @@ address.
 ## 5. Give one pod a device alone
 
 Most devices are not shareable. A USB adapter has one control
-endpoint, so `liken` publishes it as a device that allocates one time.
+endpoint, so `liken` publishes it as a device that only one claim can hold.
 Select the device by its identity:
 
     apiVersion: resource.k8s.io/v1
@@ -319,8 +314,8 @@ does not have aborts the allocation, so guard each read with `has()`.
 Add `has(device.attributes["liken.sh"].serial) &&
 device.attributes["liken.sh"].serial == "..."` when a machine has two
 adapters of the same model and you must select one of them. The
-name of the device follows the port, not the unit, so a replacement
-adapter in the same port has the same name.
+device's name comes from the USB port, not from the adapter, so a
+replacement adapter in the same port has the same name.
 
 Do not select on `busNumber` or `deviceNumber`. The kernel gives the
 device a new device number each time it enumerates, after a replug, a
@@ -330,9 +325,9 @@ the two numbers are for.
 
 Some USB devices, such as many astronomy cameras, hold no firmware of
 their own and get it from the host each time they get power. Until
-the firmware loads, the device publishes as a bare chip with the chip
-maker's vendor and product IDs. After the load, it publishes again
-with its own IDs. Select the IDs it has after the load.
+the firmware loads, the device appears as a bare chip with the vendor
+and product IDs of the chip's maker. After the firmware loads, the
+device appears again with its own IDs. Select those IDs.
 [`firmware-operator`](https://liken.sh/firmware/docs/guides/upload-to-a-device/)
 loads the firmware each time the bare chip appears.
 
@@ -357,25 +352,25 @@ Then give each pod its own claim:
               resourceClaimTemplateName: zigbee
 
 When you unplug the adapter, `liken` taints it, and Kubernetes evicts
-the pod. The pod's controller creates a new pod, and its new claim
-takes the adapter wherever you plug it in: another port, or another
-machine. This repair needs the template. A named `ResourceClaim` keeps
-its allocation on the old port, and you repair it by hand.
+the pod. The pod's controller creates a new pod, and its new claim is
+allocated the adapter wherever you plug it in: another port, or
+another machine. This works only with a template. A named
+`ResourceClaim` stays allocated to the device on the old port, and you
+must repair it by hand.
 The [device reference](/docs/reference/devices/#an-unplugged-device-evicts-its-pods)
 gives the rules, and the toleration for a program that follows its
 hardware by itself.
 
-A template makes one claim for each pod, and the device allocates to
-one claim, so only one pod holds the adapter. A rolling update waits
-until the old pod releases the adapter. This is correct for hardware
-that one process must own.
+A template makes one claim for each pod, and only one claim can hold the
+device, so only one pod holds the adapter. A rolling update waits
+until the old pod releases the adapter.
 
-Do not point two pods at one `ResourceClaim` for a device of this
-kind. Both pods receive it. Kubernetes shares a claim with every pod
-that names it, by design, and `liken` does not refuse the second pod. A
-device node does not grant exclusive access by itself. The kernel
-enforces exclusive access, through `O_EXCL` and the driver's own open
-path. Use a template to give the device to one pod only.
+Do not make two pods reference one `ResourceClaim` for a device of this
+kind. Kubernetes gives a claim's devices to every pod that references
+the claim, and `liken` does not refuse the second pod. The device node
+does not give one pod exclusive access either. Only the kernel
+enforces that, through `O_EXCL` and the driver's open function. Use a
+template to give the device to one pod only.
 
 ## 6. Run a virtual machine in a pod
 
@@ -412,11 +407,11 @@ Write a class that selects it:
 
 Add `has(device.attributes["liken.sh"].nested)` for a guest that runs
 virtual machines itself. Write classes for `vhostNet` and `vhostVsock`
-the same way when the monitor opens `/dev/vhost-net` or
+the same way when the virtual machine monitor opens `/dev/vhost-net` or
 `/dev/vhost-vsock`.
 
 Claim it from a template, so each pod gets a claim of its own. The
-device allocates to any number of claims, so pods on one node run
+device can be allocated to any number of claims, so pods on one node run
 guests at the same time:
 
     apiVersion: resource.k8s.io/v1
@@ -447,14 +442,16 @@ guests at the same time:
                 claims:
                   - name: kvm
 
-The container receives `/dev/kvm` with mode `0666`, so a monitor that
-runs as a user other than root opens it. A guest's memory is the
-memory of the monitor's process, so the container's memory request
-and limit must cover the guest's memory and the monitor's own.
+The container receives `/dev/kvm` with mode `0666`, so a virtual
+machine monitor that runs as a user other than root can open it. A
+guest's memory belongs to the monitor's process, so the container's
+memory request and limit must cover the guest's memory and the
+monitor's own.
 
-A guest on a tap network also needs `/dev/net/tun`. The container
-runtime admits that node to every container without a claim, so make
-it in the container and add the capability that makes the interface:
+A guest on a tap network also needs `/dev/net/tun`. containerd's
+default device rules allow that node in every container, so it needs
+no claim. Create the node in the container, and add the capability
+that creates the tap interface:
 
     securityContext:
       capabilities:
@@ -492,5 +489,5 @@ usually no device matched the claim. Do these checks in this order:
 
        kubectl get resourceclaims -A -o wide
 
-   A device that is not shareable allocates one time, and the second
+   A device that is not shareable can be allocated to only one claim, and the second
    claim waits until the first claim releases it.

@@ -92,7 +92,7 @@ func TestPluginsRemoveDeletesTheCLI(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := pluginsCommand([]string{"remove", "audio"}, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running plugins remove: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(binDir, plugins.Name("audio"))); !os.IsNotExist(err) {
 		t.Fatalf("the CLI must be gone: %v", err)
@@ -161,7 +161,7 @@ func TestPluginsListReportsInstalledAgainstCluster(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := pluginsCommand([]string{"list", "-server", server.URL, dir}, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running plugins list: %v", err)
 	}
 	text := out.String()
 	if !strings.Contains(text, "audio") || !strings.Contains(text, "drift") {
@@ -180,7 +180,7 @@ func TestPluginsSyncReadsAnEmptyClusterWithoutError(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := pluginsCommand([]string{"sync", "-server", server.URL, dir}, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running plugins sync: %v", err)
 	}
 }
 
@@ -196,11 +196,11 @@ func TestExecPluginVersionRunsTheBinary(t *testing.T) {
 	binDir := t.TempDir()
 	script := "#!/bin/sh\necho 2026.09.03-007\n"
 	if err := os.WriteFile(filepath.Join(binDir, plugins.Name("audio")), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the plugin script: %v", err)
 	}
 	got, err := execPluginVersion(binDir, "audio")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the plugin version: %v", err)
 	}
 	if got != "2026.09.03-007" {
 		t.Fatalf("got %q", got)

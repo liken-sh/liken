@@ -17,22 +17,22 @@ func TestInstalledReadsTheDomainsInTheDirectory(t *testing.T) {
 	binDir := t.TempDir()
 	for _, name := range []string{Name("audio"), Name("library"), "kubectl", "notes.txt"} {
 		if err := os.WriteFile(filepath.Join(binDir, name), []byte("x"), 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing %s: %v", name, err)
 		}
 	}
 	got, err := Installed(binDir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading %s: %v", binDir, err)
 	}
 	if !slices.Equal(got, []string{"audio", "library"}) {
-		t.Fatalf("got %v", got)
+		t.Fatalf("the domains are %v, want [audio library]", got)
 	}
 }
 
 func TestInstalledReadsAMissingDirectoryAsEmpty(t *testing.T) {
 	got, err := Installed(filepath.Join(t.TempDir(), "absent"))
 	if err != nil || len(got) != 0 {
-		t.Fatalf("got %v, %v", got, err)
+		t.Fatalf("the result is %v and the error is %v, want no domains and no error", got, err)
 	}
 }
 
@@ -47,7 +47,7 @@ func TestMergeUnionsBothSides(t *testing.T) {
 		{Domain: "library", CLIVersion: "", OperatorVersion: "2026.09.03-007"},
 	}
 	if !slices.Equal(got, want) {
-		t.Fatalf("got %v", got)
+		t.Fatalf("the entries are %v, want %v", got, want)
 	}
 }
 
@@ -66,10 +66,10 @@ func TestEntryDriftAndMissing(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if c.entry.Drift() != c.drift {
-				t.Errorf("drift: got %v", c.entry.Drift())
+				t.Errorf("Drift is %v, want %v", c.entry.Drift(), c.drift)
 			}
 			if c.entry.MissingCLI() != c.missing {
-				t.Errorf("missing: got %v", c.entry.MissingCLI())
+				t.Errorf("MissingCLI is %v, want %v", c.entry.MissingCLI(), c.missing)
 			}
 		})
 	}

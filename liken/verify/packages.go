@@ -63,7 +63,7 @@ func (s Summary) String() string {
 func summarize(data []byte) (Summary, error) {
 	var doc cycloneDX
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return Summary{}, fmt.Errorf("%s: %w", SBOMName, err)
+		return Summary{}, fmt.Errorf("parsing %s: %w", SBOMName, err)
 	}
 	s := Summary{Components: len(doc.Components), BySource: map[string]int{}}
 	for _, c := range doc.Components {
@@ -80,7 +80,7 @@ func summarize(data []byte) (Summary, error) {
 func CycloneDXPackages(data []byte) ([]Package, error) {
 	var doc cycloneDX
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("the CycloneDX document does not parse: %w", err)
+		return nil, fmt.Errorf("parsing the CycloneDX document: %w", err)
 	}
 	packages := make([]Package, 0, len(doc.Components))
 	for _, c := range doc.Components {
@@ -106,7 +106,7 @@ type spdx struct {
 func SPDXPackages(data []byte) ([]Package, error) {
 	var doc spdx
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("the SPDX document does not parse: %w", err)
+		return nil, fmt.Errorf("parsing the SPDX document: %w", err)
 	}
 	packages := make([]Package, 0, len(doc.Packages))
 	for _, p := range doc.Packages {

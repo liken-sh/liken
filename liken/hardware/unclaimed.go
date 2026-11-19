@@ -133,14 +133,14 @@ func unclaimedMessage(candidates, aboard []string) string {
 	if len(aboard) > 0 {
 		return "declare " + strings.Join(aboard, " or ") + " in spec.modules"
 	}
-	verb := "carries neither"
+	verb := "has neither module"
 	if len(candidates) == 1 {
-		verb = "doesn't carry it"
+		verb = "does not have it"
 	} else if len(candidates) > 2 {
-		verb = "carries none of them"
+		verb = "has none of them"
 	}
 	return strings.Join(candidates, " or ") +
-		" would drive it, but this image " + verb + "; use an image that does"
+		" would drive it, but this image " + verb + ", so use an image that does"
 }
 
 // LoadShippedModules finds which modules are actually present on

@@ -66,23 +66,23 @@ type kmsgRecord struct {
 func parseKmsgRecord(raw []byte) (kmsgRecord, error) {
 	semi := bytes.IndexByte(raw, ';')
 	if semi < 0 {
-		return kmsgRecord{}, fmt.Errorf("no header separator in %q", raw)
+		return kmsgRecord{}, fmt.Errorf("record %q has no semicolon between its header and its message", raw)
 	}
 	fields := strings.Split(string(raw[:semi]), ",")
 	if len(fields) < 4 {
-		return kmsgRecord{}, fmt.Errorf("header %q has %d fields, want at least 4", raw[:semi], len(fields))
+		return kmsgRecord{}, fmt.Errorf("record header %q has %d fields, want at least 4", raw[:semi], len(fields))
 	}
 	prio, err := strconv.Atoi(fields[0])
 	if err != nil || prio < 0 {
-		return kmsgRecord{}, fmt.Errorf("bad priority in header %q", raw[:semi])
+		return kmsgRecord{}, fmt.Errorf("priority in record header %q is not a non-negative integer", raw[:semi])
 	}
 	seq, err := strconv.ParseUint(fields[1], 10, 64)
 	if err != nil {
-		return kmsgRecord{}, fmt.Errorf("bad sequence in header %q", raw[:semi])
+		return kmsgRecord{}, fmt.Errorf("sequence in record header %q is not an unsigned integer", raw[:semi])
 	}
 	us, err := strconv.ParseInt(fields[2], 10, 64)
 	if err != nil || us < 0 {
-		return kmsgRecord{}, fmt.Errorf("bad timestamp in header %q", raw[:semi])
+		return kmsgRecord{}, fmt.Errorf("timestamp in record header %q is not a non-negative integer", raw[:semi])
 	}
 	message := raw[semi+1:]
 	if nl := bytes.IndexByte(message, '\n'); nl >= 0 {
@@ -150,7 +150,7 @@ func (r *kmsgRelay) run() error {
 	// log to the old boot's sequence numbers (earlierBoot above).
 	if resuming && cur.earlierBoot(r.now().Sub(r.anchor())) {
 		_ = r.out.notice(r.now(), "info", cur.Seq, &r.facility,
-			fmt.Sprintf("the cursor holds sequence %d from an earlier boot; relaying this boot from its first record", cur.Seq))
+			fmt.Sprintf("the cursor has sequence %d from an earlier boot, so the relay starts at the first record of this boot", cur.Seq))
 		cur = kmsgCursor{}
 		resuming = false
 	}
@@ -183,7 +183,7 @@ func (r *kmsgRelay) run() error {
 		rec, err := parseKmsgRecord(buf[:n])
 		if err != nil {
 			_ = r.out.notice(r.now(), "warning", cur.Seq, &r.facility,
-				"unparseable record: "+err.Error())
+				"discarded a record that does not parse: "+err.Error())
 			continue
 		}
 

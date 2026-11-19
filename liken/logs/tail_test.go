@@ -73,13 +73,13 @@ func appendLine(t *testing.T, path, line string) {
 	t.Helper()
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening the log file: %v", err)
 	}
 	if _, err := f.WriteString(line); err != nil {
-		t.Fatal(err)
+		t.Fatalf("appending to the log file: %v", err)
 	}
 	if err := f.Close(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("closing the log file: %v", err)
 	}
 }
 
@@ -98,7 +98,7 @@ func followedFile(t *testing.T, path, curDir string) (*syncBuffer, func()) {
 	stop := func() {
 		cancel()
 		if err := <-done; !errors.Is(err, context.Canceled) {
-			t.Errorf("tailer exited with %v, want context.Canceled", err)
+			t.Errorf("the tailer returned %v, want context.Canceled", err)
 		}
 	}
 	return out, stop
@@ -115,7 +115,7 @@ func awaitEnvelopes(t *testing.T, out *syncBuffer, n int) []envelope {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for %d envelopes; have:\n%s", n, out.String())
+	t.Fatalf("timed out waiting for %d envelopes, have:\n%s", n, out.String())
 	return nil
 }
 
@@ -124,23 +124,23 @@ func TestTailerFollowsAGrowingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "k3s.log")
 	if err := os.WriteFile(path, []byte("first line\nsecond line\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 
 	out, stop := followedFile(t, path, t.TempDir())
 	defer stop()
 	es := awaitEnvelopes(t, out, 2)
 	if es[0].Message != "first line" || es[0].Seq != 0 {
-		t.Errorf("first: %+v", es[0])
+		t.Errorf("the first envelope is %+v, want the message \"first line\" with seq 0", es[0])
 	}
 	if es[1].Message != "second line" || es[1].Seq != uint64(len("first line\n")) {
-		t.Errorf("second line's seq should be its byte offset: %+v", es[1])
+		t.Errorf("the second envelope is %+v, want the message \"second line\" with its byte offset as seq", es[1])
 	}
 
 	appendLine(t, path, "third line\n")
 	es = awaitEnvelopes(t, out, 3)
 	if es[2].Message != "third line" {
-		t.Errorf("third: %+v", es[2])
+		t.Errorf("the third envelope is %+v, want the message \"third line\"", es[2])
 	}
 }
 
@@ -150,17 +150,17 @@ func TestTailerLiftsHeadersItRecognizes(t *testing.T) {
 	path := filepath.Join(dir, "k3s.log")
 	line := `time="2026-07-07T13:51:16Z" level=error msg="tunnel disconnected"`
 	if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 
 	out, stop := followedFile(t, path, t.TempDir())
 	defer stop()
 	es := awaitEnvelopes(t, out, 1)
 	if es[0].Severity != "err" || es[0].Time != "2026-07-07T13:51:16Z" {
-		t.Errorf("lifted facts: %+v", es[0])
+		t.Errorf("the envelope is %+v, want the time and severity of the log line", es[0])
 	}
 	if es[0].Message != line {
-		t.Errorf("message must stay verbatim: %q", es[0].Message)
+		t.Errorf("the message is %q, want the log line unchanged", es[0].Message)
 	}
 }
 
@@ -174,11 +174,11 @@ func TestTailerWaitsForTheFileToExist(t *testing.T) {
 	// Let the tailer's watch settle against nothing, then create it.
 	time.Sleep(10 * time.Millisecond)
 	if err := os.WriteFile(path, []byte("containerd successfully booted\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 	es := awaitEnvelopes(t, out, 1)
 	if es[0].Message != "containerd successfully booted" {
-		t.Errorf("got %+v", es[0])
+		t.Errorf("the envelope is %+v, want the line from the new file", es[0])
 	}
 }
 
@@ -206,7 +206,7 @@ func TestTailerResumesFromItsCursor(t *testing.T) {
 	path := filepath.Join(dir, "k3s.log")
 	curDir := t.TempDir()
 	if err := os.WriteFile(path, []byte("old one\nold two\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 
 	out, stop := followedFile(t, path, curDir)
@@ -220,10 +220,10 @@ func TestTailerResumesFromItsCursor(t *testing.T) {
 	defer stop2()
 	es := awaitEnvelopes(t, out2, 2)
 	if es[0].Message != "liken-logs: resuming "+path+" at offset 16" {
-		t.Errorf("resume notice: %+v", es[0])
+		t.Errorf("the first envelope is %+v, want the resume notice", es[0])
 	}
 	if es[1].Message != "new after restart" || es[1].Seq != 16 {
-		t.Errorf("only the new line should ship: %+v", es[1])
+		t.Errorf("the second envelope is %+v, want only the new line, at seq 16", es[1])
 	}
 }
 
@@ -235,7 +235,7 @@ func TestTailerFollowsARotation(t *testing.T) {
 	// writer stopped mid-write. It ships as it is, once the tailer
 	// notices the rotation.
 	if err := os.WriteFile(path, []byte("finished line\ncut off mid-wr"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 
 	out, stop := followedFile(t, path, t.TempDir())
@@ -243,7 +243,7 @@ func TestTailerFollowsARotation(t *testing.T) {
 	awaitEnvelopes(t, out, 1)
 
 	if err := os.Rename(path, path+".1"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("rotating the log file: %v", err)
 	}
 	es := awaitEnvelopes(t, out, 2)
 	if es[1].Message != "cut off mid-wr" {
@@ -251,7 +251,7 @@ func TestTailerFollowsARotation(t *testing.T) {
 	}
 
 	if err := os.WriteFile(path, []byte("fresh generation\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 	es = awaitEnvelopes(t, out, 3)
 	if es[2].Message != "fresh generation" || es[2].Seq != 0 {
@@ -265,7 +265,7 @@ func TestTailerReplaysWhenTheFileShrinks(t *testing.T) {
 	path := filepath.Join(dir, "k3s.log")
 	curDir := t.TempDir()
 	if err := os.WriteFile(path, []byte("a long line that moves the cursor well along\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 
 	out, stop := followedFile(t, path, curDir)
@@ -275,16 +275,16 @@ func TestTailerReplaysWhenTheFileShrinks(t *testing.T) {
 
 	// Truncate in place: same inode, smaller than the cursor.
 	if err := os.WriteFile(path, []byte("tiny\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 	out2, stop2 := followedFile(t, path, curDir)
 	defer stop2()
 	es := awaitEnvelopes(t, out2, 2)
 	if es[0].Severity != "warning" {
-		t.Errorf("shrinking should be called out: %+v", es[0])
+		t.Errorf("the first envelope is %+v, want a warning that the file shrank", es[0])
 	}
 	if es[1].Message != "tiny" || es[1].Seq != 0 {
-		t.Errorf("and the file replayed from the head: %+v", es[1])
+		t.Errorf("the second envelope is %+v, want the file replayed from its start", es[1])
 	}
 }
 
@@ -297,7 +297,7 @@ func TestTailerDrainsARotatedGenerationToItsEnd(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "k3s.log")
 	if err := os.WriteFile(path, []byte("first\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 
 	out, stop := followedFile(t, path, t.TempDir())
@@ -306,7 +306,7 @@ func TestTailerDrainsARotatedGenerationToItsEnd(t *testing.T) {
 
 	appendLine(t, path, "last full line\ncut off mid-wr")
 	if err := os.Rename(path, path+".1"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("rotating the log file: %v", err)
 	}
 	es := awaitEnvelopes(t, out, 3)
 	if es[1].Message != "last full line" {
@@ -317,7 +317,7 @@ func TestTailerDrainsARotatedGenerationToItsEnd(t *testing.T) {
 	}
 
 	if err := os.WriteFile(path, []byte("fresh generation\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 	es = awaitEnvelopes(t, out, 4)
 	if es[3].Message != "fresh generation" || es[3].Seq != 0 {
@@ -340,11 +340,11 @@ func TestTailerStopsWhenItsOutputFails(t *testing.T) {
 	fastBackstop(t)
 	path := filepath.Join(t.TempDir(), "k3s.log")
 	if err := os.WriteFile(path, []byte("doomed\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 	err := tailFile(context.Background(), path, newEnvelopeWriter(brokenWriter{}), t.TempDir(), time.Now)
 	if !errors.Is(err, errStdoutGone) {
-		t.Errorf("tailFile should surface the write error, got %v", err)
+		t.Errorf("tailFile returned %v, want the error from writing the envelope", err)
 	}
 }
 
@@ -355,17 +355,17 @@ func TestTailerStopsWhenItCannotCheckpoint(t *testing.T) {
 	fastBackstop(t)
 	path := filepath.Join(t.TempDir(), "k3s.log")
 	if err := os.WriteFile(path, []byte("a line\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 	curDir := t.TempDir()
 	if err := os.Chmod(curDir, 0o500); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the cursor directory read-only: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(curDir, 0o700) })
 	out := newEnvelopeWriter(&syncBuffer{})
 	err := tailFile(context.Background(), path, out, curDir, time.Now)
 	if !errors.Is(err, os.ErrPermission) {
-		t.Errorf("tailFile should surface the checkpoint error, got %v", err)
+		t.Errorf("tailFile returned %v, want the error from saving the cursor", err)
 	}
 }
 
@@ -378,7 +378,7 @@ func TestTailerShipsGrowthOnAnEvent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "k3s.log")
 	if err := os.WriteFile(path, []byte("first\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 
 	out, stop := followedFile(t, path, t.TempDir())
@@ -403,7 +403,7 @@ func TestTailerFollowsARotationOnAnEvent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "k3s.log")
 	if err := os.WriteFile(path, []byte("before\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 
 	out, stop := followedFile(t, path, t.TempDir())
@@ -412,7 +412,7 @@ func TestTailerFollowsARotationOnAnEvent(t *testing.T) {
 
 	appendLine(t, path, "trailing fragment")
 	if err := os.Rename(path, path+".1"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("rotating the log file: %v", err)
 	}
 	es := awaitEnvelopes(t, out, 2)
 	if es[1].Message != "trailing fragment" {
@@ -436,7 +436,7 @@ func TestTailerAwaitsCreationOnAnEvent(t *testing.T) {
 	// event is the thing that wakes the tailer.
 	time.Sleep(10 * time.Millisecond)
 	if err := os.WriteFile(path, []byte("containerd up\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 	es := awaitEnvelopes(t, out, 1)
 	if es[0].Message != "containerd up" {
@@ -453,7 +453,7 @@ func TestTailerStopsWhenTheWatchCannotStart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gone", "k3s.log")
 	err := tailFile(context.Background(), path, newEnvelopeWriter(&syncBuffer{}), t.TempDir(), time.Now)
 	if err == nil || errors.Is(err, context.Canceled) {
-		t.Errorf("tailFile should surface the watch error, got %v", err)
+		t.Errorf("tailFile returned %v, want the error from starting the watch", err)
 	}
 }
 
@@ -470,15 +470,15 @@ func TestTailerStopsWhenItsWatchStops(t *testing.T) {
 	_, awaitErr := awaitFile(context.Background(), path, stopped)
 
 	if err := os.WriteFile(path, []byte("one line\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the log file: %v", err)
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening the log file: %v", err)
 	}
 	followErr := followGeneration(context.Background(), f, path, 0, 0, 0, newEnvelopeWriter(io.Discard), t.TempDir(), time.Now, stopped)
 
 	if !errors.Is(awaitErr, errWatchStopped) || !errors.Is(followErr, errWatchStopped) {
-		t.Errorf("awaiting answered %v and following answered %v, want errWatchStopped from both", awaitErr, followErr)
+		t.Errorf("awaitFile returned %v and followGeneration returned %v, want errWatchStopped from both", awaitErr, followErr)
 	}
 }

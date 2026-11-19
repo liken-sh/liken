@@ -60,8 +60,8 @@ func unattachedAdapter(d Device, serio []machine.SerioAttachment) (machine.Uncla
 		// one of two ways to use the adapter: a pod can also drive it
 		// over the tty, as libcec does, and an entry withholds the tty,
 		// so the message says which use it is for.
-		Message: fmt.Sprintf("for the kernel CEC driver, declare %s and %s in spec.modules and a %s entry in spec.serio; "+
-			"the entry withholds the tty from workloads, so leave it out when a pod drives the adapter over its serial line",
+		Message: fmt.Sprintf("for the kernel CEC driver, declare %s and %s in spec.modules and a %s entry in spec.serio. "+
+			"The entry keeps the tty from workloads, so leave it out when a pod uses the adapter over its serial line",
 			protocol.Discipline, protocol.Driver, protocol.Name),
 	}, true
 }

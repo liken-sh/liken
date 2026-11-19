@@ -165,6 +165,6 @@ func TestPassthroughNamesAMissingTool(t *testing.T) {
 	dir := deploymentDirForTest(t)
 	err := passthrough("no-such-tool-anywhere", []string{dir})
 	if err == nil || !strings.Contains(err.Error(), "no-such-tool-anywhere") {
-		t.Fatalf("a missing tool must be a plain message naming it, got %v", err)
+		t.Fatalf("the error is %v, want one that names the missing tool", err)
 	}
 }

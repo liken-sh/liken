@@ -6,28 +6,28 @@ description: "Remove one machine from a running liken cluster: demote it first i
 
 # Remove machines from a cluster
 
-You remove one machine at a time. If the machine is a leader, make it
-a follower first, so that it leaves the datastore while it still runs.
+Remove one machine at a time. If the machine is a leader, make it a
+follower first, so that it leaves the datastore while it still runs.
 Then move its workloads off, power it off, and delete its objects from
 the cluster. To replace a machine's disks or install it again under
-the same name, do not remove it.
+the same name, do not remove it. Follow
 [Install a cluster](/docs/guides/install/#to-reinstall-a-machine-that-liken-installed)
-gives those steps.
+instead.
 
 If the machine is already gone, for example because its hardware
 failed, go to [A machine that is already gone](#a-machine-that-is-already-gone).
 
 ## 1. If the machine is a leader
 
-A leader runs a control plane and holds one member of the cluster's
-datastore. Remove its name from
-[`spec.leaders`](/docs/reference/cluster/#spec--leaders), and the
-machine becomes a follower. Its datastore member leaves the cluster
-while the other leaders keep the majority.
+A leader runs a control plane and is a member of the cluster's etcd
+datastore. When you remove its name from
+[`spec.leaders`](/docs/reference/cluster/#spec--leaders), the machine
+becomes a follower, and its etcd member leaves while the other leaders
+keep a majority.
 
-Keep an odd number of leaders, so that the datastore can always make
-a majority. Two leaders tolerate no failure: while one of them
-reboots, the cluster's API does not answer. To retire one of three
+Keep an odd number of leaders. With two leaders, etcd has no majority
+while either one is down, so the cluster's API stops responding each
+time one of them reboots. To retire one of three
 leaders, first promote a follower in its place, as in
 [Add machines](/docs/guides/add-nodes/#2-if-the-new-machine-is-a-leader),
 and wait until the `ClusterConverged` condition of every machine is
@@ -35,12 +35,12 @@ and wait until the `ClusterConverged` condition of every machine is
 
 ### Let the machine finish its own demotion
 
-The machine boots as a follower, but its Node object still claims the
-control plane, and its datastore member is still registered. A member
-that does not vote still counts toward the majority, so the next leader
-reboot can lose the majority. The machine's operator fixes this. It
-deletes the machine's own Node, which makes k3s remove the datastore
-member, and it reboots once more to register as a follower.
+After the machine reboots as a follower, its Node still has the
+control-plane role, and etcd still lists its member. etcd counts that
+member when it computes the majority, so the next reboot of a leader
+can lose the majority. `machine-operator` on the machine fixes this:
+it deletes the machine's Node, which makes k3s remove the etcd member,
+and it reboots once more to register as a follower.
 
 The operator does this only when the machine's
 [`spec.rebootPolicy`](/docs/reference/machine/#spec--rebootpolicy) is
@@ -54,28 +54,27 @@ edit the leaders:
 
 Remove the machine's name from `spec.leaders` in two places:
 
-* On the live cluster, with `kubectl edit cluster`. The machines read
-  this document, and each machine gets its role from it.
-* In your `mycluster/cluster.yaml`. The file applies only to a new
-  cluster. But if you keep it correct, a new build gives the cluster
-  that you run.
+* On the live cluster, with `kubectl edit cluster`. Each machine reads
+  its role from this object.
+* In your `mycluster/cluster.yaml`. The file is read only when you
+  build a new cluster, so keep it in step with the live cluster.
 
 If [`spec.endpoint`](/docs/reference/cluster/#spec--endpoint) gives
 this machine's address, change it to another leader's address in the
 same edit. A new follower joins the cluster through the endpoint, and
-the machine you remove will not answer there.
+the machine you remove will no longer respond there.
 
 The first name in `spec.leaders` is the founding leader. Every other
-leader joins the datastore at the founder's address when it boots. If
-you remove the first name, the next name becomes the founder. k3s
-ignores `cluster-init` on a machine whose datastore already exists, so
-the new founder keeps its data.
+leader joins etcd at the founding leader's address when it boots. If
+you remove the first name, the next name becomes the founding leader.
+k3s ignores `cluster-init` on a machine whose datastore already exists,
+so the new founding leader keeps its data.
 
 A change to `spec.leaders` reboots every machine, one at a time,
-because each machine reads the leaders only when it boots. The leaders
-give each follower its time sources, and the founder's address gives
-each leader its join URL. Under `Manual`, each machine reports
-`RebootPending`, and its request reads `False` in the APPROVED column
+because each machine reads the leaders only when it boots: a follower
+uses the leaders as its time sources, and a leader joins at the
+founding leader's address. Under `Manual`, the `ClusterConverged`
+condition of each machine reports `RebootPending`, and its request reads `False` in the APPROVED column
 of `kubectl get disruptions`. Approve each one with
 [`liken approve-reboot`](/docs/reference/cli/#liken-approve-reboot), as
 in [Upgrade the fleet](/docs/guides/upgrade/).
@@ -84,12 +83,14 @@ in [Upgrade the fleet](/docs/guides/upgrade/).
 
     kubectl get machine <name> -o jsonpath='{.status.conditions[?(@.type=="NodeCurrent")]}'
 
-The machine reboots as a follower and reports `AwaitingTurn` until the
-cluster gives it a reboot turn. The demotion is part of the request
-`<name>.machine-operator`, which `kubectl get disruptions` lists. Then it reports `DemotionRebooting`,
-deletes its Node, and reboots. When it returns, the condition is
-`True` with the reason `NodeMatchesRole`, and `kubectl get nodes` shows
-the machine with no `control-plane` or `etcd` role. Continue from step
+After the machine reboots as a follower, the condition has the
+reason `AwaitingTurn` until the machine gets a reboot turn. The
+demotion belongs to the `Disruption` named `<name>.machine-operator`,
+which `kubectl get disruptions` lists. When the turn comes, the reason
+is `DemotionRebooting`, and the machine deletes its Node and reboots.
+When it is back, the condition is `True` with the reason
+`NodeMatchesRole`, and `kubectl get nodes` shows the machine with no
+`control-plane` or `etcd` role. Continue from step
 2 when the `ClusterConverged` condition of every machine is `True`.
 
 ## 2. Move the workloads off
@@ -97,13 +98,14 @@ the machine with no `control-plane` or `etcd` role. Continue from step
     kubectl drain <name> --ignore-daemonsets --delete-emptydir-data
 
 The drain cordons the node and evicts its pods, so their controllers
-start them on other nodes. The drain leaves DaemonSet pods, which
-include the OS workloads, until the machine powers off.
+start them on other nodes. DaemonSet pods, which include the OS
+workloads, keep running until the machine powers off.
 
-Some data stays on the node's own disk. The default `StorageClass`
-keeps each volume in this node's pod storage, and the volume binds its
-pod to this node. Such a pod does not start on another node after the
-drain. Copy the data off, or accept its loss, before you continue.
+The default `StorageClass`, k3s's `local-path`, stores each volume on
+the disk of the node that first used it. A pod with such a volume
+cannot start on another node after the drain, and the volume's data
+is lost with the machine. Copy the data off, or accept its loss,
+before you continue.
 
 ## 3. Power the machine off
 
@@ -119,34 +121,34 @@ this cluster.
     kubectl delete node <name>
     kubectl delete machine <name>
 
-The cluster keeps both objects until you delete them, and no other
-machine creates them again. Delete them, because a `Lost` machine
-counts against every
+Nothing deletes these objects for you. A `Lost` machine counts
+against every
 [`MachineDisruptionBudget`](/docs/reference/machinedisruptionbudget/)
-that selects it. With the `default` budget of one, no other machine
-gets a reboot turn, and upgrades and Cluster edits stop. Each
-`Disruption` names its `Machine` as its owner, so Kubernetes deletes
-the machine's requests with it. `machine-operator` and
-`liken request-reboot` set the owner when they file a request, and
-`machine-operator` adds it to a request created with `kubectl`.
+that selects it, and the `default` budget allows one machine at a
+time, so until you delete the Machine no other machine gets a reboot
+turn, and upgrades and Cluster edits stop. Each `Disruption` has its
+`Machine` as its owner, so Kubernetes deletes the machine's
+`Disruption`s with it.
 
 Power off before you delete. A machine that still runs creates its
-Machine again when its operator starts, and its kubelet registers the
-Node again at its next boot.
+Machine again when its `machine-operator` starts, and its kubelet
+registers the Node again at its next boot.
 
-If you run the fleet from git, with the `flux` feature, also delete
-the machine's file from the repository. The Machine documents carry
-`kustomize.toolkit.fluxcd.io/prune: disabled`, so Flux does not delete
-the object when the file goes. While the file stays, Flux applies the
-Machine again.
+If you run the fleet from git with the `flux` feature, also delete the
+machine's file from the repository, or Flux creates the Machine again.
+[The GitOps guide](/docs/guides/gitops/) puts
+`kustomize.toolkit.fluxcd.io/prune: disabled` on the Machine
+documents, so removing the file does not delete the object. You delete
+it with `kubectl`.
 
 ## 5. Rebuild the install stick
 
 Delete the machine's file from `mycluster/machines/`. While the file
-stays, `liken layer` packs it, and the stick's menu lists `install as
-<name>` and `wipe and reinstall as <name>` for a machine that is gone.
-Use the release that your fleet runs. `kubectl get clusters` shows it
-in the VERSION column. Pack the layer and the stick again with
+is there, `liken layer` includes it, and the stick's menu offers
+`install as <name>` and `wipe and reinstall as <name>` for the removed
+machine. Use the release that your fleet runs, which the VERSION
+column of `kubectl get clusters` shows. Build the layer and the stick
+again with
 [`liken layer`](/docs/reference/cli/#liken-layer) and
 [`liken stick`](/docs/reference/cli/#liken-stick):
 
@@ -158,9 +160,9 @@ overwrites the device.
 
     sudo dd if=mycluster/install.img of=/dev/YOUR-STICK bs=4M oflag=direct status=progress
 
-The machines that run keep the layer they were installed with, so
-their copy still holds the old file. That copy has no effect, because
-no `spec.leaders` entry names the machine.
+The remaining machines keep the layer they were installed with, which
+still has the old file. It has no effect, because the machine is not
+in `spec.leaders`.
 
 ## 6. Watch it leave
 
@@ -173,23 +175,23 @@ is ready.
 
 ## A machine that is already gone
 
-If the machine cannot boot, it cannot demote itself or drain its pods.
-Delete its objects first:
+A machine that cannot boot cannot demote itself or drain its pods, so
+delete its objects first:
 
     kubectl delete node <name>
     kubectl delete machine <name>
 
-For a leader, the deletion of the Node also removes its datastore
-member. Do this before any other Cluster edit. The `Lost` machine
-counts against the `default` budget. With the limit of one, an edit
-to `spec.leaders` does not roll while the Machine exists.
+For a leader, deleting the Node also removes its etcd member. Do
+this before any other Cluster edit: the `Lost` machine uses up the
+`default` budget of one, so an edit to `spec.leaders` reboots no
+machine while the Machine exists.
 
 Then, for a leader, remove its name from `spec.leaders` as in step 1,
 both on the live cluster and in `mycluster/cluster.yaml`, and change
 `spec.endpoint` if it gives this machine's address. The machine does
 not run, so you do not need to set its reboot policy. The other
 machines reboot one at a time. If two leaders remain, the cluster's API
-does not answer while each of them reboots. Promote a follower
+stops responding while each of them reboots. Promote a follower
 afterward, as in
 [Add machines](/docs/guides/add-nodes/#2-if-the-new-machine-is-a-leader),
 to return to three.

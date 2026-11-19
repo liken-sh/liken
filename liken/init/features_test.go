@@ -101,7 +101,7 @@ func TestActuateFeaturesReportsUnknownParameters(t *testing.T) {
 		t.Fatalf("the statuses are %+v, want one Failed for an unknown parameter", got)
 	}
 	if !strings.Contains(got[0].Message, "replicas") ||
-		!strings.Contains(got[0].Message, "misspelling") {
+		!strings.Contains(got[0].Message, "misspelled") {
 		t.Errorf("the message is %q, want the parameter name and both causes", got[0].Message)
 	}
 }

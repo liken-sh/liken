@@ -14,13 +14,13 @@ the television in the room.
 
 For example, a room has a machine connected by HDMI to a receiver and
 a television, a USB-CEC adapter plugged into a spare input of the
-receiver, and a Bluetooth remote. With the television in standby, one press of the
-remote's power button wakes the television over CEC, switches the
+receiver, and a Bluetooth remote. While the television is in standby,
+one press of the remote's power button wakes the television over CEC, switches the
 television and the receiver to the machine's input, and turns the
 receiver on. The media browser shows the namespace's catalog on the
 screen, and a press of a button starts a film. When the `Catalog`
-names a Jellyfin server, each person's progress in each title stays
-the same in Jellyfin and on the television, in both directions.
+names a Jellyfin server, `library-operator` copies each person's
+progress in each title from the catalog to Jellyfin and back.
 
 ## The operators
 
@@ -43,9 +43,8 @@ writes as `.nfo` files and art files beside the media.
 
 [`people-operator`](https://liken.sh/people/) defines the `Person`
 resource: one person in the household, with a name and a picture.
-The media browser asks who is watching. `library-operator` records
-those people on each `Play`, and keeps the progress in each title for
-them.
+The media browser asks who is watching, and `library-operator` records
+those people on each `Play` and each person's progress in each title.
 
 [`equipment-operator`](https://liken.sh/equipment/) controls the
 A/V equipment that a machine plays through. A `Receiver` turns an A/V
@@ -82,12 +81,12 @@ HDMI-CEC, through a USB-CEC adapter.
 * The message bus. The bus is MQTT. A program of your own, such as a
   phone app or a Home Assistant instance, connects as a plain MQTT
   client with no Kubernetes credentials. It can send commands to a
-  `Play`, and ask a `Player` for a volume step or a mute. The
+  `Play`, and ask a `Player` to step the volume or to mute. The
   [bus reference](https://liken.sh/media/docs/reference/bus/) lists
   each topic and who can write it.
-* Play requests. `library-operator` answers play requests on the bus
-  from any client, so a browser of another make gets the same
-  service.
+* Play requests. `library-operator` starts a `Play` for a play request
+  from any client on the bus, so a media browser that you write can
+  start a `Play` the same way.
 * The catalog. The catalog is SQLite, and the
   [catalog guide](https://liken.sh/library/docs/guides/catalog/) shows
   how to query it.
@@ -96,5 +95,5 @@ HDMI-CEC, through a USB-CEC adapter.
 * The files on the volume. The `.nfo` files and the art are in the
   forms that Kodi and Jellyfin read, so those programs can read the
   same library.
-* Jellyfin. `spec.jellyfin` on a `Catalog` keeps playback progress the
-  same between `library-operator` and a Jellyfin server.
+* Jellyfin. `spec.jellyfin` on a `Catalog` copies playback progress
+  between the catalog and a Jellyfin server, in both directions.

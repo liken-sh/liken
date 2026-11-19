@@ -98,7 +98,7 @@ func Image(ctx context.Context, reference string, options ...remote.Option) (*Im
 		return nil, fmt.Errorf("reading %s: %w", reference, err)
 	}
 	if !desc.MediaType.IsIndex() {
-		return nil, fmt.Errorf("%s is a %s, and a published image is an index that holds its attestations", reference, desc.MediaType)
+		return nil, fmt.Errorf("%s is a %s, and a published image is an index that has its attestations", reference, desc.MediaType)
 	}
 	// The digest is the hash of the bytes that the check parses, so the
 	// signature covers exactly the index that the check reads.
@@ -111,7 +111,7 @@ func Image(ctx context.Context, reference string, options ...remote.Option) (*Im
 	}
 	index, err := v1.ParseIndexManifest(bytes.NewReader(desc.Manifest))
 	if err != nil {
-		return nil, fmt.Errorf("the index of %s does not parse: %w", reference, err)
+		return nil, fmt.Errorf("parsing the index of %s: %w", reference, err)
 	}
 	if report.Attestations, err = attestations(digest.Context(), index, options); err != nil {
 		return nil, err
@@ -147,7 +147,7 @@ func imageSignature(digest name.Digest, sum [sha256.Size]byte, options []remote.
 		failures = append(failures, fmt.Errorf("%s: %w", d.Digest, err))
 	}
 	if len(failures) == 0 {
-		return Signer{}, fmt.Errorf("%s carries no Sigstore signature", digest)
+		return Signer{}, fmt.Errorf("%s has no Sigstore signature", digest)
 	}
 	return Signer{}, fmt.Errorf("no signature of %s verifies: %w", digest, errors.Join(failures...))
 }
@@ -160,7 +160,7 @@ func signatureBundle(ref name.Digest, options []remote.Option) ([]byte, error) {
 		return nil, err
 	}
 	if len(manifest.Layers) != 1 {
-		return nil, fmt.Errorf("the signature manifest holds %d layers, not 1", len(manifest.Layers))
+		return nil, fmt.Errorf("the signature manifest has %d layers, want 1", len(manifest.Layers))
 	}
 	return readBlob(ref.Context().Digest(manifest.Layers[0].Digest.String()), options)
 }
@@ -174,7 +174,7 @@ func attestations(repo name.Repository, index *v1.IndexManifest, options []remot
 		if d.Annotations[referenceType] == "attestation-manifest" {
 			subject, err := v1.NewHash(d.Annotations[referenceDigest])
 			if err != nil {
-				return nil, fmt.Errorf("the attestation manifest %s names no image: %w", d.Digest, err)
+				return nil, fmt.Errorf("the attestation manifest %s has no valid subject digest: %w", d.Digest, err)
 			}
 			attested[subject] = d.Digest
 		} else if d.Platform != nil {
@@ -189,7 +189,7 @@ func attestations(repo name.Repository, index *v1.IndexManifest, options []remot
 		}
 		manifest, ok := attested[d.Digest]
 		if !ok {
-			return nil, fmt.Errorf("the %s image carries no attestations", platform)
+			return nil, fmt.Errorf("the %s image has no attestations", platform)
 		}
 		a, err := attestation(repo, platform, d.Digest, manifest, options)
 		if err != nil {
@@ -198,7 +198,7 @@ func attestations(repo name.Repository, index *v1.IndexManifest, options []remot
 		found = append(found, a)
 	}
 	if len(found) == 0 {
-		return nil, errors.New("the index names no image")
+		return nil, errors.New("the index lists no image with a platform")
 	}
 	return found, nil
 }
@@ -222,10 +222,10 @@ func attestation(repo name.Repository, platform string, image, manifestDigest v1
 		}
 	}
 	if sbom == nil {
-		return a, fmt.Errorf("the %s image carries no SPDX SBOM", platform)
+		return a, fmt.Errorf("the %s image has no SPDX SBOM", platform)
 	}
 	if a.Provenance == "" {
-		return a, fmt.Errorf("the %s image carries no SLSA provenance", platform)
+		return a, fmt.Errorf("the %s image has no SLSA provenance", platform)
 	}
 	data, err := readBlob(repo.Digest(sbom.Digest.String()), options)
 	if err != nil {
@@ -239,10 +239,10 @@ func attestation(repo name.Repository, platform string, image, manifestDigest v1
 		Predicate json.RawMessage `json:"predicate"`
 	}
 	if err := json.Unmarshal(data, &statement); err != nil {
-		return a, fmt.Errorf("the SBOM of the %s image does not parse: %w", platform, err)
+		return a, fmt.Errorf("parsing the SBOM of the %s image: %w", platform, err)
 	}
 	if statement.PredicateType != spdxPredicate {
-		return a, fmt.Errorf("the SBOM of the %s image states the predicate %s", platform, statement.PredicateType)
+		return a, fmt.Errorf("the SBOM of the %s image has the predicate type %s, want SPDX", platform, statement.PredicateType)
 	}
 	// buildx lists the image once for each name the build published it
 	// under, so an image with two names has two subjects. Each one must

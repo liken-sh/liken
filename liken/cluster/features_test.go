@@ -44,10 +44,10 @@ func TestFeatureRequirementsAreInTheVocabulary(t *testing.T) {
 
 func TestFeatureBySlug(t *testing.T) {
 	if def := FeatureBySlug("traefik"); def == nil || def.Kind != FeatureBundled {
-		t.Errorf("traefik: got %+v", def)
+		t.Errorf("the definition of traefik is %+v, want a bundled feature", def)
 	}
 	if def := FeatureBySlug("not-a-feature"); def != nil {
-		t.Errorf("unknown slug: got %+v", def)
+		t.Errorf("the definition of an unknown slug is %+v, want nil", def)
 	}
 }
 
@@ -60,7 +60,7 @@ func TestFeatureBySlug(t *testing.T) {
 func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
 	raw, err := os.ReadFile("manifests/clusters-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CRD: %v", err)
 	}
 	var crd struct {
 		Spec struct {
@@ -92,10 +92,10 @@ func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
 		} `json:"spec"`
 	}
 	if err := yaml.Unmarshal(raw, &crd); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the CRD: %v", err)
 	}
 	if len(crd.Spec.Versions) != 1 {
-		t.Fatalf("expected one CRD version, got %d", len(crd.Spec.Versions))
+		t.Fatalf("the CRD has %d versions, want 1", len(crd.Spec.Versions))
 	}
 	features := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Spec.Properties.Features
 
@@ -170,11 +170,11 @@ func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
 func TestFluxConfigIsAbsentUntilDeclared(t *testing.T) {
 	var none *Cluster
 	if cfg, err := none.FluxConfig(); cfg != nil || err != nil {
-		t.Errorf("nil cluster: got %v, %v", cfg, err)
+		t.Errorf("a nil cluster gives config %v and error %v, want nil and nil", cfg, err)
 	}
 	lean := &Cluster{}
 	if cfg, err := lean.FluxConfig(); cfg != nil || err != nil {
-		t.Errorf("undeclared: got %v, %v", cfg, err)
+		t.Errorf("a cluster without flux gives config %v and error %v, want nil and nil", cfg, err)
 	}
 }
 
@@ -184,13 +184,13 @@ func TestFluxConfigAppliesDefaults(t *testing.T) {
 	}}}
 	cfg, err := c.FluxConfig()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the flux configuration: %v", err)
 	}
 	if cfg.Repository != "ssh://git@forge.example/fleet.git" {
-		t.Errorf("repository: got %q", cfg.Repository)
+		t.Errorf("the repository is %q, want the declared URL", cfg.Repository)
 	}
 	if cfg.Path != "." || cfg.Branch != "main" {
-		t.Errorf("defaults: got path %q, branch %q", cfg.Path, cfg.Branch)
+		t.Errorf("the defaults are path %q and branch %q, want the documented defaults", cfg.Path, cfg.Branch)
 	}
 }
 
@@ -205,7 +205,7 @@ func TestFluxConfigReadsEveryParameter(t *testing.T) {
 	}}}
 	cfg, err := c.FluxConfig()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the flux configuration: %v", err)
 	}
 	if cfg.Path != "clusters/lab" || cfg.Branch != "trunk" {
 		t.Errorf("got path %q, branch %q", cfg.Path, cfg.Branch)
@@ -251,7 +251,7 @@ func TestFluxConfigRefusesAPruneThatIsNotABoolean(t *testing.T) {
 	}}}
 	if _, err := c.FluxConfig(); err == nil ||
 		!strings.Contains(err.Error(), "prune") {
-		t.Errorf("the error must name the parameter, got %v", err)
+		t.Errorf("the error is %v, want one that names prune", err)
 	}
 }
 
@@ -264,7 +264,7 @@ func TestFluxConfigRequiresARepository(t *testing.T) {
 		c := &Cluster{Spec: ClusterSpec{Features: features}}
 		if _, err := c.FluxConfig(); err == nil ||
 			!strings.Contains(err.Error(), "repository") {
-			t.Errorf("%s: the error must name the missing parameter, got %v", name, err)
+			t.Errorf("%s: the error is %v, want one that names repository", name, err)
 		}
 	}
 }
@@ -275,7 +275,7 @@ func TestFluxConfigRefusesANonStringParameter(t *testing.T) {
 	}}}
 	if _, err := c.FluxConfig(); err == nil ||
 		!strings.Contains(err.Error(), "repository") {
-		t.Errorf("the error must name the parameter, got %v", err)
+		t.Errorf("the error is %v, want one that names repository", err)
 	}
 }
 
@@ -290,8 +290,26 @@ func TestValidateFeatureParamsNamesBothCauses(t *testing.T) {
 		"pathh":      "clusters/lab",
 	})
 	if err == nil || !strings.Contains(err.Error(), "pathh") ||
-		!strings.Contains(err.Error(), "misspelling") {
-		t.Errorf("the error must name the parameter and both causes, got %v", err)
+		!strings.Contains(err.Error(), "misspelled") {
+		t.Errorf("the error is %v, want one that names pathh and both causes", err)
+	}
+}
+
+func TestValidateFeatureParamsNamesTheValueInYAMLTerms(t *testing.T) {
+	for _, tc := range []struct {
+		value any
+		want  string
+	}{
+		{float64(2), "not a number"},
+		{true, "not a boolean"},
+		{[]any{"a"}, "not a list"},
+		{map[string]any{"a": "b"}, "not a map"},
+		{nil, "not null"},
+	} {
+		err := FeatureBySlug("flux").ValidateParams(&FeatureConfig{"path": tc.value})
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("the error for %#v is %v, want it to say %q", tc.value, err, tc.want)
+		}
 	}
 }
 
@@ -311,7 +329,7 @@ func TestValidateFeatureParamsHoldsParameterlessFeaturesToEmpty(t *testing.T) {
 func TestEnabledFeatures(t *testing.T) {
 	var none *Cluster
 	if got := none.EnabledFeatures(); got != nil {
-		t.Errorf("nil cluster: got %v", got)
+		t.Errorf("a nil cluster enables %v, want nothing", got)
 	}
 	c := &Cluster{Spec: ClusterSpec{Features: map[string]*FeatureConfig{
 		"traefik":        {},

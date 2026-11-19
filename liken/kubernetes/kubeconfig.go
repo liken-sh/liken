@@ -63,21 +63,21 @@ func KubeconfigClient(path string) (*apiclient.Client, error) {
 	}
 	switch {
 	case len(kc.Clusters) == 0 && len(kc.Users) == 0:
-		return nil, fmt.Errorf("%s names no cluster and no user", path)
+		return nil, fmt.Errorf("%s has no cluster and no user", path)
 	case len(kc.Clusters) == 0:
-		return nil, fmt.Errorf("%s names no cluster", path)
+		return nil, fmt.Errorf("%s has no cluster", path)
 	case len(kc.Users) == 0:
-		return nil, fmt.Errorf("%s names no user", path)
+		return nil, fmt.Errorf("%s has no user", path)
 	}
 	clusterEntry, userEntry := kc.Clusters[0].Cluster, kc.Users[0].User
 
 	cert, err := tls.X509KeyPair(userEntry.ClientCertificateData, userEntry.ClientKeyData)
 	if err != nil {
-		return nil, fmt.Errorf("reading the client certificate in %s: %w", path, err)
+		return nil, fmt.Errorf("loading the client certificate and key of %s: %w", path, err)
 	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(clusterEntry.CertificateAuthorityData) {
-		return nil, fmt.Errorf("%s carries no certificate authority", path)
+		return nil, fmt.Errorf("%s has no certificate authority", path)
 	}
 
 	return apiclient.New(clusterEntry.Server, &http.Client{

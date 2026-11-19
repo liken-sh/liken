@@ -58,7 +58,7 @@ func resolveCluster(dir, server string) (name, endpoint string, err error) {
 		return name, server, nil
 	}
 	if c == nil || c.Spec.Endpoint == "" {
-		return "", "", fmt.Errorf("%s/cluster.yaml declares no endpoint; pass -server", dir)
+		return "", "", fmt.Errorf("%s/cluster.yaml sets no spec.endpoint. Set it, or pass -server", dir)
 	}
 	return name, c.Spec.Endpoint, nil
 }
@@ -120,7 +120,7 @@ func passthrough(tool string, args []string) error {
 	}
 	path, err := exec.LookPath(tool)
 	if err != nil {
-		return fmt.Errorf("%s is not on PATH; install it and run this again", tool)
+		return fmt.Errorf("%s is not on PATH. Install it, then run this command again", tool)
 	}
 	return execTool(path,
 		append([]string{tool}, fs.Args()[1:]...),

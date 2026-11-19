@@ -30,7 +30,7 @@ func fixtureBOM(t *testing.T) *bom {
 	t.Helper()
 	b, err := merge(fixtureInputs())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("merging the fixture inputs: %v", err)
 	}
 	return b
 }
@@ -240,7 +240,7 @@ func marshal(t *testing.T, v any) []byte {
 	t.Helper()
 	data, err := json.Marshal(v)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("marshaling the value: %v", err)
 	}
 	return data
 }
@@ -249,7 +249,7 @@ func containsKey(t *testing.T, data []byte, key string) bool {
 	t.Helper()
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the SBOM: %v", err)
 	}
 	_, ok := fields[key]
 	return ok

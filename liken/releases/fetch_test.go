@@ -36,7 +36,7 @@ func documentDigest(t *testing.T, channel, version string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(channel, version, "release.yaml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading release.yaml: %v", err)
 	}
 	return fmt.Sprintf("sha256:%x", sha256.Sum256(raw))
 }
@@ -47,7 +47,7 @@ func TestFetchDownloadsAVerifiableRelease(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := Fetch(source, "2026.07.14-001", "", dest, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("fetching the release: %v", err)
 	}
 
 	// What landed must verify the same way a machine would verify it:
@@ -55,16 +55,16 @@ func TestFetchDownloadsAVerifiableRelease(t *testing.T) {
 	// document.
 	raw, err := os.ReadFile(filepath.Join(dest, "2026.07.14-001", "release.yaml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading release.yaml: %v", err)
 	}
 	release, err := machine.ParseRelease(raw)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing release.yaml: %v", err)
 	}
 	for _, a := range release.Artifacts {
 		f, err := os.Open(filepath.Join(dest, "2026.07.14-001", a.Name))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("opening %s: %v", a.Name, err)
 		}
 		if err := a.Verify(f); err != nil {
 			t.Errorf("%s does not verify: %v", a.Name, err)
@@ -108,7 +108,7 @@ func TestFetchRefusesATamperedArtifact(t *testing.T) {
 	// document promises.
 	tampered := filepath.Join(channel, "2026.07.14-001", "liken.sqfs")
 	if err := os.WriteFile(tampered, []byte("not the published bytes"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("overwriting the artifact: %v", err)
 	}
 
 	err := Fetch(source, "2026.07.14-001", "", dest, nil)
@@ -128,23 +128,23 @@ func TestFetchRepairsADamagedLocalCopy(t *testing.T) {
 	dest := t.TempDir()
 
 	if err := Fetch(source, "2026.07.14-001", "", dest, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("fetching the release: %v", err)
 	}
 	// This damages one local artifact. A refetch must notice by
 	// digest, and repair only what fails. This is the same resume
 	// approach, checking digests again, that the machines use.
 	damaged := filepath.Join(dest, "2026.07.14-001", "vmlinuz")
 	if err := os.WriteFile(damaged, []byte("torn"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("damaging the artifact: %v", err)
 	}
 
 	var out bytes.Buffer
 	if err := Fetch(source, "2026.07.14-001", "", dest, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("fetching the release again: %v", err)
 	}
 	raw, err := os.ReadFile(damaged)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the repaired artifact: %v", err)
 	}
 	if string(raw) != "kernel bytes" {
 		t.Errorf("the damaged artifact was not repaired: %q", raw)
@@ -159,11 +159,11 @@ func TestFetchIsIdempotent(t *testing.T) {
 	dest := t.TempDir()
 
 	if err := Fetch(source, "2026.07.14-001", "", dest, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("fetching the release: %v", err)
 	}
 	var out bytes.Buffer
 	if err := Fetch(source, "2026.07.14-001", "", dest, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("fetching the release again: %v", err)
 	}
 	if !strings.Contains(out.String(), "0 fetched") {
 		t.Errorf("a complete local copy should fetch nothing:\n%s", out.String())
@@ -176,7 +176,7 @@ func TestFetchResolvesLatestFromTheChannelDocument(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := Fetch(source, "latest", "", dest, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("fetching latest: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "2026.07.14-002", "release.yaml")); err != nil {
 		t.Errorf("latest must land under its resolved version: %v", err)
@@ -193,7 +193,7 @@ func TestFetchRefusesADocumentNamingTheWrongVersion(t *testing.T) {
 	// Publish one release's directory under another version's name:
 	// the document inside still names the version it was bundled for.
 	if err := os.Rename(filepath.Join(channel, "2026.07.14-001"), filepath.Join(channel, "2026.07.14-009")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("renaming the release directory: %v", err)
 	}
 
 	if err := Fetch(source, "2026.07.14-009", "", dest, nil); err == nil {

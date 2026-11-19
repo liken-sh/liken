@@ -617,9 +617,9 @@ var schemaPins = map[string]struct {
 	fingerprint string
 }{
 	"machines-crd.yaml":                 {13, "469a4c6903b2332bf4ef7945200dc0c7ccf3ff5cc083c7f74a1ea552a030b66f"},
-	"clusters-crd.yaml":                 {4, "ba444c40cc91e0769ddb2da79bcc283f8cee70433ab5c90edb53574c7eb0448c"},
-	"disruptions-crd.yaml":              {3, "cf60defb146736530192ac12f0c13b3cfdc70046c6a7aa9016edd5121f6e00e3"},
-	"machinedisruptionbudgets-crd.yaml": {1, "cbc781c5475da7535be3de4f4f3cfca858d88900ecacc625af5d2779e6f6713b"},
+	"clusters-crd.yaml":                 {5, "2a93745cbf8759af56420788918491920ab72991e3c10833b9b686ed52641fc6"},
+	"disruptions-crd.yaml":              {4, "a5539e639ddda2982951c5689ba937217f1c7f40bf52813a059fd68d58b6ec21"},
+	"machinedisruptionbudgets-crd.yaml": {2, "7daf916506a8b287eaeb73c1526935c33a2f60084dbebc5b32ca04c831462ac8"},
 }
 
 // The guard keeps the disk's CRD only when its revision is higher, so a

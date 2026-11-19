@@ -43,11 +43,11 @@ var versionShape = regexp.MustCompile(`^\d{4}\.\d{2}\.\d{2}-\d{3}$`)
 // happened, but this function can.
 func ValidVersion(v string) error {
 	if !versionShape.MatchString(v) {
-		return fmt.Errorf("version %q is not yyyy.mm.dd-nnn (for example 2026.07.11-001)", v)
+		return fmt.Errorf("version %q does not match yyyy.mm.dd-nnn, for example 2026.07.11-001", v)
 	}
 	date, _, _ := strings.Cut(v, "-")
 	if _, err := time.Parse("2006.01.02", date); err != nil {
-		return fmt.Errorf("version %q does not name a real date", v)
+		return fmt.Errorf("version %q has a date that is not on the calendar", v)
 	}
 	return nil
 }

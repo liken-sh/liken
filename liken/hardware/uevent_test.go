@@ -95,10 +95,10 @@ func ueventSocketpair(t *testing.T) (reader, peer int) {
 	t.Helper()
 	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the socket pair: %v", err)
 	}
 	if err := unix.SetNonblock(fds[0], true); err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting the socket non-blocking: %v", err)
 	}
 	return fds[0], fds[1]
 }
@@ -111,7 +111,7 @@ func cancelPipe(t *testing.T) (r, w int) {
 	t.Helper()
 	var pipe [2]int
 	if err := unix.Pipe2(pipe[:], unix.O_CLOEXEC|unix.O_NONBLOCK); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the cancel pipe: %v", err)
 	}
 	return pipe[0], pipe[1]
 }
@@ -124,7 +124,7 @@ func awaitSignal(t *testing.T, ch <-chan struct{}) {
 	select {
 	case <-ch:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for a signal")
+		t.Fatal("no signal arrived within 2 seconds, want one")
 	}
 }
 
@@ -134,7 +134,7 @@ func refuteSignal(t *testing.T, ch <-chan struct{}) {
 	t.Helper()
 	select {
 	case <-ch:
-		t.Fatal("got a signal, wanted silence")
+		t.Fatal("a signal arrived, want none")
 	case <-time.After(500 * time.Millisecond):
 	}
 }
@@ -202,25 +202,25 @@ func erroredSocket(t *testing.T) int {
 	t.Helper()
 	closed, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the stand-in socket: %v", err)
 	}
 	if err := unix.Bind(closed, &unix.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("binding the stand-in socket: %v", err)
 	}
 	addr, err := unix.Getsockname(closed)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the stand-in socket address: %v", err)
 	}
 	unix.Close(closed)
 	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM|unix.SOCK_NONBLOCK, 0)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the connecting socket: %v", err)
 	}
 	if err := unix.Connect(fd, addr); err != nil {
-		t.Fatal(err)
+		t.Fatalf("connecting to the closed port: %v", err)
 	}
 	if _, err := unix.Write(fd, []byte("anyone there?")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing to the closed port: %v", err)
 	}
 	return fd
 }
@@ -299,7 +299,7 @@ func TestReadUeventsExitsWhenCancelPipeCloses(t *testing.T) {
 	select {
 	case _, ok := <-notify:
 		if !ok {
-			t.Fatal("the reader closed its channel on a cancel, which tells a caller the listener failed")
+			t.Fatal("the reader closed its channel on a cancel, which tells a caller that the listener failed")
 		}
 	default:
 	}
@@ -315,7 +315,7 @@ func TestWatchUeventsStopsAfterCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	notify, err := watchUevents(ctx, reader, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("starting the uevent watch: %v", err)
 	}
 
 	unix.Write(peer, []byte("add@/devices/pci0000:00/usb1"))
@@ -341,7 +341,7 @@ func socketsAndPipes(t *testing.T) map[string]bool {
 	t.Helper()
 	entries, err := os.ReadDir("/proc/self/fd")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing /proc/self/fd: %v", err)
 	}
 	held := map[string]bool{}
 	for _, e := range entries {

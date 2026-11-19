@@ -171,7 +171,7 @@ func tailFile(ctx context.Context, path string, out *envelopeWriter, curDir stri
 					fmt.Sprintf("resuming %s at offset %d", path, offset))
 			} else {
 				_ = out.notice(now(), "warning", uint64(cur.Offset), nil,
-					fmt.Sprintf("%s shrank below the cursor; replaying from the head", path))
+					fmt.Sprintf("%s is smaller than the saved offset %d, so reading it again from the start", path, cur.Offset))
 			}
 		}
 		resuming = false

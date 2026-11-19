@@ -42,7 +42,7 @@ func OpenFATVolume(dev io.ReaderAt) (*FATVolume, error) {
 		return nil, fmt.Errorf("reading the boot sector: %w", err)
 	}
 	if boot[510] != 0x55 || boot[511] != 0xAA || string(boot[82:90]) != "FAT32   " {
-		return nil, fmt.Errorf("no FAT32 boot sector")
+		return nil, fmt.Errorf("the volume has no FAT32 boot sector")
 	}
 	reserved := uint32(binary.LittleEndian.Uint16(boot[14:16]))
 	fatSectors := binary.LittleEndian.Uint32(boot[36:40])
@@ -63,7 +63,7 @@ func OpenFATVolume(dev io.ReaderAt) (*FATVolume, error) {
 		return nil, fmt.Errorf("reading the second FAT: %w", err)
 	}
 	if !slices.Equal(table, second) {
-		return nil, fmt.Errorf("the two FAT copies disagree")
+		return nil, fmt.Errorf("the FAT copies differ")
 	}
 
 	totalSectors := binary.LittleEndian.Uint32(boot[32:36])
@@ -103,7 +103,7 @@ func (v *FATVolume) chain(first uint32) ([]byte, error) {
 	clusterBytes := int64(v.sectorsPerCluster) * SectorSize
 	for cluster := first; cluster < 0x0FFFFFF8; cluster = v.fat[cluster] {
 		if cluster < 2 || int(cluster) >= len(v.fat) {
-			return nil, fmt.Errorf("cluster chain runs off the table at %d", cluster)
+			return nil, fmt.Errorf("the cluster chain reaches cluster %d, which is outside the FAT", cluster)
 		}
 		buf := make([]byte, clusterBytes)
 		off := (int64(v.dataStart) + int64(cluster-2)*int64(v.sectorsPerCluster)) * SectorSize
@@ -156,7 +156,7 @@ func (v *FATVolume) Entries(firstCluster uint32) ([]FATEntry, error) {
 					sum = (sum>>1 | sum<<7) + rec[i]
 				}
 				if raw[off-32+13] != sum {
-					return nil, fmt.Errorf("long-name checksum mismatch before %q", name)
+					return nil, fmt.Errorf("the long-name entries before %q do not match the checksum of its short name", name)
 				}
 				var units []uint16
 				for _, u := range longName {
@@ -205,14 +205,14 @@ func (v *FATVolume) Find(path string) (FATEntry, error) {
 		}
 		idx := slices.IndexFunc(entries, func(e FATEntry) bool { return e.Name == part })
 		if idx < 0 {
-			return FATEntry{}, fmt.Errorf("%q not found (component %q)", path, part)
+			return FATEntry{}, fmt.Errorf("%q has no entry named %q", path, part)
 		}
 		if i == len(parts)-1 {
 			return entries[idx], nil
 		}
 		cluster = entries[idx].FirstCluster
 	}
-	return FATEntry{}, fmt.Errorf("empty path %q", path)
+	return FATEntry{}, fmt.Errorf("the path %q is empty", path)
 }
 
 // ReadFile reads one file's exact bytes.
@@ -222,7 +222,7 @@ func (v *FATVolume) ReadFile(path string) ([]byte, error) {
 		return nil, err
 	}
 	if e.IsDir {
-		return nil, fmt.Errorf("%q is a directory", path)
+		return nil, fmt.Errorf("%q is a directory, not a file", path)
 	}
 	raw, err := v.chain(e.FirstCluster)
 	if err != nil {

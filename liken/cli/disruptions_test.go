@@ -83,7 +83,7 @@ func TestRequestRebootFilesADisruptionForTheRunningBoot(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := requestReboot([]string{"-server", server.URL, dir, "node-5"}, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("requesting the reboot: %v", err)
 	}
 
 	boot := machine.BootID(machine.BootStatus{Time: &requestBootTime})
@@ -95,7 +95,7 @@ func TestRequestRebootFilesADisruptionForTheRunningBoot(t *testing.T) {
 		d.Spec.Kind != disruption.KindReboot || d.Spec.Requester != "kubernetes-admin" {
 		t.Errorf("the Disruption = %s %+v", d.Metadata.Name, d.Spec)
 	}
-	if !strings.Contains(out.String(), "filed: Disruption node-5.reboot-"+boot[:12]) {
+	if !strings.Contains(out.String(), "created: Disruption node-5.reboot-"+boot[:12]) {
 		t.Errorf("the output does not name the Disruption:\n%s", out.String())
 	}
 }
@@ -131,13 +131,13 @@ func TestApproveRebootApprovesTheDisruptionThatCoversTheChange(t *testing.T) {
 
 			var out bytes.Buffer
 			if err := approveReboot([]string{"-server", server.URL, dir, "node-5"}, &out); err != nil {
-				t.Fatal(err)
+				t.Fatalf("requesting the reboot: %v", err)
 			}
 
 			if len(s.written) != 1 || s.written[0].Metadata.Name != c.approve || s.written[0].Spec.ApprovedHash != s.written[0].Spec.Hash {
 				t.Errorf("wrote %+v, want %s with approvedHash set to its hash", s.written, c.approve)
 			}
-			if !strings.Contains(out.String(), "node-5 is waiting on one change:") {
+			if !strings.Contains(out.String(), "node-5 has one pending change:") {
 				t.Errorf("the report is missing from the output:\n%s", out.String())
 			}
 			if !strings.Contains(out.String(), "approved: Disruption "+c.approve) {

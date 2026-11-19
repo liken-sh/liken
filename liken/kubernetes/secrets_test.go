@@ -10,7 +10,7 @@ import (
 func TestGetRegistryCredentialsSecretDecodesData(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != RegistryCredentialsSecretPath {
-			t.Errorf("unexpected path %q", r.URL.Path)
+			t.Errorf("the request path is %q, want the Secret's", r.URL.Path)
 		}
 		// The API serves Secret data base64-encoded. The client's
 		// []byte fields must arrive already decoded.
@@ -27,10 +27,10 @@ func TestGetRegistryCredentialsSecretDecodesData(t *testing.T) {
 		t.Fatal(err)
 	}
 	if secret.Type != "kubernetes.io/dockerconfigjson" {
-		t.Errorf("type: got %q", secret.Type)
+		t.Errorf("the Secret type is %q, want the one in the response", secret.Type)
 	}
 	if got := string(secret.Data[".dockerconfigjson"]); got != `{"auths":{}}` {
-		t.Errorf("data should arrive base64-decoded, got %q", got)
+		t.Errorf("the data is %q, want it base64-decoded", got)
 	}
 }
 
@@ -40,7 +40,7 @@ func TestGetRegistryCredentialsSecretAbsenceIsOrdinary(t *testing.T) {
 	}))
 	secret, err := GetRegistryCredentialsSecret(client)
 	if secret != nil || err != nil {
-		t.Errorf("an absent Secret is nil, nil — a fleet with anonymous mirrors, not an error: %v %v", secret, err)
+		t.Errorf("the result for an absent Secret is %v, %v, want nil and no error", secret, err)
 	}
 }
 
@@ -49,6 +49,6 @@ func TestGetRegistryCredentialsSecretReportsRealFailures(t *testing.T) {
 		http.Error(w, "etcdserver: request timed out", http.StatusInternalServerError)
 	}))
 	if _, err := GetRegistryCredentialsSecret(client); err == nil {
-		t.Error("a 500 is a real failure and must be reported")
+		t.Error("a 500 response returned no error, want one")
 	}
 }

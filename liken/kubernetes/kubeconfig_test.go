@@ -154,7 +154,7 @@ func TestKubeconfigClientAuthenticatesWithItsCertificate(t *testing.T) {
 		t.Fatalf("the server saw client CN %q, want admin", sawPeerCN)
 	}
 	if sawAuthHeader {
-		t.Fatal("a certificate client must send no bearer token")
+		t.Fatal("the client sent a bearer token, want none")
 	}
 }
 
@@ -162,6 +162,6 @@ func TestKubeconfigClientRefusesAFileWithNoUsers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kubeconfig")
 	os.WriteFile(path, []byte("apiVersion: v1\nkind: Config\n"), 0o600)
 	if _, err := KubeconfigClient(path); err == nil {
-		t.Fatal("an empty kubeconfig must be an error")
+		t.Fatal("an empty kubeconfig was accepted, want an error")
 	}
 }

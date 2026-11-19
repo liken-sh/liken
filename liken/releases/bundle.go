@@ -81,7 +81,7 @@ func Bundle(vmlinuz, systemImage, bootArchive, microcode, cli, bootMenu, grubBoo
 	}
 	slotBytes, err := machine.ParseSize(slotSize)
 	if err != nil {
-		return fmt.Errorf("slot size: %w", err)
+		return fmt.Errorf("reading the slot size %q: %w", slotSize, err)
 	}
 	dest := filepath.Join(channelDir, version)
 	if err := os.RemoveAll(dest); err != nil {
@@ -133,7 +133,7 @@ func Bundle(vmlinuz, systemImage, bootArchive, microcode, cli, bootMenu, grubBoo
 	if slotPayload+slotHeadroom > slotBytes {
 		os.RemoveAll(dest)
 		return fmt.Errorf(
-			"the release's artifacts total %s, and with %s of slot headroom they outgrow the %s boot slots; shrink the image or grow the fleet's slots first",
+			"the artifacts of the release total %s, and with %s of headroom they do not fit in a boot slot of %s. Make the image smaller, or make the boot slots of the fleet larger",
 			humanSize(int64(slotPayload)), humanSize(int64(slotHeadroom)), slotSize)
 	}
 
@@ -167,7 +167,7 @@ func Bundle(vmlinuz, systemImage, bootArchive, microcode, cli, bootMenu, grubBoo
 	if err := report(dest, version, out); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "\nchannel.yaml names the latest release: %s\n", latest)
+	fmt.Fprintf(out, "\nchannel.yaml sets the latest release: %s\n", latest)
 
 	// The document's own digest is the root of the trust chain. A
 	// person verifies a download against it. A deployment commits it

@@ -332,13 +332,13 @@ func TestListHeartbeatsReadsRenewals(t *testing.T) {
 	client := testClient(t, fake.handler())
 	renewals, err := ListHeartbeats(client)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the heartbeats: %v", err)
 	}
 	if len(renewals) != 2 {
-		t.Fatalf("got %v", renewals)
+		t.Fatalf("the renewals are %v, want those of node-1 and node-2", renewals)
 	}
 	if !renewals["node-1"].Equal(heartbeatNow.Add(-10 * time.Second)) {
-		t.Errorf("node-1 renewed at %v", renewals["node-1"])
+		t.Errorf("node-1 renewed at %v, want %v", renewals["node-1"], heartbeatNow.Add(-10*time.Second))
 	}
 }
 
@@ -355,9 +355,9 @@ func TestListHeartbeatsSkipsAnUnreadableRenewal(t *testing.T) {
 	client := testClient(t, fake.handler())
 	renewals, err := ListHeartbeats(client)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the heartbeats: %v", err)
 	}
 	if len(renewals) != 1 {
-		t.Fatalf("only the readable renewal should appear: %v", renewals)
+		t.Fatalf("the renewals are %v, want only that of node-1", renewals)
 	}
 }

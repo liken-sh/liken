@@ -27,20 +27,20 @@ func (f *fakeSysfs) device(bus, name, driver string, attrs map[string]string) {
 	f.t.Helper()
 	dir := filepath.Join(f.root, "bus", bus, "devices", name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		f.t.Fatal(err)
+		f.t.Fatalf("creating the device directory: %v", err)
 	}
 	for file, content := range attrs {
 		if err := os.WriteFile(filepath.Join(dir, file), []byte(content+"\n"), 0o644); err != nil {
-			f.t.Fatal(err)
+			f.t.Fatalf("writing the attribute file: %v", err)
 		}
 	}
 	if driver != "" {
 		target := filepath.Join(f.root, "bus", bus, "drivers", driver)
 		if err := os.MkdirAll(target, 0o755); err != nil {
-			f.t.Fatal(err)
+			f.t.Fatalf("creating the driver directory: %v", err)
 		}
 		if err := os.Symlink(target, filepath.Join(dir, "driver")); err != nil {
-			f.t.Fatal(err)
+			f.t.Fatalf("linking the driver: %v", err)
 		}
 	}
 }
@@ -78,7 +78,7 @@ func TestDiscoverFindsUnboundDevices(t *testing.T) {
 		}
 	}
 	if len(unbound) != 2 {
-		t.Fatalf("unbound devices = %+v, want 2", unbound)
+		t.Fatalf("the unbound devices are %+v, want 2", unbound)
 	}
 }
 
@@ -132,7 +132,7 @@ func TestDiscoverNamesPCIDevicesNumericallyWithoutADatabase(t *testing.T) {
 	devices := DiscoverDevices(sysfs.root, nil)
 
 	if len(devices) != 1 {
-		t.Fatalf("devices = %+v, want 1", devices)
+		t.Fatalf("the devices are %+v, want 1", devices)
 	}
 	if devices[0].Name != "1af4:1050" {
 		t.Errorf("Name = %q, want the numeric fallback 1af4:1050", devices[0].Name)
@@ -163,7 +163,7 @@ func TestDiscoverRecordsEachDeviceAddress(t *testing.T) {
 	devices := DiscoverDevices(sysfs.root, nil)
 
 	if len(devices) != 2 {
-		t.Fatalf("devices = %+v, want 2", devices)
+		t.Fatalf("the devices are %+v, want 2", devices)
 	}
 	if devices[0].Address != "0000:00:02.0" {
 		t.Errorf("Address = %q, want the sysfs directory name", devices[0].Address)

@@ -119,19 +119,19 @@ func FormatFAT32(f Device, totalBytes uint64, label string, volumeID uint32) err
 
 	dataStart := uint64(fat32ReservedSectors) + fat32NumFATs*fatSectors
 	if totalSectors < dataStart {
-		return fmt.Errorf("partition is too small for FAT32: %d bytes leaves no room past the tables", totalBytes)
+		return fmt.Errorf("a partition of %d bytes has no room for FAT32 data after its tables", totalBytes)
 	}
 	clusters := (totalSectors - dataStart) / sectorsPerCluster
 	if clusters < fat32MinClusters {
 		return fmt.Errorf(
-			"partition is too small for FAT32: %d bytes yields %d clusters and FAT32 requires %d (about 33Mi at one sector per cluster); the FAT type is determined by cluster count, so a smaller volume would misparse as FAT16",
+			"a partition of %d bytes has %d clusters, and FAT32 needs at least %d (about 33Mi at one sector per cluster), because a volume with fewer clusters reads as FAT16",
 			totalBytes, clusters, fat32MinClusters)
 	}
 	// This is the upper limit. Cluster numbers at and above
 	// 0x0FFFFFF5 are reserved marks, such as bad cluster or end of
 	// chain, and are not addresses.
 	if clusters >= 0x0FFFFFF5 {
-		return fmt.Errorf("partition is too large for FAT32: %d clusters", clusters)
+		return fmt.Errorf("a partition with %d clusters is too large for FAT32, which addresses fewer than 0x0FFFFFF5", clusters)
 	}
 
 	boot := buildFAT32BootSector(totalSectors, fatSectors, sectorsPerCluster, label, volumeID)

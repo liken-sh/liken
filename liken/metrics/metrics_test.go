@@ -22,15 +22,15 @@ func scrape(t *testing.T, o *Operator) string {
 
 	resp, err := http.Get(server.URL + "/metrics")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("scraping /metrics: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("the scrape answered %s", resp.Status)
+		t.Fatalf("the scrape status is %s, want 200 OK", resp.Status)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the scrape: %v", err)
 	}
 	return string(body)
 }
@@ -59,7 +59,7 @@ func requireSeries(t *testing.T, body, line string) {
 	name, _, _ = strings.Cut(name, "{")
 	found := series(body, name)
 	if !slices.Contains(found, line) {
-		t.Errorf("the scrape has no %q; it has %q", line, found)
+		t.Errorf("the scrape has no line %q, only %q", line, found)
 	}
 }
 

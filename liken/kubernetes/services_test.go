@@ -62,6 +62,6 @@ func TestListLoadBalancerServicesReportsAFailedRead(t *testing.T) {
 	}))
 
 	if _, err := ListLoadBalancerServices(client); err == nil {
-		t.Error("a failed read must never read as an empty cluster")
+		t.Error("a failed read returned no error, want one")
 	}
 }

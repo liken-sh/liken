@@ -104,10 +104,10 @@ func (c Channel) ReleaseDocument(ctx context.Context, version, digest string) (*
 	}
 	release, err := machine.ParseRelease(raw)
 	if err != nil {
-		return nil, Signer{}, fmt.Errorf("release.yaml does not parse: %w", err)
+		return nil, Signer{}, fmt.Errorf("release.yaml: parsing: %w", err)
 	}
 	if release.Metadata.Name != version {
-		return nil, Signer{}, fmt.Errorf("release.yaml names version %s, not %s", release.Metadata.Name, version)
+		return nil, Signer{}, fmt.Errorf("release.yaml is the document of version %s, not %s", release.Metadata.Name, version)
 	}
 	return release, signer, nil
 }
@@ -139,7 +139,7 @@ func (c Channel) Artifact(ctx context.Context, version string, artifact machine.
 	}
 	digest, err := hex.DecodeString(artifact.SHA256)
 	if err != nil || len(digest) != sha256.Size {
-		return fmt.Errorf("%s: release.yaml names the digest %q, which is not a sha256", artifact.Name, artifact.SHA256)
+		return fmt.Errorf("%s: release.yaml has the digest %q, which is not a sha256", artifact.Name, artifact.SHA256)
 	}
 	if _, err := checkBundle(bundleJSON, [sha256.Size]byte(digest), ReleaseSigner); err != nil {
 		return fmt.Errorf("%s: %w", artifact.Name, err)
@@ -170,7 +170,7 @@ func (c Channel) Release(ctx context.Context, version, digest string, out io.Wri
 		fmt.Fprintf(out, "ok  %s\n", artifact.Name)
 	}
 	if sbom == nil {
-		return Summary{}, fmt.Errorf("release.yaml names no %s", SBOMName)
+		return Summary{}, fmt.Errorf("release.yaml lists no %s", SBOMName)
 	}
 	return checkSBOM(sbom.Bytes())
 }
@@ -206,5 +206,5 @@ func (c Channel) ReleaseSBOM(ctx context.Context, version, digest string) ([]byt
 		}
 		return sbom.Bytes(), nil
 	}
-	return nil, fmt.Errorf("release.yaml names no %s", SBOMName)
+	return nil, fmt.Errorf("release.yaml lists no %s", SBOMName)
 }

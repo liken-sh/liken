@@ -26,7 +26,7 @@ func TestValidateRefuses(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if err := Validate([]byte(c.document)); err == nil {
-				t.Error("Validate accepted the document")
+				t.Error("Validate accepted the document, want an error")
 			}
 		})
 	}
@@ -41,7 +41,7 @@ func TestValidateAcceptsTheSmallestBOM(t *testing.T) {
 func TestValidationErrorNamesTheField(t *testing.T) {
 	err := Validate([]byte(`{"bomFormat": "CycloneDX", "specVersion": "1.7", "colour": "blue"}`))
 	if err == nil || !strings.Contains(err.Error(), "colour") {
-		t.Errorf("the error does not name the field: %v", err)
+		t.Errorf("the error is %v, want it to name the field", err)
 	}
 }
 

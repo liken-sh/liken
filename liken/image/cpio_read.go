@@ -40,10 +40,10 @@ func readCPIO(raw []byte) ([]cpioEntry, []byte, error) {
 	pad4 := func(n int) int { return (n + 3) &^ 3 }
 	for {
 		if off+110 > len(raw) {
-			return nil, nil, fmt.Errorf("archive ends mid-header at byte %d", off)
+			return nil, nil, fmt.Errorf("the archive ends inside a header at byte %d", off)
 		}
 		if string(raw[off:off+6]) != "070701" {
-			return nil, nil, fmt.Errorf("no newc magic at byte %d", off)
+			return nil, nil, fmt.Errorf("no newc magic (070701) at byte %d", off)
 		}
 		field := func(i int) (uint32, error) {
 			start := off + 6 + i*8
@@ -61,7 +61,7 @@ func readCPIO(raw []byte) ([]cpioEntry, []byte, error) {
 				return 0, err
 			}
 			if v > math.MaxInt32 {
-				return 0, fmt.Errorf("header field %d at byte %d: %d is too large for a size", i, off, v)
+				return 0, fmt.Errorf("header field %d at byte %d is %d, which is more than the limit of %d for a size", i, off, v, math.MaxInt32)
 			}
 			return int(v), nil
 		}
@@ -86,12 +86,12 @@ func readCPIO(raw []byte) ([]cpioEntry, []byte, error) {
 			return nil, nil, err
 		}
 		if namesize == 0 || off+110+namesize > len(raw) {
-			return nil, nil, fmt.Errorf("archive ends mid-name at byte %d", off)
+			return nil, nil, fmt.Errorf("the archive ends inside a file name at byte %d", off)
 		}
 		name := string(raw[off+110 : off+110+namesize-1])
 		dataStart := pad4(off + 110 + namesize)
 		if dataStart+filesize > len(raw) {
-			return nil, nil, fmt.Errorf("archive ends mid-file in %q", name)
+			return nil, nil, fmt.Errorf("the archive ends inside the contents of %q", name)
 		}
 		data := raw[dataStart : dataStart+filesize]
 		off = pad4(dataStart + filesize)
@@ -121,7 +121,7 @@ func machineNames(layer []byte) ([]string, error) {
 		}
 	}
 	if len(names) == 0 {
-		return nil, fmt.Errorf("the deployment layer carries no machine manifests; there would be nobody to install")
+		return nil, fmt.Errorf("the deployment layer has no machine manifests, so an install from it has no machine to install")
 	}
 	slices.Sort(names)
 	return names, nil

@@ -16,25 +16,25 @@ func (f *fakeSysfs) treeDevice(path, subsystem, driver string, bus bool) string 
 	f.t.Helper()
 	dir := filepath.Join(f.root, "devices", path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		f.t.Fatal(err)
+		f.t.Fatalf("creating the device directory: %v", err)
 	}
 	if subsystem != "" {
 		if err := os.Symlink(filepath.Join(f.root, "bus", subsystem), filepath.Join(dir, "subsystem")); err != nil {
-			f.t.Fatal(err)
+			f.t.Fatalf("linking the subsystem: %v", err)
 		}
 	}
 	if driver != "" {
 		if err := os.Symlink(filepath.Join(f.root, "bus", subsystem, "drivers", driver), filepath.Join(dir, "driver")); err != nil {
-			f.t.Fatal(err)
+			f.t.Fatalf("linking the driver: %v", err)
 		}
 	}
 	if bus {
 		devices := filepath.Join(f.root, "bus", subsystem, "devices")
 		if err := os.MkdirAll(devices, 0o755); err != nil {
-			f.t.Fatal(err)
+			f.t.Fatalf("creating the bus directory: %v", err)
 		}
 		if err := os.Symlink(dir, filepath.Join(devices, filepath.Base(dir))); err != nil {
-			f.t.Fatal(err)
+			f.t.Fatalf("linking the device into its bus: %v", err)
 		}
 	}
 	return dir
@@ -53,7 +53,7 @@ func (f *fakeSysfs) treeNode(path, subsystem, devname, numbers string, attrs map
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content+"\n"), 0o644); err != nil {
-			f.t.Fatal(err)
+			f.t.Fatalf("writing a node file: %v", err)
 		}
 	}
 	links := filepath.Join(f.root, "dev", "char")
@@ -61,10 +61,10 @@ func (f *fakeSysfs) treeNode(path, subsystem, devname, numbers string, attrs map
 		links = filepath.Join(f.root, "dev", "block")
 	}
 	if err := os.MkdirAll(links, 0o755); err != nil {
-		f.t.Fatal(err)
+		f.t.Fatalf("creating the dev links directory: %v", err)
 	}
 	if err := os.Symlink(dir, filepath.Join(links, numbers)); err != nil {
-		f.t.Fatal(err)
+		f.t.Fatalf("linking the node by its numbers: %v", err)
 	}
 }
 

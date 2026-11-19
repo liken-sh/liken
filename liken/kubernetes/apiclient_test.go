@@ -36,7 +36,7 @@ func testClient(t *testing.T, handler http.Handler) *apiclient.Client {
 
 	credentials := t.TempDir()
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("test-token"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the token file: %v", err)
 	}
 	return apiclient.New(server.URL, server.Client(), credentials)
 }
@@ -44,7 +44,7 @@ func testClient(t *testing.T, handler http.Handler) *apiclient.Client {
 func TestRequestJSONDecodesAndAuthenticates(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
-			t.Errorf("authorization: got %q", got)
+			t.Errorf("the Authorization header is %q, want \"Bearer test-token\"", got)
 		}
 		_ = json.NewEncoder(w).Encode(&machine.Machine{
 			Kind:     "Machine",
@@ -53,10 +53,10 @@ func TestRequestJSONDecodesAndAuthenticates(t *testing.T) {
 	}))
 	m, err := GetMachine(client, "node-1")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("getting the Machine: %v", err)
 	}
 	if m.Metadata.Name != "node-1" {
-		t.Errorf("name: got %q", m.Metadata.Name)
+		t.Errorf("the Machine name is %q, want \"node-1\"", m.Metadata.Name)
 	}
 }
 
@@ -75,7 +75,7 @@ func TestRequestJSONDistinguishesTheOrdinaryFailures(t *testing.T) {
 				w.WriteHeader(c.status)
 			}))
 			if err := client.RequestJSON(http.MethodGet, "/x", nil, nil); !errors.Is(err, c.want) {
-				t.Errorf("got %v, want %v", err, c.want)
+				t.Errorf("the error is %v, want %v", err, c.want)
 			}
 		})
 	}
@@ -87,11 +87,11 @@ func TestRequestJSONCarriesTheServersWords(t *testing.T) {
 	}))
 	err := client.RequestJSON(http.MethodGet, "/x", nil, nil)
 	if err == nil {
-		t.Fatal("expected an error for 403")
+		t.Fatal("a 403 response returned no error")
 	}
 	for _, want := range []string{"403", "forbidden"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error should mention %q: %v", want, err)
+			t.Errorf("the error does not contain %q: %v", want, err)
 		}
 	}
 }
@@ -114,7 +114,7 @@ func countingClient(t *testing.T, handler http.Handler) (*apiclient.Client, *ato
 
 	credentials := t.TempDir()
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("test-token"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the credentials: %v", err)
 	}
 	return apiclient.New(server.URL, server.Client(), credentials), connections
 }
@@ -185,7 +185,7 @@ func serviceAccount(t *testing.T, files map[string]string) {
 	dir := t.TempDir()
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing a mounted file: %v", err)
 		}
 	}
 	previous := serviceAccountDir
@@ -211,13 +211,13 @@ func TestInClusterClientBuildsFromTheEnvironment(t *testing.T) {
 	server := tlsAPIServer(t)
 	host, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "https://"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("splitting the server address: %v", err)
 	}
 	t.Setenv("KUBERNETES_SERVICE_HOST", host)
 	t.Setenv("KUBERNETES_SERVICE_PORT", port)
 	client, err := InClusterClient("")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the in-cluster client: %v", err)
 	}
 	m, err := GetMachine(client, "node-1")
 	if err != nil || m.Metadata.Name != "Bearer test-token" {
@@ -235,7 +235,7 @@ func TestInClusterClientPrefersTheGivenEndpoint(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
 	client, err := InClusterClient(server.URL)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the in-cluster client: %v", err)
 	}
 	m, err := GetMachine(client, "node-1")
 	if err != nil || m.Metadata.Name != "Bearer test-token" {
@@ -345,7 +345,7 @@ func answersA429AtOnce(t *testing.T, bound func(*apiclient.Client) *apiclient.Cl
 	serviceAccount(t, map[string]string{"token": "test-token", "ca.crt": string(ca)})
 	client, err := InClusterClient(server.URL)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the in-cluster client: %v", err)
 	}
 
 	started := time.Now()

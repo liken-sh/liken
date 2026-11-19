@@ -201,6 +201,6 @@ func awaitReady(t *testing.T, c *informer.Collection) {
 	t.Helper()
 	synctest.Wait()
 	if !c.View().Ready() {
-		t.Fatal("the copy never became ready")
+		t.Fatal("the copy was not ready before the deadline")
 	}
 }

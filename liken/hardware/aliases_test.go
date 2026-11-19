@@ -41,7 +41,7 @@ func aliasFile(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "modules.alias")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the alias file: %v", err)
 	}
 	return path
 }
@@ -55,7 +55,7 @@ alias pci:v00001AF4d00001050sv*sd*bc*sc*i* virtio_pci
 `)
 	table, err := LoadAliasTable(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the alias table: %v", err)
 	}
 
 	got := table.Candidates("usb:v46F4p0001d0100dc00dsc00dp00ic08isc06ip50in00")
@@ -75,7 +75,7 @@ alias usb:v*p*d*dc*dsc*dp*ic08isc06ip*in* uas
 `)
 	table, err := LoadAliasTable(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the alias table: %v", err)
 	}
 	got := table.Candidates("usb:v46F4p0001d0100dc00dsc00dp00ic08isc06ip50in00")
 	if len(got) != 2 || got[0] != "usb_storage" || got[1] != "uas" {
@@ -89,7 +89,7 @@ alias usb:v0403p*d*dc*dsc*dp*ic*isc*ip*in* ftdi_sio
 `)
 	table, err := LoadAliasTable(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the alias table: %v", err)
 	}
 	got := table.Candidates("usb:v0403p6001d0600dc00dsc00dp00icFFiscFFipFFin00")
 	if len(got) != 1 || got[0] != "ftdi_sio" {
@@ -100,6 +100,6 @@ alias usb:v0403p*d*dc*dsc*dp*ic*isc*ip*in* ftdi_sio
 func TestLoadAliasTableMissingFile(t *testing.T) {
 	_, err := LoadAliasTable(filepath.Join(t.TempDir(), "nope"))
 	if err == nil {
-		t.Fatal("expected an error for a missing file")
+		t.Fatal("loading a missing alias table returned no error")
 	}
 }

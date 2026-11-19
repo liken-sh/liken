@@ -36,8 +36,7 @@ change needs:
   seconds.
 * Some, such as a cluster feature or the registry settings, restart
   k3s in place, and the pods keep running.
-* Some wait for the machine's next boot, whatever the reason for that
-  boot.
+* Some take effect at the machine's next boot, whatever causes it.
 * Some, such as a change to storage or the network, need a reboot of
   their own.
 
@@ -45,9 +44,9 @@ A machine never reboots on its own schedule. When a change needs a
 reboot, the machine stages the change, reports it in the `Machine`'s
 `status.pending`, and waits until the cluster gives it a reboot turn.
 With the default `rebootPolicy`, `Manual`, it also waits for you to
-approve the reboot, which
-[`liken approve-reboot`](/docs/reference/cli/#liken-approve-reboot) does. With `Auto`, it
-takes the reboot when its turn comes. Either way, it cordons and
+approve the reboot, with
+[`liken approve-reboot`](/docs/reference/cli/#liken-approve-reboot). With `Auto`, it
+reboots when its turn comes. Either way, it cordons and
 drains itself before it goes down.
 
 You can also ask a machine to reboot when nothing has changed, for
@@ -60,20 +59,21 @@ other.
 
 ## The reboot turn
 
-A reboot, and a restart of k3s, take a machine out of service for a
-time. So no machine does either until `cluster-operator` gives it a
-reboot turn, and the turns keep enough of the fleet in service.
+A reboot or a restart of k3s takes a machine out of service, so no
+machine does either until `cluster-operator` gives it a reboot turn.
+The turns keep enough of the fleet in service.
 
 Each request for a turn is a
-[`Disruption`](/docs/reference/disruption/). It names the machine,
-who asked, the kind (`Reboot` or `Restart`), and the reason.
-`machine-operator` keeps one request for each machine in the
-cluster, `<machine>.machine-operator`, for every staged change that waits for a
-reboot or a restart, and for a demotion. It updates the request when
-more changes wait, and deletes it when nothing waits. A person's
-request has the name `<machine>.reboot-<boot>`, after the boot it asks
-to end. `liken request-reboot` files one, and you can also create one
-with `kubectl`. `kubectl get disruptions` lists every request of the
+[`Disruption`](/docs/reference/disruption/). It records the machine,
+the requester, the kind (`Reboot` or `Restart`), and the reason.
+`machine-operator` keeps one request for each machine, named
+`<machine>.machine-operator`. It covers every staged change that waits
+for a reboot or a restart, and a demotion. `machine-operator` updates
+the request when more changes wait, and deletes it when nothing
+waits. A person's request is named `<machine>.reboot-<boot>`, where
+`<boot>` identifies the boot that the request asks to end.
+`liken request-reboot` creates one, and you can also create one with
+`kubectl`. `kubectl get disruptions` lists every request in the
 fleet:
 
     kubectl get disruptions
@@ -85,8 +85,9 @@ fleet:
 
 `cluster-operator` reports two conditions on each request. `Approved`
 is `True` when the machine's `rebootPolicy` is `Auto`, or when the
-request's `spec.approvedHash` names its `spec.hash`. `liken
-approve-reboot` sets that field for you. `Granted` is `True`
+request's `spec.approvedHash` equals its `spec.hash` or is a prefix of
+it at least 12 characters long. `liken approve-reboot` sets that field
+for you. `Granted` is `True`
 while the machine holds a turn that covers the request. While the
 request waits, the message of `Granted` names what it waits for, for
 example `The default budget allows 1 out of service, and node-3 is
@@ -127,21 +128,21 @@ another machine waiting. Among requests made in the same second, a
 follower goes before a leader. `cluster-operator` records the turn
 in the `Cluster`'s
 [`status.rebootTurns`](/docs/reference/cluster/#statusrebootturns),
-with the names of the requests that the turn covers. The entry is
-the grant. `machine-operator` acts on its machine's entry after it
-reads the `Cluster` again from the API server, so an entry that
-`cluster-operator` already removed starts no drain. It cordons and
-drains the node and reboots. `cluster-operator` also writes the
-`RebootApproved` condition on the `Machine`, because the
-`machine-operator` of an earlier release acts on that condition
-alone. For a restart of k3s
-with no reboot, it drains nothing, because the pods keep running. All
+with the names of the requests that the turn covers. That entry is
+what grants the turn. Before `machine-operator` acts on its machine's
+entry, it reads the `Cluster` again from the API server, so an entry
+that `cluster-operator` has already removed starts no drain. Then it
+cordons and drains the node and reboots. For a restart of k3s,
+it drains nothing, because the pods keep running. `cluster-operator`
+also writes the `RebootApproved` condition on the `Machine`, because
+a `machine-operator` from an earlier release acts only on that
+condition. All
 of a machine's requests share one turn, one drain, and one reboot. A
 request that arrives while the machine holds its turn joins that
 turn. While a machine's new release still downloads, `cluster-operator`
-holds back the machine's turn, so the release shares the reboot too.
+delays the machine's turn, so the release shares the reboot too.
 
-A request can stop the turn after the drain with `spec.hold`. A
+A request can pause the turn after the drain with `spec.hold`. A
 component sets it when it must change the machine while no workload
 runs there, and the change takes effect at the next boot:
 `firmware-operator` writes a Secure Boot database update this way.
@@ -155,24 +156,27 @@ reboot go ahead, remove the hold yourself:
 
     kubectl patch disruption <request> --type=json -p '[{"op":"remove","path":"/spec/hold"}]'
 
-Some work during a hold needs the reboot to go somewhere other than
-the proven slot, for one boot. A UEFI capsule is one: fwupd sets the
-firmware's `BootNext` to its updater, and the firmware applies the
-capsule from there and resets. Every other reboot aims `BootNext` at
-the proven slot, or at a release on trial, so the component asks to
-keep its own with `spec.keepBootNext` when it removes the hold. On
-that reboot `init` leaves `BootNext` alone and arms no trial, so a
-staged release waits for a later reboot. The boot after the
-component's comes from the head of `BootOrder`, with no one-shot to
-steer it, so `init` does this only when the machine's
-`status.firmware.bootOrderKept` is `true`: the proven slot led
-`BootOrder` when the machine powered on, which means the firmware
-kept the order through the last reset. Otherwise `init` aims
-`BootNext` at the proven slot as on any reboot, and prints why. The
-component then finds that its work did not take effect. `init` also
-keeps `/run/liken/proven-esp` pointed at the proven slot's ESP, which
-is the ESP that this reboot reads, so the component's pod can write
-its files there.
+Some work during a hold needs the next boot to start a program other
+than the proven slot, the slot that the machine last booted
+successfully. A UEFI capsule update is one example: fwupd sets the
+firmware's `BootNext` variable to its updater, and the firmware boots
+the updater once, applies the capsule, and resets. On every other
+reboot, `init` sets `BootNext` to the proven slot, or to a release on
+trial. So the component sets `spec.keepBootNext` when it removes the
+hold, and on that reboot `init` leaves `BootNext` as the component set
+it and starts no trial. A staged release waits for a later reboot.
+
+After the updater resets, the firmware boots the first entry of
+`BootOrder`, so `init` keeps the component's `BootNext` only when that
+entry is certain to be the proven slot. One of its checks is the
+Machine's `status.firmware.bootOrderKept`. It is `true` when the
+proven slot led `BootOrder` at power-on, which shows that the firmware
+kept the order through the last reset. When a check fails, `init`
+prints the reason and sets `BootNext` to the proven slot as on any
+other reboot, and the component's next check finds that its work did
+not take effect. `init` also keeps the symlink `/run/liken/proven-esp`
+pointed at the proven slot, whose ESP the next boot reads, so the
+component's pod can write its files there.
 
 The drain moves every pod except DaemonSet pods, static pods, and pods
 that tolerate the cordon's taint, `node.kubernetes.io/unschedulable`,
@@ -189,7 +193,7 @@ ask for a turn but cannot approve one on a `Manual` machine.
 
 A request ends when its work is done. `machine-operator` deletes its
 own request when nothing waits. It marks a person's request
-`Complete` when the machine runs another boot, and `cluster-operator`
+`Complete` when the machine has booted again, and `cluster-operator`
 deletes a complete request one day later.
 
 ## What a machine boots

@@ -39,45 +39,45 @@ func stickFixtureFor(t *testing.T, consoles []string, machines ...string) (strin
 	})
 	layer := filepath.Join(t.TempDir(), machine.LayerName)
 	if err := os.WriteFile(layer, mintedLayer(t, machines...), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the layer: %v", err)
 	}
 
 	out := filepath.Join(t.TempDir(), "stick.img")
 	if err := Stick(releaseDir, layer, out, consoles, io.Discard); err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the stick: %v", err)
 	}
 
 	f, err := os.Open(out)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening the stick: %v", err)
 	}
 	t.Cleanup(func() { f.Close() })
 	info, err := f.Stat()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the size of the stick: %v", err)
 	}
 
 	// This is the firmware's path: the partition table names one EFI
 	// system partition, and the filesystem lives inside its extent.
 	table, err := disks.ReadGPT(f, uint64(info.Size())/disks.SectorSize)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the partition table: %v", err)
 	}
 	if len(table.Entries) != 1 {
-		t.Fatalf("the stick carries one partition, got %d", len(table.Entries))
+		t.Fatalf("the stick has %d partitions, want 1", len(table.Entries))
 	}
 	esp := table.Entries[0]
 	if esp.TypeGUID != disks.EFISystemPartition {
-		t.Error("the partition must be typed as an EFI system partition or firmware won't look at it")
+		t.Error("the partition type is not EFI system partition, and firmware skips a partition of another type")
 	}
 	if esp.Name != "liken:install" {
-		t.Errorf("partition name: %q", esp.Name)
+		t.Errorf("the partition name is %q, want liken:install", esp.Name)
 	}
 	section := disks.NewSection(f, int64(esp.FirstLBA)*disks.SectorSize,
 		int64(esp.LastLBA-esp.FirstLBA+1)*disks.SectorSize)
 	volume, err := disks.OpenFATVolume(section)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening the FAT volume: %v", err)
 	}
 	return out, volume
 }
@@ -87,11 +87,11 @@ func TestStickBootsTheMenu(t *testing.T) {
 
 	boot, err := v.ReadFile("EFI/BOOT/BOOTX64.EFI")
 	if err != nil || string(boot) != "boot menu program bytes" {
-		t.Errorf("BOOTX64.EFI must be the release's systemd-boot, byte for byte: %v", err)
+		t.Errorf("BOOTX64.EFI is not the release's systemd-boot, want the same bytes (read error: %v)", err)
 	}
 	conf, err := v.ReadFile("loader/loader.conf")
 	if err != nil || !strings.Contains(string(conf), "timeout menu-force") {
-		t.Errorf("the menu must wait for a person: %q, %v", conf, err)
+		t.Errorf("loader.conf is %q (read error: %v), want timeout menu-force so that the menu waits for a person", conf, err)
 	}
 }
 
@@ -134,11 +134,11 @@ func TestStickGivesEachMachineInstallAndReinstall(t *testing.T) {
 		// The reinstall entry differs from install in exactly one word:
 		// liken.reinstall in place of liken.install.
 		if strings.Contains(string(reinstall), "liken.install") {
-			t.Errorf("%s's reinstall entry must not carry liken.install:\n%s", name, reinstall)
+			t.Errorf("%s's reinstall entry has liken.install, want only liken.reinstall:\n%s", name, reinstall)
 		}
 
 		if strings.Contains(string(install), "console=") || strings.Contains(string(reinstall), "console=") {
-			t.Errorf("no console= without the flag; hardware defaults to its screen")
+			t.Errorf("an entry has console= although no console flag was given")
 		}
 	}
 }
@@ -164,12 +164,12 @@ func TestStickCarriesTheHardwareReportEntry(t *testing.T) {
 	// The report describes hardware, not a machine, so it carries no
 	// identity.
 	if strings.Contains(text, "liken.machine=") {
-		t.Errorf("the report entry must carry no liken.machine=:\n%s", text)
+		t.Errorf("the report entry has liken.machine=, want none:\n%s", text)
 	}
 	// No sort-key: an entry without one sorts after every machine entry,
 	// which all carry sort-keys.
 	if strings.Contains(text, "sort-key") {
-		t.Errorf("the report entry must have no sort-key so it sorts last:\n%s", text)
+		t.Errorf("the report entry has a sort-key, want none so that it sorts last:\n%s", text)
 	}
 }
 
@@ -187,7 +187,7 @@ func TestStickSortKeysKeepEachMachinePairAdjacentAndOrdered(t *testing.T) {
 		sortKey(t, v, "node-2-reinstall"),
 	}
 	if !slices.IsSorted(keys) {
-		t.Errorf("the sort-keys must place the pairs in menu order: %v", keys)
+		t.Errorf("the sort-keys are %v, want the pairs in menu order", keys)
 	}
 }
 
@@ -204,7 +204,7 @@ func TestStickSortKeysGroupNamesThatArePrefixesOfOtherNames(t *testing.T) {
 		sortKey(t, v, "node-old-reinstall"),
 	}
 	if !slices.IsSorted(keys) {
-		t.Errorf("one machine's pair must not split another's: %v", keys)
+		t.Errorf("the sort-keys are %v, want one machine's pair not split by another's", keys)
 	}
 }
 
@@ -213,7 +213,7 @@ func sortKey(t *testing.T, v *disks.FATVolume, entry string) string {
 	t.Helper()
 	raw, err := v.ReadFile("loader/entries/" + entry + ".conf")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the entry: %v", err)
 	}
 	for line := range strings.SplitSeq(string(raw), "\n") {
 		if key, ok := strings.CutPrefix(line, "sort-key "); ok {
@@ -231,10 +231,10 @@ func TestStickBakesConsoles(t *testing.T) {
 	for _, entry := range []string{"node-1-install", "node-1-reinstall", "hardware-report"} {
 		raw, err := v.ReadFile("loader/entries/" + entry + ".conf")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the entry: %v", err)
 		}
 		if !strings.Contains(string(raw), "console=ttyS0 console=tty0") {
-			t.Errorf("%s: every -console lands on the options line, in order:\n%s", entry, raw)
+			t.Errorf("%s lacks console=ttyS0 console=tty0 on its options line, want every -console flag in order:\n%s", entry, raw)
 		}
 	}
 }
@@ -243,32 +243,32 @@ func TestStickCarriesTheBootFilesAndPayload(t *testing.T) {
 	_, v := stickFixture(t, nil)
 
 	if got, err := v.ReadFile("vmlinuz"); err != nil || string(got) != "kernel bytes" {
-		t.Errorf("vmlinuz: %v", err)
+		t.Errorf("vmlinuz on the stick is wrong (read error: %v)", err)
 	}
 	if got, err := v.ReadFile("boot.cpio"); err != nil || string(got) != "boot archive bytes" {
-		t.Errorf("boot.cpio: %v", err)
+		t.Errorf("boot.cpio on the stick is wrong (read error: %v)", err)
 	}
 	if got, err := v.ReadFile("microcode.cpio"); err != nil || string(got) != "early microcode bytes" {
-		t.Errorf("microcode.cpio: %v", err)
+		t.Errorf("microcode.cpio on the stick is wrong (read error: %v)", err)
 	}
 
 	layer, err := v.ReadFile(machine.LayerName)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the layer from the stick: %v", err)
 	}
 	if _, err := machineNames(layer); err != nil {
-		t.Errorf("the stick's layer must be the real archive: %v", err)
+		t.Errorf("the layer on the stick is not a valid archive: %v", err)
 	}
 
 	// The payload is the slot layout: everything the document lists,
 	// the document itself, and the layer beside its sidecar file.
 	payload, err := v.ReadFile("payload.cpio")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the payload: %v", err)
 	}
 	entries, _, err := readCPIO(payload)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the payload archive: %v", err)
 	}
 	found := map[string]bool{}
 	for _, e := range entries {
@@ -285,7 +285,7 @@ func TestStickCarriesTheBootFilesAndPayload(t *testing.T) {
 		"usr/share/liken/release/" + machine.LayerSidecarName,
 	} {
 		if !found[want] {
-			t.Errorf("the payload is missing %s", want)
+			t.Errorf("the payload has no %s", want)
 		}
 	}
 }
@@ -307,11 +307,11 @@ func TestStickRefusesAnIncompleteRelease(t *testing.T) {
 		releaseDir := releaseFixtureWith(t, files)
 		layer := filepath.Join(t.TempDir(), machine.LayerName)
 		if err := os.WriteFile(layer, mintedLayer(t, "node-1"), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the layer: %v", err)
 		}
 		err := Stick(releaseDir, layer, filepath.Join(t.TempDir(), "out.img"), nil, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), missing) {
-			t.Errorf("a release without %s must be refused by name: %v", missing, err)
+			t.Errorf("the error for a release without %s is %v, want one that names it", missing, err)
 		}
 	}
 }
@@ -326,14 +326,14 @@ func TestStickRefusesATamperedRelease(t *testing.T) {
 		"systemd-bootx64.efi": "boot menu program bytes",
 	})
 	if err := os.WriteFile(filepath.Join(releaseDir, "vmlinuz"), []byte("not the kernel"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing vmlinuz: %v", err)
 	}
 	layer := filepath.Join(t.TempDir(), machine.LayerName)
 	if err := os.WriteFile(layer, mintedLayer(t, "node-1"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the layer: %v", err)
 	}
 	if err := Stick(releaseDir, layer, filepath.Join(t.TempDir(), "out.img"), nil, io.Discard); err == nil {
-		t.Error("an artifact that fails its document must not be packed onto a stick")
+		t.Error("Stick returned no error for an artifact that does not match the release document")
 	}
 }
 
@@ -348,11 +348,11 @@ func TestStickRefusesBadInputs(t *testing.T) {
 	})
 	goodLayer := filepath.Join(t.TempDir(), machine.LayerName)
 	if err := os.WriteFile(goodLayer, mintedLayer(t, "node-1"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the layer: %v", err)
 	}
 	emptyLayer := filepath.Join(t.TempDir(), machine.LayerName)
 	if err := os.WriteFile(emptyLayer, mintedLayer(t), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the layer: %v", err)
 	}
 
 	cases := []struct {
@@ -369,7 +369,7 @@ func TestStickRefusesBadInputs(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if err := Stick(c.releaseDir, c.layer, c.out, nil, io.Discard); err == nil {
-				t.Error("a stick built from broken inputs must be refused")
+				t.Error("Stick returned no error for broken inputs")
 			}
 		})
 	}
@@ -379,11 +379,11 @@ func TestStickSizesToItsContents(t *testing.T) {
 	out, _ := stickFixture(t, nil)
 	info, err := os.Stat(out)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the size of the stick: %v", err)
 	}
 	// The fixtures are tiny, so the FAT32 floor sets the size, and the
 	// image stays close to it instead of growing to some fixed guess.
 	if info.Size() < 300<<20 || info.Size() > 320<<20 {
-		t.Errorf("image is %d MB; expected just past the FAT32 floor for these contents", info.Size()>>20)
+		t.Errorf("the image is %d MB, want just past the FAT32 floor", info.Size()>>20)
 	}
 }

@@ -37,7 +37,7 @@ func TestSyncInstallsOneCLIPerOperator(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := Sync(operators, "amd64", binDir, "/usr/bin", &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running Sync: %v", err)
 	}
 
 	for _, domain := range []string{"audio", "library"} {
@@ -47,12 +47,12 @@ func TestSyncInstallsOneCLIPerOperator(t *testing.T) {
 			t.Fatalf("no CLI for %s: %v", domain, err)
 		}
 		if info.Mode().Perm() != 0o755 {
-			t.Errorf("%s mode: got %v", domain, info.Mode().Perm())
+			t.Errorf("the mode of %s is %v, want 755", domain, info.Mode().Perm())
 		}
 	}
 	want := "ghcr.io/liken-sh/audio-operator-cli:2026.09.03-007"
 	if len(*refs) != 2 || (*refs)[0] != want {
-		t.Fatalf("pulled %v", *refs)
+		t.Fatalf("the pulled images are %v, want audio first and then library", *refs)
 	}
 }
 
@@ -63,15 +63,15 @@ func TestSyncReplacesOnReRun(t *testing.T) {
 
 	for i := 0; i < 2; i++ {
 		if err := Sync(operators, "amd64", binDir, "/usr/bin", &bytes.Buffer{}); err != nil {
-			t.Fatalf("run %d: %v", i, err)
+			t.Fatalf("running Sync, pass %d: %v", i, err)
 		}
 	}
 	data, err := os.ReadFile(filepath.Join(binDir, Name("audio")))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the installed CLI: %v", err)
 	}
 	if string(data) != "ghcr.io/liken-sh/audio-operator-cli:2026.09.03-007" {
-		t.Fatalf("got %q", data)
+		t.Fatalf("the installed CLI is %q, want the pulled binary", data)
 	}
 }
 
@@ -82,7 +82,7 @@ func TestSyncPrintsThePathHintWhenTheDirIsNotOnPath(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := Sync(operators, "amd64", binDir, "/usr/bin", &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running Sync: %v", err)
 	}
 	if !strings.Contains(out.String(), binDir) {
 		t.Fatalf("the hint must name the plugin directory:\n%s", out.String())
@@ -97,7 +97,7 @@ func TestSyncSkipsThePathHintWhenTheDirIsOnPath(t *testing.T) {
 	var out bytes.Buffer
 	pathEnv := "/usr/bin" + string(os.PathListSeparator) + binDir
 	if err := Sync(operators, "amd64", binDir, pathEnv, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running Sync: %v", err)
 	}
 	if strings.Contains(out.String(), "PATH") {
 		t.Fatalf("no hint when the dir is already on PATH:\n%s", out.String())

@@ -23,8 +23,8 @@ makes the machine like its declared state.
 
 The immutable image contains the full operating system: a kernel,
 `liken`'s own init (the Go program that the kernel runs as PID 1), and
-[`k3s`](https://k3s.io). It also contains a small number of host programs
-that a Kubernetes node cannot get from a container. These programs are
+[`k3s`](https://k3s.io). It also contains a few host programs
+that a Kubernetes node cannot get from a container. These are
 the operators and log relays that run `liken` itself, `mke2fs` to format
 blank disks, the iSCSI and NFS client binaries, and a CA trust store. The
 image has no shell, no package manager, and no libc. All other software
@@ -37,20 +37,20 @@ runs in a container.
 * **Upgrades are declarative.** The `Cluster` resource holds a catalog
   of releases and one target version. Each machine downloads the target
   release, compares every byte against pinned digests, and writes the
-  release into the spare slot of an A/B pair. A rollout conductor then
-  permits one machine to reboot at a time, which keeps the quorum of the
-  fleet safe. To upgrade the operating system and the kernel, you change
-  one field.
+  release into the spare slot of an A/B pair. `cluster-operator` then
+  lets one machine at a time reboot, so the fleet keeps its quorum. To
+  upgrade the operating system and the kernel, you change one field.
 * **Nodes share container images.** `k3s` includes the
-  [Spegel](https://spegel.dev) registry mirror. Spegel lets nodes send
-  images to each other directly. Image pulls come from the LAN, and they
-  continue to work when the internet connection is down.
+  [Spegel](https://spegel.dev) registry mirror, which lets nodes send
+  images to each other directly. A node pulls an image that another
+  node already has over the LAN, so that pull works when the internet
+  connection is down.
 * **The cluster syncs itself from git.** Declare a git repository on the
   `Cluster` resource, and the cluster syncs it with
   [Flux](https://fluxcd.io). The repository holds the Cluster document,
   the Machine documents, and the workloads, and the fleet converges to
-  each commit. The cluster makes its own deploy key, so no private
-  material leaves the cluster. [The GitOps
+  each commit. The cluster generates its own deploy key, so no private
+  key leaves the cluster. [The GitOps
   guide](https://liken.sh/docs/guides/gitops/) gives the steps, and
   [plans/completed/14-gitops-from-first-boot.md](plans/completed/14-gitops-from-first-boot.md)
   records the design.
@@ -97,45 +97,36 @@ These projects explore similar ground:
   minimal, immutable hosts. Almost every program on them runs in a
   container.
 
-None of these projects are GitOps-native from first boot. In each one,
-the git repository is a layer added on top of the OS. In `liken`, the
-repository is a feature the OS itself declares, and a new cluster can
+None of these projects syncs from git from its first boot. In each
+one, you add the git sync on top of the OS. In `liken`, the git
+repository is a feature of the `Cluster` resource, so a new cluster can
 sync from its first boot.
 
 ## Status
 
-`liken` runs in public. The release channel,
+`liken` is public. The release channel,
 [releases.liken.sh](https://releases.liken.sh/), serves
 digest-verified releases, and CI publishes a new release on every
-version tag. For the project's first public month, a one-node
-`liken` cluster on a 1 GB cloud machine served
-[liken.sh](https://liken.sh) itself: it installed from the channel
-once, then upgraded from the channel with every release.
-[GETTING-STARTED.md](GETTING-STARTED.md) describes the path from a
-release to a running cluster of your own.
+version tag. [GETTING-STARTED.md](GETTING-STARTED.md) describes the
+path from a release to a running cluster of your own.
 
-The milestones in [plans/](plans/) record the progress of the OS.
-The QEMU lab proved most of them, from a bare PID 1 to a five-node HA
-cluster. The release channel was proved where it runs, published by
-CI and polled by real machines. Later milestones added
-declarative upgrades, rolling reboots, adoption of an existing `k3s`
-cluster, updates directly from the internet under both UEFI and BIOS
-firmware, and GitOps with Flux.
+`liken` runs on the QEMU guests of [`dev-cluster/`](dev-cluster/) and
+on physical machines. The guest in
+[`dev-cluster/hardware/`](dev-cluster/hardware/) has a SATA controller
+and a real network card. The other guests use paravirtual disks and
+network cards, which the kernel drives without loading a module, so
+they cannot show a fault in a driver that the image loads.
+[Milestone 32](plans/completed/32-hardware-support-in-the-image.md)
+lists what only a physical machine can prove.
 
-`liken` also boots on a physical machine. A testbed machine showed
-faults that no lab guest had shown, because the lab ran every guest on
-paravirtual disks and paravirtual network cards, which the kernel
-drives without loading a module. Milestone 36 corrected those faults
-and added a lab guest with a SATA controller and a real network card.
-Some claims still wait for more hardware. Milestone 32 lists what only
-a physical machine can prove.
-
-The plans directory has three parts:
+The milestones in [`plans/`](plans/) record the design of the OS:
 
 * [`plans/completed/`](plans/completed/) contains the milestones that are
   built.
-* [`plans/rejected/`](plans/rejected/) contains a milestone that was built
-  and then removed.
+* [`plans/rejected/`](plans/rejected/) contains the milestones that the
+  project rejected, with the reasons.
+* [`plans/open-problems/`](plans/open-problems/) records bugs and design
+  problems that are not solved.
 * The markdown files in [`plans/`](plans/) are the design overview and
   the proposals that are not built.
 

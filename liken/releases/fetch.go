@@ -74,15 +74,15 @@ func Fetch(source, version, digest, channelDir string, out io.Writer) error {
 	// counts.
 	if digest != "" {
 		if got := fmt.Sprintf("sha256:%x", sha256.Sum256(raw)); got != digest {
-			return fmt.Errorf("the release document's digest %s does not match the pinned %s", got, digest)
+			return fmt.Errorf("the release document has the digest %s, and the pinned digest is %s", got, digest)
 		}
 	}
 	release, err := machine.ParseRelease(raw)
 	if err != nil {
-		return fmt.Errorf("the release document does not parse: %w", err)
+		return fmt.Errorf("parsing the release document: %w", err)
 	}
 	if release.Metadata.Name != version {
-		return fmt.Errorf("the release document names version %s, not %s", release.Metadata.Name, version)
+		return fmt.Errorf("the release document is for version %s, and the requested version is %s", release.Metadata.Name, version)
 	}
 
 	dest := filepath.Join(channelDir, version)
@@ -124,7 +124,7 @@ func resolveLatest(source string) (string, error) {
 	}
 	channel, err := machine.ParseChannel(raw)
 	if err != nil {
-		return "", fmt.Errorf("the channel document does not parse: %w", err)
+		return "", fmt.Errorf("parsing the channel document: %w", err)
 	}
 	return channel.Latest, nil
 }
@@ -159,7 +159,7 @@ func fetchArtifact(base string, artifact machine.ReleaseArtifact, dest string) e
 
 	if err := verifyFile(artifact, tmp); err != nil {
 		os.Remove(tmp)
-		return fmt.Errorf("%s from the server does not verify: %w", artifact.Name, err)
+		return fmt.Errorf("verifying the download of %s: %w", artifact.Name, err)
 	}
 	return os.Rename(tmp, dest)
 }

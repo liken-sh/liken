@@ -72,7 +72,7 @@ func Media(releaseDir, layerPath, out string, log io.Writer) error {
 	for _, name := range []string{microcodeArtifact, "boot.cpio"} {
 		part, err := os.Open(filepath.Join(releaseDir, name))
 		if err != nil {
-			return fmt.Errorf("release %s carries no %s; use a newer release",
+			return fmt.Errorf("release %s has no %s, so it cannot make install media. Use a newer release",
 				release.Metadata.Name, name)
 		}
 		_, err = io.Copy(f, part)
@@ -93,7 +93,7 @@ func Media(releaseDir, layerPath, out string, log io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(log, "install media for liken %s: %d MB (%d artifacts + the deployment layer)\n",
+	fmt.Fprintf(log, "wrote install media for liken %s: %d MB, %d artifacts and the deployment layer\n",
 		release.Metadata.Name, info.Size()/(1<<20), len(release.Artifacts))
 	return nil
 }
@@ -115,12 +115,12 @@ func verifiedRelease(releaseDir string) ([]byte, *machine.Release, error) {
 	for _, artifact := range release.Artifacts {
 		f, err := os.Open(filepath.Join(releaseDir, artifact.Name))
 		if err != nil {
-			return nil, nil, fmt.Errorf("the release is missing an artifact its document lists: %w", err)
+			return nil, nil, fmt.Errorf("opening an artifact that release.yaml lists: %w", err)
 		}
 		err = artifact.Verify(f)
 		f.Close()
 		if err != nil {
-			return nil, nil, fmt.Errorf("the release does not match its own document: %w", err)
+			return nil, nil, fmt.Errorf("checking an artifact against release.yaml: %w", err)
 		}
 	}
 	return document, release, nil

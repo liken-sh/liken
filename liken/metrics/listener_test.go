@@ -15,20 +15,20 @@ func TestTheListenerAnswersOnItsOwnPort(t *testing.T) {
 	// competes with anything else on the machine for 9200.
 	addr, err := o.Serve("127.0.0.1:0")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("serving on 127.0.0.1:0: %v", err)
 	}
 
 	resp, err := http.Get("http://" + addr.String() + "/metrics")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("requesting /metrics: %v", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the /metrics response: %v", err)
 	}
 	if !strings.Contains(string(body), `liken_build_info{component="liken-machine-operator",version="2026.09.10-001"} 1`) {
-		t.Errorf("the listener served no build info:\n%s", body)
+		t.Errorf("the /metrics response is:\n%s\nwant a liken_build_info line", body)
 	}
 }
 
@@ -50,10 +50,10 @@ func TestAPortAlreadyInUseIsAnError(t *testing.T) {
 	// it claims to serve.
 	held, err := NewOperator("liken-machine-operator", "dev", nil, nil).Serve("127.0.0.1:0")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("serving on 127.0.0.1:0: %v", err)
 	}
 	if _, err := NewOperator("liken-cluster-operator", "dev", nil, nil).Serve(held.String()); err == nil {
-		t.Errorf("binding %s twice reported no error", held)
+		t.Errorf("binding %s a second time returned no error, want one", held)
 	}
 }
 

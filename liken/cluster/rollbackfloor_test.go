@@ -21,7 +21,7 @@ func versionRules(t *testing.T) []string {
 	t.Helper()
 	raw, err := os.ReadFile("manifests/clusters-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading manifests/clusters-crd.yaml: %v", err)
 	}
 	var crd struct {
 		Spec struct {
@@ -45,7 +45,7 @@ func versionRules(t *testing.T) []string {
 		} `json:"spec"`
 	}
 	if err := yaml.Unmarshal(raw, &crd); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing manifests/clusters-crd.yaml: %v", err)
 	}
 	var rules []string
 	for _, v := range crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Spec.Properties.Version.Validations {

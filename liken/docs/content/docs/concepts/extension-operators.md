@@ -11,9 +11,9 @@ aliases:
 the cluster, such as put a dashboard on a monitor, play a film on the
 TV, or run a telescope, you install extension operators. Each one is a
 Kubernetes operator for one area: you describe what you want as
-Kubernetes resources, and the operator makes it happen. Each operator
-that is built has its own manual on this site, and its source is a directory of the
-[`liken` repository](https://github.com/liken-sh/liken).
+Kubernetes resources, and the operator creates and runs it. Each
+operator has its own manual on this site, and its source is a
+directory of the [`liken` repository](https://github.com/liken-sh/liken).
 
 * [Claiming hardware](/docs/concepts/claiming-hardware/):
   `display-operator`, `audio-operator`, and `bluetooth-operator` let a
@@ -36,34 +36,33 @@ that is built has its own manual on this site, and its source is a directory of 
 
 The operating system installs none of these operators. It boots each
 machine into Kubernetes and publishes the machine's own hardware as
-devices, as [Devices](/docs/reference/devices/) describes, and it
-stops there. You install the operators that your equipment and your
-workloads need, and a cluster with none of them works the same way.
-To take `liken` into a new area, you usually add an operator, and the
-operating system stays as it is.
+devices, as [Devices](/docs/reference/devices/) describes. You
+install only the operators that your equipment and your workloads
+need, and a cluster with none of them is an ordinary Kubernetes
+cluster. Support for a new area usually comes as a new operator, with
+no change to the operating system.
 
 ## Use something else in place of an operator
 
 An operator works with the rest of the cluster only through
 Kubernetes objects: the devices it claims, the resources it defines,
 and the `Event`s and conditions it posts. Other software can use the
-same objects, so you can run something else beside an operator, or in
+same objects, so you can run other software beside an operator, or in
 its place. For example:
 
 * [`library-operator`](https://liken.sh/library/) writes the `.nfo`
   files and the artwork beside your media in the formats that Kodi and
   Jellyfin read. Jellyfin can read the same library with no operator
   at all. When you run both and name the Jellyfin server in the
-  `Catalog`'s `spec.jellyfin`, `library-operator` keeps each person's
-  playback progress the same in both places.
+  `Catalog`'s `spec.jellyfin`, `library-operator` copies each person's
+  playback progress between the catalog and Jellyfin.
 * [`observatory-operator`](https://liken.sh/observatory/) serves a
   telescope's devices on its INDI server. KStars drives the telescope
   through that server, and guides through PHD2's event server.
 
 An operator that uses devices claims them with a `ResourceClaim`, the
-same way any workload does. So the dependencies go one way: the
-operators that publish devices do not depend on the operators that
-claim them.
+same way any workload does. So an operator that publishes devices
+does not depend on the operators that claim them.
 
 ## Device classes and ingress are yours to decide
 
@@ -79,6 +78,6 @@ objects of type `LoadBalancer`. You can turn each one on again in the
 `features` field of the [`Cluster`](/docs/reference/cluster/) spec.
 You decide which services are reachable from outside the cluster, and
 how: every operator's `Service` has the default type, `ClusterIP`, and
-no operator ships an `Ingress`. Two operators, `bluetooth-operator`
-and `equipment-operator`, run on the host network, so their metrics
-ports are open on each node's own address.
+no operator ships an `Ingress`. `bluetooth-operator` and
+`equipment-operator` run on the host network, so their metrics ports
+are open on the address of each node that runs them.

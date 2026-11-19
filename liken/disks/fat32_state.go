@@ -51,7 +51,7 @@ func readBootSector(devPath string) ([]byte, error) {
 		return nil, fmt.Errorf("reading the boot sector of %s: %w", devPath, err)
 	}
 	if sector[510] != 0x55 || sector[511] != 0xAA || string(sector[82:90]) != "FAT32   " {
-		return nil, fmt.Errorf("%s does not carry a FAT32 boot sector", devPath)
+		return nil, fmt.Errorf("%s has no FAT32 boot sector", devPath)
 	}
 	return sector, nil
 }
@@ -99,14 +99,14 @@ func ClearFAT32Dirty(devPath string) error {
 	// every other field exactly as it was found. A volume this machine
 	// did not format may hold fields liken does not recognize.
 	if _, err := f.WriteAt(sector[fat32StateOffset:fat32StateOffset+1], fat32StateOffset); err != nil {
-		return fmt.Errorf("clearing the mark on %s: %w", devPath, err)
+		return fmt.Errorf("clearing the dirty flag of %s: %w", devPath, err)
 	}
 	// FAT32 keeps a backup boot sector, named by the field at offset
 	// 50. The driver reads the primary and never consults the backup,
 	// so the backup is left alone: a repair tool compares the two, and
 	// a difference here is a true record of what happened.
 	if err := f.Sync(); err != nil {
-		return fmt.Errorf("flushing the mark on %s: %w", devPath, err)
+		return fmt.Errorf("flushing the dirty flag of %s: %w", devPath, err)
 	}
 	return nil
 }

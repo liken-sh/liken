@@ -60,7 +60,7 @@ func TestParseKmsgRecord(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got, err := parseKmsgRecord([]byte(c.raw))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing %q: %v", c.raw, err)
 			}
 			if got != c.want {
 				t.Errorf("got  %+v\nwant %+v", got, c.want)
@@ -83,7 +83,7 @@ func TestParseKmsgRecordRejectsMalformedRecords(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if _, err := parseKmsgRecord([]byte(c.raw)); err == nil {
-				t.Errorf("%q should not parse", c.raw)
+				t.Errorf("parsing %q succeeded, want an error", c.raw)
 			}
 		})
 	}
@@ -137,20 +137,20 @@ func TestKmsgRelayShipsItsFacilityOnly(t *testing.T) {
 		"12,103,4000000,-;liken: a warning\n",
 	))
 	if err := relay.run(); err != io.EOF {
-		t.Fatalf("run should end with the script's EOF, got %v", err)
+		t.Fatalf("running the relay: %v, want io.EOF at the end of the script", err)
 	}
 	es := parseEnvelopes(t, out.String())
 	if len(es) != 2 {
 		t.Fatalf("got %d envelopes, want 2 (facility 1 only): %+v", len(es), es)
 	}
 	if es[0].Message != "liken: hello" || es[0].Seq != 101 || es[0].Severity != "info" {
-		t.Errorf("first: %+v", es[0])
+		t.Errorf("first envelope is %+v, want the first record", es[0])
 	}
 	if es[1].Message != "liken: a warning" || es[1].Severity != "warning" {
-		t.Errorf("second: %+v", es[1])
+		t.Errorf("second envelope is %+v, want the second record", es[1])
 	}
 	if *es[0].Facility != 1 {
-		t.Errorf("facility: %d", *es[0].Facility)
+		t.Errorf("facility is %d, want 1", *es[0].Facility)
 	}
 }
 
@@ -159,7 +159,7 @@ func TestKmsgRelayConvertsStampsToWallTime(t *testing.T) {
 		"6,100,5000000,-;five seconds after boot\n",
 	))
 	if err := relay.run(); err != io.EOF {
-		t.Fatal(err)
+		t.Fatalf("running the relay: %v, want io.EOF", err)
 	}
 	es := parseEnvelopes(t, out.String())
 	if len(es) != 1 {
@@ -177,7 +177,7 @@ func TestKmsgRelayReportsOverruns(t *testing.T) {
 		"6,900,9000000,-;after the overrun\n",
 	))
 	if err := relay.run(); err != io.EOF {
-		t.Fatal(err)
+		t.Fatalf("running the relay: %v, want io.EOF", err)
 	}
 	es := parseEnvelopes(t, out.String())
 	if len(es) != 3 {
@@ -194,7 +194,7 @@ func TestKmsgRelayReportsUnparseableRecords(t *testing.T) {
 		"6,100,1000000,-;a good record\n",
 	))
 	if err := relay.run(); err != io.EOF {
-		t.Fatal(err)
+		t.Fatalf("running the relay: %v, want io.EOF", err)
 	}
 	es := parseEnvelopes(t, out.String())
 	if len(es) != 2 {
@@ -217,7 +217,7 @@ func TestKmsgRelayCheckpointsAndResumes(t *testing.T) {
 		"6,101,2000000,-;second\n",
 	))
 	if err := relay.run(); err != io.EOF {
-		t.Fatal(err)
+		t.Fatalf("running the relay: %v, want io.EOF", err)
 	}
 
 	// The restarted relay reads the whole buffer again, because kmsg
@@ -230,7 +230,7 @@ func TestKmsgRelayCheckpointsAndResumes(t *testing.T) {
 	))
 	restarted.cursorDir = relay.cursorDir
 	if err := restarted.run(); err != io.EOF {
-		t.Fatal(err)
+		t.Fatalf("running the relay: %v, want io.EOF", err)
 	}
 	es := parseEnvelopes(t, out.String())
 	if len(es) != 2 {
@@ -255,14 +255,14 @@ func TestKmsgRelayCursorAdvancesPastOtherFacilities(t *testing.T) {
 		"6,101,2000000,-;kernel: not ours\n",
 	))
 	if err := relay.run(); err != io.EOF {
-		t.Fatal(err)
+		t.Fatalf("running the relay: %v, want io.EOF", err)
 	}
 	var cur kmsgCursor
 	if !loadCursor(relay.cursorDir, &cur) {
-		t.Fatal("no cursor saved")
+		t.Fatal("the relay saved no cursor, want one")
 	}
 	if cur.Seq != 101 {
-		t.Errorf("cursor should record the kernel record it read and skipped: got %d", cur.Seq)
+		t.Errorf("cursor sequence is %d, want the sequence of the skipped kernel record", cur.Seq)
 	}
 }
 
@@ -271,7 +271,7 @@ func TestKmsgRelayNoticesRecordsExpiredWhileDown(t *testing.T) {
 
 	relay, _ := testKmsgRelay(t, 0, scriptedDevice("6,100,1000000,-;first\n"))
 	if err := relay.run(); err != io.EOF {
-		t.Fatal(err)
+		t.Fatalf("running the relay: %v, want io.EOF", err)
 	}
 
 	// While the relay was down, the buffer wrapped. The oldest
@@ -279,7 +279,7 @@ func TestKmsgRelayNoticesRecordsExpiredWhileDown(t *testing.T) {
 	restarted, out := testKmsgRelay(t, 0, scriptedDevice("6,500,9000000,-;much later\n"))
 	restarted.cursorDir = relay.cursorDir
 	if err := restarted.run(); err != io.EOF {
-		t.Fatal(err)
+		t.Fatalf("running the relay: %v, want io.EOF", err)
 	}
 	es := parseEnvelopes(t, out.String())
 	if len(es) != 3 {
@@ -303,7 +303,7 @@ func TestKmsgRelayRelaysANewBootFromItsFirstRecord(t *testing.T) {
 		"6,700,1800000000,-;half an hour into the last boot\n",
 	))
 	if err := relay.run(); err != io.EOF {
-		t.Fatal(err)
+		t.Fatalf("running the relay: %v, want io.EOF", err)
 	}
 
 	restarted, out := testKmsgRelay(t, 0, scriptedDevice(
@@ -316,7 +316,7 @@ func TestKmsgRelayRelaysANewBootFromItsFirstRecord(t *testing.T) {
 	boot := restarted.anchor()
 	restarted.now = func() time.Time { return boot.Add(10 * time.Second) }
 	if err := restarted.run(); err != io.EOF {
-		t.Fatal(err)
+		t.Fatalf("running the relay: %v, want io.EOF", err)
 	}
 
 	es := parseEnvelopes(t, out.String())
@@ -324,7 +324,7 @@ func TestKmsgRelayRelaysANewBootFromItsFirstRecord(t *testing.T) {
 		t.Fatalf("got %d envelopes, want a notice and both records: %+v", len(es), es)
 	}
 	if es[1].Seq != 0 || es[2].Seq != 1 {
-		t.Errorf("the new boot's records must all flow: %+v", es)
+		t.Errorf("envelopes are %+v, want all records of the new boot", es)
 	}
 }
 
@@ -339,7 +339,7 @@ func TestKmsgRelayKeepsItsCursorWithinOneBoot(t *testing.T) {
 		"6,101,1500000000,-;twenty five minutes after boot\n",
 	))
 	if err := relay.run(); err != io.EOF {
-		t.Fatal(err)
+		t.Fatalf("running the relay: %v, want io.EOF", err)
 	}
 
 	restarted, out := testKmsgRelay(t, 0, scriptedDevice(
@@ -349,7 +349,7 @@ func TestKmsgRelayKeepsItsCursorWithinOneBoot(t *testing.T) {
 	))
 	restarted.cursorDir = relay.cursorDir
 	if err := restarted.run(); err != io.EOF {
-		t.Fatal(err)
+		t.Fatalf("running the relay: %v, want io.EOF", err)
 	}
 
 	es := parseEnvelopes(t, out.String())
@@ -357,7 +357,7 @@ func TestKmsgRelayKeepsItsCursorWithinOneBoot(t *testing.T) {
 		t.Fatalf("got %d envelopes, want the resume notice and one new record: %+v", len(es), es)
 	}
 	if es[1].Seq != 102 {
-		t.Errorf("a same-boot resume must not replay: %+v", es)
+		t.Errorf("envelopes are %+v, want no replay after a resume in the same boot", es)
 	}
 }
 
@@ -368,7 +368,7 @@ func TestKmsgRelayStopsWhenItsOutputFails(t *testing.T) {
 	relay, _ := testKmsgRelay(t, 0, scriptedDevice("6,100,1000000,-;doomed\n"))
 	relay.out = newEnvelopeWriter(brokenWriter{})
 	if err := relay.run(); !errors.Is(err, errStdoutGone) {
-		t.Errorf("run should surface the write error, got %v", err)
+		t.Errorf("running the relay: %v, want the write error", err)
 	}
 }
 
@@ -378,11 +378,11 @@ func TestKmsgRelayStopsWhenItsOutputFails(t *testing.T) {
 func TestKmsgRelayStopsWhenItCannotCheckpoint(t *testing.T) {
 	relay, _ := testKmsgRelay(t, 0, scriptedDevice("6,100,1000000,-;x\n"))
 	if err := os.Chmod(relay.cursorDir, 0o500); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the cursor directory read-only: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(relay.cursorDir, 0o700) })
 	if err := relay.run(); !errors.Is(err, os.ErrPermission) {
-		t.Errorf("run should surface the checkpoint error, got %v", err)
+		t.Errorf("running the relay: %v, want the checkpoint error", err)
 	}
 }
 
@@ -392,14 +392,14 @@ func TestKmsgRelayStopsWhenItCannotCheckpoint(t *testing.T) {
 func TestWallAnchorRecoversTheBootMoment(t *testing.T) {
 	anchor := wallAnchor()
 	if !anchor.Before(time.Now()) {
-		t.Fatalf("the boot moment must be in the past: %v", anchor)
+		t.Fatalf("the anchor is %v, want a time in the past", anchor)
 	}
 	var ts unix.Timespec
 	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading CLOCK_MONOTONIC: %v", err)
 	}
 	elapsed := time.Duration(ts.Sec)*time.Second + time.Duration(ts.Nsec)
 	if drift := time.Since(anchor.Add(elapsed)); drift < -time.Second || drift > time.Second {
-		t.Errorf("anchor plus the monotonic elapsed should be now; off by %v", drift)
+		t.Errorf("anchor plus the monotonic time since boot is off from now by %v, want none", drift)
 	}
 }

@@ -294,19 +294,38 @@ func (def *FeatureDefinition) ValidateParams(cfg *FeatureConfig) error {
 	}
 	for _, key := range slices.Sorted(maps.Keys(*cfg)) {
 		if !slices.Contains(def.Params, key) {
-			offers := "no parameters"
+			offers := "It has no parameters in this image"
 			if len(def.Params) > 0 {
-				offers = strings.Join(def.Params, ", ")
+				offers = "Its parameters in this image are: " + strings.Join(def.Params, ", ")
 			}
 			return fmt.Errorf(
-				"%s: this image's vocabulary has no %q parameter; upgrade to a release that carries it, or fix the name if it is a misspelling (this image offers: %s)",
+				"%s has no parameter %q in this image. Upgrade to a release that has it, or correct the name if it is misspelled. %s",
 				def.Slug, key, offers)
 		}
 		if _, ok := (*cfg)[key].(string); !ok {
-			return fmt.Errorf("%s: %s must be a string", def.Slug, key)
+			return fmt.Errorf("%s: parameter %q must be a string, not %s", def.Slug, key, yamlKind((*cfg)[key]))
 		}
 	}
 	return nil
+}
+
+// yamlKind names a decoded value in the terms of YAML, because the
+// person who reads the error wrote YAML and not Go.
+func yamlKind(v any) string {
+	switch v.(type) {
+	case nil:
+		return "null"
+	case bool:
+		return "a boolean"
+	case float64, float32, int, int64, int32, uint64:
+		return "a number"
+	case []any:
+		return "a list"
+	case map[string]any:
+		return "a map"
+	default:
+		return fmt.Sprintf("a value of type %T", v)
+	}
 }
 
 // FeatureFlux is the GitOps feature's slug: the declaration that the
@@ -399,7 +418,7 @@ func (c *Cluster) FluxConfig() (*FluxConfig, error) {
 			prune, err := strconv.ParseBool(s)
 			if err != nil {
 				return nil, fmt.Errorf(
-					"flux: prune must be \"true\" or \"false\", not %q: write prune: \"false\" when the repository carries its own flux-system Kustomization",
+					"flux: prune must be \"true\" or \"false\", not %q. Write prune: \"false\" when the repository has its own flux-system Kustomization",
 					s)
 			}
 			out.Prune = prune
@@ -407,7 +426,7 @@ func (c *Cluster) FluxConfig() (*FluxConfig, error) {
 	}
 	if out.Repository == "" {
 		return nil, fmt.Errorf(
-			"flux: repository is required: the git URL the fleet's declared state syncs from, for example ssh://git@forge.example/fleet.git")
+			"flux: repository is required. It is the git URL that the fleet's declared state syncs from, for example ssh://git@forge.example/fleet.git")
 	}
 	return out, nil
 }
@@ -554,7 +573,7 @@ func (c *Cluster) DisabledComponents() []string {
 func validateFeatures(features map[string]*FeatureConfig) error {
 	for _, slug := range slices.Sorted(maps.Keys(features)) {
 		if features[slug] == nil {
-			return fmt.Errorf("spec.features: %s is null, which in Kubernetes means unset; presence is the opt-in, so write %q to enable the feature or remove the key entirely",
+			return fmt.Errorf("spec.features: %s is null, and Kubernetes reads null as unset. A feature is enabled when its key is present, so write %q to enable it, or remove the key",
 				slug, slug+": {}")
 		}
 	}

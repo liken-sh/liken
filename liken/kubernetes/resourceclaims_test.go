@@ -11,7 +11,7 @@ import (
 func TestGetResourceClaimReadsTheAllocation(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if want := "/apis/resource.k8s.io/v1/namespaces/media/resourceclaims/transcode"; r.URL.Path != want {
-			t.Errorf("got %s, want %s", r.URL.Path, want)
+			t.Errorf("the request path is %s, want %s", r.URL.Path, want)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"metadata": map[string]any{"name": "transcode", "namespace": "media", "uid": "claim-uid-1"},

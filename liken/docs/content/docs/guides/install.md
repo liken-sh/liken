@@ -37,10 +37,9 @@ release document:
     curl -fLO https://releases.liken.sh/<version>/liken
     curl -fLO https://releases.liken.sh/<version>/release.yaml
 
-Verify the files that you downloaded. `release.yaml` contains a
-`sha256:` line for each file in the release. The release's page on
-GitHub gives the digest of `release.yaml` itself. Thus the chain of
-trust starts with a value that you can read:
+Verify the files that you downloaded. `release.yaml` has a `sha256:`
+line for each file in the release, and the release's page on GitHub
+gives the digest of `release.yaml` itself:
 
     sha256sum release.yaml liken
 
@@ -69,15 +68,15 @@ release again:
 
     ./liken new mycluster
 
-[`liken new`](/docs/reference/cli/#liken-new) asks a short series of
-plain questions: the names of your machines, which machines are
-leaders, their addresses, and their disks. Then it writes `mycluster/`:
+[`liken new`](/docs/reference/cli/#liken-new) asks for the names of
+your machines, which machines are leaders, their addresses, and their
+disks. Then it writes `mycluster/`:
 a `cluster.yaml` file and one manifest for each machine. Each field has
 a comment that explains what the field means. Keep `mycluster/` in
 version control. That directory is the declaration of your cluster.
 
 If you do not know a machine's disks, its network interface names, or
-the extra drivers that it needs, write your best estimate now. The
+the extra drivers that it needs, write a guess now. The
 hardware report in step 5 boots the machine, examines its hardware, and
 writes a corrected manifest.
 
@@ -110,7 +109,7 @@ stick:
 
     ./liken stick -console ttyS0 channel/<version> mycluster/deployment.cpio mycluster/install.img
 
-The boot menu and all the messages then go to that port. Thus you can
+The boot menu and all the messages then go to that port. So you can
 install the machine through a serial cable or a remote console. The
 machines keep the setting, so their consoles stay available after the
 installation.
@@ -144,17 +143,18 @@ Select `liken hardware report`. This boot makes no changes to the
 machine's disks. It loads the drivers for the disks and the network
 ports, records the devices that appear, and writes a proposed manifest
 to the stick as `hardware-report.yaml`. It prints the full proposal,
-then it holds:
+then it waits for you:
 
     liken: wrote this report to the stick as hardware-report.yaml. Press Enter to reboot.
 
-The report loads storage drivers and network drivers only. A machine
-needs these two types of driver to install itself and to join a
-cluster. A driver for other hardware would change the machine while a
-person is in front of it. A display driver, for example, takes control
-of the screen that the report prints to. The machine reports its other
-hardware in the node's status after the node runs, in the list of
-unclaimed hardware.
+The report loads only storage and network drivers, which a machine
+needs to install itself and join a cluster. Other drivers can take
+over hardware that the report uses. A display driver, for example,
+takes control of the screen that the report prints to. After the
+machine joins the cluster, its `Machine` resource lists the rest of
+its hardware in `status.hardware.unclaimed`, and
+[Load the drivers for a machine's hardware](/docs/guides/hardware-modules/)
+shows how to add their drivers.
 
 Press Enter to reboot the machine. The report changes no disk, so you
 can run it as many times as necessary: after you install a disk, after
@@ -163,50 +163,49 @@ you connect a cable, or to examine a change before you install.
 Take the stick to your workstation and read `hardware-report.yaml`. The
 file is a valid Machine manifest. Each line has a comment with the data
 that the report found. The comments give the drivers that each device
-needs, in load order; each disk's size, model, and path; and each
+needs in load order, each disk's size, model, and path, and each
 interface's name, MAC address, and link state. Copy the `spec.modules`,
 `spec.network`, and `spec.storage` sections into this machine's
 manifest in `mycluster/`. Edit the parts marked `CHANGE-ME`. Then build
 the stick again with step 4, so that it contains the corrected
 manifest.
 
-Three parts of the proposal need your judgement.
-
-The storage sizes agree with the disks that the report measured, so you
-can install with them unchanged. Two roles still need your attention.
-`clusterState` contains the k3s database, the TLS files, and the
-containerd image store. Thus the workloads on the node set its size.
-Increase it if this machine runs many images, or large images. Select
-this number carefully: `podStorage` comes after `clusterState` on the
-disk, so `clusterState` cannot become larger after the installation.
+The report sizes the storage roles from the disks it measured, so you
+can install with the sizes unchanged. Two roles are worth checking.
+`clusterState` holds the k3s database, the TLS files, and the
+containerd image store, so the workloads on the node decide how large
+it must be. Increase it if this machine runs many images or large
+images. Choose the size before you install: `podStorage` comes after
+`clusterState` on the disk, so `clusterState` cannot grow after the
+installation.
 The Cluster's
 [`spec.runtime.kubelet.imageGC`](/docs/reference/cluster/#specruntimekubeletimagegc)
-section controls how much of this filesystem the image store keeps.
+section controls how much of this filesystem the image store may use.
 Set `podStorage` to the size that your workloads' volumes need. If the
-report had to decrease either size, it says so in the file.
+report had to reduce either size, it says so in the file.
 
 The proposal declares only the network ports that had a cable when the
 report ran. It lists the ports with no cable below them, as comments,
 with their names and MAC addresses. Remove the comment marks from a
 port after you connect its cable. A declared port with no cable delays
-each boot, because the machine waits a maximum of thirty seconds for
-its DHCP lease.
+each boot, because the machine waits up to thirty seconds for its DHCP
+lease.
 
-The report can give a warning that a disk needs a driver that this
-image does not contain on its boot path. You cannot put such a driver
-in `spec.modules`, because the machine reads that list only after it
+The report can warn that a disk needs a driver that this image does
+not include in its boot modules. You cannot name such a driver in
+`spec.modules`, because the machine reads that list only after it
 finds its disks. That machine needs an image built with the driver in
-its boot modules. The proposal gives the name of the driver, and it
-does not put that disk in the layout.
+its boot modules. The warning names the driver, and the proposal does
+not put that disk in the layout.
 
-Run the report on each new machine. It gives you the disks, the
-interface names, and the drivers that a datasheet does not give.
+Run the report on each new machine. It finds the disks, the interface
+names, and the drivers that a datasheet does not give.
 
 ### Then install the machine
 
 Select `install as <name>` for the machine in front of you. The machine
 partitions its blank disks, copies the operating system onto them,
-registers itself with its firmware, then it waits:
+registers itself with its firmware, and then waits for you:
 
     liken: installed to slot A. Remove the stick, then press Enter to power off. The next power-on boots from the disk.
 
@@ -215,13 +214,17 @@ order. If you power on the machine with the stick connected, the menu
 appears again. Press Enter. The machine powers off. Power it on again.
 From that time, it boots from its own disk.
 
-If the installation does not complete, it prints the error, lists the
-machine's disks, and holds:
+If the installation fails, it prints the error, lists the machine's
+disks, and waits for you:
 
     liken: press Enter to power off
 
 Correct the cause and boot the installation again. An installation is
 idempotent, so a second attempt is safe.
+
+Use the same stick for each machine. Start with the first leader. Each
+machine contacts its peers at the addresses that you declared. The
+leaders form the control plane, and the followers join it.
 
 ### To reinstall a machine that `liken` installed
 
@@ -230,9 +233,10 @@ does not recognize, so it does not erase data that it did not write.
 This protects your data, but it also prevents the plain installation
 from replacing an installation that `liken` made. To replace one, select
 `wipe and reinstall as <name>`. In one boot, it erases the disks that
-this machine's manifest declares, then it installs the machine. Your
-selection of the entry at the keyboard is the confirmation. It ends
-with the same held messages as a plain installation.
+this machine's manifest declares, then it installs the machine.
+Choosing the entry at the keyboard is the confirmation, and the boot
+asks for nothing more. It ends with the same messages as a plain
+installation.
 
 A reinstallation erases all the data that it claims, on each disk that
 the manifest declares. It erases the cluster state: this node's copy of
@@ -242,25 +246,22 @@ machine returns as a new member with the same name.
 
 A disk replacement is different. Install a new blank system disk and
 select the plain `install as <name>`. The installation claims the
-blank disk and recognizes the data disk that it wrote before. Thus the
+blank disk and recognizes the data disk that it wrote before. So the
 cluster state on that disk stays. Only `wipe and reinstall` erases a
 disk that `liken` claimed.
 
-If you reinstall with a different layout, the machine's document in the
-cluster continues to describe the old layout, and the two disagree.
-Storage roles can only increase in size, so the machine reports
-`SpecConverged: False` with the reason `StagingRejected`, and it gives
-the size that the disk now has. Correct this in this order. First, let
-the machine boot and publish its status. Then edit the Machine resource
-in the cluster to the layout that it now has. The rule compares your
-spec with the sizes that the machine last booted with. So the cluster
-accepts the edit only after the machine reports them. Also change the
-machine's manifest in `mycluster/` to the same layout, because the next
-stick and the next reinstallation start from that copy.
-
-Use the same stick for each machine. Start with the first leader. Each
-machine contacts its peers at the addresses that you declared. The
-leaders form the control plane, and the followers join it.
+If you reinstall with a different storage layout, the `Machine`
+resource in the cluster still describes the old one. A storage role
+can only grow, so when the reinstall made a partition larger than the
+old spec declares, the machine reports `SpecConverged: False` with the
+reason `StagingRejected` and gives the size that the partition has
+now. To fix it, first let the machine boot and
+publish its status. Then edit the `Machine` resource to the new
+layout. The API server compares your edit with the sizes that the
+machine last booted with, so it accepts the edit only after the
+machine has reported them. Change the machine's manifest in
+`mycluster/` to the same layout too, because the next stick and the
+next reinstall start from that copy.
 
 ## 6. Talk to your cluster
 

@@ -46,7 +46,7 @@ func TestImageRefuses(t *testing.T) {
 		reason string
 	}{
 		{"an image with no signature", func(t *testing.T, r verifytest.Registry) { r.Publish(t) }, verifytest.Version,
-			"carries no Sigstore signature"},
+			"has no Sigstore signature"},
 		{"a signature of another file", func(t *testing.T, r verifytest.Registry) {
 			r.Publish(t)
 			r.Sign(t, release(t, "release.yaml.sigstore.json"))
@@ -79,16 +79,16 @@ func TestAttestationsRefuse(t *testing.T) {
 	}{
 		{"an image with no attestation manifest", func(_ *testing.T, _ verifytest.Registry, index *v1.IndexManifest) {
 			index.Manifests = index.Manifests[:1]
-		}, "the linux/amd64 image carries no attestations"},
+		}, "the linux/amd64 image has no attestations"},
 		{"an index with no image", func(_ *testing.T, _ verifytest.Registry, index *v1.IndexManifest) {
 			index.Manifests = index.Manifests[1:]
-		}, "the index names no image"},
+		}, "the index lists no image"},
 		{"an attestation with no provenance", func(t *testing.T, r verifytest.Registry, index *v1.IndexManifest) {
 			index.Manifests[1].Digest = attestationWith(t, r, func(m *v1.Manifest) { m.Layers = m.Layers[:1] })
-		}, "carries no SLSA provenance"},
+		}, "has no SLSA provenance"},
 		{"an attestation with no SBOM", func(t *testing.T, r verifytest.Registry, index *v1.IndexManifest) {
 			index.Manifests[1].Digest = attestationWith(t, r, func(m *v1.Manifest) { m.Layers = m.Layers[1:] })
-		}, "carries no SPDX SBOM"},
+		}, "has no SPDX SBOM"},
 		{"an SBOM of another image", func(_ *testing.T, _ verifytest.Registry, index *v1.IndexManifest) {
 			index.Manifests[0].Digest, index.Manifests[1].Annotations[referenceDigest] = index.Manifests[1].Digest, index.Manifests[1].Digest.String()
 			index.Manifests[0].Platform = &v1.Platform{OS: "linux", Architecture: "arm64"}

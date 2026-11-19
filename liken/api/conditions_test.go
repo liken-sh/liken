@@ -16,10 +16,10 @@ func TestSetConditionAddsNew(t *testing.T) {
 		Type: "Ready", Status: "True", Reason: "BootComplete",
 	}, t0)
 	if len(conditions) != 1 {
-		t.Fatalf("got %d conditions", len(conditions))
+		t.Fatalf("there are %d conditions, want 1", len(conditions))
 	}
 	if !conditions[0].LastTransitionTime.Equal(t0) {
-		t.Errorf("transition time: got %v", conditions[0].LastTransitionTime)
+		t.Errorf("the transition time is %v, want %v", conditions[0].LastTransitionTime, t0)
 	}
 }
 
@@ -31,13 +31,13 @@ func TestSetConditionKeepsTransitionTimeWhenStatusUnchanged(t *testing.T) {
 		Type: "Ready", Status: "True", Reason: "StillFine",
 	}, t1)
 	if len(conditions) != 1 {
-		t.Fatalf("got %d conditions", len(conditions))
+		t.Fatalf("there are %d conditions, want 1", len(conditions))
 	}
 	if !conditions[0].LastTransitionTime.Equal(t0) {
-		t.Errorf("transition time moved to %v", conditions[0].LastTransitionTime)
+		t.Errorf("the transition time is %v, want %v", conditions[0].LastTransitionTime, t0)
 	}
 	if conditions[0].Reason != "StillFine" {
-		t.Errorf("reason not updated: %q", conditions[0].Reason)
+		t.Errorf("the reason is %q, want StillFine", conditions[0].Reason)
 	}
 }
 
@@ -49,7 +49,7 @@ func TestSetConditionMovesTransitionTimeWhenStatusChanges(t *testing.T) {
 		Type: "Ready", Status: "False", Reason: "K3sDown",
 	}, t1)
 	if !conditions[0].LastTransitionTime.Equal(t1) {
-		t.Errorf("transition time: got %v", conditions[0].LastTransitionTime)
+		t.Errorf("the transition time is %v, want %v", conditions[0].LastTransitionTime, t1)
 	}
 }
 
@@ -57,7 +57,7 @@ func TestSetConditionKeepsDistinctTypesApart(t *testing.T) {
 	conditions := SetCondition(nil, Condition{Type: "Ready", Status: "True"}, t0)
 	conditions = SetCondition(conditions, Condition{Type: "SysctlsApplied", Status: "True"}, t1)
 	if len(conditions) != 2 {
-		t.Fatalf("got %d conditions", len(conditions))
+		t.Fatalf("there are %d conditions, want 2", len(conditions))
 	}
 }
 
@@ -66,7 +66,7 @@ func TestRemoveConditionDropsTheNamedType(t *testing.T) {
 	conditions = SetCondition(conditions, Condition{Type: "RebootApproved", Status: "True"}, t0)
 	conditions = RemoveCondition(conditions, "RebootApproved")
 	if len(conditions) != 1 || conditions[0].Type != "Ready" {
-		t.Errorf("got %+v", conditions)
+		t.Errorf("the conditions are %+v, want only Ready", conditions)
 	}
 }
 
@@ -74,20 +74,20 @@ func TestRemoveConditionLeavesOthersAloneWhenTypeIsAbsent(t *testing.T) {
 	conditions := SetCondition(nil, Condition{Type: "Ready", Status: "True"}, t0)
 	conditions = RemoveCondition(conditions, "RebootApproved")
 	if len(conditions) != 1 {
-		t.Errorf("got %+v", conditions)
+		t.Errorf("the conditions are %+v, want only Ready", conditions)
 	}
 }
 
 func TestFindConditionReportsTheNamedType(t *testing.T) {
 	conditions := SetCondition(nil, Condition{Type: "Ready", Status: "True"}, t0)
 	if c := FindCondition(conditions, "Ready"); c == nil || c.Status != "True" {
-		t.Errorf("got %+v", c)
+		t.Errorf("the condition is %+v, want Ready with status True", c)
 	}
 }
 
 func TestFindConditionReportsNilWhenAbsent(t *testing.T) {
 	if c := FindCondition(nil, "Ready"); c != nil {
-		t.Errorf("got %+v", c)
+		t.Errorf("the condition is %+v, want nil", c)
 	}
 }
 
@@ -110,6 +110,6 @@ func TestTransitionsNameEachNewStatusReasonOrCondition(t *testing.T) {
 	}
 	want := []string{"Ready/Blocked", "StorageReady/ApplyFailed", "ModulesLoaded/NothingDeclared"}
 	if !slices.Equal(got, want) {
-		t.Errorf("got %q, want %q", got, want)
+		t.Errorf("the transitions are %q, want %q", got, want)
 	}
 }

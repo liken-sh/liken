@@ -75,19 +75,19 @@ func diskFile(t *testing.T, table *Table, totalSectors uint64) *os.File {
 	t.Helper()
 	chunks, err := SerializeGPT(table, totalSectors)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("serializing the table: %v", err)
 	}
 	f, err := os.Create(filepath.Join(t.TempDir(), "disk"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the disk file: %v", err)
 	}
 	t.Cleanup(func() { f.Close() })
 	if err := f.Truncate(int64(totalSectors) * SectorSize); err != nil {
-		t.Fatal(err)
+		t.Fatalf("sizing the disk file: %v", err)
 	}
 	for _, chunk := range chunks {
 		if _, err := f.WriteAt(chunk.Data, int64(chunk.LBA)*SectorSize); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing a table chunk: %v", err)
 		}
 	}
 	return f
@@ -101,10 +101,10 @@ func TestGPTRoundTripPreservesEverything(t *testing.T) {
 
 	got, err := ReadGPT(f, testDiskSectors)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the table: %v", err)
 	}
 	if got.DiskGUID != want.DiskGUID {
-		t.Error("the disk GUID did not survive the round trip")
+		t.Error("the disk GUID changed in the round trip")
 	}
 	if !slices.Equal(got.Entries, want.Entries) {
 		t.Errorf("entries changed in the round trip:\ngot  %+v\nwant %+v", got.Entries, want.Entries)
@@ -122,15 +122,15 @@ func TestGPTReaderRecoversFromACorruptPrimary(t *testing.T) {
 	f := diskFile(t, want, testDiskSectors)
 	// One flipped byte in the primary header breaks its checksum.
 	if _, err := f.WriteAt([]byte{0xFF}, 1*SectorSize+40); err != nil {
-		t.Fatal(err)
+		t.Fatalf("corrupting the table: %v", err)
 	}
 
 	got, err := ReadGPT(f, testDiskSectors)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the table: %v", err)
 	}
 	if got.DiskGUID != want.DiskGUID || !slices.Equal(got.Entries, want.Entries) {
-		t.Error("the backup copy should have supplied the whole table")
+		t.Error("the table read with a corrupt primary differs from the written table, want the backup's copy")
 	}
 }
 
@@ -140,18 +140,18 @@ func TestGPTReaderRejectsACorruptEntryArray(t *testing.T) {
 	// header. The primary fails its entries CRC, the backup fails
 	// its header CRC, and nothing is left to trust.
 	if _, err := f.WriteAt([]byte{0xFF}, 2*SectorSize+8); err != nil {
-		t.Fatal(err)
+		t.Fatalf("corrupting the table: %v", err)
 	}
 	if _, err := f.WriteAt([]byte{0xFF}, int64(testDiskSectors-1)*SectorSize+40); err != nil {
-		t.Fatal(err)
+		t.Fatalf("corrupting the table: %v", err)
 	}
 
 	_, err := ReadGPT(f, testDiskSectors)
 	if err == nil {
-		t.Fatal("expected an error when both copies are corrupt")
+		t.Fatal("reading a disk with both copies corrupt returned no error, want one")
 	}
 	if !strings.Contains(err.Error(), "primary") || !strings.Contains(err.Error(), "backup") {
-		t.Errorf("error should account for both copies: %v", err)
+		t.Errorf("the error is %v, want it to name the primary and the backup", err)
 	}
 }
 
@@ -164,20 +164,20 @@ func TestGPTReaderPrefersThePrimaryWhenCopiesDisagree(t *testing.T) {
 	other.DiskGUID = MustGUID("DEADBEEF-DEAD-BEEF-DEAD-BEEFDEADBEEF")
 	chunks, err := SerializeGPT(other, testDiskSectors)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("serializing the table: %v", err)
 	}
 	for _, chunk := range chunks[3:] { // backup entries + backup header only
 		if _, err := f.WriteAt(chunk.Data, int64(chunk.LBA)*SectorSize); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing a table chunk: %v", err)
 		}
 	}
 
 	got, err := ReadGPT(f, testDiskSectors)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the table: %v", err)
 	}
 	if got.DiskGUID != want.DiskGUID {
-		t.Error("disagreement should resolve in the primary's favor")
+		t.Error("the disk GUID is the backup's, want the primary's")
 	}
 }
 
@@ -186,7 +186,7 @@ func TestSerializeGPTRelocatesTheBackupWhenTheDiskGrows(t *testing.T) {
 	small := diskFile(t, table, testDiskSectors)
 	read, err := ReadGPT(small, testDiskSectors)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the table: %v", err)
 	}
 
 	// This re-serializes the same table for a disk twice the size.
@@ -196,7 +196,7 @@ func TestSerializeGPTRelocatesTheBackupWhenTheDiskGrows(t *testing.T) {
 	grown := diskFile(t, read, grownSectors)
 	reread, err := ReadGPT(grown, grownSectors)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the table: %v", err)
 	}
 	if reread.AlternateLBA != grownSectors-1 {
 		t.Errorf("backup header at %d, want %d", reread.AlternateLBA, grownSectors-1)
@@ -205,7 +205,7 @@ func TestSerializeGPTRelocatesTheBackupWhenTheDiskGrows(t *testing.T) {
 		t.Errorf("lastUsable = %d, want %d", reread.LastUsableLBA, LastUsableLBA(grownSectors))
 	}
 	if reread.DiskGUID != table.DiskGUID || !slices.Equal(reread.Entries, table.Entries) {
-		t.Error("growing the disk must not change any identity or extent")
+		t.Error("the GUIDs or partition extents changed when the table moved to a larger disk, want them unchanged")
 	}
 
 	// The stale backup at the old end still exists as bytes. This is
@@ -213,14 +213,14 @@ func TestSerializeGPTRelocatesTheBackupWhenTheDiskGrows(t *testing.T) {
 	// that ReadGPT consults the new end, by corrupting the primary
 	// and checking that recovery still works.
 	if _, err := grown.WriteAt([]byte{0xFF}, 1*SectorSize+40); err != nil {
-		t.Fatal(err)
+		t.Fatalf("corrupting the table: %v", err)
 	}
 	recovered, err := ReadGPT(grown, grownSectors)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the table: %v", err)
 	}
 	if !slices.Equal(recovered.Entries, table.Entries) {
-		t.Error("recovery should come from the relocated backup")
+		t.Error("the entries recovered from the relocated backup differ from the written entries")
 	}
 }
 
@@ -228,7 +228,7 @@ func TestSerializeGPTRejectsOversizedNames(t *testing.T) {
 	table := sampleTable()
 	table.Entries[0].Name = strings.Repeat("x", 37)
 	if _, err := SerializeGPT(table, testDiskSectors); err == nil {
-		t.Error("expected an error for a 37-character name")
+		t.Error("serializing a 37-character name returned no error, want one")
 	}
 }
 
@@ -238,10 +238,10 @@ func TestGPTNamesUseTheWholeField(t *testing.T) {
 	f := diskFile(t, table, testDiskSectors)
 	got, err := ReadGPT(f, testDiskSectors)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the table: %v", err)
 	}
 	if got.Entries[0].Name != table.Entries[0].Name {
-		t.Errorf("a 36-character name should survive: %q", got.Entries[0].Name)
+		t.Errorf("the name reads back as %q, want the 36-character name unchanged", got.Entries[0].Name)
 	}
 }
 
@@ -255,31 +255,31 @@ func TestWriteGPTWritesEverythingButNeedsARealDevice(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "disk")
 	f, err := os.Create(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the disk file: %v", err)
 	}
 	if err := f.Truncate(testDiskSectors * SectorSize); err != nil {
-		t.Fatal(err)
+		t.Fatalf("sizing the disk file: %v", err)
 	}
 	f.Close()
 
 	parts := []Partition{{Name: "liken:machineState", FirstLBA: 2_048, LastLBA: 4_095, TypeGUID: LinuxFilesystemData}}
 	err = Write(path, testDiskSectors, parts)
-	if err == nil || !strings.Contains(err.Error(), "re-reading partition table") {
-		t.Fatalf("expected the ioctl boundary failure: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "re-reading the partition table") {
+		t.Fatalf("the write returned %v, want the failure of re-reading the partition table", err)
 	}
 
 	// The bytes still arrived: the reader sees a valid table.
 	r, err := os.Open(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening the disk file: %v", err)
 	}
 	defer r.Close()
 	table, err := ReadGPT(r, testDiskSectors)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the table: %v", err)
 	}
 	if len(table.Entries) != 1 || table.Entries[0].Name != "liken:machineState" {
-		t.Errorf("the written table should read back: %+v", table.Entries)
+		t.Errorf("the table read back is %+v, want one partition named liken:machineState", table.Entries)
 	}
 }
 
@@ -292,28 +292,28 @@ func TestWriteTableInPlaceSkipsTheKernelReread(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "disk")
 	f, err := os.Create(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the disk file: %v", err)
 	}
 	if err := f.Truncate(testDiskSectors * SectorSize); err != nil {
-		t.Fatal(err)
+		t.Fatalf("sizing the disk file: %v", err)
 	}
 	f.Close()
 
 	if err := WriteTableInPlace(path, testDiskSectors, sampleTable()); err != nil {
-		t.Fatalf("in-place write should succeed on a plain file: %v", err)
+		t.Fatalf("writing the table in place to a plain file: %v", err)
 	}
 
 	r, err := os.Open(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening the disk file: %v", err)
 	}
 	defer r.Close()
 	table, err := ReadGPT(r, testDiskSectors)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the table: %v", err)
 	}
 	if table.AlternateLBA != testDiskSectors-1 {
-		t.Errorf("the backup should land on the last sector: %d", table.AlternateLBA)
+		t.Errorf("the backup header is at sector %d, want the last sector", table.AlternateLBA)
 	}
 }
 
@@ -329,38 +329,38 @@ func TestTableWritesPreserveTheBootCode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "disk")
 	f, err := os.Create(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the disk file: %v", err)
 	}
 	if err := f.Truncate(testDiskSectors * SectorSize); err != nil {
-		t.Fatal(err)
+		t.Fatalf("sizing the disk file: %v", err)
 	}
 	sentinel := bytes.Repeat([]byte{0xC3}, 446)
 	if _, err := f.WriteAt(sentinel, 0); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot code: %v", err)
 	}
 	f.Close()
 
 	if err := WriteTableInPlace(path, testDiskSectors, sampleTable()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the table in place: %v", err)
 	}
 
 	sector := make([]byte, SectorSize)
 	r, err := os.Open(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening the disk file: %v", err)
 	}
 	defer r.Close()
 	if _, err := r.ReadAt(sector, 0); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading sector 0: %v", err)
 	}
 	if !bytes.Equal(sector[:446], sentinel) {
-		t.Error("the boot code did not survive the table write")
+		t.Error("the boot code changed in the table write")
 	}
 	if sector[446+4] != 0xEE {
-		t.Error("the protective entry should still be written")
+		t.Error("the protective entry at byte 450 is not 0xEE")
 	}
 	if sector[510] != 0x55 || sector[511] != 0xAA {
-		t.Error("the boot signature should still be written")
+		t.Error("the boot signature is not 0x55 0xAA")
 	}
 }
 
@@ -371,31 +371,31 @@ func TestGPTReaderRejectsForeignGeometry(t *testing.T) {
 	// structurally sound, but not a table that liken ever writes.
 	h := make([]byte, SectorSize)
 	if _, err := f.ReadAt(h, 1*SectorSize); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the primary header: %v", err)
 	}
 	binary.LittleEndian.PutUint32(h[80:84], 64)
 	clear(h[16:20])
 	binary.LittleEndian.PutUint32(h[16:20], crc32.ChecksumIEEE(h[0:92]))
 	if _, err := f.WriteAt(h, 1*SectorSize); err != nil {
-		t.Fatal(err)
+		t.Fatalf("rewriting the primary header: %v", err)
 	}
 
 	// The backup still parses, so the read succeeds from there, and
 	// the primary alone must be disqualified. This corrupts the
 	// backup too, to see the primary's own error.
 	if _, err := f.WriteAt([]byte{0xFF}, int64(testDiskSectors-1)*SectorSize+40); err != nil {
-		t.Fatal(err)
+		t.Fatalf("corrupting the table: %v", err)
 	}
 	_, err := ReadGPT(f, testDiskSectors)
-	if err == nil || !strings.Contains(err.Error(), "geometry") {
-		t.Errorf("expected a geometry refusal: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "entries of") {
+		t.Errorf("the error is %v, want a refusal of the entry array size", err)
 	}
 }
 
 func TestWriteGPTTableReportsAMissingDevice(t *testing.T) {
 	err := WriteTable(filepath.Join(t.TempDir(), "absent"), testDiskSectors, sampleTable())
 	if err == nil {
-		t.Error("a device that won't open is an error")
+		t.Error("writing to a device that does not exist returned no error, want one")
 	}
 }
 
@@ -406,7 +406,7 @@ func TestReadGPTWithBothCopiesUnreadable(t *testing.T) {
 	blank := bytes.NewReader(make([]byte, 4_096*SectorSize))
 	_, err := ReadGPT(blank, 4_096)
 	if err == nil || !strings.Contains(err.Error(), "neither partition table copy is readable") {
-		t.Errorf("expected both copies to be reported: %v", err)
+		t.Errorf("the error is %v, want it to say that neither copy is readable", err)
 	}
 }
 
@@ -415,16 +415,16 @@ func TestWriteGPTTableRefusesAnUnserializableTable(t *testing.T) {
 	// so a table that cannot be laid out never touches the disk.
 	t1 := &Table{Entries: []Entry{{Name: strings.Repeat("x", NameChars+1), TypeGUID: LinuxFilesystemData}}}
 	err := WriteTable(filepath.Join(t.TempDir(), "disk"), 4_096, t1)
-	if err == nil || !strings.Contains(err.Error(), "exceeds GPT") {
-		t.Errorf("expected the serialization refusal: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "characters") {
+		t.Errorf("the error is %v, want a refusal of the partition name", err)
 	}
 }
 
 func TestSerializeGPTRefusesTooManyEntries(t *testing.T) {
 	t1 := &Table{Entries: make([]Entry, entryCount+1)}
 	_, err := SerializeGPT(t1, 1<<20)
-	if err == nil || !strings.Contains(err.Error(), "won't fit") {
-		t.Errorf("expected the entry-count refusal: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "partitions do not fit") {
+		t.Errorf("the error is %v, want a refusal of the entry count", err)
 	}
 }
 
@@ -435,7 +435,7 @@ func TestMustGUIDPanicsOnAGarbageLiteral(t *testing.T) {
 	// misreads.
 	defer func() {
 		if recover() == nil {
-			t.Error("a garbage literal must panic")
+			t.Error("MustGUID of a malformed literal did not panic, want a panic")
 		}
 	}()
 	MustGUID("not-a-guid")

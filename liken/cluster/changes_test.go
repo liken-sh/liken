@@ -134,7 +134,7 @@ func TestNextBootAppliesByDomain(t *testing.T) {
 
 func TestNextBootAppliesIdenticalSpecsNeedNoStaging(t *testing.T) {
 	if NextBootApplies(specWith(nil), specWith(nil)) {
-		t.Error("no drift needs no staging at all")
+		t.Error("NextBootApplies of identical specs is true, want false")
 	}
 	// The release feed is not part of the canonical document, so it is
 	// no drift for this classifier either.
@@ -143,7 +143,7 @@ func TestNextBootAppliesIdenticalSpecsNeedNoStaging(t *testing.T) {
 		s.Releases = ClusterReleasesSpec{Source: "https://releases.example"}
 	})
 	if NextBootApplies(specWith(nil), releasesOnly) {
-		t.Error("a release-feed edit alone is no drift at all")
+		t.Error("NextBootApplies of a change to version and releases is true, want false")
 	}
 }
 
@@ -153,13 +153,13 @@ func TestNextBootAppliesDoesNotMutateItsArguments(t *testing.T) {
 	NextBootApplies(old, new)
 	after, _ := json.Marshal(old)
 	if string(before) != string(after) {
-		t.Error("the caller's spec must not be mutated")
+		t.Error("the spec passed in changed, want it unchanged")
 	}
 }
 
 func TestRestartAppliesIdenticalSpecsNeedNoDisruption(t *testing.T) {
 	if RestartApplies(specWith(nil), specWith(nil)) {
-		t.Error("no drift needs no disruption at all")
+		t.Error("RestartApplies of identical specs is true, want false")
 	}
 }
 
@@ -174,14 +174,14 @@ func TestRestartAppliesIgnoresVersionAndReleases(t *testing.T) {
 		s.Releases = ClusterReleasesSpec{Source: "https://releases.example"}
 	})
 	if RestartApplies(specWith(nil), releasesOnly) {
-		t.Error("a release-feed edit alone is no drift at all")
+		t.Error("RestartApplies of a change to version and releases is true, want false")
 	}
 	both := specWith(func(s *ClusterSpec) {
 		s.Version = "0.3.0"
 		s.Features["traefik"] = &FeatureConfig{}
 	})
 	if !RestartApplies(specWith(nil), both) {
-		t.Error("the release feed must not drag a feature toggle to a reboot")
+		t.Error("RestartApplies of a feature toggle with a changed version is false, want true")
 	}
 }
 
@@ -199,10 +199,10 @@ func TestRestartAppliesTreatsAnUnknownFieldAsRebootClass(t *testing.T) {
 		s.Features["traefik"] = &FeatureConfig{}
 	})
 	if RestartApplies(specWith(nil), changed) {
-		t.Error("any residual difference beyond the restart-class fields must fall to reboot")
+		t.Error("RestartApplies of a change to the cluster CIDR is true, want false")
 	}
 	if NextBootApplies(specWith(nil), changed) {
-		t.Error("any residual difference beyond the origin and the endpoint must fall to a heavier tier")
+		t.Error("NextBootApplies of a change to the cluster CIDR is true, want false")
 	}
 }
 
@@ -215,6 +215,6 @@ func TestRestartAppliesDoesNotMutateItsArguments(t *testing.T) {
 	RestartApplies(old, new)
 	after, _ := json.Marshal(old)
 	if string(before) != string(after) {
-		t.Error("the caller's spec must not be mutated")
+		t.Error("the spec passed in changed, want it unchanged")
 	}
 }

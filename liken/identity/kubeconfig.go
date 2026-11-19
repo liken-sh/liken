@@ -157,7 +157,7 @@ func readCA(tls, name string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	}
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
-		return nil, nil, fmt.Errorf("%s.crt is not PEM", name)
+		return nil, nil, fmt.Errorf("%s has no PEM block", filepath.Join(tls, name+".crt"))
 	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
@@ -170,7 +170,7 @@ func readCA(tls, name string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	}
 	block, _ = pem.Decode(keyPEM)
 	if block == nil {
-		return nil, nil, fmt.Errorf("%s.key is not PEM", name)
+		return nil, nil, fmt.Errorf("%s has no PEM block", filepath.Join(tls, name+".key"))
 	}
 	key, err := x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {

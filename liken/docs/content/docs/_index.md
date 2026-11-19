@@ -5,7 +5,7 @@ title: Manual
 # The `liken` manual
 
 This manual tells you how to set up and run a `liken` cluster. The
-concepts section gives the model. The guides give the steps for the
+concepts section explains how the system works. The guides give the steps for the
 common tasks. The reference describes the API resources, the release
 channel, and the `liken` command.
 

@@ -11,8 +11,8 @@ without a privileged container. The operating system publishes whole
 pieces of hardware as devices, such as a sound card, a GPU, or a
 Bluetooth radio, as [Devices](/docs/reference/devices/) describes.
 A pod usually needs one output of a card, not the whole card. So each
-operator claims the hardware for its own pod, and publishes each
-output as a device that a pod can claim.
+operator claims the whole piece of hardware for its own pod, and
+publishes each output as a device that your pod can claim.
 
 For example, a pod that plays a film can claim one monitor output at
 `1280x720` and one Bluetooth speaker with the `aptx` codec. The pod
@@ -20,13 +20,13 @@ isn't privileged. Its container gets `WAYLAND_DISPLAY` for the monitor
 and `PIPEWIRE_REMOTE` for the speaker, and draws and plays through
 those sockets.
 
-Each operator is a DRA driver, with its own `ResourceSlice` on each
+Each operator is a DRA driver with its own `ResourceSlice` on each
 node, separate from the operating system's driver, `liken.sh`. A claim
-can carry settings for the device in an opaque config block, such as
-a monitor's `mode` or a speaker's `codec`. The operator reads the
-block when it prepares the claim, and sets the device up that way
-before the pod starts. A `DeviceClass` can carry the same block as
-cluster policy, and the claim's own block wins.
+can set up the device in an opaque config block, for example with a
+monitor's `mode` or a speaker's `codec`. The operator reads the block
+when it prepares the claim, and sets up the device before the pod
+starts. A `DeviceClass` can have the same block as a default for the
+cluster, and the claim's own block overrides it.
 
 ## The operators
 
@@ -41,10 +41,10 @@ several namespaces on one monitor, each in its own rectangle, and a
 machine and publishes each physical audio output as a device of the
 driver `audio.liken.sh`: the speakers of a monitor, the analog jack, a
 USB sound card, and each paired Bluetooth speaker. A claim on a
-Bluetooth speaker can set its `codec`. A `Sink` and a `Source` hold
-the volume and mute state of each output and input, and you can
-change them without a claim and without interrupting a pod that is
-playing.
+Bluetooth speaker can set its `codec`. A `Sink` shows and sets the
+volume and mute state of each output, and a `Source` does the same
+for each input. You can change them without a claim, and the change
+does not interrupt a pod that is playing.
 
 [`bluetooth-operator`](https://liken.sh/bluetooth/) runs BlueZ on each
 machine that has a Bluetooth radio, pairs controllers through a
@@ -83,15 +83,17 @@ capture image builds on the `ffmpeg` image.
   media bus of each Bluetooth radio, so `audio-operator` claims both.
   Another DRA driver can set the same attribute on a device it
   publishes, and `audio-operator` claims that device too.
-* One monitor with its own speakers. A claim can ask for a monitor
-  output and the audio output of the same monitor in one request,
-  matched on the attribute `monitor.liken.sh/id`.
+* One monitor with its own speakers. A claim can request a monitor
+  output and the audio output of the same monitor together, with a
+  constraint that both have the same `monitor.liken.sh/id`.
 * Volume control from another program. A program that writes
-  `status.session.volumeAsk` on a `Sink` asks `audio-operator` to
-  change the volume within the limits that the `Sink` sets.
-  `media-operator` uses it.
+  `status.session.volumeAsk` on a `Sink` requests a volume level, and
+  `audio-operator` applies each new request once. `media-operator`
+  writes these requests for a remote's volume keys, and keeps each
+  request at or below the `Sink`'s `spec.volume.max`.
 * Capture. `kubectl liken display capture` and
   `kubectl liken audio capture` record what a monitor shows and what a
   speaker plays, and each operator serves the same capture over HTTP.
-* Raw panel control. A claim on the I2C bus of a monitor gives a pod
-  the bus, for a program that speaks DDC/CI to the panel.
+* Raw panel control. A claim on the I2C bus of a monitor gives the
+  pod access to the bus, for a program that sends DDC/CI commands to
+  the panel.

@@ -30,10 +30,10 @@ metadata:
   name: fixture
 `
 	if err := os.WriteFile(filepath.Join(dir, "cluster.yaml"), []byte(cluster), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing cluster.yaml: %v", err)
 	}
 	if err := os.Mkdir(filepath.Join(dir, "machines"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the machines directory: %v", err)
 	}
 	m := strings.Builder{}
 	m.WriteString(`apiVersion: liken.sh/v1alpha1
@@ -48,7 +48,7 @@ metadata:
 		}
 	}
 	if err := os.WriteFile(filepath.Join(dir, "machines", "node-1.yaml"), []byte(m.String()), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the machine document: %v", err)
 	}
 	return dir
 }
@@ -71,7 +71,7 @@ spec:
           security: %q
 `, ssid, security)
 	if err := os.WriteFile(filepath.Join(dir, "machines", "node-1.yaml"), []byte(m), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the machine document: %v", err)
 	}
 	return dir
 }
@@ -83,14 +83,14 @@ func fixtureIdentity(t *testing.T, psk map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
 	if err := identity.Mint(dir, io.Discard); err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the identity: %v", err)
 	}
 	for ssid, passphrase := range psk {
 		if err := os.MkdirAll(filepath.Join(dir, "psk"), 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the psk directory: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(dir, "psk", ssid), []byte(passphrase), 0o600); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the passphrase file: %v", err)
 		}
 	}
 	return dir
@@ -108,11 +108,11 @@ func builtLayerFrom(t *testing.T, manifests, identityDir string) map[string]cpio
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "deployment.cpio")
 	if err := Layer(manifests, identityDir, out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the layer: %v", err)
 	}
 	raw, err := os.ReadFile(out)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the layer: %v", err)
 	}
 	byName := map[string]cpioEntry{}
 	for _, e := range readArchive(t, raw) {
@@ -132,11 +132,11 @@ func TestLayerCarriesTheDeployment(t *testing.T) {
 		"var/lib/rancher/k3s/server/tls/etcd/peer-ca.key",
 	} {
 		if _, ok := entries[want]; !ok {
-			t.Errorf("missing %s", want)
+			t.Errorf("the layer has no %s", want)
 		}
 	}
 	if e := entries["etc/liken/token"]; e.mode&0o777 != 0o600 {
-		t.Errorf("token mode: %o", e.mode&0o777)
+		t.Errorf("the token mode is %o, want 600", e.mode&0o777)
 	}
 }
 
@@ -147,18 +147,18 @@ func TestLayerLeavesTheKubeconfigBehind(t *testing.T) {
 	manifests := fixtureManifests(t)
 	identityDir := t.TempDir()
 	if err := identity.Mint(identityDir, io.Discard); err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the identity: %v", err)
 	}
 	if err := identity.Kubeconfig(identityDir, "mycluster", "https://127.0.0.1:16443", io.Discard); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the kubeconfig: %v", err)
 	}
 	out := filepath.Join(t.TempDir(), "deployment.cpio")
 	if err := Layer(manifests, identityDir, out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the layer: %v", err)
 	}
 	raw, err := os.ReadFile(out)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the layer: %v", err)
 	}
 	for _, e := range readArchive(t, raw) {
 		if strings.Contains(e.name, "kubeconfig") {
@@ -170,7 +170,7 @@ func TestLayerLeavesTheKubeconfigBehind(t *testing.T) {
 func TestLayerRefusesAnUnwritableOutput(t *testing.T) {
 	identityDir := t.TempDir()
 	if err := identity.Mint(identityDir, io.Discard); err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the identity: %v", err)
 	}
 	out := filepath.Join(t.TempDir(), "no-such-dir", "deployment.cpio")
 	if err := Layer(fixtureManifests(t), identityDir, out); err == nil {
@@ -184,10 +184,10 @@ func TestLayerNeedsACompleteIdentity(t *testing.T) {
 	// never join their cluster.
 	identityDir := t.TempDir()
 	if err := identity.Mint(identityDir, io.Discard); err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the identity: %v", err)
 	}
 	if err := os.Remove(filepath.Join(identityDir, "token")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the token: %v", err)
 	}
 	out := filepath.Join(t.TempDir(), "deployment.cpio")
 	if err := Layer(fixtureManifests(t), identityDir, out); err == nil {
@@ -267,11 +267,11 @@ spec:
 		t.Run(name, func(t *testing.T) {
 			manifests := fixtureManifests(t)
 			if err := os.WriteFile(filepath.Join(manifests, tc.file), []byte(tc.doc), 0o644); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing the document: %v", err)
 			}
 			identityDir := t.TempDir()
 			if err := identity.Mint(identityDir, io.Discard); err != nil {
-				t.Fatal(err)
+				t.Fatalf("minting the identity: %v", err)
 			}
 			out := filepath.Join(t.TempDir(), "deployment.cpio")
 			err := Layer(manifests, identityDir, out)
@@ -279,7 +279,7 @@ spec:
 				t.Fatal("the layer packed a document a machine would refuse")
 			}
 			if !strings.Contains(err.Error(), tc.file) {
-				t.Errorf("the error should name %s, got %v", tc.file, err)
+				t.Errorf("the error is %v, want it to name %s", err, tc.file)
 			}
 			// Nothing is written until everything validates, so a
 			// refusal leaves no half-built archive for a later step to
@@ -302,10 +302,10 @@ func TestLayerCarriesAPassphrase(t *testing.T) {
 		t.Fatal("the layer carries no passphrase for homenet")
 	}
 	if string(e.data) != "swordfish1" {
-		t.Errorf("passphrase content: %q", e.data)
+		t.Errorf("the passphrase is %q, want swordfish1", e.data)
 	}
 	if e.mode&0o777 != 0o600 {
-		t.Errorf("passphrase mode: %o", e.mode&0o777)
+		t.Errorf("the passphrase mode is %o, want 600", e.mode&0o777)
 	}
 }
 
@@ -327,7 +327,7 @@ func TestLayerRefusesAWirelessMachineWithNoPassphrase(t *testing.T) {
 			}
 			want := filepath.Join(identityDir, "psk", "homenet")
 			if !strings.Contains(err.Error(), want) {
-				t.Errorf("the error should name %s, got %v", want, err)
+				t.Errorf("the error is %v, want it to name %s", err, want)
 			}
 			// The refusal happens before the output exists, so no
 			// half-built archive is left for a later step to pack.

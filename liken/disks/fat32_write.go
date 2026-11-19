@@ -98,7 +98,7 @@ func NewFATWriter(dev interface {
 		return nil, fmt.Errorf("reading the boot sector: %w", err)
 	}
 	if boot[510] != 0x55 || boot[511] != 0xAA || string(boot[82:90]) != "FAT32   " {
-		return nil, fmt.Errorf("the volume does not carry a FAT32 boot sector")
+		return nil, fmt.Errorf("the volume has no FAT32 boot sector")
 	}
 
 	w := &FATWriter{
@@ -109,7 +109,7 @@ func NewFATWriter(dev interface {
 	}
 	numFATs := uint32(boot[16])
 	if numFATs != 2 {
-		return nil, fmt.Errorf("expected 2 FATs, found %d", numFATs)
+		return nil, fmt.Errorf("the volume has %d FATs, and the writer needs 2", numFATs)
 	}
 	w.dataStart = w.reservedSectors + numFATs*w.fatSectors
 
@@ -134,7 +134,7 @@ func NewFATWriter(dev interface {
 		return nil, fmt.Errorf("reading the volume label: %w", err)
 	}
 	if w.labelEntry[11] != 0x08 {
-		return nil, fmt.Errorf("the root directory does not begin with the volume label the format writes")
+		return nil, fmt.Errorf("the first record of the root directory is not a volume label")
 	}
 
 	w.root = &fatDir{firstCluster: 2}
@@ -161,7 +161,7 @@ func (w *FATWriter) allocate(n int64) (uint32, error) {
 	}
 	first := w.next
 	if int64(first)+n > int64(len(w.fat)) {
-		return 0, fmt.Errorf("the volume is full: %d clusters wanted, %d left", n, int64(len(w.fat))-int64(w.next))
+		return 0, fmt.Errorf("the volume is full: the file needs %d clusters and %d are free", n, int64(len(w.fat))-int64(w.next))
 	}
 	for i := int64(0); i < n-1; i++ {
 		w.fat[first+uint32(i)] = first + uint32(i) + 1
@@ -181,7 +181,7 @@ func (w *FATWriter) Mkdir(dirPath string) error {
 	}
 	parent, ok := w.dirs[parentOf(dirPath)]
 	if !ok {
-		return fmt.Errorf("directory %q has no parent yet", dirPath)
+		return fmt.Errorf("the parent of directory %q does not exist", dirPath)
 	}
 	d := &fatDir{name: path.Base(dirPath), parent: parent}
 	parent.subdirs = append(parent.subdirs, d)
@@ -197,7 +197,7 @@ func (w *FATWriter) WriteFile(filePath string, r io.Reader, size int64) error {
 	filePath = strings.Trim(filePath, "/")
 	dir, ok := w.dirs[parentOf(filePath)]
 	if !ok {
-		return fmt.Errorf("file %q has no directory yet", filePath)
+		return fmt.Errorf("the directory of file %q does not exist", filePath)
 	}
 
 	clusterBytes := w.clusterBytes()

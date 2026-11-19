@@ -31,16 +31,38 @@ func requestedMachine(policy machine.RebootPolicy) *machine.Machine {
 func TestRenderRequestSaysAnAutoMachineNeedsNothingMore(t *testing.T) {
 	got := renderRequest(requestedMachine(machine.RebootAuto), "mycluster", "node-5.reboot-3943abfa6adf")
 	for _, want := range []string{
-		"filed: Disruption node-5.reboot-3943abfa6adf",
-		"takes a reboot turn from the cluster, drains its workloads, and reboots",
-		"Nothing is staged",
+		"created: Disruption node-5.reboot-3943abfa6adf",
+		"waits for a reboot turn from the cluster, drains its workloads, and reboots",
+		"No change is staged",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("missing %q in:\n%s", want, got)
+			t.Fatalf("the report is missing %q, want it in:\n%s", want, got)
 		}
 	}
 	if strings.Contains(got, "approve-reboot") {
-		t.Fatalf("an Auto machine takes no second step:\n%s", got)
+		t.Fatalf("the report for an Auto machine names approve-reboot, want no second step:\n%s", got)
+	}
+}
+
+func TestRenderRequestListsTheStagedChangesTheRebootApplies(t *testing.T) {
+	m := requestedMachine(machine.RebootAuto)
+	m.Status.Pending = []machine.PendingDisruption{
+		{Condition: "RebootRequestHonored", Kind: machine.DisruptionReboot, Hash: "3943abfa6adf0000", Summary: "a person requested a reboot"},
+		{Condition: "SpecConverged", Kind: machine.DisruptionReboot, Hash: "a1b2c3d4e5f60000", Summary: "kernel arguments change"},
+	}
+	got := renderRequest(m, "mycluster", "node-5.reboot-3943abfa6adf")
+	for _, want := range []string{
+		"The reboot also applies every staged change",
+		"kernel arguments change (a1b2c3d4e5f6)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the report is missing %q, want it in:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"No change is staged", "a person requested a reboot"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("the report contains %q, want it left out:\n%s", unwanted, got)
+		}
 	}
 }
 
@@ -51,7 +73,7 @@ func TestRenderRequestNamesTheApprovalCommandForAManualMachine(t *testing.T) {
 		"liken approve-reboot mycluster node-5",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("missing %q in:\n%s", want, got)
+			t.Fatalf("the report is missing %q, want it in:\n%s", want, got)
 		}
 	}
 }
@@ -60,7 +82,7 @@ func TestRenderRequestUsesTheDefaultPolicyWhenNoneIsDeclared(t *testing.T) {
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-5"}}
 	m.Status.Boot.Time = &requestBootTime
 	if got := renderRequest(m, "mycluster", "node-5.reboot-3943abfa6adf"); !strings.Contains(got, "approve-reboot") {
-		t.Fatalf("Manual is the default, so the report must name the second step:\n%s", got)
+		t.Fatalf("the report for a machine with no rebootPolicy lacks approve-reboot, want it because Manual is the default:\n%s", got)
 	}
 }
 
@@ -97,18 +119,18 @@ func TestRequestRebootRefusesAMachineThatReportsNoBoot(t *testing.T) {
 	var out bytes.Buffer
 	err := requestReboot([]string{"-server", server.URL, dir, "node-5"}, &out)
 	if err == nil {
-		t.Fatal("a machine with no boot record has no boot to name")
+		t.Fatal("requestReboot returned no error for a machine with no boot record, want an error")
 	}
-	if !strings.Contains(err.Error(), "no boot time") {
-		t.Fatalf("got %v", err)
+	if !strings.Contains(err.Error(), "boot time") {
+		t.Fatalf("the error is %q, want it to mention the boot time", err)
 	}
 	if gotPatch != nil {
-		t.Fatalf("nothing should be written: %s", gotPatch)
+		t.Fatalf("the command sent the patch %s, want no write", gotPatch)
 	}
 }
 
 func TestRequestRebootChecksItsArguments(t *testing.T) {
 	if err := requestReboot([]string{"mycluster"}, io.Discard); err == nil {
-		t.Fatal("the command takes a deployment directory and a machine")
+		t.Fatal("requestReboot with one argument returned no error, want an error because it takes a deployment directory and a machine")
 	}
 }

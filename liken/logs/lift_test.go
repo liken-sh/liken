@@ -53,7 +53,7 @@ func TestLiftLogrus(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			want, err := time.Parse(time.RFC3339, c.time)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the expected time: %v", err)
 			}
 			when, severity := lift(c.line, observed)
 			if !when.Equal(want) {

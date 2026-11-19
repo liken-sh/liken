@@ -20,10 +20,10 @@ func readArchive(t *testing.T, raw []byte) []cpioEntry {
 	t.Helper()
 	entries, rest, err := readCPIO(raw)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the archive: %v", err)
 	}
 	if len(rest) != 0 {
-		t.Errorf("%d bytes after the trailer", len(rest))
+		t.Errorf("%d bytes follow the trailer, want 0", len(rest))
 	}
 	return entries
 }
@@ -32,27 +32,27 @@ func TestArchiveRoundTrips(t *testing.T) {
 	var buf bytes.Buffer
 	w := newArchive(&buf)
 	if err := w.dir("etc", 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the directory etc: %v", err)
 	}
 	if err := w.file("etc/token", []byte("secret\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the file etc/token: %v", err)
 	}
 	if err := w.close(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("closing the archive: %v", err)
 	}
 
 	entries := readArchive(t, buf.Bytes())
 	if len(entries) != 2 {
-		t.Fatalf("got %d entries", len(entries))
+		t.Fatalf("the archive has %d entries, want 2", len(entries))
 	}
 	if entries[0].name != "etc" || entries[0].mode&0o170000 != 0o040000 {
-		t.Errorf("dir entry: %+v", entries[0])
+		t.Errorf("the first entry is %+v, want the directory etc", entries[0])
 	}
 	if entries[1].name != "etc/token" || string(entries[1].data) != "secret\n" {
-		t.Errorf("file entry: %+v", entries[1])
+		t.Errorf("the second entry is %+v, want the file etc/token with the content \"secret\\n\"", entries[1])
 	}
 	if entries[1].mode&0o777 != 0o600 {
-		t.Errorf("token mode: %o", entries[1].mode&0o777)
+		t.Errorf("etc/token has mode %o, want 600", entries[1].mode&0o777)
 	}
 }
 
@@ -60,10 +60,10 @@ func TestArchiveEntriesBelongToRoot(t *testing.T) {
 	var buf bytes.Buffer
 	w := newArchive(&buf)
 	if err := w.file("f", []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the file f: %v", err)
 	}
 	if err := w.close(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("closing the archive: %v", err)
 	}
 	for _, e := range readArchive(t, buf.Bytes()) {
 		if e.uid != 0 || e.gid != 0 {
@@ -80,13 +80,13 @@ func TestArchiveAlignsOddSizes(t *testing.T) {
 	for i := range 5 {
 		name := fmt.Sprintf("f%d", i)
 		if err := w.file(name, bytes.Repeat([]byte("x"), i), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the file %s: %v", name, err)
 		}
 	}
 	if err := w.close(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("closing the archive: %v", err)
 	}
 	if got := len(readArchive(t, buf.Bytes())); got != 5 {
-		t.Errorf("got %d entries", got)
+		t.Errorf("the archive has %d entries, want 5", got)
 	}
 }

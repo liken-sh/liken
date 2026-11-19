@@ -104,7 +104,7 @@ func TestARequestIsOwnedByItsMachine(t *testing.T) {
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-4", UID: "uid-node-4"}}
 	raw, err := json.Marshal(New(OwnName("node-4"), m, Spec{Machine: "node-4"}))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the Disruption: %v", err)
 	}
 	var encoded struct {
 		Metadata struct {
@@ -116,16 +116,16 @@ func TestARequestIsOwnedByItsMachine(t *testing.T) {
 		} `json:"metadata"`
 	}
 	if err := json.Unmarshal(raw, &encoded); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the Disruption: %v", err)
 	}
 	if encoded.Metadata.Name != "node-4.machine-operator" || len(encoded.Metadata.OwnerReferences) != 1 ||
 		encoded.Metadata.OwnerReferences[0].UID != "uid-node-4" {
-		t.Errorf("metadata = %+v", encoded.Metadata)
+		t.Errorf("metadata is %+v, want name node-4.machine-operator and one owner with uid uid-node-4", encoded.Metadata)
 	}
 }
 
 func TestARebootRequestIsNamedForItsBoot(t *testing.T) {
 	if got := RebootRequestName("node-4", "0c1e9a2b77b0aaff"); got != "node-4.reboot-0c1e9a2b77b0" {
-		t.Errorf("name = %s", got)
+		t.Errorf("the name is %s, want node-4.reboot-0c1e9a2b77b0", got)
 	}
 }

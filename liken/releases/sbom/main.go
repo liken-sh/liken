@@ -53,7 +53,7 @@ func (p *pairs) String() string { return fmt.Sprint(*p) }
 func (p *pairs) Set(text string) error {
 	key, value, ok := strings.Cut(text, "=")
 	if !ok || key == "" || value == "" {
-		return fmt.Errorf("%q is not <name>=<value>", text)
+		return fmt.Errorf("%q does not have the form <name>=<value>", text)
 	}
 	*p = append(*p, [2]string{key, value})
 	return nil
@@ -62,20 +62,20 @@ func (p *pairs) Set(text string) error {
 func run(args []string) error {
 	fs := flag.NewFlagSet("sbom", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	version := fs.String("version", "", "the release's version")
-	out := fs.String("out", "", "the file to write")
-	buildroot := fs.String("buildroot", "", "buildroot's CycloneDX SBOM")
+	version := fs.String("version", "", "the version of the release")
+	out := fs.String("out", "", "the file to write the SBOM to")
+	buildroot := fs.String("buildroot", "", "the CycloneDX SBOM that buildroot wrote")
 	var scans, claims pairs
-	fs.Var(&scans, "syft", "<parent>=<file>: a syft SBOM of what the parent component holds, liken for the release")
-	fs.Var(&claims, "claim", "<path>=<component>: the component that names the file at the path in a scan")
+	fs.Var(&scans, "syft", "<parent>=<file>: a syft SBOM of the files in the parent component, where liken is the parent for the release itself")
+	fs.Var(&claims, "claim", "<path>=<component>: the component that the file at <path> in a scan belongs to")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	switch {
 	case *version == "" || *out == "" || *buildroot == "":
-		return errors.New("-version, -out, and -buildroot are required")
+		return errors.New("the flags -version, -out, and -buildroot are required")
 	case fs.NArg() == 0:
-		return errors.New("name the pin.toml of each pin that the release ships")
+		return errors.New("the command line lists no pin.toml, and needs one for each pin that the release ships")
 	}
 	in := inputs{version: *version, manifests: fs.Args(), buildroot: *buildroot, claims: map[string]string{}}
 	for _, s := range scans {

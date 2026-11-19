@@ -6,41 +6,40 @@ toc: true
 
 # Resource limits
 
-A resource limit is a ceiling the kernel puts on one process: how many
-files it may hold open, how many processes one user may run, how large
-a core dump may be. Every limit has two halves. The soft limit is the
-one in force. The hard limit is the ceiling on the soft limit. A
-process may lower either half, and may raise its soft limit up to its
-hard limit, but it can never raise its hard limit.
+A resource limit is a limit that the kernel applies to one process:
+how many files it may have open, how many processes one user may run,
+how large a core dump may be. Every limit has a soft limit and a hard
+limit. The kernel enforces the soft limit, and the hard limit is the
+highest value the soft limit can take. A process may lower either
+one, and may raise its soft limit up to its hard limit, but it cannot
+raise its hard limit.
 
-Two rules make these limits different from
-[sysctls](/docs/reference/sysctls/). The kernel fixes a
-process's limits when the process starts, and it copies them from the
-parent. So a limit reaches a program only if whoever started that
-program held the limit first. Nothing can change a program that is
-already running.
+Resource limits work differently from
+[sysctls](/docs/reference/sysctls/). A process gets its limits from
+its parent when it starts, so a limit reaches a program only if the
+process that started it already had the limit. You cannot change the
+limits of a program that is already running.
 
-Most Linux distributions set these limits for each service, in the
+Most Linux distributions set these limits for each service with the
 `Limit` directives of its systemd unit, and systemd applies them when
-it starts the service. `liken` runs no systemd. It applies its own set
-instead, listed below.
+it starts the service. `liken` has no systemd, so it sets the limits
+listed below itself.
 
 ## How the values are applied
 
-`init` applies two sets of limits to itself, in this order.
+At boot, before k3s starts, `init` applies two sets of limits to
+itself, in this order:
 
 1. `liken`'s own values, listed on this page.
 2. The values in the machine's
    [`spec.rlimits`](/docs/reference/machine/#spec--rlimits).
 
-Both run at boot, before k3s starts. `init` is the first process on the
-machine, so every process started after this point inherits the
-result: k3s, containerd, the containerd shims, and every container.
-Inheritance is the whole mechanism. There is no file to write and no
-per-container setting.
+`init` is the first process on the machine, so k3s, containerd, the
+containerd shims, and every container inherit the result. No file and
+no per-container setting is needed.
 
-Because `spec.rlimits` is applied second, a name there overrides
-`liken`'s value for that resource:
+Because `spec.rlimits` is applied second, a resource that you set
+there overrides `liken`'s value:
 
 ```yaml
 apiVersion: liken.sh/v1alpha1
@@ -53,67 +52,61 @@ spec:
     memlock: "67108864"
 ```
 
-An edit to `spec.rlimits` takes effect at the next boot, not on the
-next reconcile pass. This is the one way resource limits differ from
-sysctls in practice. The kernel fixes a process's limits when it
-forks, so nothing can raise the ceiling of a k3s that is already
-running. The operator stages the edit and reports it, and
-[`rebootPolicy`](/docs/reference/machine/#spec--rebootpolicy) says
-who starts the boot that applies it. A container
-that is already running keeps its old limits until its pod restarts,
-which the reboot does anyway.
+An edit to `spec.rlimits` takes effect at the next boot, because a
+running k3s keeps the limits it started with. The operator stages the
+edit and reports it, and
+[`rebootPolicy`](/docs/reference/machine/#spec--rebootpolicy) sets
+who starts the reboot that applies it. The reboot also restarts every
+container, so each container gets the new limits.
 
 ## Writing a value
 
-A value uses the same form a systemd unit file uses.
+A value has the same form as in a systemd unit file.
 
 | Form | Meaning |
 | --- | --- |
-| `"1048576"` | Sets both halves to 1048576. |
-| `"infinity"` | Sets both halves to no limit. |
+| `"1048576"` | Sets the soft and the hard limit to 1048576. |
+| `"infinity"` | Removes the soft and the hard limit. |
 | `"1024:1048576"` | Sets the soft limit to 1024 and the hard limit to 1048576. |
 
-A soft limit above the hard limit is refused, because no process may
-exceed its hard limit.
+A soft limit above the hard limit is refused.
 
-These resource names are accepted: `nofile`, `nproc`, `core`,
-`memlock`, `stack`, `fsize`, and `nice`. Any other name is refused,
-so a misspelling reports itself instead of applying nothing.
+The accepted resource names are `nofile`, `nproc`, `core`, `memlock`,
+`stack`, `fsize`, and `nice`. Any other name is refused, so a
+misspelled name is an error and is not silently ignored.
 
 ## The values `liken` sets
 
-This list holds only the resources where `liken` differs from the
-kernel. Every other resource keeps the kernel's own default. Both
-values match k3s's own systemd unit.
+`liken` sets only the resources below, and every other resource keeps
+the kernel's default. Both values are the same as in k3s's own systemd
+unit.
 
 | Resource | Value | Why |
 | --- | --- | --- |
-| `nofile` | `1048576` | The kernel allows 1024 open files, with a ceiling of 4096. A container runtime and its workloads exhaust this quickly, and a program that runs out reports `Too many open files` on a machine with no shortage of memory or disk. 1048576 is also the kernel's `fs.nr_open` default, which is the largest value any process may ask for. |
-| `nproc` | `infinity` | The kernel derives this ceiling from the machine's memory, so a small machine gets a small one. Root is exempt from the check, which hides the problem until a workload runs as an ordinary user. Kubernetes counts processes per pod, in cgroups, which is where a limit on a workload belongs. |
+| `nofile` | `1048576` | The kernel's default is 1024 open files, with a hard limit of 4096. A container runtime and its workloads use that up quickly, and a program that runs out reports `Too many open files` even when the machine has memory and disk to spare. 1048576 is also the kernel's default `fs.nr_open`, the largest value a process may ask for. |
+| `nproc` | `infinity` | The kernel computes the default from the machine's memory, so a small machine gets a low limit. The limit does not apply to root, so the problem shows only when a workload runs as an ordinary user. To limit the processes of a pod, use the kubelet's per-pod limit, which it enforces through the pod's cgroup. |
 
-## The value `liken` does not set
+## Core dumps
 
 k3s's unit also sets `LimitCORE=infinity`, and `liken` does not.
 
-The kernel already grants an unlimited hard limit for core dumps, so
-the only difference is the soft limit, which the kernel leaves at 0.
-On a systemd machine, raising it is safe because `kernel.core_pattern`
-sends each dump to `systemd-coredump`, which bounds its size and
-expires it. `liken` has no such collector, so `core_pattern` keeps the
-kernel's own value and a crashing process writes a file the size of
-its memory into its working directory. For a container that directory
-is inside its own writable layer, which is on the same filesystem
-as the cluster's datastore.
+The kernel's default hard limit for core dumps is already unlimited,
+so the unit only raises the soft limit from 0. On a systemd machine
+that is safe, because `kernel.core_pattern` sends each dump to
+`systemd-coredump`, which limits their size and deletes old ones.
+`liken` has no such collector, so `core_pattern` keeps the kernel's
+default, and a crashing process writes a file as large as its memory
+into its working directory. For a container, that directory is in its
+writable layer, on the same filesystem as the cluster's datastore.
 
-Nothing is blocked by this. A program that needs a core dump can raise
-its own soft limit, because the hard limit is already unlimited. A
-deployment that needs core dumps from every process can set `core` in
-`spec.rlimits`.
+A program that needs a core dump can raise its own soft limit,
+because the hard limit is already unlimited. To get core dumps from
+every process, set `core` in `spec.rlimits`.
 
 ## Reading the result
 
-`status.rlimits` reports what the kernel holds, read back after both
-sets are applied:
+`status.rlimits` shows the limits that `init` has, read back from the
+kernel after both sets are applied:
 
 ```console
 $ kubectl get machine node-1 -o jsonpath='{.status.rlimits}' | jq
@@ -124,16 +117,16 @@ $ kubectl get machine node-1 -o jsonpath='{.status.rlimits}' | jq
 }
 ```
 
-A resource `liken` could not set is missing from that map, because a
-failed write is never read back. So the map lists the limits that
-currently hold, not the limits somebody asked for.
+`init` reads each limit back from the kernel, so when a value fails to
+apply, the map shows the value the kernel kept, not the value you
+asked for. The boot log has a line for each limit that failed.
 
-`status.boot.rlimits` reports what the manifest of that boot declared.
-It holds the request rather than the result, so it is the record the
-operator compares a later edit against.
+`status.boot.rlimits` shows the `spec.rlimits` of the manifest that
+the current boot used. It does not include `liken`'s own values. The
+operator compares a later edit of `spec.rlimits` with it.
 
-On the machine itself, the kernel reports the same limits in its own
-layout. Read them for the first process, and for any process below it:
+On the machine, the kernel shows the limits of each process in
+`/proc/<pid>/limits`. Read it for the first process, or for any other:
 
 ```console
 $ cat /proc/1/limits
@@ -142,7 +135,6 @@ Limit                     Soft Limit   Hard Limit   Units
 Max open files            1048576      1048576      files
 ```
 
-Read the same file for a process inside a container to confirm that
-the limits reached the workload. `/proc/sys` is the wrong place to
-look: resource limits belong to a process, so no file under `/proc/sys`
-reports or changes them.
+Read the same file for a process in a container to confirm that the
+limits reached the workload. Resource limits belong to a process, so
+no file under `/proc/sys` shows or changes them.

@@ -30,8 +30,8 @@ upgrade:
     node-4   follower   Ready    13h      10.10.0.4/24   2026.08.12-001   7.1.5-070105-generic   18d
     node-5   follower   Ready    13h      10.10.0.5/24   2026.08.12-001   7.1.5-070105-generic   18d
 
-Each machine also reports the hardware it found, in its status. Ask
-with the same tools you already use:
+Each machine also reports the hardware it found in its status. You
+can read it with the same tools:
 
     $ kubectl get machine node-4 -o json \
         | jq '.status.hardware | {cpus, memoryBytes, disks: [.blockDevices[].model]}'
@@ -45,32 +45,33 @@ with the same tools you already use:
     }
 
 The project is [one repository](https://github.com/liken-sh/liken).
-It contains a Go init written for this project, the Linux kernel and
-k3s from their upstream releases, and the build that assembles them
-into a bootable image. Read the repository to see what your machine
-runs.
+It has the project's own `init`, written in Go, the pins of the
+Linux kernel and k3s releases that it ships, and the build that
+assembles them into a bootable image. To see what your machine runs,
+read the repository.
 
 Releases are published at
 [releases.liken.sh](https://releases.liken.sh/). To upgrade, you add
-the release to your `Cluster` and set the version. The machines
-download it, and each one reboots into it when its turn comes, one
-machine at a time by default, after you approve the reboot or on its
-own if its `rebootPolicy` is `Auto`.
+the release to your `Cluster`'s catalog and set its `spec.version`.
+Each machine downloads the release and waits for its turn to reboot
+into it. By default, one machine reboots at a time. A machine reboots
+when you approve it, or without approval when its `Machine` sets
+`spec.rebootPolicy` to `Auto`.
 
-Extension operators add more to the cluster: screens, speakers, and
-game controllers for your pods, git repositories as volumes, a home
-theater, and a telescope. You install only the ones you need.
-[Extension operators](/docs/concepts/extension-operators/) describes
-them all.
+Extension operators add features to the cluster: screens, speakers,
+and game controllers for your pods, git repositories as volumes, a
+home theater, and a telescope. You install only the ones you need.
+[Extension operators](/docs/concepts/extension-operators/) lists
+them.
 
-[The manual](/docs/) tells you how to run your own cluster.
-[How `liken` works](/docs/concepts/how-liken-works/) explains the
+[The manual](/docs/) explains how to run your own cluster.
+[How `liken` works](/docs/concepts/how-liken-works/) describes the
 model, and [Install a cluster](/docs/guides/install/) gives the
 steps from a downloaded release to `kubectl get nodes`.
 
 ## Why `liken`?
 
-The name comes from **Li**nux + **K**ub**e**r**n**etes. It also sounds
-like *lichen*: a very small thing that grows on bare rock, as `liken`
-grows on bare metal. The mark is a patch of lichen, drawn as the
-hexagonal plates that a lichen cracks into as it grows.
+The name comes from **Li**nux + **K**ub**e**r**n**etes. It also
+sounds like *lichen*, which grows on bare rock, as `liken` runs on
+bare metal. The mark is a patch of lichen, drawn as the hexagonal
+plates that a lichen cracks into as it grows.

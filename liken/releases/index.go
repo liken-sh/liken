@@ -62,7 +62,7 @@ func Index(source string, keys []string, outDir string, out io.Writer) error {
 
 	versions, notes, sources := readKeys(keys)
 	if len(versions) == 0 {
-		return fmt.Errorf("the key list names no release")
+		return fmt.Errorf("the key list has no release")
 	}
 
 	// The channel document names which release is marked latest,
@@ -273,14 +273,14 @@ func readKeys(keys []string) ([]string, map[string]bool, []*sourceComponent) {
 func releaseView(source, version string, withNotes bool) (*releaseInfo, error) {
 	raw, err := fetchDocument(source + "/" + version + "/release.yaml")
 	if err != nil {
-		return nil, fmt.Errorf("fetching %s's release document: %w", version, err)
+		return nil, fmt.Errorf("fetching the release document of %s: %w", version, err)
 	}
 	release, err := machine.ParseRelease(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%s's release document does not parse: %w", version, err)
+		return nil, fmt.Errorf("parsing the release document of %s: %w", version, err)
 	}
 	if release.Metadata.Name != version {
-		return nil, fmt.Errorf("the document under %s names version %s", version, release.Metadata.Name)
+		return nil, fmt.Errorf("the release document under %s is named %s", version, release.Metadata.Name)
 	}
 
 	info := &releaseInfo{
@@ -304,7 +304,7 @@ func releaseView(source, version string, withNotes bool) (*releaseInfo, error) {
 	if withNotes {
 		raw, err := fetchDocument(source + "/" + version + "/notes.md")
 		if err != nil {
-			return nil, fmt.Errorf("fetching %s's notes: %w", version, err)
+			return nil, fmt.Errorf("fetching the notes of %s: %w", version, err)
 		}
 		info.Notes = strings.TrimSpace(string(raw))
 	}

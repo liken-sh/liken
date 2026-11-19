@@ -181,7 +181,7 @@ func parseBinaryQuantity(s string) (uint64, error) {
 		return 0, fmt.Errorf("goMemoryLimit %q: expected \"off\", a percent like %q, or a quantity like %q", s, "25%", "448Mi")
 	}
 	if n == 0 {
-		return 0, fmt.Errorf("goMemoryLimit %q: a memory ceiling can't be zero; write \"off\" to remove the ceiling", s)
+		return 0, fmt.Errorf("goMemoryLimit %q: a memory ceiling can't be zero, so write \"off\" to remove the ceiling", s)
 	}
 	// The multiply must not wrap. An absurd count times a large unit
 	// would otherwise wrap around to a small ceiling and starve k3s
@@ -408,7 +408,7 @@ func (k K3sRuntimeSpec) Validate() error {
 		return err
 	}
 	if k.GoGC != nil && *k.GoGC < 1 {
-		return fmt.Errorf("goGC %d: GOGC must be at least 1; a smaller value makes the collector run continuously and starve the process of CPU", *k.GoGC)
+		return fmt.Errorf("goGC %d: GOGC must be at least 1. At 0 the collector runs continuously and uses the CPU that the process needs, and a negative value turns the collector off", *k.GoGC)
 	}
 	return nil
 }

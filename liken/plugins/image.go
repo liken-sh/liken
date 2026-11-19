@@ -26,11 +26,11 @@ import (
 // version tag to reuse, so it has no derived CLI.
 func cliImageRef(operatorImage string) (string, error) {
 	if strings.Contains(operatorImage, "@") {
-		return "", fmt.Errorf("image %q is pinned by digest and names no version tag", operatorImage)
+		return "", fmt.Errorf("image %q is pinned by digest and has no version tag", operatorImage)
 	}
 	tag, err := name.NewTag(operatorImage)
 	if err != nil {
-		return "", fmt.Errorf("reading image reference %q: %w", operatorImage, err)
+		return "", fmt.Errorf("parsing the image reference %q: %w", operatorImage, err)
 	}
 	return tag.Context().Name() + "-cli:" + tag.TagStr(), nil
 }
@@ -39,11 +39,11 @@ func cliImageRef(operatorImage string) (string, error) {
 // universal source every CLI compares against.
 func ImageVersion(operatorImage string) (string, error) {
 	if strings.Contains(operatorImage, "@") {
-		return "", fmt.Errorf("image %q is pinned by digest and names no version tag", operatorImage)
+		return "", fmt.Errorf("image %q is pinned by digest and has no version tag", operatorImage)
 	}
 	tag, err := name.NewTag(operatorImage)
 	if err != nil {
-		return "", fmt.Errorf("reading image reference %q: %w", operatorImage, err)
+		return "", fmt.Errorf("parsing the image reference %q: %w", operatorImage, err)
 	}
 	return tag.TagStr(), nil
 }
@@ -53,7 +53,7 @@ func ImageVersion(operatorImage string) (string, error) {
 // element names the file to extract.
 func entrypoint(cfg *v1.ConfigFile) (string, error) {
 	if cfg == nil || len(cfg.Config.Entrypoint) == 0 {
-		return "", fmt.Errorf("image declares no entrypoint")
+		return "", fmt.Errorf("the image config has no entrypoint")
 	}
 	return cfg.Config.Entrypoint[0], nil
 }
@@ -91,7 +91,7 @@ var pullBinary = remotePull
 func remotePull(ref, arch string) ([]byte, error) {
 	tag, err := name.NewTag(ref)
 	if err != nil {
-		return nil, fmt.Errorf("reading image reference %q: %w", ref, err)
+		return nil, fmt.Errorf("parsing the image reference %q: %w", ref, err)
 	}
 	image, err := remote.Image(tag,
 		remote.WithAuthFromKeychain(authn.DefaultKeychain),
@@ -105,7 +105,7 @@ func remotePull(ref, arch string) ([]byte, error) {
 	}
 	path, err := entrypoint(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("%q: %w", ref, err)
+		return nil, fmt.Errorf("reading the entrypoint of %q: %w", ref, err)
 	}
 	fs := mutate.Extract(image)
 	defer fs.Close()

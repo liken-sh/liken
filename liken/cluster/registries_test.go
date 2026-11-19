@@ -24,7 +24,7 @@ spec:
     embedded: true
 `))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the Cluster with registries: %v", err)
 	}
 	endpoints := c.Spec.Registries.Mirrors["docker.io"]
 	if len(endpoints) != 2 || endpoints[0] != "https://mirror.example:5000" {
@@ -48,7 +48,7 @@ spec:
   registries: null
 `))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the Cluster with null registries: %v", err)
 	}
 	if len(c.Spec.Registries.Mirrors) != 0 || c.Spec.Registries.Embedded {
 		t.Errorf("null registries should parse as the zero value: %+v", c.Spec.Registries)
@@ -134,7 +134,7 @@ spec:
 func TestClusterCRDRegistriesSchema(t *testing.T) {
 	raw, err := os.ReadFile("manifests/clusters-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Cluster CRD: %v", err)
 	}
 	var crd struct {
 		Spec struct {
@@ -169,7 +169,7 @@ func TestClusterCRDRegistriesSchema(t *testing.T) {
 		} `json:"spec"`
 	}
 	if err := yaml.Unmarshal(raw, &crd); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the Cluster CRD: %v", err)
 	}
 	registries := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Spec.Properties.Registries
 

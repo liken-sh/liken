@@ -40,7 +40,7 @@ func pageAt(t *testing.T, dir string, parts ...string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(append([]string{dir}, parts...)...))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the page: %v", err)
 	}
 	return string(raw)
 }
@@ -53,7 +53,7 @@ func indexed(t *testing.T, versions ...string) (string, string) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	if err := Index(source, keys, dir, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("indexing the channel: %v", err)
 	}
 	return dir, channel
 }
@@ -133,11 +133,11 @@ func TestIndexNamesEveryArtifactWithItsDigest(t *testing.T) {
 	page := pageAt(t, dir, "2026.07.15-001", "index.html")
 	raw, err := os.ReadFile(filepath.Join(channel, "2026.07.15-001", "release.yaml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the release document: %v", err)
 	}
 	release, err := machine.ParseRelease(raw)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the release document: %v", err)
 	}
 	for _, artifact := range release.Artifacts {
 		if !strings.Contains(page, artifact.Name) {
@@ -176,7 +176,7 @@ func TestIndexIgnoresKeysThatAreNotReleases(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := Index(source, append(keys, "robots.txt", "notes/scratch.txt"), dir, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("indexing the channel: %v", err)
 	}
 
 	page := pageAt(t, dir, "index.html")
@@ -195,7 +195,7 @@ func TestIndexGroupsTheSourceMirror(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := Index(source, keys, dir, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("indexing the channel: %v", err)
 	}
 
 	page := pageAt(t, dir, "sources", "index.html")
@@ -212,11 +212,11 @@ func TestIndexWritesTheVersionsDocument(t *testing.T) {
 
 	raw, err := os.ReadFile(filepath.Join(dir, "versions.yaml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading versions.yaml: %v", err)
 	}
 	var document Versions
 	if err := yaml.UnmarshalStrict(raw, &document); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing versions.yaml: %v", err)
 	}
 
 	if document.Kind != "Versions" || document.Latest != "2026.07.15-001" {
@@ -259,10 +259,10 @@ func TestIndexIsIdempotent(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := Index(source, keys, first, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("indexing the channel: %v", err)
 	}
 	if err := Index(source, keys, second, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("indexing the channel: %v", err)
 	}
 
 	// Nothing a page shows comes from the clock or from the order of a
@@ -281,7 +281,7 @@ func TestIndexIsIdempotent(t *testing.T) {
 func notedRelease(t *testing.T, channel, version, notes string) string {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(channel, version, "notes.md"), []byte(notes), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the notes: %v", err)
 	}
 	return version + "/notes.md"
 }
@@ -293,7 +293,7 @@ func TestIndexRendersTheNotesTheChannelServes(t *testing.T) {
 
 	dir := t.TempDir()
 	if err := Index(source, keys, dir, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("indexing the channel: %v", err)
 	}
 
 	page := pageAt(t, dir, "2026.07.15-001", "index.html")

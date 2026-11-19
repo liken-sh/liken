@@ -72,47 +72,50 @@ usage:
       that address is not reachable from this machine.
 
   liken approve-reboot [-server URL] <deployment-dir> <machine>
-      Report what a machine waits for, and grant it the one
-      disruption its rebootPolicy withholds. The grant sets
-      spec.approvedHash on the Disruption that covers the change,
-      so it approves only those bytes, and running this twice is
-      the same grant. When nothing waits, this writes nothing.
+      Show what a machine is waiting for, and approve the reboot
+      that its rebootPolicy holds back. The approval sets
+      spec.approvedHash on the Disruption that covers the change, so
+      it approves only that change. Running it twice has the same
+      effect as running it once. When the machine is waiting for
+      nothing, it writes nothing.
 
   liken request-reboot [-server URL] <deployment-dir> <machine>
-      Ask a machine to reboot when no change asks it to: a driver
-      bound to the wrong device, or a machine you are experimenting
-      on. The machine still takes its turn from the cluster,
-      cordons, and drains. On rebootPolicy: Auto that is the whole
-      procedure. On Manual the request waits for approve-reboot.
-      The request is a Disruption named for the running boot, so
-      it spends itself when the machine comes back.
+      Ask a machine to reboot when no change requires it, for
+      example when a driver bound to the wrong device. The machine
+      still waits for its turn in the cluster, cordons itself, and
+      drains. With rebootPolicy: Auto, that is the whole procedure.
+      With Manual, the request waits for approve-reboot. The request
+      is a Disruption named for the running boot, so it stops
+      applying when the machine boots again.
 
   liken kubectl [-server URL] <deployment-dir> [args...]
   liken stern   [-server URL] <deployment-dir> [args...]
   liken flux    [-server URL] <deployment-dir> [args...]
       Run the named tool from your PATH against the deployment's
-      cluster: resolve the credential, set KUBECONFIG, and hand the
-      terminal to the tool. Give liken's -server before the
-      directory; everything after the directory goes to the tool.
+      cluster: write the credential, set KUBECONFIG, and run the
+      tool on your terminal. Put liken's -server before the
+      directory. Everything after the directory goes to the tool.
 
   liken layer <manifests-dir> <identity-dir> <output.cpio>
-      Pack your cluster's half of the operating system into one small
-      archive: your cluster and machine manifests, and your identity.
-      Kernel modules are not part of it: the system image carries the
-      kernel's whole module tree, and spec.modules loads from that
-      tree at boot.
+      Pack the files of the operating system that belong to your
+      cluster into one small archive: your cluster and machine
+      manifests, and your identity. Kernel modules are not in it,
+      because the system image has the kernel's whole module tree,
+      and spec.modules loads modules from that tree at boot.
 
   liken fetch [-digest sha256:<hex>] <source-url> <version|latest> <channel-dir>
       Download a published release from a channel into a local
       channel directory, verifying every artifact against the
-      release's document. Pass "latest" to take whatever the channel
-      currently names newest. -digest pins the document itself to a
-      catalog entry's digest, closing the trust chain end to end.
+      release's document. Pass "latest" to download the newest
+      release that the channel lists. -digest requires the release
+      document to match the digest of a catalog entry, so the
+      download matches the release that your Cluster lists and not
+      only what the channel serves.
 
   liken verify release [-source URL] [-digest sha256:<hex>] <version>
       Check that a published release is the one liken's CI signed:
-      the Sigstore bundle of release.yaml, then every artifact it
-      names, against its digest and its own bundle. The source
+      the Sigstore bundle of release.yaml, then every artifact that
+      release.yaml lists, against its digest and its own bundle. The source
       defaults to https://releases.liken.sh. -digest pins
       release.yaml to a catalog entry's digest. Prints a line for
       each file, and stops at the first file that fails. The system
@@ -123,13 +126,13 @@ usage:
       Check that an image is one that liken's CI published: resolve
       the reference to its index's digest, verify the cosign
       signature of that digest, and read the SBOM and the provenance
-      that the index carries for each platform.
+      that the index has for each platform.
 
   liken sbom [-json] [-source URL] <version|reference>
       Print the packages of a release's or an image's SBOM: the
-      name, version, and package URL of each. A version such as
-      2026.11.01-001 names a release, and anything else names an
-      image. The SBOM's signature is checked first, as verify
+      name, version, and package URL of each. An argument in the
+      form of a version, such as 2026.11.01-001, is a release, and
+      any other argument is an image reference. The SBOM's signature is checked first, as verify
       checks it. -json prints the document itself: CycloneDX for a
       release, SPDX for an image.
 
@@ -142,17 +145,19 @@ usage:
       release and your deployment layer: one stick for the whole
       deployment, with a boot menu listing every machine by name.
       Boot it, pick the machine you're standing at, and follow the
-      console: the install holds until you remove the stick and press
+      console: the install waits until you remove the stick and press
       Enter, then powers the machine off. -console (repeatable) adds a
       console= argument to every entry; the machines keep it
       permanently.
 
   liken bundle [-slot-size 1Gi] <vmlinuz> <liken.sqfs> <boot.cpio> <microcode.cpio> <liken-cli> <systemd-boot.efi> <grub-boot.img> <grub-core.img> <licenses.md> <sbom.cdx.json> <channel-dir> <version> [component=version ...]
-      Lay out a release: copy the ten files into the channel and
-      write the release.yaml that names each one by its digest. The
-      version is a calendar date and serial (2026.07.11-001); the
-      component=version pairs record which upstreams shipped inside,
-      since the date deliberately doesn't say.
+      Create a release in the channel: copy these files into it, and
+      write the release.yaml that lists each file with its digest.
+      The version is a calendar date and a serial number, such as
+      2026.07.11-001. The date does not say which upstream versions
+      the release has, so the component=version pairs record them.
+      -slot-size is the size of a boot slot, and the command refuses
+      a release whose files do not fit in one.
 
   liken serve [-firmware dir] <channel-dir> [address]
       Share a release channel over plain HTTP so machines can
@@ -166,18 +171,19 @@ usage:
       page for the source mirror, and the versions.yaml document that
       lists every release for a script. Read the channel's object keys
       from standard input, one per line, and read each release's
-      document from the channel itself. The index is derived, so
-      rendering it again over the same channel repairs whatever is
-      stale.
+      document from the channel itself. The command writes every page
+      from the channel each time, so running it again corrects any
+      page that is out of date.
 
   liken plugins sync|list|remove [-server URL] <deployment-dir>
-      The plugins group. sync reads the operators the cluster
-      runs, pulls each one's CLI from the registry into
-      ~/.liken/plugins/bin, and prints the line to add that directory
-      to PATH. list reports each installed CLI's version and the
-      operator version it faces, and marks drift. remove <domain>
-      deletes one installed CLI. A domain that names no command, like
-      "liken audio capture", walks to kubectl-liken-<domain>.
+      Manage the CLIs of the operators. sync reads which operators
+      the cluster runs, pulls the CLI of each one from the registry
+      into ~/.liken/plugins/bin, and prints the line that adds that
+      directory to PATH. list prints the version of each installed
+      CLI and the version of the operator that it talks to, and
+      marks the CLIs whose version differs. remove <domain> deletes
+      one installed CLI. A first word that is not a liken command,
+      as in "liken audio capture", runs kubectl-liken-<domain>.
 
   liken completion bash
       Print the bash completion script for this toolkit.
@@ -189,14 +195,14 @@ An identity directory holds the certificates and join token that
 make a cluster one cluster. Some of the files are private keys, so
 keep the directory out of version control.
 
-A deployment layer is a small archive holding everything about the
-operating system that is yours and not liken's. A machine boots the
+A deployment layer is a small archive with the files of the
+operating system that belong to your cluster and not to liken. A machine boots the
 generic liken image and your layer together, and the kernel joins
 them into one system.
 
 A release channel is a directory any web server can share: one
-subdirectory per version, each holding the release's files and a
-release.yaml that names every file by its sha256 digest, so a
+subdirectory per version, each with the release's files and a
+release.yaml that lists every file with its sha256 digest, so a
 machine can check that what it downloaded is what was published.
 `
 

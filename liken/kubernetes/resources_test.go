@@ -18,7 +18,7 @@ import (
 func TestGetClusterReadsOneCluster(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if want := ClustersPath + "/lab"; r.URL.Path != want {
-			t.Errorf("got %s, want %s", r.URL.Path, want)
+			t.Errorf("the request path is %s, want %s", r.URL.Path, want)
 		}
 		_ = json.NewEncoder(w).Encode(&cluster.Cluster{
 			Kind:     "Cluster",
@@ -100,7 +100,7 @@ func TestPatchJSONCarriesTheServersRefusal(t *testing.T) {
 		http.Error(w, "nodes is forbidden", http.StatusForbidden)
 	}))
 	if err := PatchJSON(client, "/api/v1/nodes/node-1", []byte(`{}`)); err == nil {
-		t.Error("a refused patch is an error")
+		t.Error("a refused patch returned no error, want one")
 	}
 }
 

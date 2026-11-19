@@ -7,11 +7,10 @@ description: "Write a liken install image to a USB stick and prove that the byte
 # Write an install stick
 
 [`liken stick`](/docs/reference/cli/#liken-stick) writes a bootable
-disk image to a file. This guide puts that file on a USB stick and
-checks the copy, so that a machine that refuses to boot is a machine
-problem and never a stick problem. At the end, the stick contains the
-image byte for byte, and its partitions are visible to the
-workstation.
+disk image to a file. This guide writes that file to a USB stick and
+checks the copy, so that when a machine refuses to boot, you know that
+the stick is not the cause. At the end, the stick holds the image byte
+for byte, and the workstation lists its partitions.
 
 You need:
 
@@ -37,11 +36,11 @@ workstation mounted a filesystem from the stick, unmount it first:
     sudo dd if=install.img of=/dev/YOUR-STICK bs=4M oflag=direct status=progress
     sync
 
-`oflag=direct` sends every block to the device as it goes, so the
-rate that `dd` reports is the device's rate. Without it, `dd` fills
-the page cache and reports a rate several times faster than the
-stick can write, and the command returns before the bytes reach the
-stick. `sync` waits for anything that is still in flight.
+`oflag=direct` writes each block to the device immediately, so the
+rate that `dd` reports is the rate of the stick. Without it, `dd`
+writes into the page cache, reports a rate faster than the stick can
+write, and returns before the bytes reach the stick. `sync` waits
+until all pending writes finish.
 
 ## 3. Read the stick back
 
@@ -54,33 +53,33 @@ from memory and proves nothing:
     sudo head -c "$(stat -c %s install.img)" /dev/YOUR-STICK | sha256sum
 
 The two hashes must be equal. Read the stick with `head`, as above,
-and never with `dd iflag=direct`: direct reads fail on a length that
-is not a multiple of the device's block size, and the failed read
-hashes an empty stream. That hash,
-`e3b0c442...`, matches nothing and looks like a result.
+and not with `dd iflag=direct`. A direct read fails when the length
+is not a multiple of the device's block size, and `sha256sum` then
+prints the hash of no data, `e3b0c442...`, which looks like a real
+result.
 
-A hash that differs means the write did not land. Write the stick
-again. A stick that fails twice is worn out, and a different stick
-is the fix.
+When the hashes differ, the write failed, so write the stick again.
+When a stick fails twice, it is worn out, and you need a different
+stick.
 
 ## 4. Reread the partition table
 
     sudo partprobe /dev/YOUR-STICK
     lsblk /dev/YOUR-STICK
 
-The kernel still uses the partition table that the stick had before the
-write until something asks it to read the table again. The listing
-now shows the image's partitions. A workstation that automounts
-removable media may mount the stick's EFI partition here; unmount it
-before you remove the stick.
+The kernel keeps the partition table that the stick had before the
+write until a program tells it to read the table again. `partprobe`
+does this, so the listing now shows the image's partitions. A
+workstation that mounts removable media automatically can mount the
+stick's EFI partition now. Unmount it before you remove the stick.
 
 ## Firmware without an EFI shell
 
-Some firmware ships no EFI shell, and a machine with no shell gives
-you no way to look at its disks from the firmware when an install
-fails. The stick's EFI partition has room for one. On a workstation
-with the shell package installed, mount the partition and copy the
-shell to both paths the firmware searches:
+Some firmware has no EFI shell, so when an install fails, the
+firmware cannot show you the machine's disks. You can add a shell to
+the stick's EFI partition. On a workstation with the shell package
+installed, mount the partition and copy the shell to both paths that
+the firmware searches:
 
     sudo mount /dev/YOUR-STICK1 /mnt
     sudo cp /usr/share/efi-shell-x64/shellx64.efi /mnt/shellx64.efi
@@ -88,9 +87,9 @@ shell to both paths the firmware searches:
     sudo cp /usr/share/efi-shell-x64/shellx64.efi /mnt/EFI/SHELLX64.EFI
     sudo umount /mnt
 
-Every write of the stick erases the shell, so repeat this after every
-write. The package name and the path above are Ubuntu's; another
-distribution names them differently.
+Each write of the image erases the shell, so copy it again after each
+write. The package name and the path above are Ubuntu's. Another
+distribution can use different ones.
 
 ## Which menu entry to select
 

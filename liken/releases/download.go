@@ -64,7 +64,7 @@ func Get(ctx context.Context, client *http.Client, url string) (*http.Response, 
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		stop()
-		return nil, fmt.Errorf("the server answered %s", resp.Status)
+		return nil, fmt.Errorf("the server returned %s", resp.Status)
 	}
 	stall.Reset(StallLimit)
 	resp.Body = &progressBody{body: resp.Body, ctx: ctx, stall: stall, stop: stop}

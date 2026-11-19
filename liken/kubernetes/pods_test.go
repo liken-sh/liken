@@ -68,10 +68,10 @@ func TestEvictPodPostsTheEvictionSubresource(t *testing.T) {
 	}))
 	p := Pod{Metadata: PodMetadata{Name: "web", Namespace: "default"}}
 	if err := EvictPod(client, p); err != nil {
-		t.Fatal(err)
+		t.Fatalf("evicting the pod: %v", err)
 	}
 	if want := "/api/v1/namespaces/default/pods/web/eviction"; path != want {
-		t.Errorf("got %s", path)
+		t.Errorf("the eviction path is %s, want %s", path, want)
 	}
 }
 
@@ -108,12 +108,12 @@ func TestListPodsOnNodeAsksTheServerToFilter(t *testing.T) {
 	}))
 	pods, err := ListPodsOnNode(client, "node-1")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the pods of node-1: %v", err)
 	}
 	if len(pods) != 1 || pods[0].Metadata.Name != "web" {
-		t.Errorf("got %+v", pods)
+		t.Errorf("the pods are %+v, want one pod named web", pods)
 	}
 	if want := "fieldSelector=spec.nodeName%3Dnode-1"; query != want {
-		t.Errorf("the server does the filtering, so the query carries the selector: %s", query)
+		t.Errorf("the query is %q, want %q", query, want)
 	}
 }

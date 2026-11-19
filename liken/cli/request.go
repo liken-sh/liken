@@ -31,15 +31,36 @@ import (
 // that finishes the second one.
 func renderRequest(m *machine.Machine, dir, filed string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "filed: Disruption %s\n", filed)
+	fmt.Fprintf(&b, "created: Disruption %s\n", filed)
 	if m.Spec.RebootPolicyOrDefault() == machine.RebootAuto {
-		fmt.Fprintf(&b, "%s takes a reboot turn from the cluster, drains its workloads, and reboots.\n", m.Metadata.Name)
+		fmt.Fprintf(&b, "%s waits for a reboot turn from the cluster, drains its workloads, and reboots.\n", m.Metadata.Name)
 	} else {
-		fmt.Fprintf(&b, "%s has rebootPolicy: Manual, so the request waits for you. Release it with:\n", m.Metadata.Name)
+		fmt.Fprintf(&b, "%s has rebootPolicy: Manual, so the request waits for you. Approve it with:\n", m.Metadata.Name)
 		fmt.Fprintf(&b, "  liken approve-reboot %s %s\n", dir, m.Metadata.Name)
 	}
-	fmt.Fprint(&b, "Nothing is staged, so the machine comes back on the documents it runs now.\n")
+	staged := stagedChanges(m.Status.Pending)
+	if len(staged) == 0 {
+		fmt.Fprint(&b, "No change is staged, so the machine boots the same release and configuration.\n")
+		return b.String()
+	}
+	fmt.Fprint(&b, "The reboot also applies every staged change:\n")
+	for _, p := range staged {
+		fmt.Fprintf(&b, "  %s (%.12s)\n", p.Summary, p.Hash)
+	}
 	return b.String()
+}
+
+// stagedChanges leaves out the entries for reboots that a person
+// requested, because those entries have no document for the reboot to
+// apply.
+func stagedChanges(pending []machine.PendingDisruption) []machine.PendingDisruption {
+	var staged []machine.PendingDisruption
+	for _, p := range pending {
+		if p.Condition != rebootRequestCondition {
+			staged = append(staged, p)
+		}
+	}
+	return staged
 }
 
 // requestReboot is the command: resolve the credential, read the
@@ -51,7 +72,7 @@ func requestReboot(args []string, out io.Writer) error {
 		return err
 	}
 	if fs.NArg() != 2 {
-		return fmt.Errorf("usage: liken request-reboot [-server URL] <deployment-dir> <machine>")
+		return fmt.Errorf("request-reboot takes a deployment directory and a machine\nusage: liken request-reboot [-server URL] <deployment-dir> <machine>")
 	}
 	kubeconfigPath, err := writeKubeconfig(fs.Arg(0), *server, io.Discard)
 	if err != nil {
@@ -71,7 +92,7 @@ func requestReboot(args []string, out io.Writer) error {
 	// boot to ask about yet.
 	bootID := machine.BootID(m.Status.Boot)
 	if bootID == "" {
-		return fmt.Errorf("%s reports no boot time, so there is no boot to request a reboot of; the machine is still starting, or it has never reported", m.Metadata.Name)
+		return fmt.Errorf("machine %s has not reported its boot time in status.boot.time, so liken cannot request a reboot. The machine is still starting, or it has never reported its status", m.Metadata.Name)
 	}
 	filed, err := fileRebootRequest(c, m, bootID)
 	if err != nil {

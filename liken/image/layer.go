@@ -220,7 +220,7 @@ func readPassphrases(identityDir string, d *deployment) ([]passphraseFile, error
 			if w == nil || w.SecurityOrDefault() != machine.WirelessWPAPSK || held[w.SSID] {
 				continue
 			}
-			return nil, fmt.Errorf("%s: interface %s joins the network %q, and no file holds its passphrase; write it to %s",
+			return nil, fmt.Errorf("%s: interface %s joins the WPA network %q, and has no passphrase file. Write the passphrase to %s",
 				m.name, ifc.Name, w.SSID, filepath.Join(dir, w.SSID))
 		}
 	}

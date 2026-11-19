@@ -58,17 +58,17 @@ func TestListPluginWorkloadsFindsADaemonSetOnlyOperator(t *testing.T) {
 
 	workloads, err := ListPluginWorkloads(client)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the plugin workloads: %v", err)
 	}
 	domains := map[string]string{}
 	for _, w := range workloads {
 		domains[w.PluginDomain()] = w.OperatorImage()
 	}
 	if _, ok := domains["bluetooth"]; !ok {
-		t.Fatalf("a DaemonSet-only operator must be found: %v", domains)
+		t.Fatalf("the domains are %v, want the one that only a DaemonSet runs", domains)
 	}
 	if _, ok := domains["audio"]; !ok {
-		t.Fatalf("a Deployment operator must be found: %v", domains)
+		t.Fatalf("the domains are %v, want the one that a Deployment runs", domains)
 	}
 }
 
@@ -79,10 +79,10 @@ func TestListPluginWorkloadsSelectsOnTheLabel(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"kind": "List", "items": []map[string]any{}})
 	}))
 	if _, err := ListPluginWorkloads(client); err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the plugin workloads: %v", err)
 	}
 	if !strings.Contains(gotQuery, "labelSelector=cli.liken.sh") {
-		t.Fatalf("the request must select on the plugin label: %q", gotQuery)
+		t.Fatalf("the query is %q, want a labelSelector on the plugin label", gotQuery)
 	}
 }
 
@@ -95,20 +95,20 @@ func TestDedupeByDomainPrefersTheOperatorImage(t *testing.T) {
 
 	got := dedupeByDomain([]Workload{sidecarFirst, operatorFirst})
 	if len(got) != 1 {
-		t.Fatalf("one domain must yield one workload: %d", len(got))
+		t.Fatalf("the list has %d workloads, want 1 for the one domain", len(got))
 	}
 	if got[0].OperatorImage() != "ghcr.io/liken-sh/audio-operator:2026.09.03-007" {
-		t.Fatalf("the operator image must win: %q", got[0].OperatorImage())
+		t.Fatalf("the operator image is %q, want the operator container's image", got[0].OperatorImage())
 	}
 }
 
 func TestWorkloadReportsNoImageWithNoContainers(t *testing.T) {
 	var w Workload
 	if got := w.OperatorImage(); got != "" {
-		t.Errorf("a workload with no containers has no image: got %q", got)
+		t.Errorf("the image of a workload with no containers is %q, want empty", got)
 	}
 	if got := w.PluginDomain(); got != "" {
-		t.Errorf("a workload with no labels names no domain: got %q", got)
+		t.Errorf("the domain of a workload with no labels is %q, want empty", got)
 	}
 }
 
@@ -117,6 +117,6 @@ func TestListPluginWorkloadsReportsAFailedRead(t *testing.T) {
 		http.Error(w, "the server is currently unable to handle the request", http.StatusServiceUnavailable)
 	}))
 	if _, err := ListPluginWorkloads(client); err == nil {
-		t.Error("a failed read must be an error, not an empty list")
+		t.Error("a failed read returned no error, want one")
 	}
 }

@@ -68,7 +68,7 @@ var bomSchema = func() *jsonschema.Schema {
 func Validate(data []byte) error {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("the SBOM is not JSON: %w", err)
+		return fmt.Errorf("the SBOM is not valid JSON: %w", err)
 	}
 	if err := bomSchema.Validate(doc); err != nil {
 		return fmt.Errorf("the SBOM does not follow CycloneDX %s: %w", SpecVersion, err)

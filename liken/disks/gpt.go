@@ -234,7 +234,7 @@ func RandomGUID() [16]byte {
 // was read from a smaller disk relocates its backup to the new end.
 func SerializeGPT(t *Table, totalSectors uint64) ([]Chunk, error) {
 	if len(t.Entries) > entryCount {
-		return nil, fmt.Errorf("%d partitions won't fit a %d-entry GPT", len(t.Entries), entryCount)
+		return nil, fmt.Errorf("%d partitions do not fit in a GPT of %d entries", len(t.Entries), entryCount)
 	}
 
 	// This writes the entry array first, because both headers embed
@@ -250,7 +250,7 @@ func SerializeGPT(t *Table, totalSectors uint64) ([]Chunk, error) {
 
 		name := utf16.Encode([]rune(p.Name))
 		if len(name) > NameChars {
-			return nil, fmt.Errorf("partition name %q exceeds GPT's %d characters", p.Name, NameChars)
+			return nil, fmt.Errorf("partition name %q is longer than the %d characters that a GPT partition name holds", p.Name, NameChars)
 		}
 		for j, r := range name {
 			binary.LittleEndian.PutUint16(e[56+2*j:], r)
@@ -338,7 +338,7 @@ func readGPTCopy(r io.ReaderAt, headerLBA uint64) (*Table, error) {
 	// exactly what the writer covered.
 	headerSize := binary.LittleEndian.Uint32(h[12:16])
 	if headerSize < 92 || headerSize > SectorSize {
-		return nil, fmt.Errorf("implausible header size %d at sector %d", headerSize, headerLBA)
+		return nil, fmt.Errorf("header size %d at sector %d is outside the range 92 to %d bytes", headerSize, headerLBA, SectorSize)
 	}
 	scratch := slices.Clone(h[:headerSize])
 	clear(scratch[16:20])
@@ -353,7 +353,7 @@ func readGPTCopy(r io.ReaderAt, headerLBA uint64) (*Table, error) {
 	gotCount := binary.LittleEndian.Uint32(h[80:84])
 	gotSize := binary.LittleEndian.Uint32(h[84:88])
 	if gotCount != entryCount || gotSize != entrySize {
-		return nil, fmt.Errorf("unexpected entry geometry %d×%d at sector %d", gotCount, gotSize, headerLBA)
+		return nil, fmt.Errorf("the header at sector %d has %d entries of %d bytes each, and liken writes only %d entries of %d bytes", headerLBA, gotCount, gotSize, entryCount, entrySize)
 	}
 
 	entriesLBA := binary.LittleEndian.Uint64(h[72:80])
@@ -362,7 +362,7 @@ func readGPTCopy(r io.ReaderAt, headerLBA uint64) (*Table, error) {
 		return nil, fmt.Errorf("reading the entry array at sector %d: %w", entriesLBA, err)
 	}
 	if crc32.ChecksumIEEE(entries) != binary.LittleEndian.Uint32(h[88:92]) {
-		return nil, fmt.Errorf("entry array checksum mismatch (header at sector %d)", headerLBA)
+		return nil, fmt.Errorf("the entry array checksum does not match the header at sector %d", headerLBA)
 	}
 
 	t := &Table{
@@ -411,21 +411,21 @@ func ReadGPT(r io.ReaderAt, totalSectors uint64) (*Table, error) {
 	switch {
 	case perr == nil && berr == nil:
 		if primary.DiskGUID != backup.DiskGUID || !slices.Equal(primary.Entries, backup.Entries) {
-			fmt.Println("liken: storage: the primary and backup partition tables disagree; trusting the primary (so did the kernel)")
+			fmt.Println("liken: storage: the primary and backup partition tables differ, so liken uses the primary, as the kernel does")
 		}
 		return primary, nil
 	case perr == nil:
-		fmt.Printf("liken: storage: the backup partition table is unreadable (%v); the next rewrite restores it\n", berr)
+		fmt.Printf("liken: storage: the backup partition table cannot be read (%v), and the next write of the table restores it\n", berr)
 		return primary, nil
 	case berr == nil:
-		fmt.Printf("liken: storage: the primary partition table is unreadable (%v); recovered from the backup\n", perr)
+		fmt.Printf("liken: storage: the primary partition table cannot be read (%v), so liken uses the backup\n", perr)
 		return backup, nil
 	default:
 		// Redundancy cannot cover one case. If the disk was grown
 		// while the primary was already unreadable, the backup is
 		// still at the old end of the disk, where nothing looks for
 		// it.
-		return nil, fmt.Errorf("neither partition table copy is readable: primary: %v; backup at sector %d: %v (a grown disk's backup is no longer at the end)",
+		return nil, fmt.Errorf("neither partition table copy is readable. The primary copy: %v. The backup copy at sector %d: %v. When a disk is grown while its primary copy is unreadable, the backup is still at the old end of the disk",
 			perr, totalSectors-1, berr)
 	}
 }
@@ -446,7 +446,7 @@ func WriteTable(devPath string, totalSectors uint64, t *Table) error {
 	// table, which is what makes the vda1, vda2, ... devices appear
 	// or grow.
 	if _, err := unix.IoctlRetInt(int(f.Fd()), unix.BLKRRPART); err != nil {
-		return fmt.Errorf("re-reading partition table: %w", err)
+		return fmt.Errorf("re-reading the partition table: %w", err)
 	}
 	return nil
 }

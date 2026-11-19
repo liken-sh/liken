@@ -245,7 +245,7 @@ func filterByPrefix(items []string, prefix string) []string {
 // same verb.
 func completionScript(shell string, stdout io.Writer) error {
 	if shell != "bash" {
-		return fmt.Errorf("completion supports bash, not %q", shell)
+		return fmt.Errorf("unknown shell %q, completion supports: bash", shell)
 	}
 	fmt.Fprint(stdout, bashCompletionScript)
 	return nil

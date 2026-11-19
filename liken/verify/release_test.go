@@ -26,10 +26,10 @@ func TestReleaseSBOMReturnsThePublishedSBOM(t *testing.T) {
 	ch := serveChannel(t, verifytest.Version, files)
 	sbom, err := ch.ReleaseSBOM(t.Context(), verifytest.Version, digestOf(files["release.yaml"]))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the SBOM: %v", err)
 	}
 	if !bytes.Equal(sbom, files["sbom.cdx.json"]) {
-		t.Error("the SBOM differs from the published file")
+		t.Error("the SBOM is not the published sbom.cdx.json, want the same bytes")
 	}
 }
 
@@ -43,9 +43,9 @@ func TestReleaseSBOMRefuses(t *testing.T) {
 		{"a changed byte in the SBOM", func(f map[string][]byte) { f["sbom.cdx.json"] = verifytest.Tampered(f["sbom.cdx.json"]) }, "",
 			"artifact sbom.cdx.json has sha256"},
 		{"the SBOM's bundle swapped for release.yaml's", func(f map[string][]byte) { f["sbom.cdx.json.sigstore.json"] = f["release.yaml.sigstore.json"] }, "",
-			"sbom.cdx.json: the signature"},
+			"sbom.cdx.json: verifying the signature"},
 		{"release.yaml's bundle swapped for the SBOM's", func(f map[string][]byte) { f["release.yaml.sigstore.json"] = f["sbom.cdx.json.sigstore.json"] }, "",
-			"release.yaml: the signature"},
+			"release.yaml: verifying the signature"},
 		{"no bundle beside release.yaml", func(f map[string][]byte) { delete(f, "release.yaml.sigstore.json") }, "",
 			"release.yaml: fetching"},
 		{"no bundle beside the SBOM", func(f map[string][]byte) { delete(f, "sbom.cdx.json.sigstore.json") }, "",
@@ -59,7 +59,7 @@ func TestReleaseSBOMRefuses(t *testing.T) {
 			c.change(files)
 			_, err := serveChannel(t, verifytest.Version, files).ReleaseSBOM(t.Context(), verifytest.Version, c.digest)
 			if err == nil || !strings.Contains(err.Error(), c.reason) {
-				t.Errorf("the check returned %v, want an error that says %q", err, c.reason)
+				t.Errorf("the check returned %v, want an error that contains %q", err, c.reason)
 			}
 		})
 	}
@@ -71,8 +71,8 @@ func TestReleaseSBOMRefuses(t *testing.T) {
 func TestReleaseDocumentRefusesAnotherVersion(t *testing.T) {
 	ch := serveChannel(t, "2026.12.01-001", verifytest.Published(t))
 	_, _, err := ch.ReleaseDocument(t.Context(), "2026.12.01-001", "")
-	if err == nil || !strings.Contains(err.Error(), "names version 2026.11.01-001, not 2026.12.01-001") {
-		t.Errorf("the check returned %v", err)
+	if err == nil || !strings.Contains(err.Error(), "version 2026.11.01-001, not 2026.12.01-001") {
+		t.Errorf("the check returned %v, want an error that release.yaml is the document of another version", err)
 	}
 }
 
@@ -91,7 +91,7 @@ func TestReleaseReportsEachFileAndStopsAtTheFirstFailure(t *testing.T) {
 func TestCheckSBOMSummarizesThePublishedSBOM(t *testing.T) {
 	summary, err := checkSBOM(release(t, "sbom.cdx.json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the SBOM: %v", err)
 	}
 	if got, want := summary.String(), "744 components: 64 buildroot, 23 manifest, 657 syft"; got != want {
 		t.Errorf("the summary is %q, want %q", got, want)
@@ -101,6 +101,6 @@ func TestCheckSBOMSummarizesThePublishedSBOM(t *testing.T) {
 func TestCheckSBOMRefusesADocumentOutsideTheSchema(t *testing.T) {
 	_, err := checkSBOM([]byte(`{"bomFormat": "CycloneDX", "specVersion": "1.7", "colour": "blue"}`))
 	if err == nil || !strings.Contains(err.Error(), "sbom.cdx.json: the SBOM does not follow CycloneDX") {
-		t.Errorf("the check returned %v", err)
+		t.Errorf("the check returned %v, want an error that says the SBOM does not follow CycloneDX", err)
 	}
 }

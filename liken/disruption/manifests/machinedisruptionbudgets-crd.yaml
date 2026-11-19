@@ -1,24 +1,25 @@
 # The MachineDisruptionBudget API, declared to Kubernetes.
 #
 # A MachineDisruptionBudget limits how many of the machines it selects
-# may be out of service at once: the PodDisruptionBudget of machines.
-# cluster-operator grants a machine a reboot turn only when every
-# budget that selects it has room, and it keeps one budget named
-# default, which selects every machine.
+# can be out of service at the same time. It does for machines what a
+# PodDisruptionBudget does for pods. cluster-operator grants a machine a
+# reboot turn only when every budget that selects the machine has room.
+# cluster-operator also keeps one budget named default, which selects
+# every machine.
 #
-# This file goes in liken's subdirectory of k3s's auto-deploy
-# manifests and applies at every startup, like the Machine CRD.
+# k3s applies this file at every startup from liken's subdirectory of
+# its auto-deploy manifests, as it does the Machine CRD.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: machinedisruptionbudgets.liken.sh
   annotations:
-    # init keeps whichever copy of this file declares the higher
-    # revision, so an older slot's boot cannot downgrade the schema
-    # the cluster serves (init/schemarevision.go). Raise it in the same
-    # change that changes the schema below; a test holds the two
-    # together.
-    liken.sh/schema-revision: "1"
+    # init applies the copy of this file that has the higher revision,
+    # so booting an older boot slot does not replace the schema that the
+    # cluster serves with an older one (init/schemarevision.go). Raise
+    # the revision in the same change that changes the schema below. A
+    # test checks that the two change together.
+    liken.sh/schema-revision: "2"
 spec:
   group: liken.sh
   names:
@@ -56,41 +57,41 @@ spec:
         openAPIV3Schema:
           type: object
           description: >-
-            A MachineDisruptionBudget limits how many of the machines it
-            selects may be out of service at the same time, planned and
-            unplanned together. A machine takes a reboot turn only when
-            every budget that selects it has room. The budget named
-            default selects every machine, and cluster-operator creates
-            it with a limit of one machine when it is missing. Whatever
-            the budgets allow, only one leader is out of service at a
-            time.
+            Limits how many of the machines it selects can be out of
+            service at the same time, counting planned and unplanned
+            outages together. cluster-operator grants a machine a
+            reboot turn only when every budget that selects it has
+            room. The budget named default selects every machine, and
+            cluster-operator creates it with maxUnavailable 1 when it
+            does not exist. Whatever the budgets allow, at most one
+            leader is out of service at a time.
           properties:
             spec:
               type: object
               required: [maxUnavailable]
-              description: The machines the budget covers, and the limit.
+              description: Which machines the budget covers, and how many of them can be out of service.
               properties:
                 selector:
                   type: object
                   description: >-
                     Selects machines by the labels on their Machine
-                    objects, with the grammar of a Kubernetes label
+                    objects, in the same format as a Kubernetes label
                     selector. An empty selector selects every machine.
                   properties:
                     matchLabels:
                       type: object
                       additionalProperties:
                         type: string
-                      description: Each label a selected machine carries, with its value.
+                      description: Labels that a selected machine must have, each with its required value.
                     matchExpressions:
                       type: array
-                      description: Each expression a selected machine's labels meet.
+                      description: Expressions that the labels of a selected machine must satisfy.
                       items:
                         type: object
                         required: [key, operator]
                         x-kubernetes-validations:
                           - rule: "self.operator in ['In', 'NotIn'] ? has(self.values) && size(self.values) > 0 : !has(self.values) || size(self.values) == 0"
-                            message: In and NotIn need values, and Exists and DoesNotExist take none
+                            message: The operators In and NotIn need at least one value, and the operators Exists and DoesNotExist accept no values
                         properties:
                           key:
                             type: string
@@ -106,32 +107,33 @@ spec:
                   type: integer
                   minimum: 1
                   description: >-
-                    How many of the selected machines can be out of
-                    service at the same time. A machine counts when it
-                    holds a reboot turn, or when it is Lost, Degraded,
-                    or otherwise unavailable without one.
+                    The most selected machines that can be out of
+                    service at the same time. A machine counts as out of
+                    service while it holds a reboot turn, and also while
+                    its phase is Lost, Degraded, Unknown, Booting, or
+                    Updating, with or without a turn.
             status:
               type: object
-              description: What the budget counted on cluster-operator's last sweep.
+              description: The counts that cluster-operator made in its last pass over the budget.
               properties:
                 observedGeneration:
                   type: integer
                   format: int64
                 selected:
                   type: integer
-                  description: How many machines the selector selects.
+                  description: The number of machines that the selector selects.
                 unavailable:
                   type: integer
-                  description: How many of the selected machines are out of service.
+                  description: The number of selected machines that are out of service.
                 allowed:
                   type: integer
-                  description: How many more of the selected machines may go out of service now.
+                  description: The number of additional selected machines that can go out of service now.
                 conditions:
                   type: array
                   description: >-
                     DisruptionAllowed is True while the budget has room
-                    for one more machine, and its message names the
-                    machines that fill it.
+                    for one more machine out of service. Its message
+                    lists the selected machines that are out of service.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

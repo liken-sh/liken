@@ -204,9 +204,9 @@ func TestFAT32RefusesTinyPartitions(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for a partition too small for FAT32")
 	}
-	for _, want := range []string{"too small", "FAT32"} {
+	for _, want := range []string{"clusters", "FAT32"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error should mention %q: %v", want, err)
+			t.Errorf("the error is %v, want it to mention %q", err, want)
 		}
 	}
 }

@@ -23,7 +23,7 @@ func TestVerifyAndSBOMCheckTheirArguments(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			err := run(c.args)
 			if err == nil || !strings.Contains(err.Error(), "usage:") {
-				t.Errorf("bad arguments were not refused: %v", err)
+				t.Errorf("the arguments returned %v, want an error that contains \"usage:\"", err)
 			}
 		})
 	}
@@ -36,7 +36,7 @@ func TestVerifyReleaseReportsEachFile(t *testing.T) {
 	var out bytes.Buffer
 	err := verifyCommand(t.Context(), []string{"release", "-source", server.URL, verifytest.Version}, &out)
 	if !strings.HasPrefix(out.String(), "ok  release.yaml  signed by https://github.com/liken-sh/liken/") {
-		t.Errorf("the output is %q", out.String())
+		t.Errorf("the output is %q, want it to start with the signed release.yaml", out.String())
 	}
 	if err == nil || !strings.HasPrefix(err.Error(), "vmlinuz:") {
 		t.Errorf("the verify returned %v, want a failure that names vmlinuz", err)
@@ -49,7 +49,7 @@ func TestVerifyImageReportsTheSignerAndAttestations(t *testing.T) {
 	r.Sign(t, verifytest.ImageFile(t, "signature.sigstore.json"))
 	var out bytes.Buffer
 	if err := verifyCommand(t.Context(), []string{"image", r.Repo.Tag(verifytest.Version).String()}, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("verifying the image: %v", err)
 	}
 	want := "ok  " + r.Repo.Digest(verifytest.IndexDigest).String() +
 		"  signed by https://github.com/liken-sh/liken/.github/workflows/component-bluetooth-operator.yaml@refs/tags/2026.11.01-001\n" +
@@ -63,8 +63,8 @@ func TestVerifyImageRefusesAnUnsignedImage(t *testing.T) {
 	r := verifytest.NewRegistry(t)
 	r.Publish(t)
 	err := verifyCommand(t.Context(), []string{"image", r.Repo.Tag(verifytest.Version).String()}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "carries no Sigstore signature") {
-		t.Errorf("the verify returned %v", err)
+	if err == nil || !strings.Contains(err.Error(), "has no Sigstore signature") {
+		t.Errorf("the verify returned %v, want an error that the image has no Sigstore signature", err)
 	}
 }
 
@@ -78,12 +78,12 @@ func TestSBOMOfARelease(t *testing.T) {
 		{"as a table", nil, func(t *testing.T, out string) {
 			lines := strings.Split(out, "\n")
 			if len(lines) != 746 || !strings.HasPrefix(lines[0], "NAME") || !strings.HasPrefix(lines[1], "flux ") {
-				t.Errorf("the table has %d lines and starts %q", len(lines), lines[:2])
+				t.Errorf("the table has %d lines and starts %q, want 746 lines that start with the header and flux", len(lines), lines[:2])
 			}
 		}},
 		{"as the document", []string{"-json"}, func(t *testing.T, out string) {
 			if out != string(verifytest.ReleaseFile(t, "sbom.cdx.json")) {
-				t.Error("the output is not the published SBOM")
+				t.Error("the output differs from the published SBOM, want the same bytes")
 			}
 		}},
 	}
@@ -92,7 +92,7 @@ func TestSBOMOfARelease(t *testing.T) {
 			var out bytes.Buffer
 			args := append(append([]string{"-source", server.URL}, c.flags...), verifytest.Version)
 			if err := sbomCommand(t.Context(), args, &out); err != nil {
-				t.Fatal(err)
+				t.Fatalf("printing the release SBOM: %v", err)
 			}
 			c.check(t, out.String())
 		})
@@ -115,7 +115,7 @@ func TestSBOMOfAnImage(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			var out bytes.Buffer
 			if err := sbomCommand(t.Context(), append(c.flags, r.Repo.Tag(verifytest.Version).String()), &out); err != nil {
-				t.Fatal(err)
+				t.Fatalf("printing the image SBOM: %v", err)
 			}
 			if !strings.HasPrefix(out.String(), c.want) {
 				t.Errorf("the output starts %q, want %q", out.String()[:min(len(out.String()), 120)], c.want)
@@ -130,6 +130,6 @@ func TestSBOMRefusesARelease(t *testing.T) {
 	server := verifytest.ServeChannel(t, verifytest.Version, files)
 	err := sbomCommand(t.Context(), []string{"-source", server.URL, verifytest.Version}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "artifact sbom.cdx.json has sha256") {
-		t.Errorf("the sbom returned %v", err)
+		t.Errorf("the sbom returned %v, want an error for the digest of sbom.cdx.json", err)
 	}
 }

@@ -67,7 +67,7 @@ type machineAnswers struct {
 // one.
 func New(dir string, in io.Reader, out io.Writer) error {
 	if _, err := os.Stat(filepath.Join(dir, "cluster.yaml")); err == nil {
-		return fmt.Errorf("%s already has a cluster.yaml; the scaffold only starts new deployments", dir)
+		return fmt.Errorf("%s already has a cluster.yaml, and the scaffold only starts a new deployment", dir)
 	}
 
 	a, err := interview(bufio.NewScanner(in), out, filepath.Base(strings.TrimRight(dir, "/")))
@@ -80,7 +80,7 @@ func New(dir string, in io.Reader, out io.Writer) error {
 		return err
 	}
 	if _, err := cluster.ParseCluster(clusterYAML); err != nil {
-		return fmt.Errorf("this is a scaffold bug: the generated cluster.yaml does not parse: %w", err)
+		return fmt.Errorf("the generated cluster.yaml does not parse (a defect in liken, report it): %w", err)
 	}
 
 	machines := map[string][]byte{}
@@ -94,13 +94,13 @@ func New(dir string, in io.Reader, out io.Writer) error {
 		}
 		parsed, err := machine.Parse(doc)
 		if err != nil {
-			return fmt.Errorf("this is a scaffold bug: %s's manifest does not parse: %w", m.Name, err)
+			return fmt.Errorf("the generated manifest of %s does not parse (a defect in liken, report it): %w", m.Name, err)
 		}
 		if err := parsed.Spec.Storage.Validate(); err != nil {
-			return fmt.Errorf("this is a scaffold bug: %s's storage does not validate: %w", m.Name, err)
+			return fmt.Errorf("the generated storage of %s does not validate (a defect in liken, report it): %w", m.Name, err)
 		}
 		if err := parsed.Spec.Network.Validate(); err != nil {
-			return fmt.Errorf("this is a scaffold bug: %s's network does not validate: %w", m.Name, err)
+			return fmt.Errorf("the generated network of %s does not validate (a defect in liken, report it): %w", m.Name, err)
 		}
 		machines[m.Name] = doc
 	}
@@ -124,8 +124,8 @@ func New(dir string, in io.Reader, out io.Writer) error {
 		return err
 	}
 
-	fmt.Fprintf(out, "\nwrote %s/cluster.yaml and %d machine manifest(s)\n", dir, len(machines))
-	fmt.Fprintf(out, "next: liken mint %s\n", filepath.Join(dir, "identity"))
+	fmt.Fprintf(out, "\nWrote %s/cluster.yaml and %d machine manifests\n", dir, len(machines))
+	fmt.Fprintf(out, "Next: liken mint %s\n", filepath.Join(dir, "identity"))
 	return nil
 }
 
@@ -159,7 +159,7 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 			fmt.Fprintf(out, "%s: ", prompt)
 		}
 		if !in.Scan() {
-			return "", fmt.Errorf("no more answers (input ended at %q)", prompt)
+			return "", fmt.Errorf("input ended at the prompt %q", prompt)
 		}
 		answer := strings.TrimSpace(in.Text())
 		if answer == "" {
@@ -185,7 +185,7 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 	if len(machines) == 0 || slices.ContainsFunc(machines, func(n string) bool {
 		return strings.ContainsAny(n, "/. ") || n == ""
 	}) {
-		return a, fmt.Errorf("machine names become hostnames and filenames; %q won't do", names)
+		return a, fmt.Errorf("machine names become hostnames and filenames, so they cannot be empty or contain a slash, a dot, or a space: got %q", names)
 	}
 
 	defaultLeaders := machines[:1]
@@ -193,18 +193,18 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 		defaultLeaders = machines[:3]
 	}
 	for {
-		leaders, err := ask("leaders (odd count; the first is the founding leader)", strings.Join(defaultLeaders, " "))
+		leaders, err := ask("leaders (an odd number, and the first is the founding leader)", strings.Join(defaultLeaders, " "))
 		if err != nil {
 			return a, err
 		}
 		a.Leaders = strings.Fields(leaders)
 		if len(a.Leaders)%2 == 0 {
-			fmt.Fprintln(out, "etcd needs an odd number of leaders (1, 3, 5): a tie has no majority")
+			fmt.Fprintln(out, "etcd needs an odd number of leaders, such as 1, 3, or 5, because an even number can tie")
 			continue
 		}
 		outsider := slices.IndexFunc(a.Leaders, func(l string) bool { return !slices.Contains(machines, l) })
 		if outsider >= 0 {
-			fmt.Fprintf(out, "%s is not one of the machines\n", a.Leaders[outsider])
+			fmt.Fprintf(out, "%s is not in the list of machines\n", a.Leaders[outsider])
 			continue
 		}
 		break
@@ -225,7 +225,7 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 			a.NodeCIDR = cidr
 			break
 		}
-		fmt.Fprintln(out, "that isn't a CIDR like 10.10.0.0/24")
+		fmt.Fprintln(out, "enter a CIDR, such as 10.10.0.0/24")
 	}
 	base := prefix.Addr()
 	for i, name := range machines {
@@ -275,7 +275,7 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 	if a.UplinkNIC == "" {
 		clusterDefault = "eth0"
 	}
-	if a.ClusterNIC, err = ask("cluster interface (carries the fixed address)", clusterDefault); err != nil {
+	if a.ClusterNIC, err = ask("cluster interface (has the fixed address)", clusterDefault); err != nil {
 		return a, err
 	}
 	if a.UplinkNIC == "" {
@@ -288,7 +288,7 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 				a.Gateway = gw
 				break
 			}
-			fmt.Fprintln(out, "that isn't an IP address")
+			fmt.Fprintln(out, "enter an IP address")
 		}
 		ns, err := ask("nameservers, space-separated", "1.1.1.1 9.9.9.9")
 		if err != nil {
@@ -311,10 +311,10 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 		if len(a.Disks) == 1 || len(a.Disks) == 3 {
 			break
 		}
-		fmt.Fprintln(out, "one disk or three: one carries every role, three split state/pods/boot")
+		fmt.Fprintln(out, "enter 1 or 3 devices: one disk has every storage role, and three disks split the roles into state, pods, and boot")
 	}
 
-	ntp, err := ask("NTP servers for the leaders (liken deliberately has no default)", "time.cloudflare.com time.nist.gov")
+	ntp, err := ask("NTP servers for the leaders (liken has no built-in default, so the manifest lists them)", "time.cloudflare.com time.nist.gov")
 	if err != nil {
 		return a, err
 	}
@@ -329,7 +329,7 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 			a.RebootPolicy = policy
 			break
 		}
-		fmt.Fprintln(out, "Manual or Auto, capitalized the way the API spells them")
+		fmt.Fprintln(out, "enter Manual or Auto, with the capital letter")
 	}
 
 	// The interview offers the simple opt-ins, not the whole
@@ -346,7 +346,7 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 	a.Features = strings.Fields(features)
 	for _, f := range a.Features {
 		if !slices.Contains([]string{"traefik", "servicelb", "metrics-server", "iscsi", "nfs"}, f) {
-			return a, fmt.Errorf("%q is not a feature this interview can enable; the manual's Cluster reference lists the whole vocabulary", f)
+			return a, fmt.Errorf("%q is not a feature that this interview can enable, and the Cluster reference in the manual lists the features", f)
 		}
 	}
 

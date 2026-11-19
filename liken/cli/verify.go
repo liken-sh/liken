@@ -61,7 +61,7 @@ func verifyCommand(ctx context.Context, args []string, out io.Writer) error {
 		}
 		return nil
 	default:
-		return usage
+		return fmt.Errorf("unknown verify subcommand %q, want one of %v: %w", args[0], verifySubcommands, usage)
 	}
 }
 

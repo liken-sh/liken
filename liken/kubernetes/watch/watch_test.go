@@ -27,7 +27,7 @@ func asObject(t *testing.T, item thing) *unstructured.Unstructured {
 	t.Helper()
 	fields, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&item)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("converting the thing to unstructured: %v", err)
 	}
 	return &unstructured.Unstructured{Object: fields}
 }
@@ -38,7 +38,7 @@ func mistyped(t *testing.T, name string) *unstructured.Unstructured {
 	t.Helper()
 	object := asObject(t, newThing(name, "7", 1))
 	if err := unstructured.SetNestedField(object.Object, "two", "spec", "size"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting spec.size: %v", err)
 	}
 	return object
 }
@@ -75,7 +75,7 @@ func TestAReadyStoreAnswersReads(t *testing.T) {
 			t.Errorf("Get(a) = %+v, found %v, ok %v; want a with no managedFields", got, found, ok)
 		}
 		if _, found, ok := Get[thing](c.View(), "c"); !ok || found {
-			t.Errorf("Get(c) found %v, ok %v; want an answer that c is absent", found, ok)
+			t.Errorf("Get(c) found %v, ok %v; want found false and ok true for an absent c", found, ok)
 		}
 		if all, ok := List[thing](c.View()); !ok || len(all) != 2 || all[0].Metadata.Name != "a" {
 			t.Errorf("List = %+v, ok %v; want a, then b", all, ok)
@@ -93,7 +93,7 @@ func readyStore(t *testing.T, objects ...any) informer.View {
 	store := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{"app": LabelIndex("app")})
 	for _, object := range objects {
 		if err := store.Add(object); err != nil {
-			t.Fatal(err)
+			t.Fatalf("adding an object to the store: %v", err)
 		}
 	}
 	return informer.View{Store: store, Synced: func() bool { return true }}
@@ -190,7 +190,7 @@ func TestEachHandlerWakesTheLoopForItsChanges(t *testing.T) {
 				defer cancel()
 				informer.Start(ctx, testWatcher(t, server), testSource, informer.Options{Handler: c.handler(Signal(wakes))})
 				if !woke(wakes) {
-					t.Fatal("the first read did not wake the loop")
+					t.Fatal("the loop was not woken after the first read, want a wake")
 				}
 
 				server.release()

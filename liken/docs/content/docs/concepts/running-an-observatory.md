@@ -25,14 +25,15 @@ cooler at -10 °C can crack.
 observatory's hardware through INDI, under the API group
 `observatory.liken.sh`. While a reservation is active, it runs each of
 the telescope's INDI devices in its own pod, serves them on the
-telescope's INDI server, and connects and configures each device in a fixed order. It
-runs the activation procedures that each resource states, and starts
-PHD2 for the telescope's `Guider`, connected to the guide camera and
-the mount. At the end of the reservation, it runs each resource's
-deactivation procedures and reports that the devices are safe to
-power off. The dome and the weather station run on the observatory's
-own INDI server, which every telescope there shares. One telescope serves one reservation at a time, and other
-reservations wait in order of their start times.
+telescope's INDI server, and connects and configures each device in a
+fixed order. It runs the activation procedures that each resource
+lists, and starts PHD2 for the telescope's `Guider`, connected to the
+guide camera and the mount. At the end of the reservation, it runs
+each resource's deactivation procedures and reports that the devices
+are safe to power off. The dome and the weather station run on the
+observatory's own INDI server, which every telescope there shares. A
+telescope serves one reservation at a time, and other reservations
+wait in order of their start times.
 
 [`astrophotography-operator`](https://liken.sh/astrophotography/)
 takes the frames you ask for, under the API group
@@ -48,23 +49,25 @@ nights. It runs the plate solver, astrometry.net, in a pod for each
 ## What they depend on
 
 `observatory-operator` claims USB equipment from the devices that the
-operating system publishes. A device resource can hold a claim, and
-the operator creates a `ResourceClaim` from it for that device's pod.
-You write a `DeviceClass` for each piece of equipment, which selects
-the device by its vendor, product, and serial number. USB serial and HID
+operating system publishes. Each device resource, such as a camera or
+a mount, has a `spec.claim` field that holds a `ResourceClaim` spec.
+The operator creates a `ResourceClaimTemplate` from it, so each pod of
+the device gets its own `ResourceClaim`. You write a `DeviceClass` for
+each piece of equipment, which selects the device by its vendor,
+product, and serial number. USB serial and HID
 equipment reaches the pod as its device node. A camera that a vendor's
-SDK or gphoto2 drives has no kernel driver, so `liken` publishes it
-whole, and a claim delivers its USB node. See
+SDK or gphoto2 drives has no kernel driver, so `liken` publishes the
+whole USB device, and a claim gives the pod its USB node. See
 [USB devices with no kernel driver](/docs/reference/devices/#usb-devices-with-no-kernel-driver).
-A QHY camera that loads its firmware through udev rules on the host
-does not work yet.
+Many QHY cameras power up as a bare chip with no firmware, and
+[`firmware-operator`](https://liken.sh/firmware/) writes the firmware
+into the chip before the camera's pod can open it. See
+[QHY cameras that need firmware](https://liken.sh/observatory/docs/guides/connect-usb-equipment/#qhy-cameras-that-need-firmware).
 
 The device pods run the project's `indi` images: one image of
 `indiserver` and every core INDI driver, and one image for each family
 of vendor drivers. PHD2 runs in its own pod beside a headless Weston
 compositor.
-
-`observatory-operator` does not use the operators for claiming hardware.
 
 ## Extension points
 
@@ -80,7 +83,7 @@ compositor.
   types, a Go client of the INDI protocol, and a Go client of PHD2's
   event server, for a program of your own.
 
-The operator creates each INDI server and each guider as a `Service`
-of type `ClusterIP`, and you decide how a client outside the cluster
-reaches it. INDI has no authentication and no encryption: any client
+The operator serves each INDI server and each guider through a
+`Service` of type `ClusterIP`, and you decide how a client outside the
+cluster reaches it. INDI has no authentication and no encryption: any client
 that reaches port 7624 can slew the mount.

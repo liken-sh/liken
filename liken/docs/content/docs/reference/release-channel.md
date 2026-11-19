@@ -33,7 +33,7 @@ fleet](/docs/guides/upgrade/) gives the steps that use it.
       sbom.cdx.json            the CycloneDX SBOM: every component in
                                the release
       <file>.sigstore.json     the cosign signature of each file that
-                               release.yaml names, and of release.yaml
+                               release.yaml lists, and of release.yaml
       notes.md                 what changed in this release
       coverage.html            the test coverage of the tree it was built from
     sources/                   source mirrors for GPL and LGPL components,
@@ -49,12 +49,12 @@ Every field is zero-padded to a fixed width, so a plain string
 comparison puts versions in the correct order. The serial starts at `001` and
 increases during the day. No published release uses serial `000`.
 
-The version gives the date only. The `components` section of the
-release document records what is in the release.
+The version tells you only the date. The `components` list of the
+release document says what is in the release.
 
-A version always refers to the same bytes. If a release is bad,
-nobody builds it again or publishes it again with the same name.
-Publish the next serial number instead.
+A version always refers to the same bytes. A bad release is never
+rebuilt under the same version. The fix is published under the next
+serial number.
 
 ## The release document
 
@@ -70,14 +70,13 @@ liken.sh/v1alpha1`). It has two lists:
 ## The channel document
 
 `channel.yaml` is a `Channel` document. Its `latest` field records
-the newest published version. The cluster polls this document to fill the
+the newest published version. `cluster-operator` polls this document to fill the
 AVAILABLE column of `kubectl get clusters`, and `liken fetch
 ... latest ...` reads it to resolve `latest`.
 
-The channel document is the only object in the channel that changes.
-Every other object is published one time and never changes, which is
-why a machine can verify a release byte for byte against a pinned
-digest.
+The channel document is the only file in the channel that changes.
+Every other file is published once and never changes, so a machine
+can check a release byte for byte against a pinned digest.
 
 ## The versions document
 
@@ -100,48 +99,46 @@ Each entry has the shape of a catalog entry, so you can copy one
 straight into your cluster's
 [`spec.releases.catalog`](/docs/reference/cluster/#specreleasescatalog).
 
-Read this document when you want the whole list in one request. The
-storage refuses to list itself, so this file is the only way to learn
-which versions exist without opening the front page.
+Read this document when a script needs the list of releases. The
+channel is an object storage bucket that does not allow a listing of
+its contents, so this file and the front page are the only lists.
 
-No machine reads this document. A cluster polls `channel.yaml`, which
-stays one small file however many releases exist. The digests here are
-a convenience, and not an authority. A digest that the channel served
-proves nothing by itself, which is why you pin the digest in your
-own Cluster.
+No machine reads this document. `cluster-operator` polls only
+`channel.yaml`, which stays small however many releases exist. The
+digests here are a convenience. A digest that the channel served
+proves nothing by itself, so pin the digest in your own Cluster.
 
 ## The SBOM
 
 `<version>/sbom.cdx.json` is a CycloneDX SBOM of the release. Give it
-to Grype to learn which advisories apply to a release before a fleet
-adopts it, as [the verify guide](/docs/guides/verify/) shows. It lists:
+to Grype to find the advisories that apply to a release before your
+fleet takes it, as [the verify guide](/docs/guides/verify/) shows. It lists:
 
 * each file that the release takes from another project, such as the
   kernel, k3s, and the firmware, with its version, purl, sha256,
-  license, and download URL;
+  license, and download URL.
 * the static programs that buildroot builds, such as `mke2fs` and
-  `mount.nfs`, and every package that they link;
+  `mount.nfs`, and every package that they link.
 * the Go programs that syft finds in the system image, in the
   toolkit, and inside k3s, and the modules that each one links.
 
-The property `liken:source` of each component names where the entry
+The property `liken:source` of each component says where the entry
 came from: `manifest`, `buildroot`, or `syft`. The `compositions`
-section says which lists are complete. The list of everything in the
-release is incomplete, because a program that records nothing about
-what it links, such as a static C program, shows only when its own
-build wrote an SBOM.
+section says which lists are complete. The list of the whole release
+is marked incomplete, because syft cannot see what a static C program
+links. Such a program appears only when its own build wrote an SBOM.
 
 `release.yaml` lists the SBOM with its digest, like every other
-artifact, so each machine carries the SBOM of the release it runs on
-its boot slot. A release published before the SBOM existed has none.
+artifact, so each machine downloads the SBOM of the release it runs
+into its boot slot with the other files. Older releases have no SBOM.
 
 ## Signatures
 
 Each file that `release.yaml` names, and `release.yaml` itself, has a
 Sigstore bundle beside it: `<file>.sigstore.json`. The release
-workflow signs each file with cosign, with no key: Fulcio certifies
-the workflow of this repository at the release tag, and Rekor records
-the signature. To check a file that you downloaded:
+workflow signs each file with cosign in keyless mode: Fulcio issues a
+certificate for this repository's workflow at the release tag, and
+Rekor records the signature. To check a file that you downloaded:
 
 ```sh
 cosign verify-blob release.yaml --bundle release.yaml.sigstore.json \
@@ -154,34 +151,30 @@ runs the same check on `release.yaml` and on every artifact, with no
 cosign, and [Verify a release or an image](/docs/guides/verify/) gives
 the steps.
 
-A machine does not read the signatures. It trusts a release through
-the digest that its Cluster pins, as [the trust
-chain](#the-trust-chain) describes. The signature is for a person who
-has no Cluster yet, such as before an install. A release published
-before the workflow signed its files has no bundles.
+Machines do not read the signatures. A machine trusts a release
+through the digest that its Cluster pins, as [the trust
+chain](#the-trust-chain) describes. The signatures are for you when you
+have no Cluster yet, such as before an install. Releases published
+before the workflow signed its files have no bundles.
 
 ## The notes
 
 `<version>/notes.md` lists what changed in the release: the commit
-subjects since the release before it. The release's page on the
-channel shows the list, and the body of the release's page on GitHub
-wraps the same text. No digest pins the notes, `release.yaml` does
-not list them, and no machine reads them. They are announcement
-prose, in the same trust class as the index pages. That is also what
-lets a release published before notes existed gain them later.
+subjects since the previous release. The release's page on the
+channel and its page on GitHub both show this text. `release.yaml`
+does not list the notes, no digest pins them, and no machine reads
+them, so notes can be added to an older release later.
 
 ## The coverage report
 
-`<version>/coverage.html` is the test coverage of the tree the
-release was built from: one page that gives every package's number
-and colors every line of source. The checks measured it on the commit
-the tag names, and the release publishes that report. [The same
-report for the current main](/coverage.html) is on this site. No
-digest pins the report, `release.yaml` does not list it, and no
-machine reads it. It is in the same trust class as the index pages.
+`<version>/coverage.html` is the test coverage of the commit that the
+release tag points to: one page that shows the coverage of each
+package and marks each line of source as covered or not. [The same
+report for the current main](/coverage.html) is on this site.
+`release.yaml` does not list the report, and no machine reads it.
 
-Three components of the repository have tests and no manual of their
-own, so this site serves their reports for the current main too:
+Some components of the repository have tests and no manual of their
+own, so this site also serves their reports for the current main:
 [kubernetes](/coverage/kubernetes.html), the Go module that the
 operators share, [media-screen](/coverage/media-screen.html), the
 Rust crate that the screen clients share, and
@@ -192,31 +185,26 @@ map of a cluster.
 
 Open [releases.liken.sh](https://releases.liken.sh/) in a browser to
 read the channel. The front page lists every release, newest first,
-and marks the one that `channel.yaml` records as the latest. Each
-release has a page
-at `https://releases.liken.sh/<version>/`. It gives the catalog entry
-to copy, every artifact with its digest and its size, and the
-component versions in the release. The mirror at
+and marks the one that `channel.yaml` gives as the latest. Each
+release has a page at `https://releases.liken.sh/<version>/` with the
+catalog entry to copy, every artifact with its digest and its size,
+and the component versions in the release. The mirror at
 [sources/](https://releases.liken.sh/sources/) has a page too.
 
-These pages hold no information of their own. Each page is a view of
-the documents above, and no machine reads a page. A machine reads
-`channel.yaml` and `release.yaml`, and it verifies both.
+The pages show only what the documents above contain, and no
+machine reads them.
 
 ## The release page
 
 Every release also has a page on GitHub, under
 [liken-sh/liken/releases](https://github.com/liken-sh/liken/releases).
-CI makes the page after it publishes the release to the channel. The
-page is the announcement, not the distribution. It gives the digest,
-the catalog entry that you can copy, and the changes after the last
-release. The binaries stay on the channel, with the license notices
-and the source mirror. To hear about new releases, use the page's
-feed.
+CI creates the page after it publishes the release to the channel.
+It shows the digest, the catalog entry to copy, and the notes. The
+files themselves are only on the channel, with the license notices and
+the source mirror. To hear about new releases, subscribe to the
+releases feed on GitHub.
 
 ## The trust chain
-
-The chain has three links:
 
 1. The Cluster's catalog entry pins the sha256 of the exact bytes of
    `release.yaml`. The release's own page on the channel, and its page
@@ -227,9 +215,9 @@ The chain has three links:
 
 ## Sources
 
-`liken` redistributes binaries with the GPL license and the LGPL
-license, so the channel also serves the source of each such
-component, at `sources/<component>/<version>/`. The `LICENSES.md`
-file in every release gives the notices. The paths use the
-component's own version, not the release's version, because one
-component version can be in many releases.
+`liken` redistributes binaries under the GPL and the LGPL, so the
+channel also serves the source of each such component, at
+`sources/<component>/<version>/`. The `LICENSES.md` file in every
+release has the license notices. The path uses the component's own
+version, not the release's version, because one component version can
+be in many releases.

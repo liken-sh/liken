@@ -114,6 +114,6 @@ func Render(entries []Entry, out io.Writer) {
 		fmt.Fprintf(out, "%s\t%s\t%s%s\n", e.Domain, cli, operator, mark)
 	}
 	if len(missing) > 0 {
-		fmt.Fprintf(out, "no local CLI for: %s; run: liken plugins sync\n", strings.Join(missing, ", "))
+		fmt.Fprintf(out, "no local CLI for %s. Run: liken plugins sync\n", strings.Join(missing, ", "))
 	}
 }

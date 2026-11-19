@@ -76,18 +76,18 @@ func merge(in inputs) (*bom, error) {
 	}
 	for path, ref := range in.claims {
 		if !m.refs[ref] {
-			return nil, fmt.Errorf("the claim of %s names %s, which no manifest and no buildroot package is", path, ref)
+			return nil, fmt.Errorf("the claim of %s names the reference %s, and no manifest or buildroot package has that reference", path, ref)
 		}
 	}
 	names := map[string]bool{}
 	for _, s := range in.scans {
 		name := scanName(s.file)
 		if names[name] {
-			return nil, fmt.Errorf("two syft scans are named %s, and each scan needs its own name for its references", name)
+			return nil, fmt.Errorf("two syft scans have the name %s, and each scan needs its own name to prefix its references", name)
 		}
 		names[name] = true
 		if !m.refs[s.parent] {
-			return nil, fmt.Errorf("the scan %s is inside %s, which no source names", s.file, s.parent)
+			return nil, fmt.Errorf("the scan %s has the parent %s, and no source has that reference", s.file, s.parent)
 		}
 		if err := m.addScan(s, name, in.claims); err != nil {
 			return nil, err
@@ -107,7 +107,7 @@ func merge(in inputs) (*bom, error) {
 func (m *merger) add(c map[string]any) error {
 	ref, _ := c["bom-ref"].(string)
 	if ref == "" || m.refs[ref] {
-		return fmt.Errorf("the component reference %q is empty or taken", ref)
+		return fmt.Errorf("the component reference %q is empty or already used", ref)
 	}
 	m.refs[ref] = true
 	m.components = append(m.components, c)

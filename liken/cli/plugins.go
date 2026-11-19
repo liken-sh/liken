@@ -106,7 +106,7 @@ func pluginsCommand(args []string, out io.Writer) error {
 	case "remove":
 		return pluginsRemove(args[1:], out)
 	default:
-		return fmt.Errorf("usage: liken plugins sync|list|remove")
+		return fmt.Errorf("unknown plugins subcommand %q, want sync, list, or remove: usage: liken plugins sync|list|remove", args[0])
 	}
 }
 

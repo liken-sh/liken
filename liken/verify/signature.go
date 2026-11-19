@@ -84,7 +84,7 @@ var ImageSigner = Identity{
 var verifier = sync.OnceValues(func() (*verify.Verifier, error) {
 	trusted, err := root.NewTrustedRootFromJSON(trustedRootJSON)
 	if err != nil {
-		return nil, fmt.Errorf("the embedded Sigstore trusted root does not parse: %w", err)
+		return nil, fmt.Errorf("parsing the embedded Sigstore trusted root: %w", err)
 	}
 	return verify.NewVerifier(trusted,
 		verify.WithSignedCertificateTimestamps(1),
@@ -113,7 +113,7 @@ func checkBundle(bundleJSON []byte, digest [sha256.Size]byte, id Identity) (Sign
 	}
 	var b bundle.Bundle
 	if err := b.UnmarshalJSON(bundleJSON); err != nil {
-		return Signer{}, fmt.Errorf("the bundle does not parse: %w", err)
+		return Signer{}, fmt.Errorf("parsing the Sigstore bundle: %w", err)
 	}
 	certID, err := verify.NewShortCertificateIdentity(id.Issuer, "", "", id.SAN)
 	if err != nil {
@@ -123,7 +123,7 @@ func checkBundle(bundleJSON []byte, digest [sha256.Size]byte, id Identity) (Sign
 		verify.WithArtifactDigest("sha256", digest[:]),
 		verify.WithCertificateIdentity(certID)))
 	if err != nil {
-		return Signer{}, fmt.Errorf("the signature over sha256:%s does not verify: %w", hex.EncodeToString(digest[:]), err)
+		return Signer{}, fmt.Errorf("verifying the signature over sha256:%s: %w", hex.EncodeToString(digest[:]), err)
 	}
 	return Signer{Workflow: result.Signature.Certificate.SubjectAlternativeName}, nil
 }

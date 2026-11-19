@@ -60,16 +60,16 @@ func ReleaseFile(t testing.TB, name string) []byte {
 	}
 	f, err := testdata.Open(file + ".gz")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening the gzipped test file: %v", err)
 	}
 	defer f.Close()
 	z, err := gzip.NewReader(f)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the gzip reader: %v", err)
 	}
 	data, err := io.ReadAll(z)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("decompressing the test file: %v", err)
 	}
 	return data
 }
@@ -117,7 +117,7 @@ func ImageFile(t testing.TB, name string) []byte {
 	t.Helper()
 	data, err := testdata.ReadFile(path.Join("testdata", "bluetoothd", name))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the image test file: %v", err)
 	}
 	return data
 }
@@ -155,11 +155,11 @@ func NewRegistry(t testing.TB) Registry {
 	t.Cleanup(server.Close)
 	u, err := url.Parse(server.URL)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the registry address: %v", err)
 	}
 	repo, err := name.NewRepository(u.Host + "/liken-sh/bluetoothd")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the repository name: %v", err)
 	}
 	return Registry{Repo: repo}
 }
@@ -168,7 +168,7 @@ func NewRegistry(t testing.TB) Registry {
 func (r Registry) Blob(t testing.TB, data []byte) {
 	t.Helper()
 	if err := remote.WriteLayer(r.Repo, static.NewLayer(data, types.MediaType("application/octet-stream"))); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the blob to the registry: %v", err)
 	}
 }
 
@@ -178,14 +178,14 @@ func (r Registry) Manifest(t testing.TB, data []byte, tag string) v1.Hash {
 	t.Helper()
 	hash, _, err := v1.SHA256(bytes.NewReader(data))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("hashing the manifest: %v", err)
 	}
 	var ref name.Reference = r.Repo.Digest(hash.String())
 	if tag != "" {
 		ref = r.Repo.Tag(tag)
 	}
 	if err := remote.Put(ref, rawManifest(data)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the manifest to the registry: %v", err)
 	}
 	return hash
 }
@@ -220,11 +220,11 @@ func (r Registry) Sign(t testing.TB, bundleJSON []byte) {
 func withLayer(t testing.TB, manifest, layer []byte) []byte {
 	m, err := v1.ParseManifest(bytes.NewReader(manifest))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the signature manifest: %v", err)
 	}
 	hash, size, err := v1.SHA256(bytes.NewReader(layer))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("hashing the bundle: %v", err)
 	}
 	m.Layers[0].Digest, m.Layers[0].Size = hash, size
 	return marshal(t, m)
@@ -235,7 +235,7 @@ func withLayer(t testing.TB, manifest, layer []byte) []byte {
 func listing(t testing.TB, signature []byte) []byte {
 	hash, size, err := v1.SHA256(bytes.NewReader(signature))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("hashing the signature manifest: %v", err)
 	}
 	return marshal(t, v1.IndexManifest{
 		SchemaVersion: 2,
@@ -250,7 +250,7 @@ func listing(t testing.TB, signature []byte) []byte {
 func marshal(t testing.TB, v any) []byte {
 	data, err := json.Marshal(v)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the JSON: %v", err)
 	}
 	return data
 }

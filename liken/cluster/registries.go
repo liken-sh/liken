@@ -50,16 +50,16 @@ type RegistriesSpec struct {
 func validateRegistries(r RegistriesSpec) error {
 	for _, host := range slices.Sorted(maps.Keys(r.Mirrors)) {
 		if host == "" {
-			return fmt.Errorf("spec.registries.mirrors: a mirror's key must be the registry host it stands in for (docker.io, registry.example:5000)")
+			return fmt.Errorf("spec.registries.mirrors: a mirror's key must be the host of the registry it mirrors, such as docker.io or registry.example:5000, and this key is empty")
 		}
 		endpoints := r.Mirrors[host]
 		if len(endpoints) == 0 {
-			return fmt.Errorf("spec.registries.mirrors: %s lists no endpoints; list at least one endpoint URL, or remove the host entirely", host)
+			return fmt.Errorf("spec.registries.mirrors: the mirror of %s has no endpoints. List at least one endpoint URL, or remove the host", host)
 		}
 		for _, endpoint := range endpoints {
 			u, err := url.Parse(endpoint)
 			if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-				return fmt.Errorf("spec.registries.mirrors: %s endpoint %q must be an http:// or https:// URL", host, endpoint)
+				return fmt.Errorf("spec.registries.mirrors: the endpoint %q of the mirror of %s must be an http:// or https:// URL with a host", endpoint, host)
 			}
 		}
 	}

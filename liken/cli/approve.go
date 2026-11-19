@@ -47,14 +47,14 @@ func renderPending(m *machine.Machine) string {
 	name := m.Metadata.Name
 	pending := m.Status.Pending
 	if len(pending) == 0 {
-		return fmt.Sprintf("%s is converged; nothing is waiting\n", name)
+		return fmt.Sprintf("%s has no pending changes\n", name)
 	}
-	count := fmt.Sprintf("%d changes", len(pending))
+	count := fmt.Sprintf("%d pending changes", len(pending))
 	if len(pending) == 1 {
-		count = "one change"
+		count = "one pending change"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s is waiting on %s:\n", name, count)
+	fmt.Fprintf(&b, "%s has %s:\n", name, count)
 	for _, p := range pending {
 		condition := p.Condition
 		if c := api.FindCondition(m.Status.Conditions, p.Condition); c != nil {
@@ -62,7 +62,7 @@ func renderPending(m *machine.Machine) string {
 		}
 		applies := "a reboot applies this, and every other staged change with it"
 		if p.Kind == machine.DisruptionRestart {
-			applies = "a k3s restart applies this; the machine does not reboot"
+			applies = "a k3s restart applies this, and the machine does not reboot"
 		}
 		fmt.Fprintf(&b, "  %s\n  %s (%.12s)\n  %s\n", condition, p.Summary, p.Hash, applies)
 	}
@@ -102,7 +102,7 @@ func approveReboot(args []string, out io.Writer) error {
 		return fmt.Errorf("approving the Disruption: %w", err)
 	}
 	if approved == "" {
-		return fmt.Errorf("no Disruption covers the change yet; machine-operator files one on its next pass, so run the command again in a moment")
+		return fmt.Errorf("no Disruption covers the change yet. machine-operator creates one on its next pass, so run the command again in a moment")
 	}
 	fmt.Fprintf(out, "\napproved: Disruption %s\n", approved)
 	return nil

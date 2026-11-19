@@ -68,10 +68,10 @@ func TestRenderPendingShowsEachChangeWithItsReason(t *testing.T) {
 	}
 	got := renderPending(m)
 	for _, want := range []string{
-		"node-5 is waiting on one change:",
+		"node-5 has one pending change:",
 		"CredentialsConverged  RestartPending",
 		"registry credentials for 2 hosts (3943abfa6adf)",
-		"a k3s restart applies this; the machine does not reboot",
+		"a k3s restart applies this, and the machine does not reboot",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
@@ -121,7 +121,7 @@ func TestRenderPendingSaysARebootAppliesEveryStagedChange(t *testing.T) {
 
 func TestRenderPendingSaysConverged(t *testing.T) {
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-5"}}
-	if got := renderPending(m); !strings.Contains(got, "node-5 is converged; nothing is waiting") {
+	if got := renderPending(m); !strings.Contains(got, "node-5 has no pending changes") {
 		t.Fatalf("got %q", got)
 	}
 }

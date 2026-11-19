@@ -483,7 +483,7 @@ type ClusterNetworkSpec struct {
 func (n ClusterNetworkSpec) Validate() error {
 	for i, entry := range n.NodePortCIDRs {
 		if _, _, err := net.ParseCIDR(entry); err != nil {
-			return fmt.Errorf("nodePortCIDRs[%d] %q is not a subnet; write each entry as an address and a prefix length, such as 10.0.0.0/24", i, entry)
+			return fmt.Errorf("nodePortCIDRs[%d] %q is not a subnet. Write each entry as an address and a prefix length, such as 10.0.0.0/24", i, entry)
 		}
 	}
 	return nil
@@ -527,7 +527,7 @@ func ParseCluster(raw []byte) (*Cluster, error) {
 		return nil, err
 	}
 	if c.Kind != "Cluster" {
-		return nil, fmt.Errorf("expected kind Cluster, got %q", c.Kind)
+		return nil, fmt.Errorf("the document has kind %q, not Cluster", c.Kind)
 	}
 	if err := validateFeatures(c.Spec.Features); err != nil {
 		return nil, err
@@ -609,7 +609,7 @@ func LoadCluster(path string) (*Cluster, error) {
 	}
 	c, err := ParseCluster(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 	return c, nil
 }

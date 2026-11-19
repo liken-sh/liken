@@ -79,12 +79,12 @@ func TestRunRefuses(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if err := run(c.args); err == nil {
-				t.Error("run accepted the command line")
+				t.Error("run accepted the command line, want an error")
 			}
 		})
 	}
 	if _, err := os.Stat(out); err == nil {
-		t.Error("a refused run wrote the SBOM")
+		t.Error("a run that refused its command line wrote the SBOM")
 	}
 }
 

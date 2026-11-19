@@ -62,7 +62,7 @@ func Adopt(harvest, dir string, out io.Writer) error {
 	// certificate, or pods whose tokens do not verify.
 	for _, f := range Bundle {
 		if _, err := os.Stat(filepath.Join(harvest, f)); err != nil {
-			return fmt.Errorf("harvest is missing %s; re-run the tar on the existing server", f)
+			return fmt.Errorf("the harvest has no %s, so it is not a complete bundle. Run the tar again on the existing server", f)
 		}
 	}
 
@@ -88,7 +88,7 @@ func Adopt(harvest, dir string, out io.Writer) error {
 		}
 		want := fmt.Sprintf("K10%x::", sha256.Sum256(crt))
 		if !strings.HasPrefix(string(token), want) {
-			return fmt.Errorf("the harvested token does not hash the harvested server CA; these came from different clusters")
+			return fmt.Errorf("the token in the harvest does not hash the server CA in the harvest, so they come from different clusters")
 		}
 	}
 
@@ -98,7 +98,7 @@ func Adopt(harvest, dir string, out io.Writer) error {
 	// the bundle, this code stops and makes the operator choose.
 	for _, f := range Bundle {
 		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
-			return fmt.Errorf("%s already exists; this deployment already holds an identity — delete the identity directory first if replacing it is really the intent", filepath.Join(dir, f))
+			return fmt.Errorf("%s already exists, so this deployment already has an identity. To replace it, delete the identity directory first", filepath.Join(dir, f))
 		}
 	}
 

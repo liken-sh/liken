@@ -38,10 +38,10 @@ func TestSplitOptions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			flags, data := splitOptions(tc.options)
 			if flags != tc.flags {
-				t.Errorf("flags: got %#x, want %#x", flags, tc.flags)
+				t.Errorf("the flags are %#x, want %#x", flags, tc.flags)
 			}
 			if data != tc.data {
-				t.Errorf("data: got %q, want %q", data, tc.data)
+				t.Errorf("the data is %q, want %q", data, tc.data)
 			}
 		})
 	}
@@ -53,9 +53,9 @@ func TestSplitOptions(t *testing.T) {
 func TestSplitOptionsPassesUnknownNamesThrough(t *testing.T) {
 	flags, data := splitOptions("ro,inventedbysomedriver,alsoinvented=7")
 	if flags != unix.MS_RDONLY {
-		t.Errorf("flags: got %#x, want %#x", flags, uintptr(unix.MS_RDONLY))
+		t.Errorf("the flags are %#x, want %#x", flags, uintptr(unix.MS_RDONLY))
 	}
 	if want := "inventedbysomedriver,alsoinvented=7"; data != want {
-		t.Errorf("data: got %q, want %q", data, want)
+		t.Errorf("the data is %q, want %q", data, want)
 	}
 }

@@ -56,6 +56,7 @@ func main() {
 	fmt.Fprintln(os.Stderr, "liken-logs", machine.Version)
 
 	if len(os.Args) != 2 {
+		fmt.Fprintf(os.Stderr, "liken-logs: expected one verb, got %d arguments\n", len(os.Args)-1)
 		usage()
 		os.Exit(2)
 	}
@@ -70,6 +71,7 @@ func main() {
 	case "containerd":
 		err = relayFile(containerdLogPath)
 	default:
+		fmt.Fprintf(os.Stderr, "liken-logs: unknown verb %q\n", os.Args[1])
 		usage()
 		os.Exit(2)
 	}

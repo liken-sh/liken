@@ -30,14 +30,14 @@ func TestGenerateHandlesTheRealCRDs(t *testing.T) {
 		out := filepath.Join(t.TempDir(), "page.md")
 		cmd := exec.Command("go", "tool", "crdref", tc.path, out)
 		if message, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%s: %v: %s", tc.path, err, message)
+			t.Fatalf("generating a page from %s: %v: %s", tc.path, err, message)
 		}
 		got, err := os.ReadFile(out)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the generated page of %s: %v", tc.path, err)
 		}
 		if !strings.Contains(string(got), tc.heading) {
-			t.Errorf("%s: generated page is missing %q", tc.path, tc.heading)
+			t.Errorf("the page generated from %s has no heading %q", tc.path, tc.heading)
 		}
 	}
 }

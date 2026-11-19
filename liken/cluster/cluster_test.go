@@ -14,7 +14,7 @@ func writeClusterManifest(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "cluster.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the cluster manifest: %v", err)
 	}
 	return path
 }
@@ -22,10 +22,10 @@ func writeClusterManifest(t *testing.T, content string) string {
 func TestLoadClusterMissingFileIsNoCluster(t *testing.T) {
 	c, err := LoadCluster(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
 	if err != nil {
-		t.Fatalf("expected no cluster, got error: %v", err)
+		t.Fatalf("loading a missing file returns the error %v, want no cluster and no error", err)
 	}
 	if c != nil {
-		t.Fatalf("expected nil cluster, got %+v", c)
+		t.Fatalf("loading a missing file returns the cluster %+v, want nil", c)
 	}
 }
 
@@ -50,28 +50,28 @@ spec:
 `)
 	c, err := LoadCluster(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the cluster manifest: %v", err)
 	}
 	if c.Metadata.Name != "lab" {
-		t.Errorf("name: got %q", c.Metadata.Name)
+		t.Errorf("the name is %q, want lab", c.Metadata.Name)
 	}
 	if len(c.Spec.Leaders) != 1 || c.Spec.Leaders[0] != "node-1" {
-		t.Errorf("leaders: got %v", c.Spec.Leaders)
+		t.Errorf("the leaders are %v, want [node-1]", c.Spec.Leaders)
 	}
 	if c.Spec.Endpoint != "https://10.10.0.1:6443" {
-		t.Errorf("endpoint: got %q", c.Spec.Endpoint)
+		t.Errorf("the endpoint is %q, want https://10.10.0.1:6443", c.Spec.Endpoint)
 	}
 	if c.Spec.Origin != OriginAdopted {
-		t.Errorf("origin: got %q", c.Spec.Origin)
+		t.Errorf("the origin is %q, want %q", c.Spec.Origin, OriginAdopted)
 	}
 	if c.Spec.Network.NodeCIDR != "10.10.0.0/24" {
-		t.Errorf("nodeCIDR: got %q", c.Spec.Network.NodeCIDR)
+		t.Errorf("the nodeCIDR is %q, want 10.10.0.0/24", c.Spec.Network.NodeCIDR)
 	}
 	if c.Spec.Network.ClusterDomain != "cluster.local" {
-		t.Errorf("clusterDomain: got %q", c.Spec.Network.ClusterDomain)
+		t.Errorf("the clusterDomain is %q, want cluster.local", c.Spec.Network.ClusterDomain)
 	}
 	if len(c.Spec.Time.Upstreams) != 2 || c.Spec.Time.Upstreams[0] != "time.cloudflare.com" {
-		t.Errorf("time upstreams: got %v", c.Spec.Time.Upstreams)
+		t.Errorf("the time upstreams are %v, want [time.cloudflare.com 192.168.1.1]", c.Spec.Time.Upstreams)
 	}
 }
 
@@ -83,7 +83,7 @@ metadata:
   name: lab
 `)
 	if _, err := LoadCluster(path); err == nil {
-		t.Fatal("expected an error for kind Machine")
+		t.Fatal("loading a manifest of kind Machine returns no error, want one")
 	}
 }
 
@@ -97,7 +97,7 @@ spec:
   leaderss: [node-1]
 `)
 	if _, err := LoadCluster(path); err == nil {
-		t.Fatal("expected an error for the misspelled field")
+		t.Fatal("loading a manifest with the misspelled field leaderss returns no error, want one")
 	}
 }
 
@@ -113,10 +113,10 @@ spec:
 `)
 	c, err := LoadCluster(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the cluster manifest: %v", err)
 	}
 	if got := c.EnabledFeatures(); len(got) != 1 || got[0] != "metrics-server" {
-		t.Errorf("enabled features: got %v", got)
+		t.Errorf("the enabled features are %v, want one feature", got)
 	}
 }
 
@@ -132,10 +132,10 @@ spec:
 `)
 	_, err := LoadCluster(path)
 	if err == nil {
-		t.Fatal("expected an error for a null feature")
+		t.Fatal("loading a feature with a null value returns no error, want one")
 	}
 	if !strings.Contains(err.Error(), `"metrics-server: {}"`) {
-		t.Errorf("the error should say what to write instead, got: %v", err)
+		t.Errorf("the error is %v, want it to give the replacement \"metrics-server: {}\"", err)
 	}
 }
 
@@ -158,10 +158,10 @@ spec:
 `)
 	c, err := LoadCluster(path)
 	if err != nil {
-		t.Fatalf("a feature from a newer vocabulary must parse: %v", err)
+		t.Fatalf("parsing a feature from a newer vocabulary: %v", err)
 	}
 	if got := c.EnabledFeatures(); len(got) != 1 || got[0] != "from-the-future" {
-		t.Errorf("enabled features: got %v", got)
+		t.Errorf("the enabled features are %v, want one feature", got)
 	}
 }
 
@@ -187,11 +187,11 @@ spec:
 `)
 	c, err := LoadCluster(path)
 	if err != nil {
-		t.Fatalf("feature parameters must parse: %v", err)
+		t.Fatalf("parsing feature parameters: %v", err)
 	}
 	flux := *c.Spec.Features["flux"]
 	if flux["repository"] != "ssh://git@forge.example/fleet.git" {
-		t.Errorf("the parameter must survive the parse, got %v", flux)
+		t.Errorf("the parsed feature parameters are %v, want the declared parameter", flux)
 	}
 }
 
@@ -218,21 +218,21 @@ func TestRoleDerivation(t *testing.T) {
 func TestMaxUnavailableDefaultsToOne(t *testing.T) {
 	var spec ClusterSpec
 	if got := spec.Disruption.MaxUnavailableOrDefault(); got != 1 {
-		t.Errorf("got %d", got)
+		t.Errorf("MaxUnavailableOrDefault is %d, want 1", got)
 	}
 }
 
 func TestMaxUnavailableHonorsTheDeclaredBudget(t *testing.T) {
 	spec := ClusterSpec{Disruption: ClusterDisruptionSpec{MaxUnavailable: 2}}
 	if got := spec.Disruption.MaxUnavailableOrDefault(); got != 2 {
-		t.Errorf("got %d", got)
+		t.Errorf("MaxUnavailableOrDefault is %d, want 2", got)
 	}
 }
 
 func TestLoadClusterReportsAnUnreadableFile(t *testing.T) {
 	path := unreadableFile(t, filepath.Join(t.TempDir(), "cluster.yaml"))
 	if _, err := LoadCluster(path); err == nil {
-		t.Error("a cluster manifest that exists but can't be read is an error, not an absent cluster")
+		t.Error("loading an unreadable cluster manifest returns no error, want one")
 	}
 }
 
@@ -243,20 +243,20 @@ func TestReleasesEntryFindsItsVersion(t *testing.T) {
 	}}
 	entry := releases.Entry("0.2.0")
 	if entry == nil || entry.Digest != "sha256:bbb" {
-		t.Errorf("got %+v", entry)
+		t.Errorf("the entry is %+v, want the digest sha256:bbb", entry)
 	}
 }
 
 func TestReleasesEntryUnknownVersionIsNil(t *testing.T) {
 	releases := ClusterReleasesSpec{Catalog: []ReleaseCatalogEntry{{Version: "0.1.0"}}}
 	if entry := releases.Entry("0.9.9"); entry != nil {
-		t.Errorf("a version the catalog doesn't list has no entry, got %+v", entry)
+		t.Errorf("the entry for a version missing from the catalog is %+v, want nil", entry)
 	}
 }
 
 func TestReleasesEntryEmptyCatalogIsNil(t *testing.T) {
 	if entry := (ClusterReleasesSpec{}).Entry("0.1.0"); entry != nil {
-		t.Errorf("an empty catalog has no entries, got %+v", entry)
+		t.Errorf("the entry in an empty catalog is %+v, want nil", entry)
 	}
 }
 
@@ -267,10 +267,10 @@ func TestNewestVersion(t *testing.T) {
 		{Version: "2026.07.10-001"},
 	}
 	if got := NewestVersion(catalog); got != "2026.07.11-001" {
-		t.Errorf("got %q", got)
+		t.Errorf("the newest version is %q, want 2026.07.11-001", got)
 	}
 	if got := NewestVersion(nil); got != "" {
-		t.Errorf("an empty catalog has no newest; got %q", got)
+		t.Errorf("the newest version of an empty catalog is %q, want an empty string", got)
 	}
 }
 
@@ -278,11 +278,11 @@ func TestNewestVersion(t *testing.T) {
 // alone, which is kube-proxy's own "primary" keyword.
 func TestNodePortAddressesDefaultsToTheNodeIP(t *testing.T) {
 	if got := (&Cluster{}).NodePortAddresses(); !slices.Equal(got, []string{"primary"}) {
-		t.Errorf("an unset list: got %q", got)
+		t.Errorf("with an unset list, the addresses are %q, want primary", got)
 	}
 	var absent *Cluster
 	if got := absent.NodePortAddresses(); !slices.Equal(got, []string{"primary"}) {
-		t.Errorf("a machine on its own: got %q", got)
+		t.Errorf("with no cluster, the addresses are %q, want primary", got)
 	}
 }
 
@@ -307,10 +307,10 @@ func TestNetworkValidateRefusesWhatIsNotASubnet(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			err := ClusterNetworkSpec{NodePortCIDRs: []string{entry}}.Validate()
 			if err == nil {
-				t.Fatalf("%q is not a subnet, but it parsed", entry)
+				t.Fatalf("Validate accepted %q, want an error because it is not a subnet", entry)
 			}
 			if !strings.Contains(err.Error(), "nodePortCIDRs[0]") {
-				t.Errorf("the error should name the entry: %v", err)
+				t.Errorf("the error is %v, want it to name nodePortCIDRs[0]", err)
 			}
 		})
 	}
@@ -319,7 +319,7 @@ func TestNetworkValidateRefusesWhatIsNotASubnet(t *testing.T) {
 func TestNetworkValidateAcceptsSubnets(t *testing.T) {
 	spec := ClusterNetworkSpec{NodePortCIDRs: []string{"10.0.0.0/24", "10.10.10.11/32", "fd00::/64"}}
 	if err := spec.Validate(); err != nil {
-		t.Errorf("got %v", err)
+		t.Errorf("Validate returned %v, want no error", err)
 	}
 }
 

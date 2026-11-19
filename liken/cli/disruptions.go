@@ -113,12 +113,12 @@ func approveRequest(c *apiclient.Client, m *machine.Machine, choice *machine.Pen
 			return name, err
 		}
 	}
-	return "", fmt.Errorf("the Disruption %s changed on each of %d writes", name, approveAttempts)
+	return "", fmt.Errorf("each of %d writes to the Disruption %s returned a conflict, because another client changed it between the read and the write", approveAttempts, name)
 }
 
 // errNoDisruptions is the answer of a cluster that serves no
 // Disruptions: its leaders run a release from before them.
-var errNoDisruptions = errors.New("the cluster serves no Disruptions, so it runs a liken release from before them; use the liken CLI of that release")
+var errNoDisruptions = errors.New("the cluster serves no Disruptions because its leaders run a liken release from before them, so use the liken CLI of that release")
 
 // approveAttempts bounds the writes of one approval.
 const approveAttempts = 5

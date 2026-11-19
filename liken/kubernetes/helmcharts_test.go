@@ -23,13 +23,13 @@ func TestListHelmChartsReadsTheWholeCluster(t *testing.T) {
 
 	charts, err := ListHelmCharts(client)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the HelmCharts: %v", err)
 	}
 	if len(charts) != 1 || charts[0].Metadata.Name != "traefik" {
-		t.Errorf("got %+v", charts)
+		t.Errorf("the charts are %+v, want one chart named traefik", charts)
 	}
 	if path != HelmChartsPath {
-		t.Errorf("charts live in any namespace, so the read covers them all: %s", path)
+		t.Errorf("the request path is %s, want %s because charts live in any namespace", path, HelmChartsPath)
 	}
 }
 
@@ -40,10 +40,10 @@ func TestListHelmChartsTreatsAnUnservedKindAsNoCharts(t *testing.T) {
 
 	charts, err := ListHelmCharts(client)
 	if err != nil {
-		t.Fatalf("a cluster that never installed the CRD has no charts to wait for: %v", err)
+		t.Fatalf("ListHelmCharts returned the error %v, want none because a cluster without the CRD has no charts to wait for", err)
 	}
 	if len(charts) != 0 {
-		t.Errorf("got %+v", charts)
+		t.Errorf("the charts are %+v, want none", charts)
 	}
 }
 
@@ -53,6 +53,6 @@ func TestListHelmChartsReportsAFailedRead(t *testing.T) {
 	}))
 
 	if _, err := ListHelmCharts(client); err == nil {
-		t.Error("a refused read must never read as an empty cluster")
+		t.Error("a 403 returned no error, want an error because a refused read must not read as an empty cluster")
 	}
 }

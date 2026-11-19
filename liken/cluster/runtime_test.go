@@ -20,7 +20,7 @@ func TestRuntimeDefaultsImposeNothing(t *testing.T) {
 	}
 	bytes, off, err := spec.GoMemoryLimitBytes(gib)
 	if err != nil || !off || bytes != 0 {
-		t.Errorf("unset limit: got %d off=%v err=%v, want off with no ceiling", bytes, off, err)
+		t.Errorf("an unset limit is %d off=%v err=%v, want off with no ceiling", bytes, off, err)
 	}
 }
 
@@ -40,10 +40,10 @@ func TestRuntimeMemoryLimitForms(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			bytes, off, err := K3sRuntimeSpec{GoMemoryLimit: tc.limit}.GoMemoryLimitBytes(gib)
 			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+				t.Fatalf("reading goMemoryLimit %q: %v", tc.limit, err)
 			}
 			if bytes != tc.wantBytes || off != tc.wantOff {
-				t.Errorf("got %d off=%v, want %d off=%v", bytes, off, tc.wantBytes, tc.wantOff)
+				t.Errorf("the limit is %d off=%v, want %d off=%v", bytes, off, tc.wantBytes, tc.wantOff)
 			}
 		})
 	}
@@ -52,7 +52,7 @@ func TestRuntimeMemoryLimitForms(t *testing.T) {
 func TestRuntimeGoGCResolves(t *testing.T) {
 	got, ok := (K3sRuntimeSpec{GoGC: gogcPtr(80)}).GoGCPercent()
 	if !ok || got != 80 {
-		t.Errorf("custom GoGC: got %d ok=%v, want 80 set", got, ok)
+		t.Errorf("a custom GoGC is %d ok=%v, want 80 set", got, ok)
 	}
 }
 
@@ -77,10 +77,10 @@ func TestRuntimeValidationRejectsGarbage(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			err := tc.spec.Validate()
 			if err == nil {
-				t.Fatal("expected an error")
+				t.Fatal("validation returned no error, want one")
 			}
 			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("error %q should mention %q", err, tc.want)
+				t.Errorf("the error is %q, want it to mention %q", err, tc.want)
 			}
 		})
 	}
@@ -98,7 +98,7 @@ func TestRuntimeValidationAcceptsGoodValues(t *testing.T) {
 	}
 	for _, spec := range good {
 		if err := spec.Validate(); err != nil {
-			t.Errorf("%+v should validate, got %v", spec, err)
+			t.Errorf("validating %+v: %v, want no error", spec, err)
 		}
 	}
 }
@@ -160,10 +160,10 @@ func TestImageGCValidationRejectsGarbage(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			err := tc.spec.Validate()
 			if err == nil {
-				t.Fatal("expected an error")
+				t.Fatal("validation returned no error, want one")
 			}
 			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("error %q should mention %q", err, tc.want)
+				t.Errorf("the error is %q, want it to mention %q", err, tc.want)
 			}
 		})
 	}
@@ -182,7 +182,7 @@ func TestImageGCValidationAcceptsGoodValues(t *testing.T) {
 	}
 	for _, spec := range good {
 		if err := spec.Validate(); err != nil {
-			t.Errorf("%+v should validate, got %v", spec, err)
+			t.Errorf("validating %+v: %v, want no error", spec, err)
 		}
 	}
 }
@@ -195,10 +195,10 @@ func TestContainerdValidationRejectsUnknownLevels(t *testing.T) {
 		t.Run(level, func(t *testing.T) {
 			err := ContainerdRuntimeSpec{LogLevel: level}.Validate()
 			if err == nil {
-				t.Fatal("expected an error")
+				t.Fatal("validation returned no error, want one")
 			}
 			if !strings.Contains(err.Error(), "logLevel") {
-				t.Errorf("the error should name the field, got: %v", err)
+				t.Errorf("the error is %v, want it to name the field", err)
 			}
 		})
 	}
@@ -207,7 +207,7 @@ func TestContainerdValidationRejectsUnknownLevels(t *testing.T) {
 func TestContainerdValidationAcceptsTheLevelsLikenOffers(t *testing.T) {
 	for _, level := range []string{"", "debug", "info", "warn", "error"} {
 		if err := (ContainerdRuntimeSpec{LogLevel: level}).Validate(); err != nil {
-			t.Errorf("level %q should validate, got %v", level, err)
+			t.Errorf("validating level %q: %v, want no error", level, err)
 		}
 	}
 }
@@ -226,10 +226,10 @@ spec:
       goMemoryLimit: "150%"
 `))
 	if err == nil {
-		t.Fatal("expected an error for an out-of-range percent")
+		t.Fatal("validation of an out-of-range percent returned no error, want one")
 	}
 	if !strings.Contains(err.Error(), "spec.runtime") || !strings.Contains(err.Error(), "k3s") {
-		t.Errorf("the error should name the field, got: %v", err)
+		t.Errorf("the error is %v, want it to name the field", err)
 	}
 }
 
@@ -247,10 +247,10 @@ spec:
         lowThresholdPercent: 70
 `))
 	if err == nil {
-		t.Fatal("expected an error for a low threshold above the high one")
+		t.Fatal("validation of a low threshold above the high one returned no error, want one")
 	}
 	if !strings.Contains(err.Error(), "spec.runtime") || !strings.Contains(err.Error(), "kubelet") {
-		t.Errorf("the error should name the field, got: %v", err)
+		t.Errorf("the error is %v, want it to name the field", err)
 	}
 }
 
@@ -270,14 +270,14 @@ spec:
         maximumAge: 168h
 `))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the Cluster: %v", err)
 	}
 	gc := c.KubeletSpec().ImageGC
 	if *gc.HighThresholdPercent != 70 || *gc.LowThresholdPercent != 60 {
-		t.Errorf("thresholds not parsed: %+v", gc)
+		t.Errorf("the thresholds are %+v, want them parsed", gc)
 	}
 	if gc.MinimumAge != "5m" || gc.MaximumAge != "168h" {
-		t.Errorf("ages not parsed: %+v", gc)
+		t.Errorf("the ages are %+v, want them parsed", gc)
 	}
 }
 
@@ -309,10 +309,10 @@ spec:
       logLevel: verbose
 `))
 	if err == nil {
-		t.Fatal("expected an error for a level containerd does not know")
+		t.Fatal("validation of a level containerd does not know returned no error, want one")
 	}
 	if !strings.Contains(err.Error(), "spec.runtime") || !strings.Contains(err.Error(), "containerd") {
-		t.Errorf("the error should name the field, got: %v", err)
+		t.Errorf("the error is %v, want it to name the field", err)
 	}
 }
 
@@ -330,13 +330,13 @@ spec:
       logLevel: warn
 `))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the Cluster: %v", err)
 	}
 	if !c.RuntimeSpec().Debug {
-		t.Error("the k3s debug flag did not parse")
+		t.Error("the k3s debug flag is false, want true")
 	}
 	if got := c.ContainerdSpec().LogLevel; got != "warn" {
-		t.Errorf("containerd's level did not parse: %q", got)
+		t.Errorf("the containerd level is %q, want warn", got)
 	}
 }
 
@@ -353,10 +353,10 @@ spec:
       goGC: 80
 `))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the Cluster: %v", err)
 	}
 	gc, ok := c.RuntimeSpec().GoGCPercent()
 	if c.Spec.Runtime.K3s.GoMemoryLimit != "448Mi" || !ok || gc != 80 {
-		t.Errorf("runtime not parsed: %+v", c.Spec.Runtime)
+		t.Errorf("the runtime is %+v, want it parsed", c.Spec.Runtime)
 	}
 }
