@@ -33,14 +33,14 @@ func ParseRA(text string) (float64, error) {
 // ParseDec converts a declination such as -05:23:28 to degrees. The
 // sign is optional.
 func ParseDec(text string) (float64, error) {
-	sign := 1.0
+	sign, unsigned := 1.0, text
 	switch {
 	case strings.HasPrefix(text, "-"):
-		sign, text = -1, text[1:]
+		sign, unsigned = -1, text[1:]
 	case strings.HasPrefix(text, "+"):
-		text = text[1:]
+		unsigned = text[1:]
 	}
-	degrees, err := sexagesimal(text)
+	degrees, err := sexagesimal(unsigned)
 	if err != nil {
 		return 0, fmt.Errorf("reading the declination %q: %w", text, err)
 	}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/liken-sh/liken/astrophotography-operator/catalog"
@@ -367,5 +368,31 @@ func TestACatalogThatCannotBeReadStopsTheRun(t *testing.T) {
 	}
 	if _, err := Run(w.options()); err == nil {
 		t.Error("the run returned no error, want one for the unreadable catalog")
+	}
+}
+
+// On a share that refuses RENAME_NOREPLACE, the frame takes its name by
+// a hard link, and a crash before the .part name is removed leaves the
+// frame under both names. The next run finishes the frame and removes
+// the .part name, so the archive holds no hidden second link.
+func TestARerunRemovesThePartNameThatALinkLeft(t *testing.T) {
+	w := newWorld(t)
+	frame := lightFrame(frameID)
+	w.expose("M42_0001", frame)
+	archived := filepath.Join(w.archive, "astro", "M42_0001.fits")
+	w.write(archived, frame)
+	if err := os.Link(archived, filepath.Join(w.archive, "astro", ".M42_0001.fits.part")); err != nil {
+		t.Fatalf("linking the .part name: %v", err)
+	}
+
+	report, err := Run(w.options())
+
+	if err != nil || report.Promoted != 1 {
+		t.Fatalf("Run returned the report %+v and the error %v, want one frame promoted", report, err)
+	}
+	got := keys(w.files(filepath.Join(w.archive, "astro")))
+	slices.Sort(got)
+	if !reflect.DeepEqual(got, []string{"M42_0001.fits", "catalog/m42.jsonl"}) {
+		t.Errorf("the archive holds %v, want only the frame and the catalog", got)
 	}
 }

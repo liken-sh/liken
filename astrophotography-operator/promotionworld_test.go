@@ -135,13 +135,17 @@ func finish(t *testing.T, api *fakeAPI, job string, report *promote.Report) {
 		encoded, _ := json.Marshal(report)
 		terminated = map[string]any{"exitCode": 0, "message": string(encoded)}
 	}
-	stored["status"] = status
-	api.put(jobsPath, stored)
+	// The pod ends before the Job controller marks the Job finished, so
+	// the pod goes in first. With the Job first, a pass that runs
+	// between the two writes finds a finished Job with no pod, and runs
+	// the Job again as one whose pod was deleted.
 	pod := object(observatoryNS, job+"-x7k2p", map[string]any{labelManagedBy: managedBy, labelPromotionJob: job}, nil)
 	pod["status"] = map[string]any{"containerStatuses": []any{map[string]any{
 		"name": promoteContainer, "state": map[string]any{"terminated": terminated},
 	}}}
 	api.put(podsPath, pod)
+	stored["status"] = status
+	api.put(jobsPath, stored)
 }
 
 // complete ends a Job as Complete with no pod, as when the pod whose

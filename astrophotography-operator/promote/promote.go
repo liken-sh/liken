@@ -61,6 +61,11 @@ type Options struct {
 	Target  string
 	Cameras map[string]Camera
 
+	// Log receives the lines about what a run leaves behind without a
+	// fault, such as a .part name that it could not remove. Nil
+	// discards them.
+	Log io.Writer
+
 	// after, when set, is called each time a frame finishes a step, with
 	// the step and the file the step wrote. A test returns an error from
 	// it to stop the run as a killed pod would, or changes the file.
@@ -195,6 +200,11 @@ func (f *frameRun) promote() error {
 // file. When the file has the frame's hash, an earlier run crashed after
 // the rename, so finishPlaced appends the catalog line if it is missing
 // and deletes the frame. Otherwise it reports a name conflict.
+//
+// It also removes the frame's .part name. renameNoReplace links the
+// copy to the frame's name on a share that refuses RENAME_NOREPLACE,
+// and a crash before the unlink leaves the .part name as a second link
+// to the archived frame.
 func (f *frameRun) finishPlaced(archived string, inCatalog bool) error {
 	sum, size, err := hashFile(f.source)
 	if err != nil {
@@ -202,6 +212,13 @@ func (f *frameRun) finishPlaced(archived string, inCatalog bool) error {
 	}
 	if sum != archived {
 		return f.conflict()
+	}
+	// The frame is whole in the archive, so a .part name that stays is
+	// only a hidden second link to it, and the frame still finishes. The
+	// frame then leaves the outbox, so no later run visits it, and the
+	// name stays until a person removes it.
+	if err := os.Remove(f.part()); err != nil && !errors.Is(err, fs.ErrNotExist) && f.Log != nil {
+		fmt.Fprintf(f.Log, "promote: the hidden name %s stays beside the archived frame until a person removes it: %v\n", filepath.Base(f.part()), err)
 	}
 	if !inCatalog {
 		if err := f.record(sum, size); err != nil {
@@ -211,8 +228,14 @@ func (f *frameRun) finishPlaced(archived string, inCatalog bool) error {
 	return f.delete()
 }
 
+// part returns the hidden name beside the frame's name in the archive
+// that the copy is written to before the rename.
+func (f *frameRun) part() string {
+	return filepath.Join(filepath.Dir(f.target), "."+filepath.Base(f.target)+".part")
+}
+
 func (f *frameRun) copy(recorded catalog.Line, inCatalog bool) error {
-	part := filepath.Join(filepath.Dir(f.target), "."+filepath.Base(f.target)+".part")
+	part := f.part()
 	sum, size, err := copyFile(f.source, part)
 	if err != nil {
 		return f.fail(f.rel, ReasonCopyFailed, err)

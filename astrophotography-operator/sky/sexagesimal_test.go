@@ -111,3 +111,21 @@ func TestFormatReadsBack(t *testing.T) {
 		t.Errorf("ParseDec(FormatDec(-5.391111)) = %f, %v, want -5.391111 within 0.05 arcseconds", dec, err)
 	}
 }
+
+// An error quotes the declination as the caller gave it, with its sign.
+func TestParseDecQuotesTheTextWithItsSign(t *testing.T) {
+	cases := []struct {
+		text string
+		want string
+	}{
+		{"-91:00:00", `the declination "-91:00:00" is beyond 90 degrees`},
+		{"-10:61:00", `reading the declination "-10:61:00": the minutes 61 and the seconds 0 must each be below 60`},
+	}
+	for _, c := range cases {
+		t.Run(c.text, func(t *testing.T) {
+			if _, err := ParseDec(c.text); err == nil || err.Error() != c.want {
+				t.Errorf("ParseDec(%q) returned the error %v, want %q", c.text, err, c.want)
+			}
+		})
+	}
+}

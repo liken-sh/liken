@@ -77,6 +77,12 @@ func (g *phd2Guiding) stop(ctx context.Context, w *work) error {
 		return fmt.Errorf("sending stop_capture to PHD2 of Guider %s: %w", l.name, err)
 	}
 	if err := l.client.WaitFor(stopping, func(s phd2.State) bool { return !s.Open || !phd2Active(s.AppState) }); err != nil {
+		// The predicate counts a closed connection as stopped, so the
+		// wait fails only when a context ends: ctx, as when the
+		// reservation ends, or the stop's time limit.
+		if ctx.Err() != nil {
+			return fmt.Errorf("waiting for PHD2 of Guider %s to stop: %w", l.name, err)
+		}
 		return fmt.Errorf("PHD2 of Guider %s did not stop within %s", l.name, stopTimeout)
 	}
 	return nil

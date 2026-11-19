@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -45,9 +46,14 @@ func TestASolverGetsItsDeploymentAndService(t *testing.T) {
 	})
 }
 
-// Ready goes from no pod, to a pod whose claim does not exist, to a
-// ready pod with the lab's index files. Each transition posts one Event,
-// and only the missing claim posts a Warning.
+// Ready goes from no pod, to a pod whose claim does not exist, to no
+// pod again, to a ready pod with the lab's index files. Each transition
+// posts one Event, and only the missing claim posts a Warning. The
+// second "no pod yet" repeats the first Event, so the recorder raises
+// that Event's count to 2. The test settles after the pod's delete,
+// because a pass that runs only after the new pod's add writes "reading
+// the index list" for that transition, a PodNotReady with a different
+// message, and so a different Event.
 func TestReadyFollowsTheSolversPod(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
@@ -59,6 +65,7 @@ func TestReadyFollowsTheSolversPod(t *testing.T) {
 		settle()
 		missing := readyOf(w.solver(t, "lab"))
 		w.api.remove(podsPath, "observatory", "lab-solver-0")
+		settle()
 		w.readySolverPod("lab-solver-1", "pod-1")
 		settle()
 		lab := w.solver(t, "lab")
@@ -87,9 +94,9 @@ func TestReadyFollowsTheSolversPod(t *testing.T) {
 		}
 		var posted []string
 		for _, e := range w.api.recorded.About("Solver", "lab") {
-			posted = append(posted, e.Type+" "+e.Reason)
+			posted = append(posted, fmt.Sprintf("%s %s %d", e.Type, e.Reason, e.Count))
 		}
-		want := []string{"Normal PodNotReady", "Warning ClaimMissing", "Normal PodNotReady", "Normal Loaded"}
+		want := []string{"Normal PodNotReady 2", "Warning ClaimMissing 1", "Normal Loaded 1"}
 		if !slices.Equal(posted, want) {
 			t.Errorf("Events %q, want %q", posted, want)
 		}

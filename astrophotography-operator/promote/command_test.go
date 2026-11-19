@@ -70,3 +70,25 @@ func TestMainExitCodes(t *testing.T) {
 		})
 	}
 }
+
+// A bad flag is named alone, so the reader fixes the flag that is wrong.
+func TestMainNamesTheFlagThatIsWrong(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no target", []string{"--cameras", "{}"}, "promote: --target is required\n"},
+		{"cameras that are not JSON", []string{"--target", "m42", "--cameras", "{"},
+			"promote: --cameras must be a JSON object: unexpected end of JSON input\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var log strings.Builder
+			Main(c.args, &log)
+			if log.String() != c.want {
+				t.Errorf("Main wrote %q, want %q", log.String(), c.want)
+			}
+		})
+	}
+}

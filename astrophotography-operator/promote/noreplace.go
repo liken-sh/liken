@@ -18,8 +18,9 @@ var errNameTaken = errors.New("the destination name already exists")
 // link and then removes the old name instead. The link fails with
 // EEXIST when to exists, so this path never replaces a file either. A
 // crash between the link and the removal leaves the frame under both
-// names, and the next run finds the archived file and deletes the frame
-// from the outbox (finishPlaced in promote.go).
+// names, and the next run finds the archived file, removes the other
+// name, and deletes the frame from the outbox (finishPlaced in
+// promote.go).
 func renameNoReplace(from, to string) error {
 	err := unix.Renameat2(unix.AT_FDCWD, from, unix.AT_FDCWD, to, unix.RENAME_NOREPLACE)
 	if errors.Is(err, unix.EINVAL) || errors.Is(err, unix.ENOSYS) || errors.Is(err, unix.EOPNOTSUPP) {

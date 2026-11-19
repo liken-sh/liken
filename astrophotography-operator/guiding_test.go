@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"slices"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/liken-sh/liken/astrophotography-operator/astrophotography"
 	"github.com/liken-sh/liken/kubernetes/conditions"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
+	"github.com/liken-sh/liken/observatory-operator/phd2"
 	"github.com/liken-sh/liken/observatory-operator/phd2/phd2test"
 )
 
@@ -190,6 +192,31 @@ func TestAPHD2ThatDoesNotStopKeepsTheMountStill(t *testing.T) {
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False GuidingFailed" })
 		if slews := slices.DeleteFunc(w.indi.Changes(), func(c string) bool { return !isSlew(c) }); len(slews) != 0 {
 			t.Errorf("the mount slewed with %q, want no slew", slews)
+		}
+	})
+}
+
+// PHD2 answers stop_capture and keeps guiding until its exposure ends.
+// When the reservation ends during that wait, stop returns the end of
+// the reservation, not the stop's time limit, which has not passed.
+func TestAStopThatTheReservationEndsReportsTheEnd(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		server := connectedPHD2()
+		server.Set(func(s *phd2test.Server) { s.AppState, s.HoldStop = "Guiding", true })
+		client := phd2.NewClient("guide", phd2.WithDialer(server))
+		go func() { _ = client.Run(t.Context()) }()
+		if err := client.WaitFor(t.Context(), func(s phd2.State) bool { return s.AppState == "Guiding" }); err != nil {
+			t.Fatalf("waiting for the state of PHD2: %v", err)
+		}
+		r := &runner{}
+		g := &phd2Guiding{links: map[*runner]*guiderLink{r: {name: "guide", client: client}}}
+		ctx, end := context.WithCancelCause(t.Context())
+		time.AfterFunc(time.Second, func() { end(errors.New("the reservation ended")) })
+
+		err := g.stop(ctx, &work{r: r})
+
+		if err == nil || !strings.Contains(err.Error(), "the reservation ended") {
+			t.Errorf("stop returned %v, want the end of the reservation", err)
 		}
 	})
 }

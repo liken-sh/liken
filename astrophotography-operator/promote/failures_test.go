@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/liken-sh/liken/astrophotography-operator/catalog"
@@ -272,5 +273,37 @@ func TestADirectoryThatCannotBeReadStopsTheRun(t *testing.T) {
 
 	if _, err := Run(w.options()); err == nil {
 		t.Error("Run returned no error, want one for a directory that cannot be read")
+	}
+}
+
+// A .part name that the run cannot remove beside an archived frame
+// leaves the frame safe in the archive, so the run finishes the frame
+// and logs the name that stays. The frame then leaves the outbox, so no
+// later run visits it, and the name stays until a person removes it.
+func TestAPartNameThatCannotBeRemovedDoesNotFailTheFrame(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes through every permission")
+	}
+	w := newWorld(t)
+	frame := lightFrame(frameID)
+	w.expose("M42_0001", frame)
+	archived := filepath.Join(w.archive, "astro", "M42_0001.fits")
+	w.write(archived, frame)
+	w.write(filepath.Join(w.archive, "astro", "catalog", "m42.jsonl"), nil)
+	if err := os.Link(archived, filepath.Join(w.archive, "astro", ".M42_0001.fits.part")); err != nil {
+		t.Fatalf("linking the .part name: %v", err)
+	}
+	readOnly(t, filepath.Join(w.archive, "astro"))
+	var log strings.Builder
+	options := w.options()
+	options.Log = &log
+
+	report, err := Run(options)
+
+	if err != nil || report.Promoted != 1 || len(report.Failures) != 0 {
+		t.Errorf("Run returned the report %+v and the error %v, want one frame promoted and no failure", report, err)
+	}
+	if want := "promote: the hidden name .M42_0001.fits.part stays beside the archived frame until a person removes it: "; !strings.HasPrefix(log.String(), want) {
+		t.Errorf("the log is %q, want a line that starts with %q, because no later run visits a frame that left the outbox", log.String(), want)
 	}
 }

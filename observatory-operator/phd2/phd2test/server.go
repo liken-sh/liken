@@ -59,6 +59,10 @@ type Server struct {
 	// SettleFailure is the reason that each SettleDone reports, or
 	// empty for a settle that succeeds.
 	SettleFailure string
+	// HoldStop makes stop_capture return its result and leave the
+	// state as it was, with no event, as PHD2 does while it waits for
+	// the end of the guide exposure in progress.
+	HoldStop bool
 
 	// settling is "guide" or "dither" while HoldSettle keeps that
 	// operation's settle open. PHD2 refuses a guide or a dither during a
@@ -246,6 +250,9 @@ func (s *Server) call(method string, params json.RawMessage) reply {
 		s.Equipment = on[0]
 		return result(0).first(changed)
 	case "stop_capture":
+		if s.HoldStop {
+			return result(0)
+		}
 		// PHD2 sends the end of guiding and of the loop as events after
 		// the response, and sends no AppState.
 		var after []map[string]any

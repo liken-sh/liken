@@ -27,7 +27,7 @@ const ArchiveRoot = "/archive"
 func Main(args []string, log io.Writer) int {
 	flags := flag.NewFlagSet("promote", flag.ContinueOnError)
 	flags.SetOutput(log)
-	var o Options
+	o := Options{Log: log}
 	var cameras, report string
 	flags.StringVar(&o.Outbox, "outbox", outbox.Root, "the directory where the outbox claim is mounted")
 	flags.StringVar(&o.Archive, "archive", ArchiveRoot, "where the archive claim is mounted")
@@ -39,8 +39,12 @@ func Main(args []string, log io.Writer) int {
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	if err := json.Unmarshal([]byte(cameras), &o.Cameras); err != nil || o.Target == "" {
-		fmt.Fprintf(log, "promote: --target is required, and --cameras must be JSON: %v\n", err)
+	if o.Target == "" {
+		fmt.Fprintln(log, "promote: --target is required")
+		return 2
+	}
+	if err := json.Unmarshal([]byte(cameras), &o.Cameras); err != nil {
+		fmt.Fprintf(log, "promote: --cameras must be a JSON object: %v\n", err)
 		return 2
 	}
 	result, err := Run(o)
