@@ -257,7 +257,44 @@ func TestPurgeLeaderLeftoversWithNoDatastoreDoesNothing(t *testing.T) {
 func TestPersistNodePasswordSkipsAMemoryBackedMachine(t *testing.T) {
 	// A memory-backed machine keeps nothing across a reboot, so init
 	// leaves the password on tmpfs and creates no symlink.
-	persistNodePassword(machine.AllRolesInMemory())
+	if err := persistNodePassword(machine.AllRolesInMemory()); err != nil {
+		t.Errorf("persistNodePassword returned %v for a memory-backed machine, want nil", err)
+	}
+}
+
+// When the link to the password directory is already in place, the
+// mint must still run, or k3s writes the password itself without a
+// sync.
+func TestTheNodePasswordIsMintedWhenTheLinkIsAlreadyInPlace(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(t.TempDir(), "rancher", "node")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatalf("creating the parent of the link: %v", err)
+	}
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatalf("creating the link: %v", err)
+	}
+	if err := linkNodePassword(dir, link); err != nil {
+		t.Fatalf("linking the node password through the existing link: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "password")); err != nil {
+		t.Errorf("reading the minted password: %v, want a password minted through the existing link", err)
+	}
+}
+
+// When something other than the link holds the link's path, k3s would
+// keep its password in the RAM root, and the next boot would present a
+// password that the control plane never recorded. So the link fails
+// the boot.
+func TestAPathThatCannotBeLinkedFailsTheBoot(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(t.TempDir(), "rancher", "node")
+	if err := os.MkdirAll(link, 0o755); err != nil {
+		t.Fatalf("creating a directory at the path of the link: %v", err)
+	}
+	if err := linkNodePassword(dir, link); err == nil {
+		t.Errorf("linkNodePassword returned nil with a directory at %s, want an error that fails the boot", link)
+	}
 }
 
 func TestMintNodePasswordWritesOne(t *testing.T) {

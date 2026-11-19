@@ -455,28 +455,38 @@ func purgeLeaderLeftovers(role api.Role, clusterManifestSource machine.ManifestS
 // /etc/rancher/node, which is in the RAM root, so init makes that
 // directory a symlink to a directory on machineState. When machineState
 // is in memory, nothing survives a reboot, and init leaves the default.
-func persistNodePassword(storage machine.StorageStatus) {
+func persistNodePassword(storage machine.StorageStatus) error {
 	if storage.MachineState.Backing != machine.BackingPartition {
-		return
+		return nil
 	}
-	dir := filepath.Join(machine.MachineStateDir, "node")
+	return linkNodePassword(filepath.Join(machine.MachineStateDir, "node"), "/etc/rancher/node")
+}
+
+// linkNodePassword makes link a symlink to dir and mints the password
+// in dir. A link that already names dir is kept, and the mint still
+// runs, because without the mint k3s writes the password itself. When
+// the link cannot be made, it returns an error, and the boot fails:
+// k3s would keep its password in the RAM root, and on a first join the
+// next boot would present a password that the control plane never
+// recorded.
+func linkNodePassword(dir, link string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: creating %s: %v\n", dir, err)
-		return
+		return fmt.Errorf("keeping the node password on machineState: %w", err)
 	}
-	if err := os.MkdirAll("/etc/rancher", 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: creating /etc/rancher: %v\n", err)
-		return
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		return fmt.Errorf("keeping the node password on machineState: %w", err)
 	}
-	if err := os.Symlink(dir, "/etc/rancher/node"); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: linking /etc/rancher/node to %s: %v\n", dir, err)
-		return
+	if err := os.Symlink(dir, link); err != nil {
+		if target, rerr := os.Readlink(link); rerr != nil || target != dir {
+			return fmt.Errorf("keeping the node password on machineState: %w", err)
+		}
 	}
 	if err := mintNodePassword(dir); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: minting the node password: %v\n", err)
-		return
+		return nil
 	}
-	fmt.Printf("liken: /etc/rancher/node is a link to %s on machineState, so the node password survives reboots\n", dir)
+	fmt.Printf("liken: %s is a link to %s on machineState, so the node password survives reboots\n", link, dir)
+	return nil
 }
 
 // mintNodePassword writes the node password before k3s does. k3s

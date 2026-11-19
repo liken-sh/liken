@@ -330,9 +330,12 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	registries := writeRegistriesConfig(clusterDoc, creds,
 		machine.RegistryCredentialsStore(machine.MachineStateDir), boot.CredentialsSource)
 	// k3s creates a node password when the machine first joins. Without
-	// it after a reboot, the machine cannot rejoin its own cluster
+	// it after a reboot, the machine cannot rejoin its own cluster, so a
+	// password that cannot be kept on machineState is a boot fault
 	// (k3s.go).
-	persistNodePassword(storage)
+	if err := persistNodePassword(storage); err != nil {
+		failBoot(err)
+	}
 	// After a proven demotion from leader, purgeLeaderLeftovers deletes
 	// the old etcd datastore before k3s starts, because etcd refuses a
 	// removed member that rejoins over its old data (k3s.go).
