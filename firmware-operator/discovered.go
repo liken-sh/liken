@@ -105,8 +105,7 @@ func (o *operator) applyScan(objects *[]firmware, s scanEntries) error {
 		}
 		key := keyOf(f.Spec.Update)
 		present[key] = true
-		problems = append(problems, o.settleEntries(f, s.replace(s.byGroup[key])))
-		o.post(f, condition{}, s.warnings[key], false)
+		problems = append(problems, o.settleEntries(f, s.replace(s.byGroup[key]), s.warnings[key]))
 	}
 	for _, key := range sortedGroups(s.byGroup) {
 		if present[key] {
@@ -119,8 +118,7 @@ func (o *operator) applyScan(objects *[]firmware, s scanEntries) error {
 		}
 		*objects = append(*objects, *f)
 		created := &(*objects)[len(*objects)-1]
-		problems = append(problems, o.settleEntries(created, s.replace(s.byGroup[key])))
-		o.post(created, condition{}, s.warnings[key], false)
+		problems = append(problems, o.settleEntries(created, s.replace(s.byGroup[key]), s.warnings[key]))
 	}
 	return errors.Join(problems...)
 }
@@ -158,7 +156,7 @@ func (o *operator) moveEntriesToScannedFile(objects []firmware, c *catalog) erro
 				}
 			}
 			return next
-		}))
+		}, nil))
 	}
 	return errors.Join(problems...)
 }
@@ -188,7 +186,7 @@ func (o *operator) removeEntriesOfDeletedMachines(objects []firmware, fleet map[
 				_, exists := fleet[e.Machine]
 				return !exists
 			})
-		}))
+		}, nil))
 	}
 	return errors.Join(problems...)
 }
@@ -251,8 +249,11 @@ func ownedBy(f *firmware, key groupKey) bool {
 // settleEntries writes the entries that change returns for a discovered
 // object, and deletes the object when it has no entries and is
 // retirable. When the write fails because f is stale, change runs
-// again on a fresh copy from the API server.
-func (o *operator) settleEntries(f *firmware, change func([]machineEntry) []machineEntry) error {
+// again on a fresh copy from the API server. It posts warnings, with
+// the notices of the change, only when the write succeeds, so a pass
+// that applies a kept scan pod again after a refused write posts them
+// once.
+func (o *operator) settleEntries(f *firmware, change func([]machineEntry) []machineEntry, warnings []notice) error {
 	var notices []notice
 	written, err := informer.SettleStatus[firmware](o.client, o.firmwares.Versions, firmwarePath(f.Metadata.Name), f, func(latest *firmware) bool {
 		before := latest.Status
@@ -278,7 +279,7 @@ func (o *operator) settleEntries(f *firmware, change func([]machineEntry) []mach
 		return err
 	}
 	if written {
-		o.post(f, condition{}, notices, false)
+		o.post(f, condition{}, append(notices, warnings...), false)
 	}
 	if len(f.Status.Machines) > 0 || !retirable(f) {
 		return nil

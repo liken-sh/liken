@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 )
 
 // rescan reboots node-2, which makes the operator scan it again, and
@@ -192,6 +193,34 @@ func TestReleasesOfTwoComponentsPostAWarning(t *testing.T) {
 		want := []posted{{"Normal", reasonDiscovered}, {"Normal", reasonUpdateAvailable}, {"Warning", reasonManyComponents}}
 		if got := w.postedAbout(biosObjectName); !slices.Equal(got, want) {
 			t.Errorf("the Events are %v, want %v", got, want)
+		}
+	})
+}
+
+// A status write that the API server refuses keeps the scan pod, and
+// the next pass applies its result again. The ManyComponents Warning is
+// about the scan's result, so the retry does not post it again.
+func TestARetriedScanPostsItsWarningOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := scannedWorld(t)
+		device := systemFirmware("0.0.3.5", "0.0.4.2")
+		device.Releases = append(device.Releases, offeredRelease{Version: "0.0.3.9", ID: "work.frame.Laptop.Other.firmware"})
+		w.api.putFleetMachine("node-2", machineReady, secondBoot)
+		w.settle()
+		w.api.refuseStatusWritesTo(firmwaresPath, 1)
+		w.api.finishScan(t, w.onlyScan(t).Metadata.Name, podSucceeded, resultLog(scanned("firmware-09138-stable.xml.zst", device, secureBootDBX("2"))))
+		w.settle()
+		time.Sleep(retryDelay)
+		w.settle()
+
+		var counts []int32
+		for _, event := range w.api.recorded.About(firmwareKind, biosObjectName) {
+			if event.Reason == reasonManyComponents {
+				counts = append(counts, event.Count)
+			}
+		}
+		if !slices.Equal(counts, []int32{1}) {
+			t.Errorf("the ManyComponents Events have the counts %v, want one Event with the count 1", counts)
 		}
 	})
 }

@@ -105,7 +105,7 @@ func (s scanner) loadCatalog(ctx context.Context) *Result {
 		return end(failed(cfg.file, "downloading %s: %v", item.file, err))
 	}
 	got := sum(fileData)
-	if got != cfg.sha256 || (item.sha256 != "" && got != item.sha256) {
+	if got != cfg.sha256 || got != item.sha256 {
 		return end(failed(cfg.file, "the SHA-256 of %s is %s, and the operator expects %s", item.file, got, cfg.sha256))
 	}
 

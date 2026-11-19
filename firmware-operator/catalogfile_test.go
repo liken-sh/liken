@@ -22,6 +22,10 @@ func TestReadJcat(t *testing.T) {
 		{"no item", gzipOf(`{"Items":[]}`, nil), jcatEntry{}, "no items"},
 		{"a path", jcatOf("../secrets", sum), jcatEntry{}, "not a file name"},
 		{"no SHA-256", gzipOf(`{"Items":[{"Id":"f.xml.zst","Blobs":[{"Kind":4,"Data":"aa"}]}]}`, nil), jcatEntry{}, "no SHA-256"},
+		// The scan's parseJcat refuses the same jcat, so both programs
+		// accept the same files.
+		{"a jcat that decompresses to more than 1 MiB", gzipOf(`{"Items":[{"Id":"f.xml.zst","Blobs":[{"Kind":1,"Data":"`+sum+`"}]}]}`+strings.Repeat(" ", 1<<20), nil),
+			jcatEntry{}, "more than 1048576 bytes"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

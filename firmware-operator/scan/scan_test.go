@@ -110,6 +110,15 @@ func TestScanOutcomes(t *testing.T) {
 			"CatalogMoved", "the jcat now lists firmware-09139-stable.xml.zst",
 		},
 		{
+			// The operator reads the jcat's checksum in lowercase, and the
+			// scan must read the same value.
+			"a jcat with an uppercase checksum", func(t *testing.T, r *rig) {
+				r.web[testCatalogURL+".jcat"] = jcatFor(t, testFile, strings.ToUpper(sum(testCatalog)))
+				r.tool.outputs["get-updates"] = toolOutput{stdout: string(fixture(t, "updates_none.json")), err: errExit2}
+			},
+			"Scanned", "2 devices, no updates",
+		},
+		{
 			"the jcat download fails", func(t *testing.T, r *rig) {
 				delete(r.web, testCatalogURL+".jcat")
 			},

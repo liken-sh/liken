@@ -42,9 +42,12 @@ func readJcat(body []byte) (jcatEntry, error) {
 		return jcatEntry{}, fmt.Errorf("the jcat is not gzip: %w", err)
 	}
 	unzipped.Multistream(false)
-	text, err := io.ReadAll(io.LimitReader(unzipped, maxJcatSize))
+	text, err := io.ReadAll(io.LimitReader(unzipped, maxJcatSize+1))
 	if err != nil {
 		return jcatEntry{}, fmt.Errorf("the jcat does not decompress: %w", err)
+	}
+	if len(text) > maxJcatSize {
+		return jcatEntry{}, fmt.Errorf("the jcat decompresses to more than %d bytes", maxJcatSize)
 	}
 	var parsed struct {
 		Items []struct {
@@ -76,7 +79,9 @@ func readJcat(body []byte) (jcatEntry, error) {
 	return jcatEntry{}, fmt.Errorf("the jcat has no SHA-256 blob for %s", item.ID)
 }
 
-// maxJcatSize limits how many decompressed bytes readJcat reads. A jcat
-// from LVFS has one item with a few checksums and signatures, far less
-// than this.
+// maxJcatSize limits how many decompressed bytes readJcat reads, and
+// readJcat refuses a jcat that decompresses to more, as the scan's
+// parseJcat does, so both programs accept the same files. A jcat from
+// LVFS has one item with a few checksums and signatures, far less than
+// this.
 const maxJcatSize = 1 << 20

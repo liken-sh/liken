@@ -70,14 +70,22 @@ type fakeAPI struct {
 	logsForbidden bool
 
 	// refusals is the number of next status writes that fail with 503, as
-	// when an API server restarts.
+	// when an API server restarts. When refusing is not empty, only the
+	// writes to that collection count and fail.
 	refusals int
+	refusing string
 }
 
 func (a *fakeAPI) refuseStatusWrites(count int) {
+	a.refuseStatusWritesTo("", count)
+}
+
+// refuseStatusWritesTo refuses the next count status writes to one
+// collection, such as firmwaresPath.
+func (a *fakeAPI) refuseStatusWritesTo(collection string, count int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.refusals = count
+	a.refusals, a.refusing = count, collection
 }
 
 func startFakeAPI(t *testing.T) *fakeAPI {
@@ -331,7 +339,7 @@ func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, collection
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	if a.refusals > 0 {
+	if a.refusals > 0 && (a.refusing == "" || a.refusing == collection) {
 		a.refusals--
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
