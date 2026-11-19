@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -193,7 +194,9 @@ func TestCappedLogStopsWritingTheFileAfterAWriteFails(t *testing.T) {
 	}
 }
 
-func TestShiftLogContinuesAfterARenameFailure(t *testing.T) {
+// A generation that cannot be renamed is reported on the console, and
+// shiftLog returns, so the rotation moves on to the next generation.
+func TestShiftLogReportsARenameItCannotMake(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "k3s.log"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("writing the log file: %v", err)
@@ -202,7 +205,13 @@ func TestShiftLogContinuesAfterARenameFailure(t *testing.T) {
 		t.Fatalf("making the directory read-only: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	logStream := fakeLogStream(t)
+
 	shiftLog(filepath.Join(dir, "k3s.log"), filepath.Join(dir, "k3s.log.1"))
+
+	if want := "liken: rotating " + filepath.Join(dir, "k3s.log") + ": "; !strings.HasPrefix(logStream(), want) {
+		t.Errorf("the console holds %q, want a line that starts with %q", logStream(), want)
+	}
 }
 
 func TestOpenCappedLogReportsAMissingDirectory(t *testing.T) {

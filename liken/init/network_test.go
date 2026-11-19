@@ -94,29 +94,48 @@ func TestJoinIPsReadsAsAList(t *testing.T) {
 	}
 }
 
+// The console is the only place a person reads a machine's addresses,
+// so each method prints its own facts.
 func TestConnectionReportPrintsEachMethod(t *testing.T) {
-	// The test checks no output. It runs the DHCP branch and the static
-	// branch of report, so a panic in either one fails it.
 	_, subnet, _ := net.ParseCIDR("10.0.2.0/24")
-	dhcp := &connection{
-		ifname:      "eth0",
-		mac:         net.HardwareAddr{0x52, 0x54, 0x00, 0x4c, 0x4b, 0x01},
-		addr:        &net.IPNet{IP: net.ParseIP("10.0.2.15"), Mask: subnet.Mask},
-		method:      machine.MethodDHCP,
-		gateway:     net.ParseIP("10.0.2.2"),
-		server:      net.ParseIP("10.0.2.2"),
-		nameservers: []net.IP{net.ParseIP("10.0.2.3")},
-		leaseTime:   time.Hour,
+	cases := []struct {
+		name string
+		conn *connection
+		want []string
+	}{
+		{"a DHCP lease", &connection{
+			ifname:      "eth0",
+			mac:         net.HardwareAddr{0x52, 0x54, 0x00, 0x4c, 0x4b, 0x01},
+			addr:        &net.IPNet{IP: net.ParseIP("10.0.2.15"), Mask: subnet.Mask},
+			method:      machine.MethodDHCP,
+			gateway:     net.ParseIP("10.0.2.2"),
+			server:      net.ParseIP("10.0.2.2"),
+			nameservers: []net.IP{net.ParseIP("10.0.2.3")},
+			leaseTime:   time.Hour,
+		}, []string{
+			"liken: eth0 (52:54:00:4c:4b:01) is 10.0.2.15/24 (dhcp)\n",
+			"liken:   gateway 10.0.2.2, dhcp server 10.0.2.2, lease 1h0m0s\n",
+			"liken:   nameservers 10.0.2.3\n",
+		}},
+		{"a static address", &connection{
+			ifname:  "eth1",
+			mac:     net.HardwareAddr{0x52, 0x54, 0x00, 0x4c, 0x4c, 0x01},
+			addr:    &net.IPNet{IP: net.ParseIP("10.10.0.1"), Mask: subnet.Mask},
+			method:  machine.MethodStatic,
+			gateway: net.ParseIP("10.10.0.254"),
+		}, []string{
+			"liken: eth1 (52:54:00:4c:4c:01) is 10.10.0.1/24 (static)\n",
+			"liken:   gateway 10.10.0.254\n",
+		}},
 	}
-	dhcp.report()
-	static := &connection{
-		ifname:  "eth1",
-		mac:     net.HardwareAddr{0x52, 0x54, 0x00, 0x4c, 0x4c, 0x01},
-		addr:    &net.IPNet{IP: net.ParseIP("10.10.0.1"), Mask: subnet.Mask},
-		method:  machine.MethodStatic,
-		gateway: net.ParseIP("10.10.0.254"),
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := capturedStdout(t, c.conn.report)
+			if want := strings.Join(c.want, ""); got != want {
+				t.Errorf("report printed\n%s\nwant\n%s", got, want)
+			}
+		})
 	}
-	static.report()
 }
 
 func TestResolvConfCapsAtThreeNameservers(t *testing.T) {

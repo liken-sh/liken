@@ -215,7 +215,10 @@ func TestReportBlockDevicesPrintsDisks(t *testing.T) {
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 2<<30, nil)
 	writeSysfs(t, filepath.Join(sys, "vda"), "serial", "liken-lab-state\n")
-	reportBlockDevices()
+	got := capturedStdout(t, reportBlockDevices)
+	if want := "liken: disk " + filepath.Join(dev, "vda") + ": 2.0 GiB, serial liken-lab-state\n"; got != want {
+		t.Errorf("reportBlockDevices printed %q, want %q", got, want)
+	}
 }
 
 func TestDiscoverBlockDevicesReadsSCSIModels(t *testing.T) {
@@ -300,5 +303,7 @@ func TestDiscoverBlockDevicesWithNoSysfsReportsNothing(t *testing.T) {
 
 func TestReportBlockDevicesWithNoDisks(t *testing.T) {
 	fakeMachine(t)
-	reportBlockDevices()
+	if got := capturedStdout(t, reportBlockDevices); got != "liken: no disks attached\n" {
+		t.Errorf("reportBlockDevices printed %q, want the line that says no disks are attached", got)
+	}
 }

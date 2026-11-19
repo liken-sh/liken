@@ -63,6 +63,10 @@ func mountEssentials() {
 	}
 }
 
+// selfMountsPath is a variable so that a test can give worldReport a
+// mount table in place of the workstation's.
+var selfMountsPath = "/proc/self/mounts"
+
 // worldReport prints the kernel, firmware, command line, mounts, /dev
 // entry count, and block devices to the console at every boot. The
 // image has no interactive shell, so this output is what a person would
@@ -86,7 +90,7 @@ func worldReport() {
 
 	// /proc/self/mounts lists what is actually mounted, which shows
 	// whether mountEssentials succeeded.
-	if mounts, err := os.ReadFile("/proc/self/mounts"); err == nil {
+	if mounts, err := os.ReadFile(selfMountsPath); err == nil {
 		fmt.Print("liken: mounts:\n")
 		for line := range strings.SplitSeq(strings.TrimSpace(string(mounts)), "\n") {
 			fmt.Printf("liken:   %s\n", line)

@@ -40,11 +40,20 @@ func readParameter(t *testing.T, dir, name string) string {
 	return strings.TrimSpace(string(raw))
 }
 
+// The parameters apply in name order, so both failures come before
+// vm.swappiness, and the test shows that the loop goes on past them.
 func TestApplySysctlsSkipsFailuresAndContinues(t *testing.T) {
+	dir := fakeSysctlDir(t, "vm.swappiness")
+
 	applySysctls(map[string]string{
 		"liken.test.no.such.parameter": "1", // the file does not exist
 		"../escape/attempt":            "1", // the path leaves the sysctl directory
+		"vm.swappiness":                "10",
 	})
+
+	if got := readParameter(t, dir, "vm.swappiness"); got != "10" {
+		t.Errorf("vm.swappiness is %q, want 10 written after the two parameters that fail", got)
+	}
 }
 
 // A typo in a parameter name or an unwritable value in OSSysctls would

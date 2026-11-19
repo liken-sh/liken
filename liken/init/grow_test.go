@@ -242,65 +242,45 @@ func TestPlanAllGrowthNeedsTheDiskInTheInventory(t *testing.T) {
 	}
 }
 
-func TestPlanAllGrowthRefusesToGrowSystemSlots(t *testing.T) {
-	roles := []machine.DeclaredRole{declared("systemA", "/dev/vdc", "1Gi")}
-	found := map[machine.StorageRoleName]partition{
-		"systemA": {name: "vdc1", disk: "vdc", partName: "liken:systemA", sizeBytes: 512 << 20},
-	}
-	_, err := planAllGrowth(roles, found)
-	if err == nil {
-		t.Fatal("planAllGrowth returned no error, want a refusal to grow a system slot")
-	}
-	for _, want := range []string{"systemA", "boot role"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the error is %q, want it to mention %q", err, want)
-		}
+// The system slots and bootHome are FAT, and the MBR's boot code
+// addresses biosBoot by sector number, so a spec that grows any of
+// them is refused before anything is written.
+func TestPlanAllGrowthRefusesToGrowABootRole(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		role machine.StorageRoleName
+		size uint64
+	}{
+		{"a system slot", machine.SystemARole, 512 << 20},
+		{"the BIOS boot partition", machine.BIOSBootRole, 64 << 20},
+		{"the boot home", machine.BootHomeRole, 64 << 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			roles := []machine.DeclaredRole{declared(tc.role, "/dev/vdc", "1Gi")}
+			found := map[machine.StorageRoleName]partition{
+				tc.role: {name: "vdc1", disk: "vdc", partName: "liken:" + string(tc.role), sizeBytes: tc.size},
+			}
+			_, err := planAllGrowth(roles, found)
+			if err == nil {
+				t.Fatalf("planAllGrowth returned no error, want a refusal to grow %s", tc.role)
+			}
+			for _, want := range []string{string(tc.role), "boot role"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the error is %q, want it to mention %q", err, want)
+				}
+			}
+		})
 	}
 }
 
-func TestPlanAllGrowthLeavesRightSizedSystemSlotsAlone(t *testing.T) {
-	roles := []machine.DeclaredRole{declared("systemA", "/dev/vdc", "512Mi")}
+func TestPlanAllGrowthLeavesARightSizedSystemSlotAlone(t *testing.T) {
+	roles := []machine.DeclaredRole{declared(machine.SystemARole, "/dev/vdc", "512Mi")}
 	found := map[machine.StorageRoleName]partition{
-		"systemA": {name: "vdc1", disk: "vdc", partName: "liken:systemA", sizeBytes: 512 << 20},
+		machine.SystemARole: {name: "vdc1", disk: "vdc", partName: "liken:systemA", sizeBytes: 512 << 20},
 	}
 	plans, err := planAllGrowth(roles, found)
 	if err != nil || plans != nil {
 		t.Errorf("planAllGrowth returned %v, %v, want nil, nil", plans, err)
-	}
-}
-
-func TestPlanAllGrowthRefusesToGrowASystemSlot(t *testing.T) {
-	roles := []machine.DeclaredRole{declared(machine.SystemARole, "/dev/vdc", "1Gi")}
-	found := map[machine.StorageRoleName]partition{
-		machine.SystemARole: {name: "vdc1", disk: "vdc", sizeBytes: 512 << 20},
-	}
-	_, err := planAllGrowth(roles, found)
-	if err == nil || !strings.Contains(err.Error(), "systemA") {
-		t.Errorf("the result is %v, want an error that names systemA", err)
-	}
-}
-
-func TestPlanAllGrowthRefusesToGrowTheBootRoles(t *testing.T) {
-	for _, role := range []machine.StorageRoleName{machine.BIOSBootRole, machine.BootHomeRole} {
-		roles := []machine.DeclaredRole{declared(role, "/dev/vdc", "1Gi")}
-		found := map[machine.StorageRoleName]partition{
-			role: {name: "vdc1", disk: "vdc", sizeBytes: 64 << 20},
-		}
-		_, err := planAllGrowth(roles, found)
-		if err == nil || !strings.Contains(err.Error(), string(role)) {
-			t.Errorf("the result is %v, want an error that names %s", err, role)
-		}
-	}
-}
-
-func TestPlanAllGrowthAcceptsASlotAtItsClaimedSize(t *testing.T) {
-	roles := []machine.DeclaredRole{declared(machine.SystemARole, "/dev/vdc", "512Mi")}
-	found := map[machine.StorageRoleName]partition{
-		machine.SystemARole: {name: "vdc1", disk: "vdc", sizeBytes: 512 << 20},
-	}
-	plans, err := planAllGrowth(roles, found)
-	if err != nil || len(plans) != 0 {
-		t.Errorf("planAllGrowth returned %v, %v, want no plans and no error", plans, err)
 	}
 }
 

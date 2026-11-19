@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/liken-sh/liken/liken/machine"
@@ -187,18 +188,13 @@ func TestReportFirmwareUEFI(t *testing.T) {
 		"BootNext":    u16le(0x0002),
 		"BootOrder":   u16le(0x0002),
 	})
-	// reportFirmware only prints, so the test checks what it prints
-	// from.
-	reportFirmware()
-	fw := firmwareFacts(efiVarsDir)
-	if fw.Mode != machine.FirmwareUEFI {
-		t.Errorf("mode is %s, want UEFI because a variable store exists", fw.Mode)
-	}
-	if fw.BootCurrent != "Boot0002 (liken slot A)" {
-		t.Errorf("BootCurrent is %q, want %q", fw.BootCurrent, "Boot0002 (liken slot A)")
-	}
-	if fw.BootNext != "Boot0002 (liken slot A, pinned at the proven slot)" {
-		t.Errorf("BootNext is %q, want its description and the pinned note", fw.BootNext)
+	got := capturedStdout(t, reportFirmware)
+	want := "liken: firmware: UEFI\n" +
+		"liken: firmware: booted via Boot0002 (liken slot A)\n" +
+		"liken: firmware: BootNext is Boot0002 (liken slot A, pinned at the proven slot)\n" +
+		"liken: firmware: boot order: Boot0002 (liken slot A)\n"
+	if got != want {
+		t.Errorf("reportFirmware printed\n%s\nwant\n%s", got, want)
 	}
 }
 
@@ -206,9 +202,11 @@ func TestReportFirmwareBIOS(t *testing.T) {
 	old := efiVarsDir
 	efiVarsDir = filepath.Join(t.TempDir(), "no-efivars")
 	t.Cleanup(func() { efiVarsDir = old })
-	reportFirmware()
-	if fw := firmwareFacts(efiVarsDir); fw.Mode != machine.FirmwareBIOS {
-		t.Errorf("mode is %s, want BIOS because no variable store exists", fw.Mode)
+	// The BIOS facts read liken.slot from the command line, so the test
+	// gives one with no slot in place of the workstation's.
+	fakeCmdline(t, "console=ttyS0\n")
+	if got := capturedStdout(t, reportFirmware); !strings.HasPrefix(got, "liken: firmware: BIOS, because /sys/firmware/efi does not exist") {
+		t.Errorf("reportFirmware printed %q, want the line that names BIOS and its reason", got)
 	}
 }
 
