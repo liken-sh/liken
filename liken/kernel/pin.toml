@@ -18,13 +18,13 @@
 # as the operating system linux:linux_kernel. kernel/latest.sh --bump
 # writes the cpe with the version.
 [linux-image-unsigned]
-version = "7.3.1"
-url = "https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-image-unsigned-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb"
-sha256 = "93c7c059e51cd81d7aa817f0cb0d2a7e94c5b04642a8e20de8b4ab4628b6a357"
-purl = "pkg:generic/linux-image-unsigned@7.3.1?download_url=https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-image-unsigned-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb&checksum=sha256:93c7c059e51cd81d7aa817f0cb0d2a7e94c5b04642a8e20de8b4ab4628b6a357"
+version = "7.3.5"
+url = "https://kernel.ubuntu.com/mainline/v7.3.5/amd64/linux-image-unsigned-7.3.5-070305-generic_7.3.5-070305.202611171251_amd64.deb"
+sha256 = "6892914ad7689a9d33b47be13d155563d5f782a561dac962537d7960e8573139"
+purl = "pkg:generic/linux-image-unsigned@7.3.5?download_url=https://kernel.ubuntu.com/mainline/v7.3.5/amd64/linux-image-unsigned-7.3.5-070305-generic_7.3.5-070305.202611171251_amd64.deb&checksum=sha256:6892914ad7689a9d33b47be13d155563d5f782a561dac962537d7960e8573139"
 license = "GPL-2.0-only WITH Linux-syscall-note"
 type = "application"
-cpe = "cpe:2.3:o:linux:linux_kernel:7.3.1:*:*:*:*:*:*:*"
+cpe = "cpe:2.3:o:linux:linux_kernel:7.3.5:*:*:*:*:*:*:*"
 
 # The modules, the build's configuration, and its System.map.
 #
@@ -34,10 +34,10 @@ cpe = "cpe:2.3:o:linux:linux_kernel:7.3.1:*:*:*:*:*:*:*"
 # second entry with the kernel's CPE would report each kernel finding
 # twice.
 [linux-modules]
-version = "7.3.1"
-url = "https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-modules-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb"
-sha256 = "7f9a44175036fd63b01ec317ccace29e184261a794d39046902439458fb18c2f"
-purl = "pkg:generic/linux-modules@7.3.1?download_url=https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-modules-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb&checksum=sha256:7f9a44175036fd63b01ec317ccace29e184261a794d39046902439458fb18c2f"
+version = "7.3.5"
+url = "https://kernel.ubuntu.com/mainline/v7.3.5/amd64/linux-modules-7.3.5-070305-generic_7.3.5-070305.202611171251_amd64.deb"
+sha256 = "e64be543d9c4e5e957e46696a425d37f9397866883d30ed202ed3c86a094c98c"
+purl = "pkg:generic/linux-modules@7.3.5?download_url=https://kernel.ubuntu.com/mainline/v7.3.5/amd64/linux-modules-7.3.5-070305-generic_7.3.5-070305.202611171251_amd64.deb&checksum=sha256:e64be543d9c4e5e957e46696a425d37f9397866883d30ed202ed3c86a094c98c"
 license = "GPL-2.0-only WITH Linux-syscall-note"
 type = "application"
 
@@ -47,9 +47,9 @@ type = "application"
 # source, so its scope is excluded. kernel/latest.sh --bump takes its
 # digest from kernel.org's signed sha256sums.asc.
 [linux-source]
-version = "7.3.1"
-url = "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.1.tar.xz"
-sha256 = "fa595aad93734f829c963c2a90ef7c3673224fd7fdae7b49406e397cde2de231"
-purl = "pkg:generic/linux@7.3.1?download_url=https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.1.tar.xz&checksum=sha256:fa595aad93734f829c963c2a90ef7c3673224fd7fdae7b49406e397cde2de231"
+version = "7.3.5"
+url = "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.5.tar.xz"
+sha256 = "8f293f83d54f0b7b9be56863ebc5e4ea79d73e530b4ae55c572be97ef39f0990"
+purl = "pkg:generic/linux@7.3.5?download_url=https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.5.tar.xz&checksum=sha256:8f293f83d54f0b7b9be56863ebc5e4ea79d73e530b4ae55c572be97ef39f0990"
 license = "GPL-2.0-only WITH Linux-syscall-note"
 scope = "excluded"
