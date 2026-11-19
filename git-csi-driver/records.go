@@ -9,6 +9,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -90,7 +92,7 @@ func (n *node) record(ctx context.Context, published *volume) {
 	}
 	content, err := json.Marshal(written)
 	if err == nil {
-		err = os.WriteFile(filepath.Join(published.directory, recordFile), content, 0o600)
+		err = writeFileAtomically(filepath.Join(published.directory, recordFile), content)
 	}
 	if err != nil {
 		n.logger.WarnContext(ctx, "The record file of the volume was not written",
@@ -112,14 +114,24 @@ func (n *node) forget(published *volume) {
 // passes a volume with no mounted target to drop.
 func (n *node) resume(ctx context.Context) {
 	volumes := filepath.Join(n.store.root, "volumes")
-	entries, err := os.ReadDir(volumes)
+	ids, err := n.store.volumeIDs()
 	if err != nil {
+		// The pods of the volumes keep their mounts, but the driver does
+		// not follow their refs or commit their changes until it restarts
+		// and reads the directory.
+		n.logger.WarnContext(ctx, "The volumes in the store were not resumed", "error", err)
 		return
 	}
-	for _, entry := range entries {
-		directory := filepath.Join(volumes, entry.Name())
+	for _, id := range ids {
+		directory := filepath.Join(volumes, id)
 		rec, err := readRecord(filepath.Join(directory, recordFile))
 		if err != nil {
+			// A writeable volume that was staged and never published has
+			// no record.
+			if !absent(err) {
+				n.logger.WarnContext(ctx, "The volume was not resumed, because its record was not read",
+					"volume", id, "error", err)
+			}
 			continue
 		}
 		mounted := n.mountedTargets(rec)
@@ -238,9 +250,28 @@ func readRecord(path string) (*record, error) {
 	}
 	rec := &record{}
 	if err := json.Unmarshal(content, rec); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 	return rec, nil
+}
+
+// writeFileAtomically writes content to a temporary file beside path,
+// syncs it, and renames it over path, with the mode 0600 of
+// os.CreateTemp. A driver that stops partway leaves the earlier file
+// whole, where a write in place can leave a truncated record that the
+// sweep cannot read.
+func writeFileAtomically(path string, content []byte) error {
+	next, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".next-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(next.Name())
+	_, written := next.Write(content)
+	err = errors.Join(written, next.Sync(), next.Close())
+	if err == nil {
+		err = os.Rename(next.Name(), path)
+	}
+	return err
 }
 
 // mountTable is the kernel's list of the mounts that this process

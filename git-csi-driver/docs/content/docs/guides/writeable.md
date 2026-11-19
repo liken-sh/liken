@@ -256,7 +256,10 @@ So that the node's store does not grow with every ref a volume once
 used, the driver cleans it once an hour and after each tree that it
 removes. It deletes the refs under `refs/git-csi/` that no volume uses,
 removes each bare repository that no volume and no work tree uses, and
-runs `git gc` in each bare repository that remains.
+runs `git gc` in each bare repository that remains. When the driver
+cannot read the volumes in its store, it cannot tell which repository a
+work tree uses, so it deletes nothing, logs a warning, and tries again
+at the next cleaning.
 
 ## What the driver does not serve
 

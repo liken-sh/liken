@@ -409,6 +409,33 @@ func readOnlyDir(t *testing.T, path string) {
 	t.Cleanup(func() { _ = os.Chmod(path, 0o700) })
 }
 
+// unreadableDir removes every permission from the directory at path,
+// so os.ReadDir of it fails with a permission error. Root ignores the
+// mode, so the test is skipped when it runs as root.
+func unreadableDir(t *testing.T, path string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root can read a directory whatever its mode")
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("removing the permissions of %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o700) })
+}
+
+// unreadableFile removes every permission from the file at path. Root
+// ignores the mode, so the test is skipped when it runs as root.
+func unreadableFile(t *testing.T, path string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root can read a file whatever its mode")
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("removing the permissions of %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+}
+
 func TestCreateReportsARepositoryGitCannotMake(t *testing.T) {
 	stored, repo := storeWith(t, "https://example.com/data.git")
 	if err := os.MkdirAll(repo.dir, 0o755); err != nil {

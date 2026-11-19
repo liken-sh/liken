@@ -8,6 +8,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,21 +58,60 @@ func (n *node) sweepRepositories(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	keepRefs := n.unreadableRecords(ctx)
 	for _, entry := range entries {
 		n.sweepRepository(ctx, &repository{
 			store: n.store,
 			name:  entry.Name(),
 			dir:   filepath.Join(root, entry.Name()),
-		})
+		}, keepRefs)
 	}
+}
+
+// unreadableRecords reports whether a record in the store cannot be read
+// or parsed, and logs each such record once for the sweep. A record
+// names its repository by URL, so the sweep cannot tell which repository
+// an unreadable record follows a ref of, and keeps the refs of every
+// repository until the record can be read.
+func (n *node) unreadableRecords(ctx context.Context) bool {
+	ids, err := n.store.volumeIDs()
+	if err != nil {
+		// usesRepository reports the volumes directory it cannot read.
+		return false
+	}
+	found := false
+	for _, id := range ids {
+		_, err := readRecord(filepath.Join(n.store.volumeDir(id), recordFile))
+		if err == nil || absent(err) {
+			continue
+		}
+		n.logger.WarnContext(ctx, "The refs of every repository are kept until the record of the volume can be read",
+			"volume", id, "error", err)
+		found = true
+	}
+	return found
 }
 
 // sweepRepository holds the repository's lock throughout, so it cannot
 // delete a repository while a stage or a fetch loop writes it.
-func (n *node) sweepRepository(ctx context.Context, repo *repository) {
+// keepRefs skips the deletion of refs, because a record that the sweep
+// cannot read can follow any ref.
+func (n *node) sweepRepository(ctx context.Context, repo *repository, keepRefs bool) {
 	defer repo.lock()()
-	if n.usesRepository(repo.dir) {
-		n.sweepRefs(ctx, repo)
+	used, err := n.usesRepository(repo.dir)
+	if err != nil {
+		// A sweep that cannot read the store cannot tell whether a work
+		// tree reads its objects from the repository, and a work tree
+		// whose repository is deleted loses its history. The next sweep
+		// tries again.
+		n.logger.WarnContext(ctx, "The repository was not swept, because the store was not read",
+			"repository", repo.name, "error", err)
+		return
+	}
+	if used {
+		if !keepRefs {
+			n.sweepRefs(ctx, repo)
+		}
 		n.collect(ctx, repo)
 		return
 	}
@@ -85,23 +126,45 @@ func (n *node) sweepRepository(ctx context.Context, repo *repository) {
 // usesRepository reports whether a volume in memory has the URL of the
 // repository at dir, or the alternates file of a work tree in the store
 // points to it. A work tree on disk counts even when the driver holds
-// no volume for it.
-func (n *node) usesRepository(dir string) bool {
+// no volume for it. It returns an error when it cannot read the store,
+// because then it cannot tell.
+func (n *node) usesRepository(dir string) (bool, error) {
 	for _, vol := range n.allVolumes() {
 		if n.store.repository(vol.attributes.url).dir == dir {
-			return true
+			return true, nil
 		}
 	}
-	entries, err := os.ReadDir(filepath.Join(n.store.root, "volumes"))
+	ids, err := n.store.volumeIDs()
 	if err != nil {
-		return false
+		return false, err
 	}
-	for _, entry := range entries {
-		if n.store.tree(entry.Name()).alternate() == dir {
-			return true
+	for _, id := range ids {
+		alternate, err := n.store.tree(id).alternate()
+		if err != nil {
+			return false, err
+		}
+		if alternate == dir {
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
+}
+
+// volumeIDs returns the names of the volume directories in the store.
+// A missing volumes directory means there are no volumes.
+func (s *store) volumeIDs() ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(s.root, "volumes"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		ids = append(ids, entry.Name())
+	}
+	return ids, nil
 }
 
 // sweepRefs deletes every ref under refPrefix that no volume follows.
@@ -109,7 +172,12 @@ func (n *node) usesRepository(dir string) bool {
 // would leave every old tag in the repository, and git gc would keep the
 // history of each one.
 func (n *node) sweepRefs(ctx context.Context, repo *repository) {
-	followed := n.followedRefs(ctx, repo.dir)
+	followed, err := n.followedRefs(ctx, repo.dir)
+	if err != nil {
+		n.logger.WarnContext(ctx, "The refs of the repository were not swept, because the store was not read",
+			"repository", repo.name, "error", err)
+		return
+	}
 	for _, ref := range repo.refs(ctx) {
 		if followed[ref] {
 			continue
@@ -126,40 +194,58 @@ func (n *node) sweepRefs(ctx context.Context, repo *repository) {
 // followedRefs returns the refs under refPrefix that a volume of the
 // repository at dir follows. It reads the volumes in memory, and the
 // records and work trees on disk, which also cover volumes the driver
-// does not hold.
-func (n *node) followedRefs(ctx context.Context, dir string) map[string]bool {
+// does not hold. It returns an error when it cannot read the store.
+func (n *node) followedRefs(ctx context.Context, dir string) (map[string]bool, error) {
 	followed := map[string]bool{}
 	for _, vol := range n.allVolumes() {
 		if n.store.repository(vol.attributes.url).dir == dir {
 			followed[refPrefix+vol.attributes.ref] = true
 		}
 	}
-	// A missing volumes directory means there are no volumes.
-	entries, _ := os.ReadDir(filepath.Join(n.store.root, "volumes"))
-	for _, entry := range entries {
-		n.followedInStore(ctx, followed, dir, entry.Name())
+	ids, err := n.store.volumeIDs()
+	if err != nil {
+		return nil, err
 	}
-	return followed
+	for _, id := range ids {
+		if err := n.followedInStore(ctx, followed, dir, id); err != nil {
+			return nil, err
+		}
+	}
+	return followed, nil
 }
 
 // followedInStore adds the ref that the volume directory id follows,
 // from its record and from the HEAD of a work tree whose alternates file
 // points to dir. Both are read because a volume that was staged and
 // never published has a work tree and no record.
-func (n *node) followedInStore(ctx context.Context, followed map[string]bool, dir, id string) {
-	if rec, err := readRecord(filepath.Join(n.store.volumeDir(id), recordFile)); err == nil {
+func (n *node) followedInStore(ctx context.Context, followed map[string]bool, dir, id string) error {
+	rec, err := readRecord(filepath.Join(n.store.volumeDir(id), recordFile))
+	switch {
+	case err == nil:
 		if parsed, err := parseVolumeContext(rec.Attributes); err == nil &&
 			n.store.repository(parsed.url).dir == dir {
 			followed[refPrefix+parsed.ref] = true
 		}
+	case !absent(err):
+		// A record that cannot be read or parsed can name any ref.
+		return err
 	}
 	work := n.store.tree(id)
-	if work.alternate() != dir {
-		return
+	alternate, err := work.alternate()
+	if err != nil {
+		return err
 	}
-	if ref := work.followedRef(ctx); ref != "" {
+	if alternate != dir {
+		return nil
+	}
+	ref, err := work.followedRef(ctx)
+	if err != nil {
+		return err
+	}
+	if ref != "" {
 		followed[refPrefix+ref] = true
 	}
+	return nil
 }
 
 // refs returns nil when git cannot read the repository.

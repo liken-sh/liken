@@ -5,10 +5,13 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 // alternatesFile lists other object stores that git reads from. A work
@@ -46,13 +49,18 @@ func (s *store) tree(id string) *workTree {
 }
 
 // alternate returns the bare repository that the alternates file points
-// to, or an empty string when there is no alternates file.
-func (w *workTree) alternate() string {
+// to, or an empty string when there is no alternates file. It returns an
+// error when the file is there and cannot be read, so the sweep does not
+// take a tree it cannot read for a tree that uses no repository.
+func (w *workTree) alternate() (string, error) {
 	content, err := os.ReadFile(filepath.Join(w.gitDir, alternatesFile))
-	if err != nil {
-		return ""
+	if absent(err) {
+		return "", nil
 	}
-	return filepath.Dir(trimLine(string(content)))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(trimLine(string(content))), nil
 }
 
 // exists reports whether the git directory has a HEAD file. git init
@@ -184,7 +192,11 @@ func (w *workTree) moveCheckout(ctx context.Context, old, new string) error {
 	if _, err := w.git(ctx, "read-tree", "-m", "-u", "--end-of-options", old, new); err != nil {
 		return err
 	}
-	_, err := w.git(ctx, "update-ref", "refs/heads/"+w.followedRef(ctx), new)
+	branch, err := w.followedRef(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = w.git(ctx, "update-ref", "refs/heads/"+branch, new)
 	return err
 }
 
@@ -213,10 +225,26 @@ func (w *workTree) gitWith(ctx context.Context, env []string, args ...string) (g
 }
 
 // followedRef returns the branch that HEAD points to, or an empty
-// string when the directory is not a work tree.
-func (w *workTree) followedRef(ctx context.Context) string {
-	output, _ := w.git(ctx, "symbolic-ref", "--quiet", "HEAD")
-	return strings.TrimPrefix(trimLine(output.stdout), "refs/heads/")
+// string when HEAD names a commit and no branch. With --quiet, git
+// symbolic-ref exits with 1 for that case and with 128 when it cannot
+// read the git directory, which followedRef returns as an error.
+func (w *workTree) followedRef(ctx context.Context) (string, error) {
+	output, err := w.git(ctx, "symbolic-ref", "--quiet", "HEAD")
+	if err != nil && output.code == 1 {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimPrefix(trimLine(output.stdout), "refs/heads/"), nil
+}
+
+// absent reports whether err says that a path is not there. A path
+// under an entry that is not a directory cannot be there either, so
+// ENOTDIR counts as ENOENT does: a file in volumes/ holds no work tree
+// and no record.
+func absent(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)
 }
 
 // refCommit returns the commit the ref points to, or an empty string

@@ -205,6 +205,34 @@ func TestTheWorkTreeReportsWhatGitCannotDo(t *testing.T) {
 	}
 }
 
+func TestTheFollowedRefOfADetachedHeadIsNone(t *testing.T) {
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	work, commit := workTreeOf(t, source)
+	if err := work.create(t.Context(), "main", commit); err != nil {
+		t.Fatalf("creating the work tree: %v", err)
+	}
+	git(t, work.directory, "--git-dir="+work.gitDir, "update-ref", "--no-deref", "HEAD", commit)
+
+	ref, err := work.followedRef(t.Context())
+
+	if ref != "" || err != nil {
+		t.Errorf("followedRef of a detached HEAD = %q, %v, want no ref and no error", ref, err)
+	}
+}
+
+func TestMoveCheckoutReportsAHeadItCannotRead(t *testing.T) {
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	work, commit := workTreeOf(t, source)
+	if err := work.create(t.Context(), "main", commit); err != nil {
+		t.Fatalf("creating the work tree: %v", err)
+	}
+	refusingGit(t, "symbolic-ref")
+
+	if err := work.moveCheckout(t.Context(), commit, commit); err == nil {
+		t.Error("moveCheckout returned no error when git could not read HEAD, want one")
+	}
+}
+
 func TestTheWorkTreeReportsATreeItCannotMake(t *testing.T) {
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	work, commit := workTreeOf(t, source)

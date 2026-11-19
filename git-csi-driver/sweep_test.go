@@ -233,6 +233,175 @@ func TestTheSweepReadsAStoreThatIsNotThere(t *testing.T) {
 	}
 }
 
+func TestTheSweepKeepsTheRepositoryWhenItCannotReadTheVolumes(t *testing.T) {
+	n, remote := sweepingNode(t, io.Discard)
+	// The driver holds no volume for this work tree, so only the
+	// alternates file on disk records that the tree uses the repository.
+	unstagedVolume(t, n, "config", fileURL(remote))
+	repo := n.store.repository(fileURL(remote))
+	git(t, repo.dir, "update-ref", refPrefix+"kept", refPrefix+"main")
+	unreadableDir(t, filepath.Join(n.store.root, "volumes"))
+
+	n.sweepStore(t.Context())
+
+	if _, err := os.Stat(repo.dir); err != nil {
+		t.Fatalf("the repository is gone after a sweep that could not read the volumes directory: %v, want it kept because a work tree can still use it", err)
+	}
+	if got := storeRefs(t, repo); got != refPrefix+"kept "+refPrefix+"main" {
+		t.Errorf("the repository has %q, want %q because the sweep cannot tell which refs the volumes follow", got, refPrefix+"kept "+refPrefix+"main")
+	}
+}
+
+// unreadableAlternates removes every permission from the alternates file
+// of the volume's work tree. Root ignores the mode, so the test is
+// skipped when it runs as root.
+func unreadableAlternates(t *testing.T, vol *volume) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root can read a file whatever its mode")
+	}
+	path := filepath.Join(vol.directory, "git", alternatesFile)
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("removing the permissions of %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+}
+
+func TestTheSweepKeepsTheRepositoryOfAWorkTreeItCannotRead(t *testing.T) {
+	logs := &logbook{}
+	n, remote := sweepingNode(t, logs)
+	vol := unstagedVolume(t, n, "config", fileURL(remote))
+	repo := n.store.repository(fileURL(remote))
+	unreadableAlternates(t, vol)
+
+	n.sweepStore(t.Context())
+
+	if _, err := os.Stat(repo.dir); err != nil {
+		t.Errorf("the repository is gone after a sweep that could not read a work tree's alternates file: %v, want it kept", err)
+	}
+	if !strings.Contains(logs.String(), "The repository was not swept, because the store was not read") {
+		t.Errorf("the log is %q, want the line for the repository that was not swept", logs)
+	}
+}
+
+// A volume in memory uses the repository, so the sweep keeps it without a
+// read of the store, and reads the store only for the refs.
+func TestTheSweepKeepsTheRefsWhenItCannotReadTheStore(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		unread func(t *testing.T, n *node, remote string)
+	}{
+		{name: "the volumes directory", unread: func(t *testing.T, n *node, _ string) {
+			unreadableDir(t, filepath.Join(n.store.root, "volumes"))
+		}},
+		{name: "the alternates file of a work tree", unread: func(t *testing.T, n *node, remote string) {
+			unreadableAlternates(t, unstagedVolume(t, n, "config", fileURL(remote)))
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			logs := &logbook{}
+			n, remote := sweepingNode(t, logs)
+			publishedVolume(t, n, "data", fileURL(remote), nil)
+			repo := n.store.repository(fileURL(remote))
+			git(t, repo.dir, "update-ref", refPrefix+"kept", refPrefix+"main")
+			c.unread(t, n, remote)
+
+			n.sweepStore(t.Context())
+
+			if got := storeRefs(t, repo); got != refPrefix+"kept "+refPrefix+"main" {
+				t.Errorf("the repository has %q, want %q because the sweep cannot tell which refs the volumes follow", got, refPrefix+"kept "+refPrefix+"main")
+			}
+			if !strings.Contains(logs.String(), "The refs of the repository were not swept, because the store was not read") {
+				t.Errorf("the log is %q, want the line for the refs that were not swept", logs)
+			}
+		})
+	}
+}
+
+func TestTheSweepKeepsTheRefsWhenItCannotReadTheRefOfAWorkTree(t *testing.T) {
+	logs := &logbook{}
+	n, remote := sweepingNode(t, logs)
+	// The driver holds no volume for this work tree, so the tree's HEAD is
+	// the only record of the ref it follows.
+	unstagedVolume(t, n, "config", fileURL(remote))
+	repo := n.store.repository(fileURL(remote))
+	refusingGit(t, "symbolic-ref")
+
+	n.sweepStore(t.Context())
+
+	if got := storeRefs(t, repo); got != refPrefix+"main" {
+		t.Errorf("the repository has %q after a sweep that could not read the work tree's HEAD, want %q because the tree may follow it", got, refPrefix+"main")
+	}
+	if !strings.Contains(logs.String(), "The refs of the repository were not swept, because the store was not read") {
+		t.Errorf("the log is %q, want the line for the refs that were not swept", logs)
+	}
+}
+
+func TestTheSweepKeepsTheRefsWhenItCannotReadARecord(t *testing.T) {
+	logs := &logbook{}
+	n, remote := sweepingNode(t, logs)
+	publishedVolume(t, n, "data", fileURL(remote), nil)
+	repo := n.store.repository(fileURL(remote))
+	// A record that the driver cannot read can name any ref, such as the
+	// ref of a read-only volume that the driver does not hold.
+	git(t, repo.dir, "update-ref", refPrefix+"v1", refPrefix+"main")
+	writeFiles(t, n.store.volumeDir("docs"), map[string]string{recordFile: "{}"})
+	unreadableFile(t, filepath.Join(n.store.volumeDir("docs"), recordFile))
+
+	n.sweepStore(t.Context())
+
+	if got := storeRefs(t, repo); got != refPrefix+"main "+refPrefix+"v1" {
+		t.Errorf("the repository has %q after a sweep that could not read a record, want %q because the record may follow v1", got, refPrefix+"main "+refPrefix+"v1")
+	}
+	if !strings.Contains(logs.String(), keptRefsLine) {
+		t.Errorf("the log is %q, want the line for the refs that are kept", logs)
+	}
+}
+
+// keptRefsLine is the message of the warning for a record that the
+// sweep cannot read.
+const keptRefsLine = "The refs of every repository are kept until the record of the volume can be read"
+
+func TestARecordThatDoesNotParseIsReportedOnceForASweepWithItsPath(t *testing.T) {
+	logs := &logbook{}
+	n, remote := sweepingNode(t, logs)
+	other := bareRemote(t, map[string]string{"b.txt": "two"})
+	publishedVolume(t, n, "data", fileURL(remote), nil)
+	publishedVolume(t, n, "docs", fileURL(other), nil)
+	path := filepath.Join(n.store.volumeDir("torn"), recordFile)
+	writeFiles(t, n.store.volumeDir("torn"), map[string]string{recordFile: "{"})
+
+	n.sweepStore(t.Context())
+
+	if got := strings.Count(logs.String(), keptRefsLine); got != 1 {
+		t.Errorf("the sweep of two repositories logged %q %d times, want once for the sweep", keptRefsLine, got)
+	}
+	if !strings.Contains(logs.String(), path) {
+		t.Errorf("the log is %q, want the path %s of the record that does not parse", logs, path)
+	}
+}
+
+func TestTheFollowedRefsAreUnknownWhileARecordCannotBeRead(t *testing.T) {
+	n, remote := sweepingNode(t, io.Discard)
+	writeFiles(t, n.store.volumeDir("torn"), map[string]string{recordFile: "{"})
+
+	if _, err := n.followedRefs(t.Context(), n.store.repository(fileURL(remote)).dir); err == nil {
+		t.Error("followedRefs returned no error with a record that does not parse, want one because the record can follow any ref")
+	}
+}
+
+func TestAFileInTheVolumesDirectoryIsNoVolume(t *testing.T) {
+	n, remote := sweepingNode(t, io.Discard)
+	repo := orphanRepository(t, n, remote)
+	writeFiles(t, filepath.Join(n.store.root, "volumes"), map[string]string{"notes.txt": "left by a person"})
+
+	n.sweepStore(t.Context())
+
+	if _, err := os.Stat(repo.dir); err == nil {
+		t.Error("the repository that no volume uses is still there after the sweep, want it deleted because a file in volumes/ holds no work tree")
+	}
+}
+
 func TestTheSweepRunsOnItsIntervalUntilTheDriverStops(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		n, remote := sweepingNode(t, io.Discard)

@@ -182,6 +182,81 @@ func TestResumeSkipsWhatItCannotRead(t *testing.T) {
 	}
 }
 
+func TestResumeReportsAVolumesDirectoryItCannotRead(t *testing.T) {
+	logs := &logbook{}
+	n, _ := testNode(t, logs)
+	volumes := filepath.Join(n.store.root, "volumes")
+	if err := os.MkdirAll(volumes, 0o700); err != nil {
+		t.Fatalf("making the volumes directory: %v", err)
+	}
+	unreadableDir(t, volumes)
+
+	n.resume(t.Context())
+
+	if !strings.Contains(logs.String(), "The volumes in the store were not resumed") {
+		t.Errorf("the log is %q, want the line for the volumes directory that was not read", logs)
+	}
+}
+
+func TestResumeReportsARecordThatDoesNotParse(t *testing.T) {
+	logs := &logbook{}
+	n, _ := testNode(t, logs)
+	path := filepath.Join(n.store.volumeDir("torn"), recordFile)
+	writeFiles(t, n.store.volumeDir("torn"), map[string]string{recordFile: "{"})
+
+	n.resume(t.Context())
+
+	if !strings.Contains(logs.String(), "The volume was not resumed, because its record was not read") ||
+		!strings.Contains(logs.String(), path) {
+		t.Errorf("the log is %q, want the line for the volume that was not resumed, with the path %s", logs, path)
+	}
+}
+
+// The record is replaced by a rename, so a reader finds the earlier record
+// whole or the next one whole, and a driver that stops in the middle of a
+// write leaves the earlier record readable.
+func TestTheRecordIsReplacedWholeByARename(t *testing.T) {
+	n, _ := testNode(t, io.Discard)
+	vol := publishedVolume(t, n, "data", fileURL(bareRemote(t, map[string]string{"a.txt": "one"})), nil)
+	path := filepath.Join(vol.directory, recordFile)
+	before := inodeOf(t, path)
+
+	n.record(t.Context(), vol)
+
+	if after := inodeOf(t, path); after == before {
+		t.Errorf("the record kept its inode %d when it was written again, want a new file renamed over it, so a write that stops partway leaves the earlier record", before)
+	}
+}
+
+// recordText returns the content of the record file at path.
+func recordText(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the record: %v", err)
+	}
+	return string(content)
+}
+
+func TestARecordWriteThatFailsLeavesTheEarlierRecord(t *testing.T) {
+	logs := &logbook{}
+	n, _ := testNode(t, logs)
+	vol := publishedVolume(t, n, "data", fileURL(bareRemote(t, map[string]string{"a.txt": "one"})), nil)
+	path := filepath.Join(vol.directory, recordFile)
+	earlier := recordText(t, path)
+	readOnlyDir(t, vol.directory)
+	vol.target = "/another/target"
+
+	n.record(t.Context(), vol)
+
+	if got := recordText(t, path); got != earlier {
+		t.Errorf("the record is %q after a write that failed, want the earlier record %q", got, earlier)
+	}
+	if !strings.Contains(logs.String(), "The record file of the volume was not written") {
+		t.Errorf("the log is %q, want the line for the record that was not written", logs)
+	}
+}
+
 func TestTheRecordReportsWhatItCannotWrite(t *testing.T) {
 	logs := &logbook{}
 	n, _ := testNode(t, logs)

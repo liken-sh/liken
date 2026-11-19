@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -180,4 +182,23 @@ func TestGitEnvironmentHasNoVariableOfTheNode(t *testing.T) {
 			}
 		}
 	}
+}
+
+// refusingGit puts a git wrapper first on PATH that refuses every git
+// command with the subcommand, as git does when it cannot read the
+// repository, and runs the real git for every other command.
+func refusingGit(t *testing.T, subcommand string) {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("finding git: %v", err)
+	}
+	dir := t.TempDir()
+	script := fmt.Sprintf("#!/bin/sh\ncase \" $* \" in *\" %s \"*) echo 'fatal: the repository was not read' >&2; exit 128;; esac\nexec %s \"$@\"\n",
+		subcommand, quote(real))
+	writeFiles(t, dir, map[string]string{"git": script})
+	if err := os.Chmod(filepath.Join(dir, "git"), 0o755); err != nil {
+		t.Fatalf("making the git wrapper runnable: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
