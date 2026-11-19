@@ -1,8 +1,5 @@
 package main
 
-// The heartbeat's timer, the check of the sysctls, and the backstop,
-// through the loop in a synctest bubble.
-
 import (
 	"context"
 	"errors"
@@ -22,7 +19,7 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// leaseLog records when the heartbeat lease was written, and whether
+// leaseLog records the time of each heartbeat lease write, and whether
 // the lease or the Machine's status was written first.
 type leaseLog struct {
 	next  http.Handler
@@ -48,7 +45,8 @@ func (h *leaseLog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.next.ServeHTTP(w, r)
 }
 
-// writesBetween counts the lease writes in (from, to].
+// writesBetween counts the lease writes after from, up to and
+// including to.
 func (h *leaseLog) writesBetween(from, to time.Time) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -61,8 +59,8 @@ func (h *leaseLog) writesBetween(from, to time.Time) int {
 	return n
 }
 
-// longestGap answers the longest time between two lease writes, or
-// between from or to and the nearest write.
+// longestGap returns the longest time between two consecutive lease
+// writes, counting from and to as the ends of the interval.
 func (h *leaseLog) longestGap(from, to time.Time) time.Duration {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -80,15 +78,15 @@ func (h *leaseLog) firstWrite() string {
 	return h.first
 }
 
-// A loop that stays busy past stuckAfter stops renewing the lease,
-// fails /healthz, and ends the process, so the kubelet starts it again.
-// Until the limit, the lease still renews, because a slow pass is not a
-// stuck one. Here the facts
-// watch's Sync blocks, the way a call that never answers would.
+// A loop that stays busy for longer than stuckAfter stops renewing the
+// lease, fails /healthz, and exits the process so the kubelet starts it
+// again. Before that limit the lease still renews, because a slow pass
+// is not a stuck one. The test blocks the facts watch's sync during a
+// pass, as a call that never returns would.
 func TestAStuckLoopStopsTheLeaseAndFailsTheCheck(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		api := &leaseLog{next: newPassAPI()}
 		l, _ := testLoop(t, api)
 		wake, block := make(chan struct{}, 1), make(chan struct{})
@@ -132,9 +130,9 @@ func TestAStuckLoopStopsTheLeaseAndFailsTheCheck(t *testing.T) {
 	})
 }
 
-// A parameter that another process changes wakes a pass within
-// sysctlCheckEvery, and the pass writes it back. A parameter that reads
-// back in another spelling of the same values wakes no pass.
+// When another process changes a sysctl, a pass runs within
+// sysctlCheckEvery and writes the value back. A sysctl that reads back
+// with the same values in a different spelling does not start a pass.
 func TestTheSysctlCheckWakesAPassOnlyForAChangedValue(t *testing.T) {
 	name := slices.Sorted(maps.Keys(machine.OSSysctls))[0]
 	value := machine.OSSysctls[name]
@@ -151,7 +149,7 @@ func TestTheSysctlCheckWakesAPassOnlyForAChangedValue(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				isolatePass(t)
-				seedSysctls(t)
+				writeAppliedSysctls(t)
 				path := filepath.Join(sysctlRoot, strings.ReplaceAll(name, ".", "/"))
 				facts := &fakeFactsWatch{wake: make(chan struct{}, 1)}
 				l, _ := testLoop(t, newPassAPI(), facts)
@@ -174,21 +172,22 @@ func TestTheSysctlCheckWakesAPassOnlyForAChangedValue(t *testing.T) {
 func writeSysctl(t *testing.T, path, value string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory of %s: %v", path, err)
 	}
 	if err := os.WriteFile(path, []byte(value), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing %s: %v", path, err)
 	}
 }
 
-// A backstop pass that writes anything found a wake the code does not
-// send, and reports it: a BackstopRepaired Warning Event that names the
-// step, and the counter by step. Here the hosts file changes with no
-// inotify event, as if the hosts watch had missed it.
+// When a backstop pass writes anything, some change sent no wake
+// signal, so the loop reports it with a BackstopRepaired Warning Event
+// that names the step, and with a counter for each step. The test
+// changes the hosts file without an inotify event, as if the hosts
+// watch had missed it.
 func TestABackstopPassThatRepairsReportsIt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		client, recorder, recorded := recordingClient(t, newPassAPI())
 		l, _ := testLoop(t, http.NotFoundHandler(), &fakeFactsWatch{wake: make(chan struct{}, 1)})
 		l.objects = &reader{client: client, recorder: recorder}
@@ -199,7 +198,7 @@ func TestABackstopPassThatRepairsReportsIt(t *testing.T) {
 		quiet := posted(recorded)
 
 		if err := os.WriteFile(hostsPath, nil, 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("emptying %s: %v", hostsPath, err)
 		}
 		time.Sleep(backstopEvery + time.Second)
 
@@ -213,12 +212,12 @@ func TestABackstopPassThatRepairsReportsIt(t *testing.T) {
 	})
 }
 
-// A backstop pass on a settled machine writes nothing and reports
-// nothing.
+// A backstop pass on a machine that is already in its declared state
+// writes nothing and reports nothing.
 func TestABackstopPassOnASettledMachineReportsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		client, recorder, recorded := recordingClient(t, newPassAPI())
 		l, _ := testLoop(t, http.NotFoundHandler(), &fakeFactsWatch{wake: make(chan struct{}, 1)})
 		l.objects = &reader{client: client, recorder: recorder}
@@ -234,8 +233,8 @@ func TestABackstopPassOnASettledMachineReportsNothing(t *testing.T) {
 	})
 }
 
-// The check reads the loop's busy mark: a loop that waits, or one busy
-// for less than stuckAfter, passes, and one busy for longer fails.
+// The check passes for a loop that is waiting or has been busy for less
+// than stuckAfter, and fails for a loop busy for longer.
 func TestTheLivenessCheckFailsOnlyPastTheLimit(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		live := newLiveness()
@@ -253,9 +252,10 @@ func TestTheLivenessCheckFailsOnlyPastTheLimit(t *testing.T) {
 	})
 }
 
-// A backstop that fires while another cause is ready gives the pass to
-// that cause, so a write it makes is not reported as a missed wake.
-func TestABackstopGivesThePassToACauseThatIsReady(t *testing.T) {
+// When the backstop timer fires while another cause for a pass is
+// ready, the pass runs for that cause, so a write it makes is not
+// reported as a missing wake signal.
+func TestABackstopTimerYieldsToACauseThatIsReady(t *testing.T) {
 	dir := t.TempDir()
 	saved := sysctlRoot
 	t.Cleanup(func() { sysctlRoot = saved })
@@ -288,7 +288,8 @@ func TestABackstopGivesThePassToACauseThatIsReady(t *testing.T) {
 	}
 }
 
-// refusingStatusWith answers every status write with one status.
+// refusingStatusWith responds to every status write with the same
+// status code.
 type refusingStatusWith struct {
 	next   http.Handler
 	status int
@@ -302,17 +303,18 @@ func (h refusingStatusWith) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.next.ServeHTTP(w, r)
 }
 
-// While a retry is due, no backstop pass runs: the retry's pass does the
-// same work, and a write it makes once somebody fixes the cause, such as
-// an RBAC grant for a 403, is the retry's, not a missed wake.
+// While a retry is pending, no backstop pass runs. The retry's pass
+// does the same work, and a write it makes after someone fixes the
+// cause, such as an RBAC grant after a 403, belongs to the retry and
+// is not a missing wake signal.
 func TestNoBackstopRunsWhileARetryIsDue(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		l, _ := testLoop(t, refusingStatusWith{next: newPassAPI(), status: http.StatusForbidden}, &fakeFactsWatch{wake: make(chan struct{}, 1)})
-		// The retry's ceiling of five minutes, with its most jitter,
-		// comes after the backstop's five minutes with none, so a
-		// backstop armed beside the retry would fire first.
+		// With jitter near its maximum, a retry at its five-minute limit
+		// fires after backstopEvery, so a backstop timer armed beside
+		// the retry would fire first.
 		l.retry.jitter = func() float64 { return 0.99 }
 		layer, scrape := observer(t, &fetcher{})
 		l.layer = layer
@@ -325,13 +327,13 @@ func TestNoBackstopRunsWhileARetryIsDue(t *testing.T) {
 	})
 }
 
-// A Sync of the facts watch that fails leaves a subtree with no watch,
-// so the pass records the failure and the retry runs Sync again within
-// a second or two.
+// When the facts watch's sync fails, a subtree has no watch, so the
+// pass records the failure and the retry calls sync again within a
+// second or two.
 func TestAFailedSyncOfTheFactsWatchIsRetried(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		l, _ := testLoop(t, newPassAPI())
 		var syncs atomic.Int64
 		l.watchFactsTree = func(context.Context) (*factsWatch, error) {

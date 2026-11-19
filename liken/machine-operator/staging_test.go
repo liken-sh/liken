@@ -1,9 +1,5 @@
 package main
 
-// The staging half of convergence, tested against real files:
-// carrying out a convergence decision against a manifest store, and
-// reading the staged document's identity back out of one.
-
 import (
 	"os"
 	"path/filepath"
@@ -25,26 +21,26 @@ func TestCarryOutConvergenceStages(t *testing.T) {
 	}
 	condition := carryOutConvergence(conv, store, t.TempDir(), "cluster document", lifecycleNow, nil)
 	if condition.Reason != "RebootPending" {
-		t.Errorf("the decision's condition comes back: %s", condition.Reason)
+		t.Errorf("condition reason is %s, want RebootPending, the decision's condition", condition.Reason)
 	}
 	staged, err := store.LoadStaged()
 	if err != nil || string(staged) != "kind: Cluster\n" {
-		t.Errorf("the manifest should be staged: %q, %v", staged, err)
+		t.Errorf("staged manifest is %q (error %v), want the manifest of the decision", staged, err)
 	}
 }
 
 func TestCarryOutConvergenceWithdrawsAndClears(t *testing.T) {
 	store := machine.ClusterManifests(t.TempDir())
 	if err := store.WriteStaged([]byte("kind: Cluster\n")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("staging the first document: %v", err)
 	}
 	if err := store.Reject(machine.Rejection{Hash: "stale", Reason: "the test says so", RejectedAt: lifecycleNow}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("recording the rejection: %v", err)
 	}
 	// The rejection moved the staged document aside, so a newer one is
 	// staged beside the record.
 	if err := store.WriteStaged([]byte("kind: Cluster\nmetadata: {name: newer}\n")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("staging the newer document: %v", err)
 	}
 	conv := convergence{
 		condition:      converged("ClusterConverged", "Converged", "current"),
@@ -53,20 +49,17 @@ func TestCarryOutConvergenceWithdrawsAndClears(t *testing.T) {
 	}
 	carryOutConvergence(conv, store, t.TempDir(), "cluster document", lifecycleNow, nil)
 	if staged, _ := store.LoadStaged(); staged != nil {
-		t.Error("the staged copy should be withdrawn")
+		t.Error("the staged copy is still present, want it withdrawn")
 	}
 	if rejection, _ := store.LoadRejection(); rejection != nil {
-		t.Error("the rejection record should be cleared")
+		t.Error("the rejection record is still present, want it cleared")
 	}
 }
 
 func TestCarryOutConvergenceReportsAFailedStaging(t *testing.T) {
-	// A store rooted somewhere unwritable cannot stage. The
-	// condition downgrades to StagingFailed, instead of reporting a
-	// reboot that will not happen.
 	parent := t.TempDir()
 	if err := os.Chmod(parent, 0o555); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the parent read-only: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
 	store := machine.ClusterManifests(filepath.Join(parent, "unwritable"))
@@ -77,15 +70,13 @@ func TestCarryOutConvergenceReportsAFailedStaging(t *testing.T) {
 	}
 	condition := carryOutConvergence(conv, store, t.TempDir(), "cluster document", lifecycleNow, nil)
 	if condition.Reason != "StagingFailed" {
-		t.Errorf("got %s", condition.Reason)
+		t.Errorf("condition reason is %s, want StagingFailed", condition.Reason)
 	}
 }
 
 func TestCarryOutConvergenceReportsAFailedRestartRequest(t *testing.T) {
-	// The intent channel directory belongs to init to create. On a
-	// machine where it is missing, the request must downgrade to
-	// StagingFailed, instead of reporting a restart that will not
-	// happen. This is the same behavior a failed staging takes.
+	// init creates the intent directory, so the operator does not
+	// create it when it is missing.
 	store := machine.RegistryCredentialsStore(t.TempDir())
 	conv := convergence{
 		condition:      notConverged("CredentialsConverged", "RestartRequested", "restarting"),
@@ -94,43 +85,41 @@ func TestCarryOutConvergenceReportsAFailedRestartRequest(t *testing.T) {
 	}
 	condition := carryOutConvergence(conv, store, filepath.Join(t.TempDir(), "missing"), "registry credentials", lifecycleNow, nil)
 	if condition.Reason != "StagingFailed" {
-		t.Errorf("got %s", condition.Reason)
+		t.Errorf("condition reason is %s, want StagingFailed", condition.Reason)
 	}
 }
 
 func TestReadStagedHashOfAnEmptyStore(t *testing.T) {
 	store := machine.MachineManifests(t.TempDir())
 	if hash := readStagedHash(store); hash != "" {
-		t.Errorf("an empty store stages nothing: %q", hash)
+		t.Errorf("staged hash of an empty store is %q, want an empty string", hash)
 	}
 }
 
-func TestReadStagedHashIsTheStagedBytesIdentity(t *testing.T) {
+func TestReadStagedHashIsTheHashOfTheStagedBytes(t *testing.T) {
 	store := machine.MachineManifests(t.TempDir())
 	raw := []byte("kind: Machine\nmetadata: {name: liken-dev}\n")
 	if err := store.WriteStaged(raw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("staging the bytes: %v", err)
 	}
 	if hash := readStagedHash(store); hash != machine.ManifestHash(raw) {
-		t.Errorf("got %q", hash)
+		t.Errorf("staged hash is %q, want the hash of the staged bytes", hash)
 	}
 }
 
-func TestReadStagedHashHashesUnparseableBytesToo(t *testing.T) {
-	// The idempotence check compares bytes, not parsed meaning, so
-	// staged bytes that fail to parse still get an identity.
+func TestReadStagedHashHashesUnparsableBytes(t *testing.T) {
 	store := machine.MachineManifests(t.TempDir())
 	raw := []byte(":: this is not yaml ::")
 	if err := store.WriteStaged(raw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("staging the bytes: %v", err)
 	}
 	if hash := readStagedHash(store); hash != machine.ManifestHash(raw) {
-		t.Errorf("got %q", hash)
+		t.Errorf("staged hash is %q, want the hash of the staged bytes", hash)
 	}
 }
 
-// Each kind of disruption a decision asks for lands as the intent file
-// init acts on, and counts as a write.
+// Each kind of disruption that a decision requests is written as the
+// intent file that init reads, and counts as a write.
 func TestCarryOutConvergenceWritesTheIntentItAsksFor(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -164,9 +153,8 @@ func TestCarryOutConvergenceWritesTheIntentItAsksFor(t *testing.T) {
 	}
 }
 
-// An intent that cannot be written downgrades the condition to
-// StagingFailed and leaves a failure for the loop to retry, so the
-// condition never reports a disruption that will not happen.
+// An intent that cannot be written changes the condition to
+// StagingFailed and leaves a failure for the loop to retry.
 func TestCarryOutConvergenceReportsAFailedIntent(t *testing.T) {
 	cases := []struct {
 		name string
@@ -191,19 +179,17 @@ func TestCarryOutConvergenceReportsAFailedIntent(t *testing.T) {
 // A withdrawal or a cleared rejection that cannot write leaves the
 // condition as the decision gave it, because the cluster's copy still
 // matches this boot, and leaves a failure for the loop to retry.
-func TestCarryOutConvergenceRetriesAFailedTidy(t *testing.T) {
+func TestCarryOutConvergenceRetriesAFailedWithdrawal(t *testing.T) {
 	root := t.TempDir()
 	store := machine.ClusterManifests(root)
 	if err := store.WriteStaged([]byte("kind: Cluster\n")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("staging the first document: %v", err)
 	}
 	if err := store.Reject(machine.Rejection{Hash: "stale", Reason: "the test says so", RejectedAt: lifecycleNow}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("recording the rejection: %v", err)
 	}
-	// The rejection moved the staged document aside, so a newer one is
-	// staged beside the record.
 	if err := store.WriteStaged([]byte("kind: Cluster\nmetadata: {name: newer}\n")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("staging the newer document: %v", err)
 	}
 	readOnly(t, filepath.Join(root, "cluster"))
 	conv := convergence{

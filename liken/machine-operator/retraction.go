@@ -1,46 +1,39 @@
 package main
 
-// The retraction barrier: what must be true before a feature stops.
+// The retraction barrier keeps a feature running after an edit removes
+// it from the cluster document, until the cluster has no objects left
+// that only the feature's controller can finish deleting.
 //
-// A feature's controller runs because the cluster document declares
-// the feature. When the document stops declaring it, init stops
-// rendering its configuration and the controller does not start at
-// the next boot. What that controller programmed stays, and some of
-// it can only be removed by the controller itself.
+// When an edit removes a feature, init stops rendering its
+// configuration and its controller does not start at the next boot.
+// Some objects that the controller created can be deleted only while
+// it runs:
 //
-// Two features carry the consequence. k3s deploys Traefik through a
-// HelmChart, and the Helm controller puts a removal finalizer on
-// every chart it manages. Nothing but traefik requires helm, so an
-// edit that removes traefik removes helm with it. k3s deletes the
-// HelmChart once the disable list names traefik, and if the Helm
-// controller has already stopped, the deletion never completes: the
-// finalizer stays, and the release keeps running. servicelb has the
-// same problem, over objects a deployment owns. The cloud controller
-// inside it holds the cleanup finalizer on every LoadBalancer
-// Service, so a Service deleted after that controller stops also
-// never finishes deleting.
+//   - k3s deploys Traefik through a HelmChart, and the Helm controller
+//     adds a finalizer to every chart it manages. k3s deletes the
+//     HelmChart when traefik is disabled. If the Helm controller has
+//     already stopped, nothing removes the finalizer, the HelmChart is
+//     never deleted, and the release keeps running. Only traefik
+//     requires helm, so an edit that removes traefik also removes helm.
+//   - The servicelb cloud controller adds a cleanup finalizer to every
+//     LoadBalancer Service. A Service deleted after that controller
+//     stops is never removed.
 //
-// So a retraction waits for the cluster instead of applying halfway.
-// On every pass the operator derives the document it stages: the
-// cluster document as the deployment wrote it, with every feature put
-// back whose precondition the cluster does not satisfy yet. That
-// reduced document is what the operator hashes, stages, and boots
-// under. A machine that reboots in the middle of a retraction comes
-// back up running the held feature, so the controller runs for as
-// long as its programming is in force.
+// So on every pass the operator adds back to the desired document each
+// removed feature whose precondition the cluster does not satisfy yet,
+// and hashes, stages, and boots that reduced document. A machine that
+// reboots during a retraction starts with the removed feature still
+// running.
 //
-// The order between dependent features needs no rule of its own. An
-// edit that removes traefik retracts helm too, and the HelmCharts
-// still exist at that moment, so the pass holds helm and stops
-// traefik alone. k3s deletes the charts, the Helm controller
-// uninstalls the releases, and the next pass reads no charts and
-// stops helm. Nothing here consults the dependency graph.
+// Dependent features need no ordering rule. When an edit removes
+// traefik and helm together, the HelmCharts still exist, so the pass
+// keeps helm and stops only traefik. k3s then deletes the charts, the
+// Helm controller uninstalls the releases, and a later pass finds no
+// charts and stops helm.
 //
-// This is the machine operator's work because the machine operator
-// selects the document each machine stages. There is no handshake
-// between operators and no field in the cluster document for a held
-// feature. Every machine reads the same objects, evaluates the same
-// preconditions, and derives the same reduced document.
+// The cluster document has no field that records a kept feature. Every machine
+// reads the same objects and evaluates the same preconditions, so every
+// machine stages the same reduced document.
 
 import (
 	"fmt"
@@ -50,41 +43,34 @@ import (
 	"github.com/liken-sh/liken/liken/cluster"
 )
 
-// A featureHold is one feature that keeps running although the
-// document no longer declares it, because the cluster still holds
-// objects that only this feature's controller can remove. Blocker
-// names those objects, in a sentence a person can act on.
+// A featureHold is a feature that keeps running after an edit removed
+// it, because the cluster still has objects that only its
+// controller can delete. blocker describes those objects for a person
+// to act on.
 type featureHold struct {
 	slug    string
 	blocker string
 }
 
-// preconditionEvaluator answers one feature's precondition against
-// the live cluster: whether it holds, and when it does not, what
-// still stands in the way. The reduction takes this as a parameter
-// rather than calling the API itself, so the decision stays a pure
-// function over its inputs, the way every other decision in this
-// operator is.
-type preconditionEvaluator func(cluster.Precondition) (holds bool, blocker string, err error)
+// preconditionEvaluator checks one precondition against the live
+// cluster, and when it is not satisfied, describes the objects that
+// block it. reduceRetraction takes it as a parameter so that tests can
+// pass a stub.
+type preconditionEvaluator func(cluster.Precondition) (satisfied bool, blocker string, err error)
 
 // reduceRetraction derives the document this machine stages from the
-// document the deployment wrote. Every feature whose precondition the
-// cluster does not satisfy goes back into spec.features, and the
-// caller receives those features and the reason for each.
-//
-// An edit that stops no feature evaluates nothing, so the ordinary
-// pass, where the document is unchanged or changes something else,
-// costs no API calls.
-//
-// A held feature goes back with the declaration it runs under now,
-// which withFeature takes from the boot document.
+// document the deployment wrote. It adds back to spec.features every
+// retracted feature whose precondition the cluster does not satisfy,
+// with its configuration from bootDoc, and returns a featureHold for
+// each one. When the edit retracts no feature, it makes no API calls.
 func reduceRetraction(bootDoc, desired *cluster.Cluster, evaluate preconditionEvaluator) (*cluster.Cluster, []featureHold) {
 	if bootDoc == nil {
-		// A retraction is a difference between two documents, and
-		// without the document this boot ran there is no difference to
-		// measure. The convergence decision applies an unreadable boot
-		// document by rebooting (cluster.go), and a reboot is also the
-		// safest way to stop a controller.
+		// Without the boot document no retraction can be found. When
+		// the boot ran a cluster document that cannot be read, the
+		// convergence decision (cluster.go) reports FactsIncomplete and
+		// stages nothing, so the desired document does not bypass the
+		// barrier. When the boot ran no cluster document, no feature
+		// was running.
 		return desired, nil
 	}
 	reduced := desired
@@ -94,15 +80,13 @@ func reduceRetraction(bootDoc, desired *cluster.Cluster, evaluate preconditionEv
 		if def == nil || def.Retraction.Precondition == cluster.PreconditionNone {
 			continue
 		}
-		holds, blocker, err := evaluate(def.Retraction.Precondition)
+		satisfied, blocker, err := evaluate(def.Retraction.Precondition)
 		if err != nil {
-			// A failed read is not a satisfied precondition. A feature
-			// held on a failed read costs a delayed retraction, and the
-			// next pass evaluates it again. A feature stopped on a
-			// failed read costs the stranded objects this barrier
-			// prevents.
-			blocker = fmt.Sprintf("the check for what still depends on it could not run: %v", err)
-		} else if holds {
+			// A failed check keeps the feature, and the next pass checks
+			// again. Stopping it could leave finalizers that nothing
+			// removes.
+			blocker = fmt.Sprintf("the check for objects that depend on it did not run: %v", err)
+		} else if satisfied {
 			continue
 		}
 		reduced = withFeature(reduced, slug, bootDoc.Spec.Features[slug])
@@ -111,18 +95,14 @@ func reduceRetraction(bootDoc, desired *cluster.Cluster, evaluate preconditionEv
 	return reduced, held
 }
 
-// withFeature returns a copy of the document with one more feature
-// declared. It copies rather than edits, because the document it
-// receives is the live Cluster that the rest of the pass reads: the
-// release feed comes from that same object, and the reduction must
-// change nothing that anything else reads.
+// withFeature returns a copy of doc with one more feature declared. It
+// copies because doc is the live Cluster that the rest of the pass also
+// reads.
 //
-// The configuration comes from the document this boot ran under, so a
-// held feature keeps running exactly as it has been running. A
-// parameterized feature declared with {} instead would come back
-// stripped of its parameters, which is a different feature from the
-// one the machine is holding. A requirement that nobody declared has
-// no configuration of its own, and {} is right for it.
+// cfg is the feature's declaration in the boot document, so a kept
+// feature keeps its parameters. A feature that ran only because
+// another feature required it has no declaration, so cfg is nil and the
+// feature is declared as {}.
 func withFeature(doc *cluster.Cluster, slug string, cfg *cluster.FeatureConfig) *cluster.Cluster {
 	reduced := *doc
 	reduced.Spec.Features = maps.Clone(doc.Spec.Features)
@@ -136,10 +116,9 @@ func withFeature(doc *cluster.Cluster, slug string, cfg *cluster.FeatureConfig) 
 	return &reduced
 }
 
-// evaluatePrecondition answers one precondition against the live
-// cluster. Every precondition is a count of objects that only the
-// feature's own controller can finish removing, so an unsatisfied
-// precondition always carries the names of those objects.
+// evaluatePrecondition checks one precondition against the live
+// cluster. A precondition is satisfied when no object of its kind
+// remains, and the blocker lists the objects that remain.
 func evaluatePrecondition(r *reader, p cluster.Precondition) (bool, string, error) {
 	switch p {
 	case cluster.NoHelmCharts:
@@ -155,7 +134,7 @@ func evaluatePrecondition(r *reader, p cluster.Precondition) (bool, string, erro
 			names[i] = chart.Metadata.Namespace + "/" + chart.Metadata.Name
 		}
 		return false, fmt.Sprintf(
-			"the cluster still holds HelmCharts (%s); they must be deleted, and their releases uninstalled, before the Helm controller stops",
+			"HelmCharts (%s) remain in the cluster, and the Helm controller stops only after they are deleted and their releases are uninstalled",
 			nameList(names)), nil
 
 	case cluster.NoLoadBalancerServices:
@@ -171,20 +150,16 @@ func evaluatePrecondition(r *reader, p cluster.Precondition) (bool, string, erro
 			names[i] = s.Metadata.Namespace + "/" + s.Metadata.Name
 		}
 		return false, fmt.Sprintf(
-			"the cluster still holds Services of type LoadBalancer (%s); they must be deleted before the controller that cleans them up stops",
+			"Services of type LoadBalancer (%s) remain in the cluster, and the controller that cleans them up stops only after they are deleted",
 			nameList(names)), nil
 	}
-	// The vocabulary is compiled in, so a precondition this switch
-	// does not cover is one the feature table states and this file
-	// has no case for. Reading it as unsatisfied is the safe
-	// direction, and the feature keeps running.
-	return false, fmt.Sprintf("this build cannot evaluate the %s precondition", p), nil
+	// A precondition in the feature table that this switch does not
+	// handle keeps the feature running.
+	return false, fmt.Sprintf("this build has no check for the %s precondition", p), nil
 }
 
-// nameListLimit is how many object names a blocker carries. A
-// condition message is written for a person, who acts on the first
-// few names, and every name after them costs message length without
-// changing the correction.
+// nameListLimit is the number of object names that a blocker lists,
+// so that a condition message stays short.
 const nameListLimit = 3
 
 func nameList(names []string) string {
@@ -194,9 +169,7 @@ func nameList(names []string) string {
 	return fmt.Sprintf("%s and %d more", strings.Join(names[:nameListLimit], ", "), len(names)-nameListLimit)
 }
 
-// holdMessage is the condition's message for a retraction that
-// cannot proceed: each feature that keeps running, and the objects
-// the cluster must lose before that feature may stop.
+// holdMessage is the condition message for a blocked retraction.
 func holdMessage(held []featureHold) string {
 	sentences := make([]string, len(held))
 	for i, h := range held {

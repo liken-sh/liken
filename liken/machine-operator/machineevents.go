@@ -1,33 +1,30 @@
 package main
 
-// The kernel's events for the state on the machine that a pass reads.
+// Readers that wake the reconcile loop when the kernel reports a
+// change on the machine.
 //
-// A pass reads two kinds of state from the machine itself that the
-// kernel announces, beside the facts that init publishes. The device
-// inventory and the claims' CDI specifications come from a walk of
-// sysfs (dra.go, cdi.go), and the host entries come from the host's
-// /etc/hosts (hosts.go). The kernel announces a change to either one:
-// a uevent for a device that arrives, leaves, or changes its driver,
-// and an inotify event for a file. So two readers turn those events
-// into wakes of the loop.
+// A pass reads two kinds of machine state that change with no
+// Kubernetes event. The device inventory and the CDI specifications of
+// claims come from a walk of sysfs (dra.go, cdi.go), and the host
+// entries come from the host's /etc/hosts (hosts.go). The kernel sends
+// a uevent when a device arrives, leaves, or changes its driver, and an
+// inotify event when a file changes, so a reader for each wakes the
+// loop.
 //
-// The sysctls have no such event. A write through /proc/sys does send
-// inotify events, but only to a watch on the same mount of procfs,
-// because each mount has inodes of its own. Each container mounts its
-// own /proc, and the host has its own, so a watch in this pod sees
-// this pod's writes alone. The loop checks them on a timer instead
-// (backstop.go).
+// Sysctls have no such event. A write through /proc/sys sends inotify
+// events only to watches on the same procfs mount, because each mount
+// has its own inodes. The pod and the host have separate /proc mounts,
+// so the loop reads sysctls on a timer instead (backstop.go).
 //
-// The readers open before the first pass, so a change during the first
-// walk or the first read of a file still sends a wake after it.
+// main.go opens the readers before the first pass, so a change during
+// the first walk or the first read of a file still wakes the loop.
 //
-// A reader that stops after it opened ends the operator. A reader stops
-// only on a poll error or a descriptor that is no longer open, which
-// nothing in the operator can repair, and a reader that stopped misses
-// every change after it. The kubelet starts the container again with
-// its backoff, and the new process opens new readers before its first
-// pass, so a change made while nothing listened is still read. This is
-// the crash-only rule at the head of main.go.
+// When a reader stops after it opened, the operator exits. A reader
+// stops only on a poll error or a closed descriptor, which the
+// operator cannot repair, and a stopped reader would miss every later
+// change. The kubelet restarts the container, and the new process opens
+// new readers before its first pass, so it reads any change made while
+// no reader ran.
 
 import (
 	"context"
@@ -42,28 +39,26 @@ import (
 )
 
 // listenForUevents opens the uevent listener, filtered to the events
-// that can change what the inventory reads (hardware.InventoryEvent).
-// The veth pairs that pods add and remove wake nothing. It is a
-// variable so a test can hand the loop a listener whose wakes the test
-// sends.
+// that can change the device inventory (hardware.InventoryEvent), so
+// the veth pairs that pods create and remove wake nothing. A test
+// replaces it.
 var listenForUevents = func(ctx context.Context) (<-chan struct{}, error) {
 	return hardware.ListenForUeventsMatching(ctx, hardware.InventoryEvent)
 }
 
-// watchHostsFile watches the name hosts in the host's /etc, the
-// directory the pod mounts (hosts.go). It is a variable so a test can
-// hand the loop a watch whose wakes the test sends.
+// watchHostsFile watches the hosts file by name in the host's /etc,
+// which the pod mounts (hosts.go). A test replaces it.
 var watchHostsFile = func(ctx context.Context) (<-chan struct{}, error) {
 	return machine.WatchName(ctx, filepath.Dir(hostsPath), filepath.Base(hostsPath))
 }
 
-// hostsWatchFailure answers the error of a hosts watch that failed to
-// open, unless its directory does not exist. A pod from a template
-// older than the /host/etc mount has no directory, and the operator
-// runs without the watch while hostEntriesCondition reports the missing
-// mount. Any other failure, such as EMFILE or ENOSPC from inotify,
-// would leave the hosts file with no wake for the life of the process,
-// so it ends the process, the same as a reader that stops.
+// hostsWatchFailure returns the error from opening the hosts watch,
+// or nil when the directory does not exist. A pod made from a template
+// older than the /host/etc mount has no such directory, so the operator
+// runs without the watch and hostEntriesCondition reports the missing
+// mount. Any other error, such as EMFILE or ENOSPC from inotify, would
+// leave the hosts file unwatched for the life of the process, so main
+// exits on it.
 func hostsWatchFailure(err error) error {
 	if err == nil || errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -71,28 +66,27 @@ func hostsWatchFailure(err error) error {
 	return err
 }
 
-// errReaderStopped is what relay answers when its reader closes the
-// channel.
 var errReaderStopped = errors.New("the reader stopped")
 
-// settleEvents gathers a burst of events into one wake, with init's
-// intervals for its own hardware watch: one second of quiet, and five
-// seconds at most. One USB device that enumerates sends a dozen events
-// in a few milliseconds, and the pass after the burst reads every one
-// of them. The hosts file needs it too. The pass's own write to
-// /etc/hosts sends an event, and a process that keeps writing another
-// file would otherwise trade writes with the pass as fast as both can
-// write. With the settle, that costs a pass every five seconds at most.
-// The settle runs in the relay's goroutine, not in the loop, so a
-// stream that holds it at the ceiling never delays a wake from a watch.
+// settleEvents merges a burst of events into one wake signal: it waits
+// for one second with no event, or five seconds at most, the same
+// intervals as init's hardware watch. A USB device that enumerates
+// sends many uevents within milliseconds, and one pass after the burst
+// reads all of them. The hosts watch needs it too, because the pass's
+// own write to /etc/hosts sends an event. Without it, a pass and
+// another process that keeps rewriting the file would overwrite each
+// other as fast as both can write. With it, that costs at most one pass
+// every five seconds. Each relay runs in its own goroutine, so a reader
+// that stays busy for the full five seconds does not delay the others'
+// wakes.
 func settleEvents(ctx context.Context, events <-chan struct{}) {
 	hardware.Settle(ctx, events, time.Second, 5*time.Second)
 }
 
-// relay turns a reader's events into wakes of the loop until the
-// context ends, and answers errReaderStopped when the reader closes its
-// channel. settle, when it is not nil, waits out a burst after the
-// first event of it.
+// relay wakes the loop for each event from a reader, until ctx ends,
+// and returns errReaderStopped when the reader closes its channel.
+// When settle is not nil, relay calls it after the first event of a
+// burst and wakes the loop once the burst ends.
 func relay(ctx context.Context, events <-chan struct{}, wakes chan<- struct{}, settle func(context.Context, <-chan struct{})) error {
 	wake := watch.Signal(wakes)
 	for {

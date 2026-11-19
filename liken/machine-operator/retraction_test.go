@@ -1,9 +1,5 @@
 package main
 
-// The retraction barrier: which features a pass holds back, what the
-// machine stages while it holds them, and what an operator reads
-// when nothing can move.
-
 import (
 	"encoding/json"
 	"errors"
@@ -18,11 +14,9 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// clusterWithFeatures builds the decision's Cluster document
-// declaring the named features and nothing else. Declaring a feature
-// also enables what it requires, so a document that declares traefik
-// runs helm too, and that implied pair is what the barrier exists
-// for.
+// clusterWithFeatures builds a Cluster document that declares only the
+// named features. A feature also enables the features it requires, so
+// a document that declares traefik runs helm too.
 func clusterWithFeatures(slugs ...string) *cluster.Cluster {
 	doc := decisionCluster()
 	doc.Spec.Features = map[string]*cluster.FeatureConfig{}
@@ -32,22 +26,21 @@ func clusterWithFeatures(slugs ...string) *cluster.Cluster {
 	return doc
 }
 
-// A stubEvaluator stands in for the live cluster. It answers each
-// precondition from a table, records every precondition it was given,
-// so a test can state that a pass evaluated none, and it can fail
-// every evaluation the way an unreachable API server does.
+// stubEvaluator replaces the live cluster. It looks up each
+// precondition in satisfied, records the preconditions it evaluated,
+// and fails every evaluation when fail is set.
 type stubEvaluator struct {
-	holds map[cluster.Precondition]bool
-	fail  error
-	asked []cluster.Precondition
+	satisfied map[cluster.Precondition]bool
+	fail      error
+	evaluated []cluster.Precondition
 }
 
 func (s *stubEvaluator) evaluate(p cluster.Precondition) (bool, string, error) {
-	s.asked = append(s.asked, p)
+	s.evaluated = append(s.evaluated, p)
 	if s.fail != nil {
 		return false, "", s.fail
 	}
-	return s.holds[p], "the cluster still holds Services of type LoadBalancer (default/whoami)", nil
+	return s.satisfied[p], "the cluster still holds Services of type LoadBalancer (default/whoami)", nil
 }
 
 func declared(doc *cluster.Cluster, slug string) bool {
@@ -56,9 +49,9 @@ func declared(doc *cluster.Cluster, slug string) bool {
 }
 
 func TestARetractionWaitsForItsPrecondition(t *testing.T) {
-	// An edit that removes traefik retracts helm with it, because
-	// nothing else requires helm. The HelmCharts still exist at this
-	// moment, so helm stays and traefik goes.
+	// Removing traefik also retracts helm, because nothing else
+	// requires helm. The HelmCharts still exist, so helm stays and
+	// traefik stops.
 	boot := clusterWithFeatures("traefik")
 	desired := clusterWithFeatures()
 	stub := &stubEvaluator{}
@@ -69,31 +62,30 @@ func TestARetractionWaitsForItsPrecondition(t *testing.T) {
 		t.Errorf("the staged document keeps helm and drops traefik: %+v", reduced.Spec.Features)
 	}
 	if len(held) != 1 || held[0].slug != "helm" {
-		t.Errorf("got %+v", held)
+		t.Errorf("held features are %+v, want only helm", held)
 	}
 	if declared(desired, "helm") {
-		t.Error("the reduction must not edit the live document the rest of the pass reads")
+		t.Error("the reduction changed the live document, want it unchanged because the rest of the pass reads it")
 	}
 }
 
-func TestARetractionProceedsOnceItsPreconditionHolds(t *testing.T) {
-	// One convergence later: traefik stopped, k3s deleted the
-	// HelmChart, and the Helm controller uninstalled the release.
+func TestARetractionProceedsOnceItsPreconditionIsSatisfied(t *testing.T) {
+	// Traefik has stopped, k3s has deleted the HelmChart, and the Helm
+	// controller has uninstalled the release.
 	boot := clusterWithFeatures("helm")
 	desired := clusterWithFeatures()
-	stub := &stubEvaluator{holds: map[cluster.Precondition]bool{cluster.NoHelmCharts: true}}
+	stub := &stubEvaluator{satisfied: map[cluster.Precondition]bool{cluster.NoHelmCharts: true}}
 
 	reduced, held := reduceRetraction(boot, desired, stub.evaluate)
 
 	if declared(reduced, "helm") || len(held) != 0 {
-		t.Errorf("nothing depends on helm now, so it stops: %+v %+v", reduced.Spec.Features, held)
+		t.Errorf("features are %+v and held is %+v, want helm stopped and nothing held because nothing depends on it", reduced.Spec.Features, held)
 	}
 }
 
 func TestAFeatureWithNoPreconditionStopsWithoutAnyReads(t *testing.T) {
-	// metrics-server and network-policy leave behind no object that
-	// another one depends on, so their retraction states no
-	// precondition and the pass reads nothing.
+	// metrics-server and network-policy have no retraction
+	// precondition.
 	boot := clusterWithFeatures("metrics-server", "network-policy")
 	desired := clusterWithFeatures()
 	stub := &stubEvaluator{}
@@ -101,10 +93,10 @@ func TestAFeatureWithNoPreconditionStopsWithoutAnyReads(t *testing.T) {
 	reduced, held := reduceRetraction(boot, desired, stub.evaluate)
 
 	if len(reduced.Spec.Features) != 0 || len(held) != 0 {
-		t.Errorf("got %+v %+v", reduced.Spec.Features, held)
+		t.Errorf("features are %+v and held is %+v, want both empty", reduced.Spec.Features, held)
 	}
-	if len(stub.asked) != 0 {
-		t.Errorf("an edit with no precondition to satisfy reads nothing: %v", stub.asked)
+	if len(stub.evaluated) != 0 {
+		t.Errorf("an edit with no precondition makes no reads: %v", stub.evaluated)
 	}
 }
 
@@ -114,16 +106,12 @@ func TestAnUnchangedDocumentEvaluatesNothing(t *testing.T) {
 
 	reduceRetraction(boot, clusterWithFeatures("traefik", "servicelb"), stub.evaluate)
 
-	if len(stub.asked) != 0 {
-		t.Errorf("the ordinary pass stops no feature, so it costs no reads: %v", stub.asked)
+	if len(stub.evaluated) != 0 {
+		t.Errorf("an unchanged document retracts no feature, so it makes no reads: %v", stub.evaluated)
 	}
 }
 
-func TestAnUnansweredPreconditionHoldsTheFeature(t *testing.T) {
-	// The safe direction: a feature held on a failed read costs a
-	// delayed retraction, and the next pass evaluates it again. A
-	// feature stopped on a failed read costs the stranded objects the
-	// barrier prevents.
+func TestAFailedPreconditionCheckKeepsTheFeatureRunning(t *testing.T) {
 	boot := clusterWithFeatures("servicelb")
 	desired := clusterWithFeatures()
 	stub := &stubEvaluator{fail: errors.New("connection refused")}
@@ -131,33 +119,33 @@ func TestAnUnansweredPreconditionHoldsTheFeature(t *testing.T) {
 	reduced, held := reduceRetraction(boot, desired, stub.evaluate)
 
 	if !declared(reduced, "servicelb") || len(held) != 1 {
-		t.Fatalf("got %+v %+v", reduced.Spec.Features, held)
+		t.Fatalf("features are %+v and held is %+v, want servicelb running and held", reduced.Spec.Features, held)
 	}
 	if !strings.Contains(held[0].blocker, "connection refused") {
-		t.Errorf("the hold says why it could not decide: %q", held[0].blocker)
+		t.Errorf("the blocker is %q, want the reason for the failed check", held[0].blocker)
 	}
 }
 
-func TestAnUnreadableBootDocumentRecognizesNoRetraction(t *testing.T) {
+func TestAnUnreadableBootDocumentHoldsNoFeature(t *testing.T) {
 	desired := clusterWithFeatures()
 	stub := &stubEvaluator{}
 
 	reduced, held := reduceRetraction(nil, desired, stub.evaluate)
 
-	if reduced != desired || len(held) != 0 || len(stub.asked) != 0 {
-		t.Errorf("with nothing to compare against there is no retraction to hold: %+v %v", held, stub.asked)
+	if reduced != desired || len(held) != 0 || len(stub.evaluated) != 0 {
+		t.Errorf("held features are %+v and evaluations %v, want none because there is no boot document to compare", held, stub.evaluated)
 	}
 }
 
-// blockedRetraction runs a whole convergence decision for a document
-// whose only edit is a retraction the cluster refuses: the reduction
-// hands back exactly the document this boot runs.
+// blockedRetraction runs the convergence decision for a document whose
+// only change is a retraction that the cluster blocks, so the reduced
+// document equals the boot document.
 func blockedRetraction(t *testing.T) convergence {
 	t.Helper()
 	boot := clusterWithFeatures("servicelb")
 	_, bootHash, err := renderCluster(boot.Metadata.Name, boot.Spec)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the boot document: %v", err)
 	}
 	reduced, held := reduceRetraction(boot, clusterWithFeatures(), (&stubEvaluator{}).evaluate)
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-raw-hash")
@@ -165,17 +153,17 @@ func blockedRetraction(t *testing.T) convergence {
 		boot, bootHash, "", turnGranted)
 }
 
-func TestABlockedRetractionNamesWhatMustGo(t *testing.T) {
+func TestABlockedRetractionNamesTheBlockingObjects(t *testing.T) {
 	conv := blockedRetraction(t)
 
 	if conv.condition.Reason != "RetractionBlocked" || conv.condition.Status != "False" {
-		t.Fatalf("got %+v", conv.condition)
+		t.Fatalf("the condition is %+v, want RetractionBlocked with status False", conv.condition)
 	}
 	if !strings.Contains(conv.condition.Message, "servicelb") {
-		t.Errorf("the message names the feature that cannot stop: %q", conv.condition.Message)
+		t.Errorf("the message is %q, want it to name the held feature", conv.condition.Message)
 	}
 	if !strings.Contains(conv.condition.Message, "default/whoami") {
-		t.Errorf("the message names what the deployment must remove: %q", conv.condition.Message)
+		t.Errorf("the message names the objects that block the retraction: %q", conv.condition.Message)
 	}
 }
 
@@ -183,27 +171,25 @@ func TestABlockedRetractionDisruptsNothing(t *testing.T) {
 	conv := blockedRetraction(t)
 
 	if conv.stage || conv.requestReboot || conv.requestRestart {
-		t.Errorf("no reboot moves a machine that already runs the reduced document: %+v", conv)
+		t.Errorf("the machine already runs the reduced document, so nothing needs a reboot: %+v", conv)
 	}
 }
 
-func TestABlockedRetractionReadsAsBlocked(t *testing.T) {
+func TestABlockedRetractionSetsPhaseBlocked(t *testing.T) {
 	phase := decidePhase([]api.Condition{blockedRetraction(t).condition})
 
 	if phase != api.PhaseBlocked {
-		t.Errorf("only a change to the cluster's objects clears this: %s", phase)
+		t.Errorf("only a change to the cluster's objects clears this phase: %s", phase)
 	}
 }
 
 func TestTheReducedDocumentIsWhatGetsStaged(t *testing.T) {
-	// The machine stages the document with helm put back, not the
-	// one the deployment wrote. This is what makes a reboot in the
-	// middle of the retraction safe: the machine comes back up still
-	// running the held feature.
+	// The machine stages the document with helm added back, not the
+	// one the deployment wrote.
 	boot := clusterWithFeatures("traefik")
 	_, bootHash, err := renderCluster(boot.Metadata.Name, boot.Spec)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the boot document: %v", err)
 	}
 	reduced, held := reduceRetraction(boot, clusterWithFeatures(), (&stubEvaluator{}).evaluate)
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-raw-hash")
@@ -212,50 +198,47 @@ func TestTheReducedDocumentIsWhatGetsStaged(t *testing.T) {
 		boot, bootHash, "", turnGranted)
 
 	if !conv.stage {
-		t.Fatalf("stopping traefik alone is progress, so it stages: %+v", conv)
+		t.Fatalf("stopping traefik alone changes the document, so it stages: %+v", conv)
 	}
 	_, want, _ := renderCluster(reduced.Metadata.Name, reduced.Spec)
 	if conv.hash != want {
-		t.Errorf("the staged bytes are the reduced document's: %s, want %s", conv.hash, want)
+		t.Errorf("the staged bytes are the reduced document: %s, want %s", conv.hash, want)
 	}
 	staged := string(conv.manifest)
 	if !strings.Contains(staged, "helm") || strings.Contains(staged, "traefik") {
-		t.Errorf("the staged document holds helm and drops traefik:\n%s", staged)
+		t.Errorf("the staged document declares helm and not traefik:\n%s", staged)
 	}
 }
 
 func TestAHeldFeatureKeepsTheConfigurationItRunsUnder(t *testing.T) {
-	// A held feature goes on running, so it must go on running as
-	// itself. Rewriting its declaration to {} would hold a different
-	// feature from the one the machine has up.
 	configured := &cluster.FeatureConfig{"repository": "ssh://git@forge.example/fleet.git"}
 	reduced := withFeature(clusterWithFeatures(), "flux", configured)
 	if got := reduced.Spec.Features["flux"]; got != configured {
-		t.Errorf("got %v, want the boot document's own declaration", got)
+		t.Errorf("the flux configuration is %v, want the boot document's own declaration", got)
 	}
 }
 
-func TestAHeldRequirementNobodyDeclaredGetsTheZeroConfiguration(t *testing.T) {
+func TestAHeldRequirementNobodyDeclaredGetsAnEmptyConfiguration(t *testing.T) {
 	reduced := withFeature(clusterWithFeatures(), "helm", nil)
 	if got := reduced.Spec.Features["helm"]; got == nil || len(*got) != 0 {
-		t.Errorf("got %v, want an empty configuration", got)
+		t.Errorf("the helm configuration is %v, want an empty configuration", got)
 	}
 }
 
-func TestNameListStopsCounting(t *testing.T) {
+func TestNameListShortensALongList(t *testing.T) {
 	names := []string{"a/1", "a/2", "a/3", "a/4", "a/5"}
 
 	if got := nameList(names); got != "a/1, a/2, a/3 and 2 more" {
-		t.Errorf("got %q", got)
+		t.Errorf("nameList of 5 names is %q, want \"a/1, a/2, a/3 and 2 more\"", got)
 	}
 	if got := nameList(names[:2]); got != "a/1, a/2" {
-		t.Errorf("a short list is named in full: %q", got)
+		t.Errorf("nameList of 2 names is %q, want \"a/1, a/2\" because a short list shows every name", got)
 	}
 }
 
-// collectionServer answers one list URL with the objects given, and
-// answers 404 everywhere else, the way an API server answers for a
-// kind it does not serve.
+// collectionServer returns the given objects for a list request at
+// path and 404 for every other path, as an API server does for a kind
+// it does not serve.
 func collectionServer(t *testing.T, path string, objects ...map[string]any) *apiclient.Client {
 	t.Helper()
 	return testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -274,14 +257,14 @@ func namedObject(namespace, name string, spec map[string]any) map[string]any {
 	}
 }
 
-func TestEvaluatePreconditionNamesTheObjectsThatRemain(t *testing.T) {
+func TestEvaluatePreconditionNamesTheRemainingObjects(t *testing.T) {
 	cases := map[string]struct {
 		precondition cluster.Precondition
 		client       func(t *testing.T) *apiclient.Client
-		holds        bool
+		satisfied    bool
 		names        string
 	}{
-		"a chart still installed keeps helm running": {
+		"a remaining chart blocks the helm precondition": {
 			precondition: cluster.NoHelmCharts,
 			client: func(t *testing.T) *apiclient.Client {
 				return collectionServer(t, kubernetes.HelmChartsPath,
@@ -289,14 +272,14 @@ func TestEvaluatePreconditionNamesTheObjectsThatRemain(t *testing.T) {
 			},
 			names: "kube-system/traefik",
 		},
-		"no charts left releases helm": {
+		"no charts satisfy the helm precondition": {
 			precondition: cluster.NoHelmCharts,
 			client: func(t *testing.T) *apiclient.Client {
 				return collectionServer(t, kubernetes.HelmChartsPath)
 			},
-			holds: true,
+			satisfied: true,
 		},
-		"a LoadBalancer Service keeps servicelb running": {
+		"a LoadBalancer Service blocks the servicelb precondition": {
 			precondition: cluster.NoLoadBalancerServices,
 			client: func(t *testing.T) *apiclient.Client {
 				return collectionServer(t, "/api/v1/services",
@@ -304,47 +287,47 @@ func TestEvaluatePreconditionNamesTheObjectsThatRemain(t *testing.T) {
 			},
 			names: "default/whoami",
 		},
-		"ordinary Services release servicelb": {
+		"other Services satisfy the servicelb precondition": {
 			precondition: cluster.NoLoadBalancerServices,
 			client: func(t *testing.T) *apiclient.Client {
 				return collectionServer(t, "/api/v1/services",
 					namedObject("default", "kubernetes", map[string]any{"type": "ClusterIP"}))
 			},
-			holds: true,
+			satisfied: true,
 		},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			holds, blocker, err := evaluatePrecondition(&reader{client: c.client(t)}, c.precondition)
+			satisfied, blocker, err := evaluatePrecondition(&reader{client: c.client(t)}, c.precondition)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("evaluating the precondition: %v", err)
 			}
-			if holds != c.holds {
-				t.Fatalf("holds = %v, want %v (%s)", holds, c.holds, blocker)
+			if satisfied != c.satisfied {
+				t.Fatalf("satisfied = %v, want %v (%s)", satisfied, c.satisfied, blocker)
 			}
 			if !strings.Contains(blocker, c.names) {
-				t.Errorf("the blocker names what remains: %q", blocker)
+				t.Errorf("the blocker names the remaining objects: %q", blocker)
 			}
 		})
 	}
 }
 
-func TestEvaluatePreconditionCarriesAFailedRead(t *testing.T) {
+func TestEvaluatePreconditionReturnsAFailedRead(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 	}))
 
 	if _, _, err := evaluatePrecondition(&reader{client: client}, cluster.NoLoadBalancerServices); err == nil {
-		t.Error("a refused read is not an answer")
+		t.Error("evaluatePrecondition returned no error, want one because the read was refused")
 	}
 }
 
-func TestAnUnservedHelmChartKindHolds(t *testing.T) {
-	// A cluster that never ran the Helm controller serves no
-	// HelmChart kind at all. There is nothing to wait for.
-	holds, _, err := evaluatePrecondition(&reader{client: collectionServer(t, "/served/nowhere")}, cluster.NoHelmCharts)
+func TestAnUnservedHelmChartKindSatisfiesTheHelmPrecondition(t *testing.T) {
+	// A cluster that never ran the Helm controller does not serve the
+	// HelmChart kind, so there are no charts to wait for.
+	satisfied, _, err := evaluatePrecondition(&reader{client: collectionServer(t, "/served/nowhere")}, cluster.NoHelmCharts)
 
-	if err != nil || !holds {
-		t.Errorf("holds = %v, err = %v", holds, err)
+	if err != nil || !satisfied {
+		t.Errorf("satisfied is %v and the error is %v, want satisfied and no error", satisfied, err)
 	}
 }

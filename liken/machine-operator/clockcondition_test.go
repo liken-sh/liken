@@ -50,24 +50,21 @@ func TestClockCondition(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := clockCondition(tc.time)
 			if c.Type != clockSynchronizedCondition || c.Status != tc.status || c.Reason != tc.reason {
-				t.Errorf("got %+v", c)
+				t.Errorf("clockCondition(%+v) = %+v, want status %s and reason %s", tc.time, c, tc.status, tc.reason)
 			}
 		})
 	}
 }
 
-// A clock that loses its source leaves the machine Ready. An upstream
-// outage reaches every leader at once, and a fleet that turns Degraded
-// together stalls every reboot turn.
 func TestAnUnsynchronizedClockLeavesTheMachineReady(t *testing.T) {
 	conditions := []api.Condition{
 		condition("HostEntriesApplied", "True", "Applied"),
 		clockCondition(machine.TimeStatus{State: machine.TimeUnsynchronized, Stratum: 16}),
 	}
 	if c := readyCondition(conditions); c.Status != api.ConditionTrue {
-		t.Errorf("got %+v", c)
+		t.Errorf("readyCondition = %+v, want status True", c)
 	}
 	if phase := decidePhase(conditions); phase != api.PhaseReady {
-		t.Errorf("got %s", phase)
+		t.Errorf("decidePhase = %s, want %s", phase, api.PhaseReady)
 	}
 }

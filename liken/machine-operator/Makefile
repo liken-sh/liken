@@ -1,25 +1,15 @@
-# The machine operator domain: the node-local half of operating the
-# OS through the Kubernetes API.
+# Builds the machine operator, a static Go binary, and the OCI image
+# tarball that the OS ships it in. The header comment of main.go
+# explains what the operator does.
 #
-# This domain builds two artifacts: the operator binary (a static Go
-# build, with the same discipline as init's) and the OCI image
-# tarball that carries it into the cluster, packaged by the recipe
-# the image domain owns (image/oci.sh). main.go's header comment
-# explains what an operator is, why this one uses no Kubernetes
-# libraries, and where the line sits between it and the cluster
-# operator.
-#
-# version.mk supplies the version stamp. The releases domain
-# overrides the stamp and the output directory, to rebuild this
-# operator under a release's name into its own tree, through these
-# same rules.
+# version.mk sets LIKEN_VERSION. releases/Makefile sets LIKEN_VERSION
+# and DIST to build the operator for a release into its own directory.
 include ../version.mk
 DIST ?= dist
 
-# A recipe that fails, or a build that is killed during one, leaves its
-# target partly written and newer than its inputs. make deletes that
-# target, so the next build makes it again and does not take it as
-# current.
+# A recipe that fails or is killed can leave a partly written target
+# that is newer than its inputs. make deletes it, so the next build
+# makes it again.
 .DELETE_ON_ERROR:
 
 all: $(DIST)/liken-machine-operator-image.tar
@@ -34,15 +24,14 @@ $(DIST)/liken-machine-operator: ../go.mod ../go.sum $(wildcard *.go) \
 		-ldflags "-X github.com/liken-sh/liken/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-machine-operator .
 
-# The operator downloads releases over HTTPS, and its image has no
-# base layer to supply root certificates. So the machine's own
-# vendored trust bundle travels in the image (oci.sh explains where
-# it lands).
+# The operator downloads releases over HTTPS, and its image has no base
+# layer with root certificates, so the image includes the CA bundle
+# that the `trust` component pins.
 CA_BUNDLE := ../../trust/dist/$(strip $(file <../../trust/VERSION))/cacert.pem
 
-# The PCI naming database, for the device inventory's
-# human-readable names (dra.go). oci.sh explains why it travels in
-# this image, rather than as a mount of the OS's own copy.
+# The PCI ID database gives readable names to the devices in the
+# ResourceSlice (dra.go). oci.sh explains why the image has its own
+# copy.
 PCI_IDS := ../hwdata/dist/$(strip $(file <../hwdata/VERSION))/pci.ids
 
 $(DIST)/liken-machine-operator-image.tar: $(DIST)/liken-machine-operator ../image/oci.sh $(CA_BUNDLE) $(PCI_IDS)

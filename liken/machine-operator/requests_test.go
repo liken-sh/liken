@@ -26,8 +26,8 @@ var (
 )
 
 // The operator's own request covers every staged document and a
-// demotion, takes a reboot when any of them needs one, and leaves a
-// person's reboot to the person's own request.
+// demotion. Its kind is a reboot when any of them needs one, and a
+// person's reboot is left to the person's own request.
 func TestTheOwnRequestCoversWhatWaits(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -62,8 +62,8 @@ func TestNothingWaitingMeansNoOwnRequest(t *testing.T) {
 	}
 }
 
-// The request's hash names what it applies, so a change to any staged
-// document changes it.
+// The request's hash depends on what it covers, so a change to any
+// staged document changes it.
 func TestTheOwnRequestsHashFollowsTheStagedDocuments(t *testing.T) {
 	before := ownRequest("node-4", []machine.PendingDisruption{stagedSpec, stagedCluster}, noDemotion)
 	reordered := ownRequest("node-4", []machine.PendingDisruption{stagedCluster, stagedSpec}, noDemotion)
@@ -106,8 +106,8 @@ func requestingNode4() *machine.Machine {
 }
 
 // The operator creates its request, updates it when more is staged,
-// keeps a person's approval through the update, and deletes it when
-// nothing waits.
+// keeps an approval through the update, and deletes it when nothing
+// waits.
 func TestTheOwnRequestFollowsWhatWaits(t *testing.T) {
 	c := testClient(t, requestsAPI())
 	r := &reader{client: c}
@@ -116,7 +116,7 @@ func TestTheOwnRequestFollowsWhatWaits(t *testing.T) {
 	syncOwnRequest(r, m, nil, ownRequest("node-4", []machine.PendingDisruption{stagedCluster}, noDemotion))
 	created := storedRequests(t, c)
 	if len(created) != 1 || created[0].Metadata.Name != "node-4.machine-operator" || created[0].Spec.Kind != disruption.KindRestart {
-		t.Fatalf("after the create: %+v", created)
+		t.Fatalf("after the create, the requests are %+v, want one", created)
 	}
 	if owner := created[0].Metadata.OwnerReferences; len(owner) != 1 || owner[0].Kind != "Machine" || owner[0].UID != "uid-node-4" {
 		t.Errorf("the request's owners are %+v, want the Machine", owner)
@@ -128,12 +128,12 @@ func TestTheOwnRequestFollowsWhatWaits(t *testing.T) {
 		ownRequest("node-4", []machine.PendingDisruption{stagedSpec, stagedCluster}, noDemotion))
 	updated := storedRequests(t, c)
 	if len(updated) != 1 || updated[0].Spec.Kind != disruption.KindReboot || updated[0].Spec.ApprovedHash != "aaaaaaaaaaaa" {
-		t.Fatalf("after the update: %+v", updated)
+		t.Fatalf("after the update, the requests are %+v, want one Reboot that keeps approvedHash aaaaaaaaaaaa", updated)
 	}
 
 	syncOwnRequest(r, m, updated, nil)
 	if left := storedRequests(t, c); len(left) != 0 {
-		t.Errorf("after nothing waits: %+v", left)
+		t.Errorf("after nothing waits, the requests are %+v, want none", left)
 	}
 }
 
@@ -152,9 +152,9 @@ func personRequest(hash, approvedHash string) disruption.Disruption {
 		Machine: "node-4", Requester: "kubernetes-admin", Kind: disruption.KindReboot, Hash: hash, ApprovedHash: approvedHash})
 }
 
-// A person's request for the running boot is a reboot request, and its
-// approvedHash approves it on a Manual machine.
-func TestAPersonsRequestAsksForAReboot(t *testing.T) {
+// A person's request for the running boot asks for a reboot, and on a
+// Manual machine its approvedHash approves the reboot.
+func TestAPersonsRequestRebootsTheMachine(t *testing.T) {
 	boot := machine.BootID(machine.BootStatus{Time: &requestBootTime})
 	cases := []struct {
 		name    string
@@ -180,9 +180,9 @@ func TestAPersonsRequestAsksForAReboot(t *testing.T) {
 	}
 }
 
-// A person's request for an earlier boot is marked Complete, and a
-// request that names no boot gets the running one and the Machine as
-// its owner.
+// A person's request for an earlier boot is marked Complete. A request
+// that names no boot gets the running boot and the Machine as its
+// owner.
 func TestThePeoplesRequestsFollowTheBoot(t *testing.T) {
 	boot := machine.BootID(machine.BootStatus{Time: &requestBootTime})
 	spent := personRequest("51f0e2d8aa90aa", "")
@@ -199,17 +199,18 @@ func TestThePeoplesRequestsFollowTheBoot(t *testing.T) {
 		return held[slices.IndexFunc(held, func(d disruption.Disruption) bool { return d.Metadata.Name == name })]
 	}
 	if d := byName(spent.Metadata.Name); !d.Complete() {
-		t.Errorf("the request for an earlier boot is not complete: %+v", d.Status)
+		t.Errorf("the status of the request for an earlier boot is %+v, want Complete", d.Status)
 	}
 	if d := byName("node-4.reboot-now"); d.Spec.Hash != boot || d.Complete() || len(d.Metadata.OwnerReferences) != 1 {
-		t.Errorf("the request that named no boot = %+v, owners %+v; want the running boot, the Machine, and not complete",
+		t.Errorf("the request that named no boot = %+v, owners %+v; want the running boot, the Machine as owner, and not Complete",
 			d.Spec, d.Metadata.OwnerReferences)
 	}
 }
 
-// The own request's approvedHash approves every staged change it
-// covers. It counts only while the request covers what the last pass
-// found waiting, and the approve annotation approves nothing.
+// The own request's approvedHash approves every staged document that
+// it covers. It counts only while the request covers what the last
+// pass found waiting, and the liken.sh/approve-disruption annotation
+// approves nothing.
 func TestTheOwnRequestsApprovalApprovesWhatItCovers(t *testing.T) {
 	waiting := []machine.PendingDisruption{stagedCluster, stagedSpec}
 	covering := ownRequest("node-4", waiting, noDemotion)

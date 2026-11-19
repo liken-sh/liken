@@ -1,9 +1,5 @@
 package main
 
-// These tests read the Events the machine operator posts about its
-// Machine from eventstest's fake of the events collection, in a
-// synctest bubble, so the recorder's goroutine runs on the fake clock.
-
 import (
 	"io"
 	"net/http"
@@ -21,8 +17,8 @@ import (
 	"github.com/liken-sh/liken/liken/metrics"
 )
 
-// recordingClient serves the events fake in front of handler, and
-// answers a client and a recorder that writes through it.
+// recordingClient returns a client and a recorder whose requests go
+// through an eventstest fake in front of handler.
 func recordingClient(t *testing.T, handler http.Handler) (*apiclient.Client, *events.Recorder, *eventstest.Events) {
 	t.Helper()
 	recorded := &eventstest.Events{}
@@ -31,7 +27,7 @@ func recordingClient(t *testing.T, handler http.Handler) (*apiclient.Client, *ev
 	return client, recorder, recorded
 }
 
-// posted answers each Event about the Machine node-1 as
+// posted returns the Events about the Machine node-1 as
 // "Type Reason: message", in the order the fake received them.
 func posted(recorded *eventstest.Events) []string {
 	synctest.Wait()
@@ -49,8 +45,6 @@ var crashTime = testNow.Add(-time.Hour)
 
 var roamTime = testNow.Add(-time.Minute)
 
-// onRadio is a status whose one interface, wlan0, is a radio with the
-// given standing.
 func onRadio(w *machine.WirelessStatus) machine.MachineStatus {
 	return machine.MachineStatus{Network: machine.NetworkStatus{
 		Interfaces: []machine.InterfaceStatus{{Name: "wlan0", Wireless: w}},
@@ -58,7 +52,7 @@ func onRadio(w *machine.WirelessStatus) machine.MachineStatus {
 }
 
 func TestAStatusWritePostsTheEventOfEachChange(t *testing.T) {
-	converged := api.Condition{Type: "SpecConverged", Status: api.ConditionTrue, Reason: "Converged", Message: "this boot actuated the current spec"}
+	converged := api.Condition{Type: "SpecConverged", Status: api.ConditionTrue, Reason: "Converged", Message: "This boot applied the current spec"}
 	ready := api.Condition{Type: "Ready", Status: api.ConditionTrue, Reason: "Reconciled"}
 	cases := []struct {
 		name    string
@@ -103,7 +97,7 @@ func TestAStatusWritePostsTheEventOfEachChange(t *testing.T) {
 			want:    []string{"Normal Reconciled: Ready is True"},
 		},
 		{
-			name:   "a new message alone, and the conductor's grant",
+			name:   "a new message alone, and RebootApproved",
 			stored: machine.MachineStatus{Conditions: []api.Condition{converged}},
 			written: machine.MachineStatus{Conditions: []api.Condition{
 				{Type: "SpecConverged", Status: api.ConditionTrue, Reason: "Converged", Message: "another message"},
@@ -117,7 +111,7 @@ func TestAStatusWritePostsTheEventOfEachChange(t *testing.T) {
 			written: machine.MachineStatus{LastCrash: &machine.CrashStatus{
 				Time: &crashTime, Reason: "Panic", Message: "Kernel panic - not syncing: VFS",
 			}},
-			want: []string{"Warning KernelCrashed: the kernel recorded a Panic at 2026-07-06T11:00:00Z: Kernel panic - not syncing: VFS; status.lastCrash names the records"},
+			want: []string{"Warning KernelCrashed: The kernel recorded a Panic at 2026-07-06T11:00:00Z: Kernel panic - not syncing: VFS. status.lastCrash has the records"},
 		},
 		{
 			name:    "a crash the status already names",
@@ -173,15 +167,15 @@ func TestAStatusWritePostsTheEventOfEachChange(t *testing.T) {
 				postStatusEvents(machineEvents{recorder, machineReference(m)}, &c.stored, &c.written)
 
 				if got := posted(recorded); !slices.Equal(got, c.want) {
-					t.Errorf("got %q, want %q", got, c.want)
+					t.Errorf("the posted Events are %q, want %q", got, c.want)
 				}
 			})
 		})
 	}
 }
 
-// refusingOnce answers the first request of a method and path with a
-// 500, and hands every other request to next.
+// refusingOnce fails the first request with method and path with a
+// 500, and passes every other request to next.
 func refusingOnce(next http.Handler, method, path string) http.Handler {
 	refused := false
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -194,10 +188,9 @@ func refusingOnce(next http.Handler, method, path string) http.Handler {
 	})
 }
 
-// A pass posts its transitions only after its status write lands. A
-// refused write posts nothing, and the next pass finds the same
-// transitions and posts them. A settled pass posts nothing more.
-func TestAPassPostsItsTransitionsAfterTheWriteLands(t *testing.T) {
+// A failed status write posts nothing, so the next pass finds the
+// same transitions and posts them.
+func TestAPassPostsItsTransitionsAfterTheWriteSucceeds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
 		fake := newPassAPI()
@@ -209,41 +202,39 @@ func TestAPassPostsItsTransitionsAfterTheWriteLands(t *testing.T) {
 		pass := func() error {
 			current, err := r.machine("node-1")
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the Machine: %v", err)
 			}
 			return reconcile(r, current, "lab", &fetcher{}, mm, nil)
 		}
 
 		if err := pass(); err == nil {
-			t.Fatal("the first status write should be refused")
+			t.Fatal("the first pass returned no error, want the error of the refused status write")
 		}
 		if got := posted(recorded); len(got) != 0 {
-			t.Fatalf("a refused write posted %q", got)
+			t.Fatalf("the refused write posted %q, want no Events", got)
 		}
 
 		if err := pass(); err != nil {
-			t.Fatal(err)
+			t.Fatalf("running the pass: %v", err)
 		}
 		written, err := kubernetes.GetMachine(client, "node-1")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the Machine: %v", err)
 		}
 		first := posted(recorded)
 		if len(first) != len(written.Status.Conditions) {
-			t.Errorf("the landed write posted %d Events for %d conditions: %q", len(first), len(written.Status.Conditions), first)
+			t.Errorf("the successful write posted %d Events for %d conditions: %q, want one for each", len(first), len(written.Status.Conditions), first)
 		}
 
 		if err := pass(); err != nil {
-			t.Fatal(err)
+			t.Fatalf("running the pass: %v", err)
 		}
 		if got := posted(recorded); len(got) != len(first) {
-			t.Errorf("a settled pass posted more: %q", got[len(first):])
+			t.Errorf("a settled pass posted %q, want no more Events", got[len(first):])
 		}
 	})
 }
 
-// The drain's cordon is one Event when the operator cordons the Node,
-// and none when the Node is already cordoned or the cordon fails.
 func TestTheDrainPostsTheCordonItApplies(t *testing.T) {
 	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
 	cases := []struct {
@@ -253,7 +244,7 @@ func TestTheDrainPostsTheCordonItApplies(t *testing.T) {
 		want []string
 	}{
 		{"an uncordoned node", &drainAPI{pods: []kubernetes.Pod{pod("web", "default")}}, drainNode(false, false, ""),
-			[]string{"Normal Cordoned: cordoned the Node node-4 ahead of the reboot; 1 pods to move"}},
+			[]string{"Normal Cordoned: Cordoned the Node node-4 before the reboot. Pods to evict: 1"}},
 		{"a node the drain cordoned already", &drainAPI{}, drainNode(true, true, since), nil},
 		{"a cordon that fails", &drainAPI{patchFail: true}, drainNode(false, false, ""), nil},
 	}
@@ -266,15 +257,13 @@ func TestTheDrainPostsTheCordonItApplies(t *testing.T) {
 				gateThroughDrain(&reader{client: client}, c.node, rebootingConvergence(), drainNow, machineEvents{recorder, machineReference(m)}, nil)
 
 				if got := posted(recorded); !slices.Equal(got, c.want) {
-					t.Errorf("got %q, want %q", got, c.want)
+					t.Errorf("the posted Events are %q, want %q", got, c.want)
 				}
 			})
 		})
 	}
 }
 
-// A pass that finds the Node under the drain's own cordon, with no
-// reboot ahead, uncordons it and posts one Event.
 func TestAPassPostsTheUncordonAfterTheReboot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
@@ -286,30 +275,28 @@ func TestAPassPostsTheUncordonAfterTheReboot(t *testing.T) {
 		r := &reader{client: client, recorder: recorder}
 		current, err := r.machine("node-1")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the Machine: %v", err)
 		}
 		mm := newMachineMetrics(metrics.NewOperator(component, machine.Version, []string{machineKind}, watchKinds), &fetcher{})
 
 		if err := reconcile(r, current, "lab", &fetcher{}, mm, nil); err != nil {
-			t.Fatal(err)
+			t.Fatalf("reconciling the Machine: %v", err)
 		}
 
-		want := "Normal Uncordoned: uncordoned the Node node-1; its reboot is complete"
+		want := "Normal Uncordoned: Uncordoned the Node node-1 after its reboot"
 		if got := posted(recorded); !slices.Contains(got, want) {
-			t.Errorf("got %q, want it to hold %q", got, want)
+			t.Errorf("the posted Events are %q, want them to include %q", got, want)
 		}
 	})
 }
 
-// The Machine that the operator creates from the boot manifest posts
-// MachineJoined, and a Machine that exists already posts nothing.
 func TestCreatingTheMachinePostsMachineJoined(t *testing.T) {
 	cases := []struct {
 		name   string
 		exists bool
 		want   []string
 	}{
-		{"an absent Machine", false, []string{"Normal MachineJoined: created the Machine from the boot manifest, because the cluster held none"}},
+		{"an absent Machine", false, []string{"Normal MachineJoined: Created the Machine from the boot manifest, because the cluster had none"}},
 		{"a Machine that exists", true, nil},
 	}
 	for _, c := range cases {
@@ -318,11 +305,11 @@ func TestCreatingTheMachinePostsMachineJoined(t *testing.T) {
 				client, recorder, recorded := recordingClient(t, (&machineAPI{exists: c.exists}).handler())
 
 				if _, err := ensureMachine(client, seedMachine(), recorder); err != nil {
-					t.Fatal(err)
+					t.Fatalf("ensuring the Machine: %v", err)
 				}
 
 				if got := posted(recorded); !slices.Equal(got, c.want) {
-					t.Errorf("got %q, want %q", got, c.want)
+					t.Errorf("the posted Events are %q, want %q", got, c.want)
 				}
 			})
 		})

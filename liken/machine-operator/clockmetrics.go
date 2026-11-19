@@ -1,16 +1,5 @@
 package main
 
-// The clock's metrics, read at scrape time.
-//
-// Every other metric in metrics.go reads the status that a pass is
-// about to write. The clock's offset cannot, because status holds only
-// a bound on it (machine/clock.go): the exact offset moves on every
-// poll, and a status write for each poll would cost a raft round on
-// every leader. So init writes each poll's reading to a file outside
-// the facts tree, and this collector reads that file only when
-// Prometheus scrapes. A machine that nobody scrapes never reads it, and
-// no pass ever wakes for it.
-
 import (
 	"time"
 
@@ -29,8 +18,13 @@ var (
 		nil, nil)
 )
 
-// clockCollector reads the reading under dir at each scrape. now is
-// the clock it judges the reading's age by.
+// clockCollector publishes the clock's offset on each scrape. The
+// other metrics in metrics.go come from the status that a pass writes,
+// but status has only a bound on the offset (machine/clock.go), and a
+// status write after each poll would be a datastore write on every
+// leader. So init writes each poll's reading to a file in dir, and
+// Collect reads that file only during a scrape. now gives the current
+// time, for the age of the reading.
 type clockCollector struct {
 	dir string
 	now func() time.Time
@@ -41,13 +35,12 @@ func (c clockCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- clockLastSyncDesc
 }
 
-// Collect publishes nothing before the first answered poll, and
-// nothing for a reading it cannot parse, because a zero would read as
-// a perfect clock. It drops the offset of a reading older than
-// machine.ClockStaleAfter, the age at which init reports the clock
-// Unsynchronized, so a graph never shows an old offset as current.
-// The last-sync time stays, so the graph shows when the source went
-// quiet.
+// Collect publishes nothing when there is no reading or it cannot read
+// one, because a zero offset would look like a perfect clock. When the
+// reading is older than machine.ClockStaleAfter, the age at which init
+// reports the clock Unsynchronized, Collect omits the offset but still
+// publishes the last sync time, so a graph shows when the source
+// stopped answering.
 func (c clockCollector) Collect(ch chan<- prometheus.Metric) {
 	reading, err := machine.ReadClockReading(c.dir)
 	if err != nil || reading.At.IsZero() {

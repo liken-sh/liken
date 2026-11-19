@@ -1,7 +1,8 @@
 package main
 
-// The handover: a request whose requester set BootNext for the turn's
-// reboot, which the intent names so that init leaves BootNext alone.
+// A handover is a Disruption whose requester has set the UEFI
+// BootNext variable for the turn's reboot. The reboot intent names that
+// Disruption so that init leaves BootNext as the requester set it.
 
 import (
 	"testing"
@@ -11,8 +12,8 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// capsuleRequest is firmware-operator's request after it staged a
-// capsule and removed spec.hold: it set BootNext and asks to keep it.
+// capsuleRequest is a Disruption from firmware-operator after it
+// staged a capsule, set BootNext, and cleared spec.hold.
 func capsuleRequest(hash string) disruption.Disruption {
 	d := firmwareRequest(hash, false)
 	d.Metadata.Name = "node-4.firmware-bios"
@@ -20,7 +21,7 @@ func capsuleRequest(hash string) disruption.Disruption {
 	return d
 }
 
-func TestTheHandoverRequestIsReleasedApprovedAndNotDone(t *testing.T) {
+func TestHandoverRequestIsAReleasedApprovedRequestForThisBoot(t *testing.T) {
 	boot := machine.BootID(machine.BootStatus{Time: &requestBootTime})
 	holding := capsuleRequest(boot)
 	holding.Spec.Hold = true
@@ -47,9 +48,7 @@ func TestTheHandoverRequestIsReleasedApprovedAndNotDone(t *testing.T) {
 	}
 }
 
-// The turn's reboot carries the handover to the intent, whichever
-// document asks for the reboot, once the drain is clear.
-func TestTheGrantedRebootCarriesTheHandover(t *testing.T) {
+func TestGrantedRebootKeepsBootNextOfTheHandover(t *testing.T) {
 	fake := &drainAPI{}
 	client := testClient(t, fake.handler())
 	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
@@ -62,7 +61,7 @@ func TestTheGrantedRebootCarriesTheHandover(t *testing.T) {
 	}
 }
 
-func TestNoHandoverWithoutTheTurn(t *testing.T) {
+func TestNoBootNextIsKeptBeforeTheTurnIsGranted(t *testing.T) {
 	d := &disruptions{handover: "node-4.firmware-bios"}
 
 	conv := d.gate(nil, nil, nil, turnAwaiting, drainNow, rebootingConvergence())
@@ -72,7 +71,7 @@ func TestNoHandoverWithoutTheTurn(t *testing.T) {
 	}
 }
 
-func TestEachIntentCarriesTheHandover(t *testing.T) {
+func TestEachRebootIntentNamesTheHandover(t *testing.T) {
 	conv := convergence{requestReboot: true, hash: "abc123", keepBootNext: "node-4.firmware-bios"}
 	cases := []struct {
 		name  string

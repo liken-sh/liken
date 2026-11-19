@@ -1,36 +1,24 @@
 package main
 
-// The DRA driver's kubelet half: the plugin the kubelet calls before
-// it starts a pod that holds a claim.
+// The DRA kubelet plugin: the kubelet calls it to prepare a claim's
+// devices before it starts a pod that uses the claim.
 //
-// The wire arrangement is the opposite of what the word "plugin"
-// suggests. The driver runs two gRPC servers, and the kubelet is
-// the only client of both. The first service is registration: the
-// kubelet watches a well-known directory for sockets, dials each
-// one, and calls GetInfo to read what is there. The second service
-// is the DRA plugin API itself, on a socket of the driver's own,
-// whose path GetInfo announces. Both sockets live under the
-// kubelet's own state directory. Unix sockets are the entire
-// transport: nothing here touches the network, and file permissions
-// on the kubelet's directories provide the authentication.
+// The plugin runs two gRPC servers on unix sockets. The kubelet watches
+// its plugin registry directory, dials the registration socket there,
+// and calls GetInfo, which returns the path of the DRA socket in the
+// driver's own directory. Both directories are under the kubelet's
+// state directory, so their file permissions are the only
+// authentication.
 //
-// The prepare protocol deliberately tells the driver almost
-// nothing: a claim's namespace, name, and UID. What was allocated
-// lives on the claim's status in the API server, so the driver reads
-// that back (kubernetes/resourceclaims.go), walks its own inventory
-// again, and hands the claim the published device's nodes. This
-// follows the same rule liken applies everywhere: a call only
-// signals that something happened, and the driver acts on the
-// shared, durable record, not on data carried in the call itself.
+// A prepare request has only the claim's namespace, name, and UID. So
+// the plugin reads the claim's allocation from the API server, walks
+// sysfs, and returns the device nodes of each allocated device.
 //
-// Failures are per-claim strings inside the response, not gRPC
-// errors. The kubelet holds the affected pod in ContainerCreating
-// and retries. This is the right behavior for every temporary
-// cause, such as a device still being enumerated or an API hiccup,
-// and it is also the honest behavior for a permanent one, such as
-// hardware that has been removed. The pod waits, visibly, for
-// hardware the cluster said it could have, and a describe of the
-// pod shows why.
+// A failure is an error string in that claim's response, not a gRPC
+// error. The kubelet keeps the pod in ContainerCreating and retries,
+// which suits a device that is still enumerating or an API server
+// error. For hardware that is gone, the retries never succeed, but
+// `kubectl describe pod` shows the error.
 
 import (
 	"context"
@@ -52,30 +40,26 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// The kubelet's plugin directories. The registry is where the
-// kubelet discovers plugins. The plugin's own directory holds the
-// socket that does the real work. These are variables so the tests
-// can substitute them.
+// Variables so that tests can use a temporary directory.
 var (
 	draRegistryDir = "/var/lib/kubelet/plugins_registry"
 	draPluginDir   = "/var/lib/kubelet/plugins/liken.sh"
 )
 
-// draPlugin answers the kubelet's DRA calls. The API client is its
-// only state. It derives everything else again on each call, from
-// the claim and from sysfs.
+// draPlugin serves the kubelet's DRA calls. It reads the claim and
+// sysfs on each call and caches nothing.
 //
-// released wakes the reconcile pass after an unprepare. The slice
-// taints the device of a claim whose unit was unplugged until the
-// claim ends, so the pass must publish again when it does
-// (unplugged.go). A nil channel wakes nothing.
+// Each unprepare sends on released, if it is not nil, to wake the
+// reconcile loop. The ResourceSlice keeps the taint on an unplugged
+// device until its claim is unprepared, so the loop must then publish
+// the slice again without it (unplugged.go).
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
 	client   *apiclient.Client
 	released chan<- struct{}
 }
 
-// draRegistrar answers the kubelet's plugin-watcher handshake.
+// draRegistrar serves the kubelet's plugin registration handshake.
 type draRegistrar struct {
 	regv1.UnimplementedRegistrationServer
 	endpoint string
@@ -86,15 +70,11 @@ func (r *draRegistrar) GetInfo(ctx context.Context, req *regv1.InfoRequest) (*re
 		Type:     regv1.DRAPlugin,
 		Name:     kubernetes.DriverName,
 		Endpoint: r.endpoint,
-		// These strings name gRPC services, not semantic versions. The
-		// kubelet picks the newest version that it also supports.
-		// liken serves exactly the v1 API. The Kubernetes version
-		// liken ships is never older than its own OS components, so
-		// there is no version gap to bridge with a beta shim. The list
-		// names no health service, so the kubelet opens no
-		// device-health stream, because liken makes no health claims
-		// about devices yet. A driver that reports health serves
-		// dra-health/v1 and adds its service name here.
+		// gRPC service names, of which the kubelet uses the newest that
+		// it supports. The Kubernetes that liken ships has the v1 API,
+		// so the plugin serves only that. The kubelet opens a
+		// device-health stream only when this list has dra-health/v1,
+		// and the plugin does not report device health.
 		SupportedVersions: []string{drav1.DRAPluginService},
 	}, nil
 }
@@ -106,13 +86,11 @@ func (r *draRegistrar) NotifyRegistrationStatus(ctx context.Context, status *reg
 	return &regv1.RegistrationStatusResponse{}, nil
 }
 
-// serveDRAPlugin starts both servers and blocks until the context
-// ends or a server fails. The order matters: the plugin socket must
-// already be listening before the registration socket exists,
-// because the kubelet dials the announced endpoint as soon as it
-// sees the registration. The function removes stale sockets from a
-// previous operator first. A bind to an orphaned socket file fails
-// even when nothing is listening on it.
+// serveDRAPlugin serves both sockets until ctx ends or a server
+// fails. It listens on the plugin socket before it creates the
+// registration socket, because the kubelet dials the plugin as soon as
+// the registration socket appears. It removes each socket file first,
+// because bind fails on a file left by a previous process.
 func serveDRAPlugin(ctx context.Context, client *apiclient.Client, released chan<- struct{}) error {
 	if err := os.MkdirAll(draPluginDir, 0o755); err != nil {
 		return err
@@ -121,7 +99,7 @@ func serveDRAPlugin(ctx context.Context, client *apiclient.Client, released chan
 	_ = os.Remove(pluginSocket)
 	pluginListener, err := net.Listen("unix", pluginSocket)
 	if err != nil {
-		return fmt.Errorf("the plugin socket: %w", err)
+		return fmt.Errorf("listening on the plugin socket: %w", err)
 	}
 	pluginServer := grpc.NewServer()
 	drav1.RegisterDRAPluginServer(pluginServer, &draPlugin{client: client, released: released})
@@ -130,7 +108,7 @@ func serveDRAPlugin(ctx context.Context, client *apiclient.Client, released chan
 	_ = os.Remove(registrationSocket)
 	registrationListener, err := net.Listen("unix", registrationSocket)
 	if err != nil {
-		return fmt.Errorf("the registration socket: %w", err)
+		return fmt.Errorf("listening on the registration socket: %w", err)
 	}
 	registrationServer := grpc.NewServer()
 	regv1.RegisterRegistrationServer(registrationServer, &draRegistrar{endpoint: pluginSocket})
@@ -148,11 +126,9 @@ func serveDRAPlugin(ctx context.Context, client *apiclient.Client, released chan
 	}
 }
 
-// NodePrepareResources prepares every claim in the request. The
-// response must carry one entry for each claim, because the kubelet
-// treats a missing entry as a failure to retry. Each entry stands
-// on its own, so trouble with one claim never blocks another
-// claim's pod.
+// NodePrepareResources returns an entry for each claim, because the
+// kubelet treats a missing entry as a failure. A failure of one claim
+// does not fail the others.
 func (p *draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePrepareResourcesRequest) (*drav1.NodePrepareResourcesResponse, error) {
 	resp := &drav1.NodePrepareResourcesResponse{Claims: map[string]*drav1.NodePrepareResourceResponse{}}
 	for _, claim := range req.Claims {
@@ -161,18 +137,16 @@ func (p *draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePre
 	return resp, nil
 }
 
-// resolveAllocated maps an allocated device name to the published set
-// that the name denotes. A bare name is the primary. Any other name
-// must equal a bare name plus a published suffix, which the policy
-// recomputes here from a fresh walk, so the answer is always what
-// this claim would receive now. The bare names are tried first,
-// exactly: one device's bare name can begin with another's, so a
-// prefix alone identifies nothing.
+// resolveAllocated returns the entry that publishFor gives now for an
+// allocated device name, so prepare delivers what the ResourceSlice
+// would publish at this moment. A device's own name is its primary
+// entry, and any other name is a device's name plus a companion's
+// suffix. An exact name match comes first, because one device's name
+// can begin with another's. A virtualization device has no hardware,
+// so its name resolves through publishingvirtualization.go.
 //
-// A device that the protection withholds answers errWithheld, and a
-// name that no present device publishes answers errNotPublished. A
-// virtualization device's name resolves from its own table
-// (publishingvirtualization.go), because no hardware is behind it.
+// It returns errWithheld for a device that delivers a protected disk,
+// and errNotPublished for a name that no present device publishes.
 func resolveAllocated(name string, sysRoot string, byName map[string]hardware.Device, serio []machine.SerioAttachment, platform protection) (publishedDevice, error) {
 	if published, ok, err := resolveVirtualization(name, sysRoot, sysctlRoot); ok {
 		return published, err
@@ -207,9 +181,7 @@ func resolveAllocated(name string, sysRoot string, byName map[string]hardware.De
 	return publishedDevice{}, errNotPublished
 }
 
-// errNotPublished is an allocated device name that no present device
-// publishes.
-var errNotPublished = errors.New("it is not in this machine's inventory now")
+var errNotPublished = errors.New("no device in this machine's inventory publishes that name")
 
 func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceResponse {
 	fail := func(format string, args ...any) *drav1.NodePrepareResourceResponse {
@@ -223,19 +195,16 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		return fail("reading the claim: %v", err)
 	}
 	if allocated.Metadata.UID != claim.Uid {
-		// The named claim was deleted and recreated after the
-		// kubelet asked. Whatever this new claim holds, it is not
-		// the grant this pod was scheduled against.
+		// The claim was deleted and created again with the same name,
+		// so its allocation is not the one this pod was scheduled with.
 		return fail("the claim's UID changed (%s became %s)", claim.Uid, allocated.Metadata.UID)
 	}
 	if allocated.Status.Allocation == nil {
 		return fail("the claim has no allocation yet")
 	}
 
-	// One walk maps allocated device names back to hardware. It uses
-	// the same walk and the same naming that published the
-	// inventory, so the two can never disagree about which device a
-	// name identifies.
+	// The same walk and naming that publish the ResourceSlice, so an
+	// allocated name refers to the device that the slice published.
 	byName := map[string]hardware.Device{}
 	for _, d := range hardware.DiscoverInventory(draSysfsRoot, draNaming()) {
 		byName[deviceName(d)] = d
@@ -245,13 +214,11 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 	var devices []*drav1.Device
 	for _, result := range allocated.Status.Allocation.Devices.Results {
 		if result.Driver != kubernetes.DriverName {
-			// This is another driver's allocation in the same claim.
-			// That driver's own plugin prepares it.
 			continue
 		}
 		published, err := resolveAllocated(result.Device, draSysfsRoot, byName, declaredSerio(), currentProtection())
 		if err != nil {
-			return fail("allocated device %s: %v", result.Device, err)
+			return fail("resolving the allocated device %s: %v", result.Device, err)
 		}
 		nodes := deviceNodes(published.Nodes)
 		name := claim.Uid + "-" + result.Device
@@ -276,15 +243,12 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 	return &drav1.NodePrepareResourceResponse{Devices: devices}
 }
 
-// NodeUnprepareResources gives each claim's hardware back to the
-// machine and removes the claim's CDI spec. As with prepare, every
-// claim gets an answer, and failures stay specific to each claim.
-//
-// The repair runs before the removal, because the spec file is the
-// only record of what the claim held (rebinding.go explains the
-// repair and why it never fails the call). One sysfs walk serves
-// every claim in the request, and the walk runs only when a claim has
-// a spec file, so an unprepare the kubelet repeats costs nothing.
+// NodeUnprepareResources rebinds the kernel drivers of each claim's
+// devices and removes the claim's CDI spec. As in prepare, each claim
+// gets its own entry. The rebind runs first, because the spec file is
+// the only record of which devices the claim used (rebinding.go). The
+// sysfs walk runs at most once for the request, and only when a claim
+// still has a spec file, so a repeated unprepare does not walk sysfs.
 func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeUnprepareResourcesRequest) (*drav1.NodeUnprepareResourcesResponse, error) {
 	devices := sync.OnceValue(func() map[string]hardware.Device {
 		byName := map[string]hardware.Device{}

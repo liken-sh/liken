@@ -1,33 +1,28 @@
 package main
 
-// USB devices that a program in userspace drives.
+// Some USB devices have no kernel driver, because the vendor's driver
+// is a program that opens the device through libusb. ZWO astronomy
+// cameras, smart card readers that pcscd serves, and many
+// software-defined radios work this way. The kernel enumerates such a
+// device, creates its interfaces, binds no driver to any of them, and
+// creates the usbfs node /dev/bus/usb/<bus>/<device>. The program finds
+// the device in sysfs and opens that node.
 //
-// Some USB devices never get a kernel driver, because the vendor's
-// driver is a program that reaches the device through libusb. ZWO's
-// astronomy cameras, smart card readers that pcscd serves, and many
-// software-defined radios are this kind. The kernel enumerates such
-// a device, creates its interfaces, binds none of them, and gives the
-// device its usbfs node, /dev/bus/usb/<bus>/<device>. The program
-// reads sysfs to find the device and opens that node, and it needs
-// nothing more.
+// The inventory publishes such a device as one exclusive slice device,
+// named by its port path such as usb-1-2, that delivers the usbfs node.
+// The usbfs node gives access to every interface of the device, so one
+// claim must cover the whole device.
 //
-// The inventory publishes such a device whole, as one exclusive slice
-// device that delivers the usbfs node, and names it by the device's
-// own port path, usb-1-2, not by an interface's. The usbfs node opens
-// every interface of the device, so one claim on the device is the
-// only claim that can hand it over.
-//
-// The rule asks that no interface has a driver at all. A device that
-// the kernel drives in part already publishes its driven interfaces,
-// each with the usbfs node beside its own nodes, and a second claim on
-// the whole device would hand the same hardware to a second workload.
-// A USB audio adapter whose HID interface no driver bound is the case
-// the lab's testbed showed: a player holds the audio interface, and a
-// claim on the whole adapter could reset it under the player. The
-// rule also refuses an interface that usbfs holds. A program bound to
-// an interface while it runs, and a device that a program holds this
-// way leaves the slice until the program lets go, so a second claim
-// cannot arrive while the first one is using the device.
+// The inventory publishes the whole device only when no interface has
+// a driver. When the kernel drives some interfaces, the inventory
+// already publishes each of them with the usbfs node beside its own
+// nodes, and a claim on the whole device would give the same hardware
+// to a second workload. For example, a USB audio adapter can have a HID
+// interface with no driver: a player holds the audio interface, and a
+// claim on the whole adapter could reset it during playback. A program
+// that claims an interface through libusb makes the kernel bind the
+// usbfs driver to it, so the same rule removes the device from the
+// slice while a program uses it.
 
 import (
 	"strings"
@@ -35,11 +30,11 @@ import (
 	"github.com/liken-sh/liken/liken/hardware"
 )
 
-// userspaceDevice reports whether d is a USB device whose every
-// interface has no driver, and returns it with the first interface's
-// class, so that a DeviceClass can select a camera or a card reader by
-// what the device says it is. A USB device's own class is most often
-// 00, which means that each interface states its own.
+// userspaceDevice reports whether d is a USB device that has at least
+// one interface and no driver on any interface. It returns d with the
+// class of its first interface, so that a DeviceClass can select a
+// camera or a card reader by class. A USB device's own class is usually
+// 00, which means that each interface declares its own.
 func userspaceDevice(d hardware.Device, discovered []hardware.Device) (hardware.Device, bool) {
 	if d.Bus != "usb" || d.Driver != "usb" || strings.Contains(d.Address, ":") {
 		return d, false

@@ -15,8 +15,9 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// A Machine whose status holds a condition of a newer release, as a
-// rollback leaves it, and the conductor's grant.
+// rolledBackPass writes the status that a rollback leaves, with a
+// condition from a newer release and cluster-operator's grant, runs the
+// passes, and returns the Machine.
 func rolledBackPass(t *testing.T) *machine.Machine {
 	t.Helper()
 	isolatePass(t)
@@ -24,7 +25,7 @@ func rolledBackPass(t *testing.T) *machine.Machine {
 	client, _ := passClients(t, server)
 	m, err := kubernetes.GetMachine(client, "node-1")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading Machine node-1: %v", err)
 	}
 	status := m.Status
 	status.Conditions = []api.Condition{
@@ -32,50 +33,44 @@ func rolledBackPass(t *testing.T) *machine.Machine {
 		{Type: machine.RebootApprovedCondition, Status: api.ConditionTrue, Reason: "DisruptionBudgetAllows"},
 	}
 	if _, err := kubernetes.PublishStatus(client, m, &status); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the status of Machine node-1: %v", err)
 	}
 	_, after := runPasses(t, server, &reader{client: client})
 	return after
 }
 
-// A rollback leaves conditions of a newer release on the Machine. The
-// operator drops each type it does not own, so a stale False of a
-// type this release never writes cannot hold the machine Degraded,
-// and the conductor's grant stays.
 func TestAPassDropsTheConditionsOfANewerRelease(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		after := rolledBackPass(t)
 
 		if c := api.FindCondition(after.Status.Conditions, "FutureAttached"); c != nil {
-			t.Errorf("the newer release's condition stayed: %+v", c)
+			t.Errorf("after the pass, the condition of a newer release is still there: %+v, want it dropped", c)
 		}
 		if c := api.FindCondition(after.Status.Conditions, machine.RebootApprovedCondition); c == nil {
-			t.Error("the conductor's grant was dropped")
+			t.Error("the pass dropped the RebootApproved condition of cluster-operator, want it kept")
 		}
 	})
 }
 
-// Every condition type a pass writes is one the operator owns, so no
-// condition of this release is dropped at the start of a pass.
 func TestEveryConditionAPassWritesIsOwned(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		after := rolledBackPass(t)
 
 		for _, c := range after.Status.Conditions {
 			if !ownsCondition(c.Type) {
-				t.Errorf("the pass wrote %s, which ownedConditionTypes does not name", c.Type)
+				t.Errorf("the pass wrote the condition %s, which ownedConditionTypes does not list", c.Type)
 			}
 		}
 	})
 }
 
-// conditionsDescription reads the description of status.conditions
-// from the Machine CRD, the text the reference page publishes.
+// conditionsDescription returns the description of status.conditions
+// from the Machine CRD. The reference page is generated from it.
 func conditionsDescription(t *testing.T) string {
 	t.Helper()
 	raw, err := os.ReadFile("../machine/manifests/machines-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Machine CRD: %v", err)
 	}
 	var crd struct {
 		Spec struct {
@@ -97,13 +92,13 @@ func conditionsDescription(t *testing.T) string {
 		} `json:"spec"`
 	}
 	if err := yaml.Unmarshal(raw, &crd); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the Machine CRD: %v", err)
 	}
 	return crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Status.Properties.Conditions.Description
 }
 
-// A reader learns what each condition reports from the reference
-// page, so the CRD's description names every condition a pass writes.
+// The reference page is generated from the CRD, so the CRD's
+// description must name every condition that a pass writes.
 func TestTheCRDDescribesEveryCondition(t *testing.T) {
 	described := strings.FieldsFunc(conditionsDescription(t), func(r rune) bool {
 		return !unicode.IsLetter(r)
@@ -111,7 +106,7 @@ func TestTheCRDDescribesEveryCondition(t *testing.T) {
 
 	for conditionType := range ownedConditionTypes {
 		if !slices.Contains(described, conditionType) {
-			t.Errorf("the description of status.conditions does not name %s", conditionType)
+			t.Errorf("the description of status.conditions does not mention %s, want every condition that a pass writes", conditionType)
 		}
 	}
 }

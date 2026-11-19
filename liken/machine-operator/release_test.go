@@ -1,8 +1,8 @@
 package main
 
-// The version-convergence truth table: which ask, if any, a
-// machine derives from the cluster's target, and how the fetcher's
-// answer becomes the VersionConverged condition.
+// Version convergence: which download a machine starts for the
+// cluster's target, and how the fetcher's state becomes the
+// VersionConverged condition.
 
 import (
 	"path/filepath"
@@ -41,33 +41,33 @@ func slotBackedFacts(runningVersion, slot string) *machine.MachineStatus {
 	}
 }
 
-func TestVersionAskForAMachineBehindTheTarget(t *testing.T) {
-	ask, _, ok := versionAsk(clusterWithTarget("0.2.0"), slotBackedFacts("0.1.0", "A"))
+func TestReleaseToFetchForAMachineBehindTheTarget(t *testing.T) {
+	fetch, _, ok := releaseToFetch(clusterWithTarget("0.2.0"), slotBackedFacts("0.1.0", "A"))
 	if !ok {
-		t.Fatal("a machine behind the target should have an ask")
+		t.Fatal("releaseToFetch returned no fetch for a machine behind the target, want one")
 	}
-	if ask.version != "0.2.0" || ask.digest != "sha256:"+strings.Repeat("bb", 32) {
-		t.Errorf("ask names the wrong release: %+v", ask)
+	if fetch.version != "0.2.0" || fetch.digest != "sha256:"+strings.Repeat("bb", 32) {
+		t.Errorf("fetch is %+v, want version 0.2.0 with the digest of the catalog entry", fetch)
 	}
-	if ask.slot != "B" || ask.slotDir != "/var/lib/liken/system/b" {
-		t.Errorf("a machine running slot A downloads to slot B: %+v", ask)
+	if fetch.slot != "B" || fetch.slotDir != "/var/lib/liken/system/b" {
+		t.Errorf("fetch is %+v, want slot B and /var/lib/liken/system/b for a machine running slot A", fetch)
 	}
-	if ask.activeSlotDir != "/var/lib/liken/system/a" {
-		t.Errorf("the running slot lends the download its layer: %+v", ask)
+	if fetch.activeSlotDir != "/var/lib/liken/system/a" {
+		t.Errorf("fetch is %+v, want activeSlotDir /var/lib/liken/system/a", fetch)
 	}
-	if ask.source != "http://10.0.2.2:8017/releases" {
-		t.Errorf("source: %q", ask.source)
-	}
-}
-
-func TestVersionAskAimsAtTheOtherSlot(t *testing.T) {
-	ask, _, ok := versionAsk(clusterWithTarget("0.2.0"), slotBackedFacts("0.1.0", "B"))
-	if !ok || ask.slot != "A" {
-		t.Errorf("a machine running slot B downloads to slot A: %+v", ask)
+	if fetch.source != "http://10.0.2.2:8017/releases" {
+		t.Errorf("source is %q, want the catalog source", fetch.source)
 	}
 }
 
-func TestVersionAskShortCircuits(t *testing.T) {
+func TestReleaseToFetchTargetsTheInactiveSlot(t *testing.T) {
+	fetch, _, ok := releaseToFetch(clusterWithTarget("0.2.0"), slotBackedFacts("0.1.0", "B"))
+	if !ok || fetch.slot != "A" {
+		t.Errorf("fetch is %+v, want slot A for a machine running slot B", fetch)
+	}
+}
+
+func TestReleaseToFetchReturnsAConditionWhenThereIsNothingToFetch(t *testing.T) {
 	noSlots := slotBackedFacts("0.1.0", "A")
 	noSlots.Storage.SystemA.Backing = machine.BackingMemory
 
@@ -87,28 +87,28 @@ func TestVersionAskShortCircuits(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			_, cond, ok := versionAsk(tt.clusterDoc, tt.facts)
+			_, cond, ok := releaseToFetch(tt.clusterDoc, tt.facts)
 			if ok {
-				t.Fatal("no ask expected")
+				t.Fatal("releaseToFetch returned a fetch, want none")
 			}
 			if cond.Type != "VersionConverged" || cond.Status != tt.wantStatus || cond.Reason != tt.wantReason {
-				t.Errorf("got %s/%s (%s)", cond.Status, cond.Reason, cond.Type)
+				t.Errorf("condition is %s/%s/%s, want VersionConverged/%s/%s", cond.Type, cond.Status, cond.Reason, tt.wantStatus, tt.wantReason)
 			}
 		})
 	}
 }
 
-func TestVersionAskWithoutASource(t *testing.T) {
+func TestReleaseToFetchWithoutASource(t *testing.T) {
 	clusterDoc := clusterWithTarget("0.2.0")
 	clusterDoc.Spec.Releases.Source = ""
-	_, cond, ok := versionAsk(clusterDoc, slotBackedFacts("0.1.0", "A"))
+	_, cond, ok := releaseToFetch(clusterDoc, slotBackedFacts("0.1.0", "A"))
 	if ok || cond.Reason != "NoReleaseSource" {
-		t.Errorf("a catalog without a source can't be fetched from: %+v", cond)
+		t.Errorf("fetch ok = %v, condition %+v, want no fetch and reason NoReleaseSource", ok, cond)
 	}
 }
 
 func TestVersionConditionFollowsTheFetch(t *testing.T) {
-	ask := fetchAsk{version: "0.2.0", slot: "B"}
+	fetch := releaseFetch{version: "0.2.0", slot: "B"}
 	cases := []struct {
 		name       string
 		state      fetchState
@@ -124,16 +124,16 @@ func TestVersionConditionFollowsTheFetch(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			cond := versionCondition(ask, fetchSnapshot{ask: ask, state: tt.state, detail: "the story so far", retrying: tt.retrying})
+			cond := versionCondition(fetch, fetchSnapshot{fetch: fetch, state: tt.state, detail: "downloading", retrying: tt.retrying})
 			if cond.Type != "VersionConverged" || cond.Status != tt.wantStatus || cond.Reason != tt.wantReason {
-				t.Errorf("got %s/%s", cond.Status, cond.Reason)
+				t.Errorf("condition is %s/%s/%s, want VersionConverged/%s/%s", cond.Type, cond.Status, cond.Reason, tt.wantStatus, tt.wantReason)
 			}
 		})
 	}
 }
 
-func verifiedSnap(ask fetchAsk) fetchSnapshot {
-	return fetchSnapshot{ask: ask, state: fetchVerified, detail: "verified"}
+func verifiedSnap(fetch releaseFetch) fetchSnapshot {
+	return fetchSnapshot{fetch: fetch, state: fetchVerified, detail: "verified"}
 }
 
 func autoMachine() *machine.Machine {
@@ -141,8 +141,8 @@ func autoMachine() *machine.Machine {
 }
 
 func TestAVerifiedDownloadStagesAndFollowsTheRebootPolicy(t *testing.T) {
-	ask := fetchAsk{version: "0.2.0", digest: "sha256:" + strings.Repeat("bb", 32), slot: "B"}
-	_, hash, err := machine.RenderSystemRelease(ask.version, ask.slot, ask.digest)
+	fetch := releaseFetch{version: "0.2.0", digest: "sha256:" + strings.Repeat("bb", 32), slot: "B"}
+	_, hash, err := machine.RenderSystemRelease(fetch.version, fetch.slot, fetch.digest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,61 +155,61 @@ func TestAVerifiedDownloadStagesAndFollowsTheRebootPolicy(t *testing.T) {
 		wantReboot bool
 	}{
 		{"manual policy waits for a person", &machine.Machine{}, turnAwaiting, "RebootPending", false},
-		{"auto without a turn awaits the conductor", autoMachine(), turnAwaiting, "AwaitingTurn", false},
+		{"auto without a turn awaits cluster-operator", autoMachine(), turnAwaiting, "AwaitingTurn", false},
 		{"a granted turn requests the proving reboot", autoMachine(), turnGranted, "RebootRequested", true},
 		{"standalone machines reboot at will", autoMachine(), turnStandalone, "RebootRequested", true},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			conv := decideSystemStaging(ask, verifiedSnap(ask), tt.m, nil, "", tt.turn)
+			conv := decideSystemStaging(fetch, verifiedSnap(fetch), tt.m, nil, "", tt.turn)
 			if conv.condition.Reason != tt.wantReason || conv.requestReboot != tt.wantReboot {
-				t.Errorf("got %s (reboot=%v)", conv.condition.Reason, conv.requestReboot)
+				t.Errorf("reason %s with requestReboot %v, want %s with %v", conv.condition.Reason, conv.requestReboot, tt.wantReason, tt.wantReboot)
 			}
 			if !conv.stage || conv.hash != hash {
-				t.Errorf("the record should stage with its identity: %+v", conv)
+				t.Errorf("stage = %v, hash = %q, want stage true and hash %q", conv.stage, conv.hash, hash)
 			}
 		})
 	}
 }
 
-func TestStagingIsIdempotentAcrossPasses(t *testing.T) {
-	ask := fetchAsk{version: "0.2.0", digest: "sha256:" + strings.Repeat("bb", 32), slot: "B"}
-	_, hash, _ := machine.RenderSystemRelease(ask.version, ask.slot, ask.digest)
-	conv := decideSystemStaging(ask, verifiedSnap(ask), autoMachine(), nil, hash, turnAwaiting)
+func TestAStagedReleaseIsNotStagedAgain(t *testing.T) {
+	fetch := releaseFetch{version: "0.2.0", digest: "sha256:" + strings.Repeat("bb", 32), slot: "B"}
+	_, hash, _ := machine.RenderSystemRelease(fetch.version, fetch.slot, fetch.digest)
+	conv := decideSystemStaging(fetch, verifiedSnap(fetch), autoMachine(), nil, hash, turnAwaiting)
 	if conv.stage {
-		t.Error("an already-staged record must not stage again")
+		t.Error("stage is true for a record that is already staged, want false")
 	}
 }
 
-func TestAFallenBackTrialHolds(t *testing.T) {
-	ask := fetchAsk{version: "0.2.0", digest: "sha256:" + strings.Repeat("bb", 32), slot: "B"}
-	_, hash, _ := machine.RenderSystemRelease(ask.version, ask.slot, ask.digest)
+func TestAFallenBackTrialIsNotStagedAgain(t *testing.T) {
+	fetch := releaseFetch{version: "0.2.0", digest: "sha256:" + strings.Repeat("bb", 32), slot: "B"}
+	_, hash, _ := machine.RenderSystemRelease(fetch.version, fetch.slot, fetch.digest)
 	rejection := &machine.Rejection{Hash: hash, Reason: "the machine fell back to slot A"}
 
-	conv := decideSystemStaging(ask, verifiedSnap(ask), autoMachine(), rejection, "", turnGranted)
+	conv := decideSystemStaging(fetch, verifiedSnap(fetch), autoMachine(), rejection, "", turnGranted)
 	if conv.condition.Reason != "RejectedLastBoot" || conv.stage || conv.requestReboot {
-		t.Errorf("an identical decision must hold at the rejection: %+v", conv)
+		t.Errorf("convergence is %+v, want RejectedLastBoot with no stage and no reboot", conv)
 	}
 
-	// A republished release carries a different digest. This is a
-	// different decision, and the rejection no longer applies.
-	fixed := ask
+	// A republished release has a different digest, so its record
+	// has a different hash and the rejection does not match it.
+	fixed := fetch
 	fixed.digest = "sha256:" + strings.Repeat("cc", 32)
 	conv = decideSystemStaging(fixed, verifiedSnap(fixed), autoMachine(), rejection, "", turnGranted)
 	if conv.condition.Reason != "RebootRequested" {
-		t.Errorf("a different digest is a different decision: %+v", conv)
+		t.Errorf("reason is %s for a republished digest, want RebootRequested", conv.condition.Reason)
 	}
 }
 
-func TestAConvergedTargetTidiesTheStore(t *testing.T) {
+func TestAConvergedTargetWithdrawsTheStagedRecordAndClearsRejections(t *testing.T) {
 	cond := converged("VersionConverged", "Converged", "running the target")
 	conv := versionConvergence(cond, "somehash", &machine.Rejection{Hash: "old"})
 	if !conv.withdraw || !conv.clearRejection {
-		t.Errorf("a converged machine withdraws its staged record and clears rejections: %+v", conv)
+		t.Errorf("convergence is %+v, want withdraw and clearRejection for a converged machine", conv)
 	}
 	conv = versionConvergence(notConverged("VersionConverged", "Downloading", "busy"), "", nil)
 	if conv.withdraw || conv.clearRejection {
-		t.Error("an unconverged machine tidies nothing")
+		t.Error("an unconverged machine withdraws or clears a rejection, want neither")
 	}
 }
 
@@ -223,12 +223,9 @@ func slotFacts(version, slot string) *machine.MachineStatus {
 	}
 }
 
-// These tests deliberately promote records for version 0.2.0,
-// while this test binary's own machine.Version is "dev". Promotion
-// judges the OS that the facts report, never the operator's own
-// stamp. In a mixed fleet, the pod comes from whatever image the
-// cluster's DaemonSet still pins, and the pod plays no part in the
-// machine's trial.
+// The records here are for version 0.2.0, and this test binary's
+// machine.Version is "dev", so these tests also show that promotion
+// reads the version from the facts.
 func TestPromotesTheReleaseThisBootProves(t *testing.T) {
 	root := t.TempDir()
 	store := machine.SystemReleases(root)
@@ -243,10 +240,10 @@ func TestPromotesTheReleaseThisBootProves(t *testing.T) {
 	settleSystemReleaseLifecycle(root, slotFacts("0.2.0", "B"), nil)
 
 	if staged, _ := store.LoadStaged(); staged != nil {
-		t.Error("promotion consumes the staged record")
+		t.Error("the staged record remains after promotion, want it removed")
 	}
 	if proven, _ := store.LoadProven(); string(proven) != string(raw) {
-		t.Error("the proven record is the exact staged bytes")
+		t.Error("the proven record differs from the staged bytes, want them equal")
 	}
 }
 
@@ -273,13 +270,13 @@ func TestPromotionRequiresTheMatchingSlotAndVersion(t *testing.T) {
 			settleSystemReleaseLifecycle(root, slotFacts(tt.bootVersion, tt.bootSlot), nil)
 
 			if staged, _ := store.LoadStaged(); staged == nil {
-				t.Error("a trial this boot didn't run must not promote")
+				t.Error("the staged record was promoted, want it left staged because this boot did not run the trial")
 			}
 		})
 	}
 }
 
-func TestRecordsTheRunningReleaseAsTheFirstProven(t *testing.T) {
+func TestRecordsTheRunningReleaseAsTheFirstProvenRecord(t *testing.T) {
 	root := t.TempDir()
 	store := machine.SystemReleases(root)
 
@@ -287,22 +284,22 @@ func TestRecordsTheRunningReleaseAsTheFirstProven(t *testing.T) {
 
 	proven, _ := store.LoadProven()
 	if proven == nil {
-		t.Fatal("a slot-booted machine with no record writes its standing down")
+		t.Fatal("no proven record, want one for the running release of a machine booted from a slot")
 	}
 	record, err := machine.ParseSystemRelease(proven)
 	if err != nil || record.Slot != "A" || record.Version != "0.1.0" {
-		t.Errorf("the seed record names the running release: %+v, %v", record, err)
+		t.Errorf("proven record is %+v (parse error %v), want slot A and version 0.1.0", record, err)
 	}
 
-	// And only once. A second pass leaves it alone.
+	// A second pass does not write it again.
 	settleSystemReleaseLifecycle(root, slotFacts("0.1.0", "A"), nil)
 	if again, _ := store.LoadProven(); string(again) != string(proven) {
-		t.Error("the seed record is written once, not re-asserted")
+		t.Error("the second pass rewrote the proven record, want it written once")
 	}
 }
 
-// A promotion that cannot write leaves the record staged and a failure
-// for the loop to retry, so a later pass proves the release.
+// When the promotion cannot write, the record stays staged and the
+// pass reports a failure, so a later pass promotes it.
 func TestAReleasePromotionThatCannotWriteIsRetried(t *testing.T) {
 	root := t.TempDir()
 	store := machine.SystemReleases(root)
@@ -324,8 +321,8 @@ func TestAReleasePromotionThatCannotWriteIsRetried(t *testing.T) {
 	}
 }
 
-// A first proven record that cannot be written leaves a failure for
-// the loop to retry, the same as a promotion.
+// When the first proven record cannot be written, the pass reports a
+// failure and a later pass writes it.
 func TestAFirstProvenReleaseThatCannotBeWrittenIsRetried(t *testing.T) {
 	root := t.TempDir()
 	readOnly(t, root)
@@ -338,8 +335,8 @@ func TestAFirstProvenReleaseThatCannotBeWrittenIsRetried(t *testing.T) {
 	}
 }
 
-// A staged record that does not parse is init's to judge at the next
-// boot, so the operator leaves it in place and reports no failure.
+// Init checks staged records at boot, so the operator leaves a record
+// that does not parse in place and reports no failure.
 func TestAnUnparseableStagedReleaseIsLeftForInit(t *testing.T) {
 	root := t.TempDir()
 	store := machine.SystemReleases(root)

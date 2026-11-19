@@ -9,12 +9,12 @@ import (
 	"github.com/liken-sh/liken/liken/machine/supplicanttest"
 )
 
-// signalPoll is the answer a real wpa_supplicant 2.12 gave to
-// SIGNAL_POLL on an associated radio.
+// signalPoll is a reply that wpa_supplicant 2.12 sent to SIGNAL_POLL
+// on an associated radio.
 const signalPoll = "RSSI=-71\nLINKSPEED=144\nNOISE=9999\nFREQUENCY=2437\nWIDTH=20 MHz\nCENTER_FRQ1=2437\nAVG_RSSI=-70\nAVG_BEACON_RSSI=-70\n"
 
-// scrapeRadios scrapes a registry that holds only the radios'
-// collector, over the supplicants under dir.
+// scrapeRadios scrapes a registry that has only the wireless
+// collector, for the supplicants with sockets in dir.
 func scrapeRadios(t *testing.T, dir string) string {
 	t.Helper()
 	registry := prometheus.NewRegistry()
@@ -41,7 +41,7 @@ func TestARadioThatIsNotAssociatedReportsNoSignal(t *testing.T) {
 	body := scrapeRadios(t, dir)
 	requireNoSeries(t, body, "liken_wireless_signal_dbm")
 	if asked := s.Asked(); len(asked) != 1 {
-		t.Errorf("the collector asked %q of a radio with no access point", asked)
+		t.Errorf("the collector sent %q to a radio with no access point, want only STATUS", asked)
 	}
 }
 

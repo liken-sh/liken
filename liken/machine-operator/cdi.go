@@ -1,40 +1,27 @@
 package main
 
-// Writing CDI specs: how a prepared claim becomes device nodes in a
-// container.
+// Writes the CDI specs that turn a prepared DRA claim into device nodes
+// in a container.
 //
-// The Container Device Interface connects two things: which device to
-// use, and what appears inside the container. A JSON file in a
-// well-known directory describes named devices and the edits that
-// grant one device to a container. Here, those edits are device
-// nodes only; the CDI spec format also allows mounts and environment
-// variables for drivers that need them, but liken does not use those.
-// The DRA driver answers the kubelet's prepare call with CDI device
-// IDs. Each ID has the form kind=name. The kubelet passes the ID
-// through the CRI, and containerd resolves it against these files
-// when it creates the container. No privilege is involved anywhere:
-// the pod gets exactly the nodes the spec names, with the default
-// cgroup device rules to match.
+// The DRA driver's response to the kubelet's prepare call lists CDI
+// device IDs of the form kind=name. The kubelet passes them through the
+// CRI, and containerd looks each one up in the spec files in cdiDir
+// when it creates the container. liken's specs list device nodes and
+// nothing else, so the container gets those nodes and the default
+// cgroup rules for them, and no privilege.
 //
-// Each claim gets one spec file, named by the claim's UID, not by its
-// namespace and name. This is deliberate. When a claim is deleted and
-// recreated under the same name, it is a different grant, and its
-// file must not collide with a stale one. The specs live under
-// /var/run, which is the machine's runtime tmpfs at /run under its
-// older name (the image build explains the symlink). The kubelet
-// re-prepares every claim after a reboot, so each file only needs to
-// last one boot, and a tmpfs directory removes the files
-// automatically at that point.
+// Each claim has its own spec file, named by the claim's UID, so a
+// claim that is deleted and created again with the same name does not
+// reuse the old file. The files are on a tmpfs (/var/run links to
+// /run). That is enough, because the kubelet prepares every claim again
+// after a reboot.
 //
-// A file also has to stay correct for the whole boot. The kubelet
-// prepares a claim once and reuses the answer for every later pod
-// that names the same claim, so nothing re-prepares a claim while one
-// of its pods runs. Meanwhile the nodes a device delivers can move
-// under it: a USB device that is unplugged and plugged back in
-// enumerates again with a new device number, and its usbfs node moves
-// with it. The reconcile pass rewrites every prepared claim's file
-// from the same sysfs walk that publishes the inventory, and the
-// uevent of the replug wakes that pass.
+// The kubelet prepares a claim once and reuses the result for every
+// later pod of the claim, but the device nodes can change in that
+// time. A USB device that is unplugged and plugged in again gets a new
+// device number, and its usbfs node moves. So every reconcile pass
+// rewrites the spec of each prepared claim (refreshCDISpecs), and the
+// uevent of the replug starts a pass.
 
 import (
 	"encoding/json"
@@ -50,19 +37,15 @@ import (
 	"github.com/liken-sh/liken/liken/hardware"
 )
 
-// cdiWrites serializes the writes to these files. The kubelet's
-// prepare calls and the reconcile pass both write them, and both
-// stage a write through the same temporary path.
+// cdiWrites serializes writes to the spec files. The kubelet's prepare
+// calls and the reconcile pass both write a claim's file through the
+// same temporary path.
 var cdiWrites sync.Mutex
 
-// cdiDir is the directory where containerd looks for the CDI specs
-// that liken writes while the system runs. It is a variable so the
-// tests can change it.
+// cdiDir is the directory where containerd reads CDI specs.
 var cdiDir = "/var/run/cdi"
 
-// cdiSpec holds the part of the CDI spec schema that liken writes.
-// liken delivers device nodes only, so the struct omits the fields
-// for mounts and environment variables.
+// cdiSpec has only the fields of the CDI spec schema that liken writes.
 type cdiSpec struct {
 	Version string      `json:"cdiVersion"`
 	Kind    string      `json:"kind"`
@@ -79,11 +62,10 @@ type cdiEdits struct {
 	DeviceNodes []cdiDeviceNode `json:"deviceNodes"`
 }
 
-// cdiDeviceNode is one node the runtime injects. A node named by
-// path alone is one the runtime reads from the host: it stats the
-// path to learn the node's kind and numbers. Type, Major, and Minor
-// state those facts instead, and a node that states them needs no
-// host node at all.
+// cdiDeviceNode is one device node the runtime creates in the container.
+// With only Path set, the runtime stats the host node to learn its type
+// and numbers. With Type, Major, and Minor set, the runtime creates the
+// node itself, and no host node has to exist.
 type cdiDeviceNode struct {
 	Path     string `json:"path"`
 	Type     string `json:"type,omitempty"`
@@ -92,15 +74,13 @@ type cdiDeviceNode struct {
 	FileMode *int   `json:"fileMode,omitempty"`
 }
 
-// deviceNodes turns the paths one published device delivers into the
-// container edits that grant them. A path whose numbers the kernel
-// fixes carries those numbers, because the node it names can be
-// absent when the kubelet prepares the claim. The runtime then
-// creates the node with mknod and writes the matching cgroup rule,
-// and the container can open the device the moment the kernel
-// registers it. A virtualization node states its numbers too, with the
-// mode that lets a user other than root open it
-// (virtualizationFileMode).
+// deviceNodes turns the paths of one published device into CDI device
+// nodes. The kernel fixes the major and minor numbers of evdev and
+// virtualization nodes, so deviceNodes sets them, with a type and a
+// file mode, because the host node can be absent when the kubelet
+// prepares the claim. The runtime then creates the node with mknod and
+// adds its cgroup rule, and the container can open the device as soon
+// as the kernel registers it.
 func deviceNodes(paths []string) []cdiDeviceNode {
 	nodes := make([]cdiDeviceNode, 0, len(paths))
 	for _, path := range paths {
@@ -118,10 +98,10 @@ func deviceNodes(paths []string) []cdiDeviceNode {
 	return nodes
 }
 
-// sameDeviceNodes answers whether two lists grant the same nodes. A
-// node's FileMode is a pointer, so the comparison reads the mode, not
-// the pointer: a spec read back from its file and the nodes built again
-// for the same devices hold equal modes behind different pointers.
+// sameDeviceNodes reports whether two lists describe the same nodes.
+// It compares the modes that FileMode points to, because nodes read
+// back from a spec file and nodes built again for the same devices
+// have equal modes behind different pointers.
 func sameDeviceNodes(a, b []cdiDeviceNode) bool {
 	return slices.EqualFunc(a, b, func(x, y cdiDeviceNode) bool {
 		sameMode := (x.FileMode == nil) == (y.FileMode == nil) && (x.FileMode == nil || *x.FileMode == *y.FileMode)
@@ -129,31 +109,27 @@ func sameDeviceNodes(a, b []cdiDeviceNode) bool {
 	})
 }
 
-// evdevFileMode is the mode the runtime gives a node it creates with
-// mknod. The runtime copies the mode of a host node it can stat, but a
-// node in the evdev range can be absent when the container starts, and
-// a node created with no mode is openable only by a process that holds
-// CAP_DAC_OVERRIDE. The owner is the container's own user, so owner
-// read and write is what the program needs.
+// evdevFileMode is the mode of an evdev node that the runtime creates
+// with mknod. The runtime copies the mode of a host node that it can
+// stat, but an evdev node can be absent when the container starts, and
+// a node created with no mode can be opened only by a process with
+// CAP_DAC_OVERRIDE. The container's user owns the node, so it needs
+// only read and write.
 const evdevFileMode = 0o600
 
-// cdiKind identifies liken's CDI devices, the same way the driver
-// name identifies liken's slices. A CDI device ID has the form
-// "<kind>=<name>".
+// cdiKind is the kind part of liken's CDI device IDs, "<kind>=<name>".
 const cdiKind = "liken.sh/device"
 
-// writeCDISpec writes one claim's devices to a file where the
-// runtime can find them.
 func writeCDISpec(claimUID string, devices []cdiDevice) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()
 	return writeSpecFile(claimUID, devices)
 }
 
-// writeSpecFile is the write itself, with the lock already held. It
-// is atomic. containerd may list the directory at any moment, and a
-// half-written spec would fail every container creation that reads it
-// at that moment.
+// writeSpecFile writes a claim's spec file. The caller holds cdiWrites.
+// It writes a temporary file and renames it, because containerd can
+// read the directory at any time, and a container creation that reads
+// a half-written spec fails.
 func writeSpecFile(claimUID string, devices []cdiDevice) error {
 	if err := os.MkdirAll(cdiDir, 0o755); err != nil {
 		return err
@@ -171,10 +147,9 @@ func writeSpecFile(claimUID string, devices []cdiDevice) error {
 	return os.Rename(tmp, path)
 }
 
-// removeCDISpec deletes a claim's spec file. If the spec is already
-// gone, this counts as success, because unprepare must be
-// idempotent: the kubelet retries it whenever it is not sure the
-// call succeeded.
+// removeCDISpec deletes a claim's spec file. A file that is already
+// gone is not an error, because the kubelet retries unprepare when it
+// is not sure the call succeeded.
 func removeCDISpec(claimUID string) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()
@@ -189,19 +164,18 @@ func cdiSpecPath(claimUID string) string {
 	return filepath.Join(cdiDir, "liken.sh-"+claimUID+".json")
 }
 
-// refreshCDISpecs rewrites each prepared claim's spec with the nodes
-// its devices deliver now. It resolves each device the same way
-// prepare does, from one walk of sysfs, so a spec written by a
-// refresh and a spec written by a prepare always agree.
+// refreshCDISpecs rewrites the spec of each prepared claim with the
+// device nodes that its devices have now. It resolves the devices with
+// resolveAllocated, as prepare does, so a refresh and a prepare write
+// the same spec.
 //
-// This cannot repair a container that is already running. The runtime
-// injects the nodes at container creation, and a node that moves
-// under a running container stays wrong until the pod restarts. What
-// it prevents is a stale file that every later pod would receive.
+// A running container keeps its nodes, because the runtime creates
+// them only when it creates the container. The refresh corrects the
+// nodes of later containers.
 func refreshCDISpecs(sysRoot string, out *passOutcome, notes machineEvents) {
 	entries, err := os.ReadDir(cdiDir)
 	if err != nil {
-		// No directory means no claim has been prepared on this boot.
+		// The directory is missing until the first prepare of this boot.
 		return
 	}
 	var byName map[string]hardware.Device
@@ -223,51 +197,49 @@ func refreshCDISpecs(sysRoot string, out *passOutcome, notes machineEvents) {
 	}
 }
 
-// refreshCDISpec rewrites one claim's spec, and writes nothing when
-// every device still delivers what the file says.
+// refreshCDISpec rewrites one claim's spec when a device's nodes differ
+// from the ones the file lists.
 //
-// A device that this machine no longer publishes names
-// deviceAbsentNode. The claim names hardware that left, and unprepare
-// ends the claim when its pods do. Its old nodes would hand the next
-// container whatever device the kernel gave those names since, and an
-// empty edit list would start that container with no device and no
-// error. When the hardware returns at the same address, the refresh
-// writes its nodes back.
+// When a device cannot be given to the container, its spec lists a node
+// that does not exist, so the next container of the claim fails to
+// start:
 //
-// A CEC adapter's devices name their own absent node, serioAbsentNode, so
-// a container fails to start rather than open a node whose number
-// another device may hold. So does a claim allocated to the adapter's
-// interface before spec.serio declared it: its old nodes are the tty
-// and the usbfs node, which end the attachment (serioFailsClosed).
+//   - deviceAbsentNode when the device is no longer published. The
+//     kernel can give the old node names to a different device, and an
+//     empty node list would start the container with no device and no
+//     error.
+//   - serioAbsentNode for the devices of a CEC adapter, and for a claim
+//     that was allocated to the adapter's tty or USB interface before
+//     spec.serio declared it. A container that opens the old tty or
+//     usbfs node can end the serio attachment (serioFailsClosed).
+//   - withheldNode for a disk that disk protection withholds, because
+//     the disk can back the machine's own filesystems (protection.go).
 //
-// A disk that the protection withholds names withheldNode, for the
-// same reason: the next container fails to start rather than open a
-// disk that may back the machine's own filesystems (protection.go).
-// When the facts read again and the disk backs no role, the refresh
-// writes its nodes back.
+// When the hardware returns at the same address, or the disk backs no
+// role, the refresh writes the real nodes back. The claim itself stays
+// prepared until its pods end and the kubelet unprepares it.
 //
-// A device that is present with no driver is a different case: the
-// program under this claim detached the kernel driver, and the
-// kernel driver's nodes went with it. The publish policy resolves
-// that shape to the bus node alone, so the refresh rewrites the spec
-// to the one node the program uses. Without this rewrite the spec
-// keeps a node the program deleted, and the claim's container can
-// never restart: the runtime injects the spec's nodes at every
-// container creation, and a stat on the deleted node fails it.
+// A program in the claim's pod can detach the kernel driver from a
+// device, and the driver's nodes go with it. resolveAllocated then
+// returns the device's bus node, and the refresh writes that node. A
+// spec that kept the deleted node would stop the container from
+// restarting, because the runtime creates the spec's nodes at every
+// container creation and fails on a missing one.
 //
-// A device whose unit left its address takes the unplugged mark, once,
-// and posts one Event (unplugged.go).
+// When a device's USB unit leaves its address, markUnplugged marks the
+// device in the spec once, and the refresh posts a DeviceUnplugged
+// Event (unplugged.go).
 //
-// A spec that does not decode is wrapped in fs.ErrInvalid: nothing but
-// a new prepare replaces it, so the pass's outcome retries it slowly.
+// The error for a spec that does not decode wraps fs.ErrInvalid, so the
+// pass outcome counts it as lasting and retries it slowly. Only a new
+// prepare replaces the file.
 func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device, out *passOutcome, notes machineEvents) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()
 
 	raw, err := os.ReadFile(cdiSpecPath(claimUID))
 	if os.IsNotExist(err) {
-		// Unprepare removed the claim between the directory listing
-		// and this read.
+		// Unprepare removed the claim after the directory listing.
 		return nil
 	}
 	if err != nil {
@@ -279,9 +251,9 @@ func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device,
 	}
 	changed := false
 	for i, device := range spec.Devices {
-		// prepare names each CDI device for the claim and the
-		// allocated device together, so the allocated name is in the
-		// file, and the refresh needs no call to the API server.
+		// Prepare names each CDI device "<claim UID>-<allocated
+		// device>", so the refresh reads the allocated device from the
+		// file and makes no call to the API server.
 		allocated, ok := strings.CutPrefix(device.Name, claimUID+"-")
 		if !ok {
 			continue
@@ -317,17 +289,15 @@ func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device,
 	return nil
 }
 
-// deviceAbsentNode is the node a prepared claim's spec names while its
-// hardware is absent. No such node exists, so the runtime fails to
-// create the next container that holds the claim, and the kubelet
-// retries it under its restart backoff. A container that started
-// before the hardware left keeps the nodes it received.
+// deviceAbsentNode is the node a claim's spec lists while its hardware
+// is absent. The node does not exist, so the runtime fails to create
+// the next container of the claim, and the kubelet retries it with its
+// restart backoff.
 const deviceAbsentNode = "/dev/liken.sh/device-absent"
 
-// claimUIDFromSpecName reads a claim's UID back out of its spec file
-// name. A name that does not fit the pattern belongs to another
-// writer, or is a temporary file mid-rename, and the refresh leaves
-// it alone.
+// claimUIDFromSpecName returns the claim UID in a spec file name. It
+// returns false for another driver's file and for a temporary file
+// that writeSpecFile has not renamed yet.
 func claimUIDFromSpecName(name string) (string, bool) {
 	uid, ok := strings.CutPrefix(name, "liken.sh-")
 	if !ok {

@@ -1,29 +1,24 @@
 package main
 
-// The watches that run only while a pass waits on objects that other
-// programs change.
-//
-// Three features wait that way. The image proof waits for every OS
-// container on the node to become Ready (imports.go). The drain waits
-// for the node's pods to leave, and for a PodDisruptionBudget to allow
-// an eviction it refused (drain.go). A feature removal waits for the
-// cluster's HelmCharts or LoadBalancer Services to be deleted
-// (retraction.go). Each of those reads lists objects that change while
-// the wait lasts, so each wait gets a watch, and the watch wakes the
-// pass that reads it.
+// Some passes wait for objects that other programs change. The image
+// proof waits until every OS container on the node is Ready
+// (imports.go). The drain waits until the node's pods leave, and until
+// a PodDisruptionBudget allows an eviction that it refused (drain.go).
+// A retraction waits until the cluster's HelmCharts or LoadBalancer
+// Services are deleted (retraction.go). Each wait gets a watch that
+// wakes the pass loop when those objects change.
 //
 // A watch runs only while its wait does. A pass that reads a kind
-// starts its watch, and the loop stops every watch that the last pass
-// did not read (endPass). A wait begins and ends on a pass, and each
-// pass works out from the state it reads whether the wait goes on, so
-// an operator that restarts in the middle of a drain starts the
-// watches it needs on its first pass. Outside a wait, a busy node's pod
-// writes wake no pass, and no copy of them costs memory.
+// starts its watch, and endPass stops every watch that the pass did
+// not read. Each pass decides from what it reads whether the wait
+// continues, so an operator that restarts during a drain starts the
+// watches it needs on its first pass. Outside a wait, writes to a busy
+// node's pods wake no pass and use no memory.
 //
-// A copy that is not ready yet answers nothing, and the read goes to
-// the API server, as every read of the reader does (watches.go). The
-// first pass of a wait reads the API server and starts the watch, and
-// the watch's first sync wakes the next pass, which reads the copy.
+// The reader goes to the API server whenever a watch's copy is not
+// ready (watches.go). So the first pass of a wait reads the API server
+// and starts the watch, and the watch's first sync wakes the next
+// pass, which reads the copy.
 
 import (
 	"context"
@@ -41,7 +36,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// The kinds a wait can watch.
+// The kinds that a wait can watch.
 const (
 	waitPods     = "node pods"
 	waitBudgets  = "PodDisruptionBudgets"
@@ -55,8 +50,8 @@ var (
 	serviceResource = schema.GroupVersionResource{Version: "v1", Resource: "services"}
 )
 
-// waits starts and stops the watches of the waits. A nil *waits starts
-// nothing, and every read goes to the API server.
+// waits starts and stops the watches for the waits. A nil *waits
+// starts no watch, so every read goes to the API server.
 type waits struct {
 	ctx     context.Context
 	watcher dynamic.Interface
@@ -68,7 +63,6 @@ type waits struct {
 	used    map[string]bool
 }
 
-// waitWatch is one running watch and the cancel that stops it.
 type waitWatch struct {
 	copy   *informer.Collection
 	cancel context.CancelFunc
@@ -79,9 +73,9 @@ func newWaits(ctx context.Context, watcher dynamic.Interface, wake func(), node 
 		running: map[string]*waitWatch{}, used: map[string]bool{}}
 }
 
-// use answers the copy of one kind, and starts its watch when it is not
-// running. The pass that calls it keeps the watch running for one more
-// pass.
+// use returns the copy of one kind and starts its watch if it is not
+// running. The watch keeps running until a pass ends without calling
+// use for the kind.
 func (w *waits) use(kind string) *informer.Collection {
 	if w == nil {
 		return nil
@@ -101,8 +95,8 @@ func (w *waits) use(kind string) *informer.Collection {
 	return running.copy
 }
 
-// endPass stops every watch that the pass did not use, and starts the
-// count again for the next pass.
+// endPass stops every watch that the pass did not use, and clears the
+// record of what the pass used.
 func (w *waits) endPass() {
 	if w == nil {
 		return
@@ -118,7 +112,8 @@ func (w *waits) endPass() {
 	clear(w.used)
 }
 
-// watchOf names the source of one kind and what wakes the loop.
+// watchOf returns what to watch for one kind and the options that
+// decide which events wake the loop.
 func (w *waits) watchOf(kind string) (informer.Source, informer.Options) {
 	switch kind {
 	case waitPods:
@@ -134,8 +129,8 @@ func (w *waits) watchOf(kind string) (informer.Source, informer.Options) {
 	case waitCharts:
 		return informer.Source{Resource: chartResource}, informer.Options{
 			Handler: presenceHandler(w.wake),
-			// The HelmChart kind exists only while k3s's Helm controller
-			// runs. An absent kind holds no chart.
+			// The HelmChart kind exists only while the Helm controller
+			// runs, and a missing kind means there are no charts.
 			Absent: apierrors.IsNotFound,
 		}
 	default:
@@ -146,10 +141,10 @@ func (w *waits) watchOf(kind string) (informer.Source, informer.Options) {
 	}
 }
 
-// budgetHandler wakes the loop when a budget could allow an eviction it
-// refused: a budget whose status.disruptionsAllowed rose, and a budget
-// that was deleted, which guards nothing any more. A new budget
-// guards more, so it wakes nothing.
+// budgetHandler wakes the loop when a budget may now allow an eviction
+// that it refused earlier: when status.disruptionsAllowed rises, and
+// when the budget is deleted. A new budget only restricts more, so it
+// wakes nothing.
 func budgetHandler(wake func()) cache.ResourceEventHandler {
 	return cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(before, after any) {
@@ -168,10 +163,10 @@ func budgetHandler(wake func()) cache.ResourceEventHandler {
 	}
 }
 
-// presenceHandler wakes the loop when an object appears or leaves. A
-// removal waits only on whether the objects exist, and the Helm
-// controller writes each chart's status as it works, which changes
-// nothing the wait reads.
+// presenceHandler wakes the loop when an object is added or deleted.
+// A retraction waits only for objects to be deleted, and the Helm
+// controller updates each chart's status while it works, so updates
+// wake nothing.
 func presenceHandler(wake func()) cache.ResourceEventHandler {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(any) { wake() },
@@ -179,9 +174,9 @@ func presenceHandler(wake func()) cache.ResourceEventHandler {
 	}
 }
 
-// serviceHandler wakes the loop when a Service appears or leaves, or
-// changes its type, which can make it a LoadBalancer or stop it being
-// one.
+// serviceHandler wakes the loop when a Service is added or deleted, or
+// when spec.type changes, because that can make it a LoadBalancer or
+// stop it being one.
 func serviceHandler(wake func()) cache.ResourceEventHandler {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(any) { wake() },
@@ -201,15 +196,14 @@ func serviceHandler(wake func()) cache.ResourceEventHandler {
 	}
 }
 
-// trimPod keeps only what the proof and the drain read from a pod
-// (kubernetes.Pod), so a copy of a node's pods costs under a kilobyte
-// for each pod rather than tens of kilobytes. A field the trim drops
-// converts to its zero value, so the trim must keep every field the
-// code reads. Without the owner references, every DaemonSet pod looks
-// evictable, without the mirror annotation, the drain evicts mirror
-// pods that the kubelet creates again, and without the tolerations, the
-// drain evicts a pod that tolerates the cordon, which comes straight
-// back.
+// trimPod keeps only the pod fields that the image proof and the drain
+// read through kubernetes.Pod, so the copy of a node's pods stays
+// small. A dropped field reads as its zero value, so every field that
+// the code reads must stay. For example, without ownerReferences the
+// drain evicts DaemonSet pods. Without the mirror annotation it evicts
+// mirror pods, which the kubelet creates again. Without the
+// tolerations it evicts a pod that tolerates the cordon, and the pod is
+// scheduled onto the same node again.
 func trimPod(object *unstructured.Unstructured) {
 	kept := map[string]any{
 		"apiVersion": object.GetAPIVersion(),
@@ -274,8 +268,9 @@ func trimPod(object *unstructured.Unstructured) {
 	object.Object = kept
 }
 
-// trimService keeps a Service's identity and its type, which is all a
-// removal reads, so a copy of every Service in the cluster stays small.
+// trimService keeps a Service's name, namespace, and type, which are
+// the fields that a retraction reads, so the copy of every Service in
+// the cluster stays small.
 func trimService(object *unstructured.Unstructured) {
 	kind, _, _ := unstructured.NestedString(object.Object, "spec", "type")
 	object.Object = map[string]any{
@@ -291,14 +286,14 @@ func trimService(object *unstructured.Unstructured) {
 	}
 }
 
-// nodePods reads every pod on this node, from the wait's copy when it
-// is ready, and from the API server otherwise.
+// nodePods returns every pod on the node, from the copy when it is
+// ready and from the API server otherwise.
 func (r *reader) nodePods(node string) ([]kubernetes.Pod, error) {
 	copy := r.waits.use(waitPods)
 	if pods, ok := watch.List[kubernetes.Pod](r.view(copy)); ok {
-		// The store answers in no order, and the API server lists by
-		// namespace and name, so the drain asks pods to leave in the
-		// same order from either.
+		// The copy returns pods in no fixed order, but the API server
+		// lists them by namespace and name. Sorting makes the drain
+		// evict pods in the same order from either source.
 		slices.SortFunc(pods, func(a, b kubernetes.Pod) int {
 			return strings.Compare(a.Metadata.Namespace+"/"+a.Metadata.Name, b.Metadata.Namespace+"/"+b.Metadata.Name)
 		})
@@ -307,13 +302,13 @@ func (r *reader) nodePods(node string) ([]kubernetes.Pod, error) {
 	return kubernetes.ListPodsOnNode(r.client, node)
 }
 
-// watchBudgets keeps the budget watch running for one more pass, so a
-// budget that allows a refused eviction wakes the drain.
+// watchBudgets keeps the budget watch running, so that a budget that
+// allows a refused eviction wakes the drain.
 func (r *reader) watchBudgets() {
 	r.waits.use(waitBudgets)
 }
 
-// helmCharts reads every HelmChart in the cluster.
+// helmCharts returns every HelmChart in the cluster.
 func (r *reader) helmCharts() ([]kubernetes.HelmChart, error) {
 	copy := r.waits.use(waitCharts)
 	if charts, ok := watch.List[kubernetes.HelmChart](r.view(copy)); ok {
@@ -322,8 +317,8 @@ func (r *reader) helmCharts() ([]kubernetes.HelmChart, error) {
 	return kubernetes.ListHelmCharts(r.client)
 }
 
-// loadBalancerServices reads every Service of type LoadBalancer in the
-// cluster.
+// loadBalancerServices returns every Service of type LoadBalancer in
+// the cluster.
 func (r *reader) loadBalancerServices() ([]kubernetes.Service, error) {
 	copy := r.waits.use(waitServices)
 	services, ok := watch.List[kubernetes.Service](r.view(copy))

@@ -1,9 +1,5 @@
 package main
 
-// The kubelet prepares a claim once, and the reconcile pass keeps
-// that claim's spec file current while the hardware under it
-// enumerates again.
-
 import (
 	"encoding/json"
 	"os"
@@ -15,7 +11,6 @@ import (
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 )
 
-// specPaths reads back every device node in one claim's spec file.
 func specPaths(t *testing.T, fixture *draFixture, claimUID string) []string {
 	t.Helper()
 	var paths []string
@@ -25,17 +20,15 @@ func specPaths(t *testing.T, fixture *draFixture, claimUID string) []string {
 	return paths
 }
 
-// specNodes reads back every device node one claim's spec grants,
-// with the fields the runtime creates the node from.
 func specNodes(t *testing.T, fixture *draFixture, claimUID string) []cdiDeviceNode {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(fixture.cdi, "liken.sh-"+claimUID+".json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CDI spec: %v", err)
 	}
 	var spec cdiSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the CDI spec: %v", err)
 	}
 	var nodes []cdiDeviceNode
 	for _, device := range spec.Devices {
@@ -52,18 +45,17 @@ func prepared(t *testing.T, fixture *draFixture) {
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
-	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
-		t.Fatalf("answer = %+v", answer)
+	if result := resp.Claims["claim-1"]; result == nil || result.Error != "" {
+		t.Fatalf("the prepare result for claim-1 is %+v, want no error", result)
 	}
 }
 
 func TestRefreshFollowsADeviceThatEnumeratedAgain(t *testing.T) {
-	// The kubelet does not prepare a claim twice, so a device that is
-	// unplugged and plugged back in leaves the file naming a usbfs node
-	// that no longer exists. The next pod that holds this claim would
-	// get that node.
+	// The kubelet prepares a claim once, so after a replug the file
+	// still lists the old usbfs node, which no longer exists. The next
+	// pod that uses the claim would receive that node.
 	fixture := newDRAFixture(t)
 	fixture.enumerate(t, 4)
 	prepared(t, fixture)
@@ -74,12 +66,10 @@ func TestRefreshFollowsADeviceThatEnumeratedAgain(t *testing.T) {
 	paths := specPaths(t, fixture, "claim-1")
 	slices.Sort(paths)
 	if !slices.Equal(paths, []string{"/dev/bus/usb/002/009", "/dev/sda"}) {
-		t.Errorf("paths = %v, want the node this enumeration assigned", paths)
+		t.Errorf("the spec device nodes are %v, want the node this enumeration assigned", paths)
 	}
 }
 
-// A refresh that rewrites a spec records the write in the pass's
-// outcome, and a refresh that finds the spec current records nothing.
 func TestARefreshRecordsTheSpecsItRewrites(t *testing.T) {
 	fixture := newDRAFixture(t)
 	fixture.enumerate(t, 4)
@@ -96,27 +86,28 @@ func TestARefreshRecordsTheSpecsItRewrites(t *testing.T) {
 	}
 }
 
-// A spec that does not decode stays that way until something replaces
-// it, so its failure retries at the slow pace.
+// A spec that does not decode stays broken until a new prepare
+// replaces it, so the pass retries it slowly.
 func TestACorruptSpecIsALastingFailure(t *testing.T) {
 	fixture := newDRAFixture(t)
 	fixture.enumerate(t, 4)
 	prepared(t, fixture)
 	if err := os.WriteFile(cdiSpecPath("claim-1"), []byte("{not json"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the corrupt spec: %v", err)
 	}
 	out := &passOutcome{}
 
 	refreshCDISpecs(draSysfsRoot, out, machineEvents{})
 
 	if got := failureKinds(out); !slices.Equal(got, []failureKind{lasting}) {
-		t.Errorf("kinds = %v, want one lasting failure", got)
+		t.Errorf("the failure kinds are %v, want one lasting failure", got)
 	}
 }
 
 func TestRefreshLeavesASpecThatStillMatchesAlone(t *testing.T) {
-	// Hardware that stays put must not produce a write on every pass.
-	// containerd reads these files whenever it creates a container.
+	// A device that has not changed must not cause a write on every
+	// pass, because containerd reads these files at every container
+	// creation.
 	fixture := newDRAFixture(t)
 	fixture.enumerate(t, 4)
 	prepared(t, fixture)
@@ -124,24 +115,23 @@ func TestRefreshLeavesASpecThatStillMatchesAlone(t *testing.T) {
 	path := filepath.Join(fixture.cdi, "liken.sh-claim-1.json")
 	written := time.Now().Add(-time.Hour)
 	if err := os.Chtimes(path, written, written); err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting the spec modification time: %v", err)
 	}
 	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 
 	info, err := os.Stat(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the spec file status: %v", err)
 	}
 	if !info.ModTime().Equal(written) {
 		t.Errorf("the spec was rewritten at %v, want no write at all", info.ModTime())
 	}
 }
 
-// The claim names hardware that left. Its old nodes would be worse
-// than none: the kernel gives /dev/sda to the next disk that arrives,
-// and the next container under this claim would open that disk. So
-// the spec names a node that does not exist, and the next container
-// fails to start until the hardware returns.
+// The kernel gives the stick's old /dev/sda to the next disk that
+// arrives, so a container that kept the old nodes would open that
+// disk. The spec lists a node that does not exist instead, and the
+// next container of the claim fails to start until the stick returns.
 func TestRefreshNamesAnAbsentNodeForHardwareThatLeft(t *testing.T) {
 	fixture := newDRAFixture(t)
 	fixture.enumerate(t, 4)
@@ -151,12 +141,12 @@ func TestRefreshNamesAnAbsentNodeForHardwareThatLeft(t *testing.T) {
 	// /dev/sda.
 	usb := filepath.Join(draSysfsRoot, "bus", "usb", "devices")
 	if err := os.Rename(filepath.Join(usb, "2-1:1.0"), filepath.Join(usb, "2-2:1.0")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("unplugging the stick: %v", err)
 	}
 	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 
 	if paths := specPaths(t, fixture, "claim-1"); !slices.Equal(paths, []string{deviceAbsentNode}) {
-		t.Errorf("paths = %v, want the absent node alone", paths)
+		t.Errorf("the spec device nodes are %v, want the absent node alone", paths)
 	}
 }
 
@@ -168,53 +158,50 @@ func TestRefreshRestoresTheNodesOfHardwareThatReturned(t *testing.T) {
 	aside := filepath.Join(t.TempDir(), "unplugged")
 
 	if err := os.Rename(stick, aside); err != nil {
-		t.Fatal(err)
+		t.Fatalf("unplugging the stick: %v", err)
 	}
 	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 	if err := os.Rename(aside, stick); err != nil {
-		t.Fatal(err)
+		t.Fatalf("plugging the stick back in: %v", err)
 	}
 	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 
 	paths := specPaths(t, fixture, "claim-1")
 	slices.Sort(paths)
 	if !slices.Equal(paths, []string{"/dev/bus/usb/002/004", "/dev/sda"}) {
-		t.Errorf("paths = %v, want the stick's nodes back", paths)
+		t.Errorf("the spec device nodes are %v, want the stick's nodes back", paths)
 	}
 }
 
-func TestRefreshDeliversTheBusNodeAloneAfterADriverDetach(t *testing.T) {
+func TestRefreshWritesTheBusNodeAloneAfterADriverDetach(t *testing.T) {
 	// A libusb program in the claim's pod detaches the kernel driver
-	// from the interface, and the driver's nodes leave with it. The
-	// interface stays on the bus. The refresh rewrites the spec to
-	// the bus node, the one node the program uses, so a container
-	// restart under the same prepared claim injects a node that
-	// exists. Before this rewrite the spec kept the driver's deleted
-	// node, and every restart failed on it.
+	// from the interface, and the driver's nodes go with it. The
+	// interface stays on the bus. The refresh rewrites the spec to the
+	// bus node, so a restarted container of the claim gets a node that
+	// exists.
 	fixture := newDRAFixture(t)
 	fixture.enumerate(t, 4)
 	prepared(t, fixture)
 
 	stick := filepath.Join(draSysfsRoot, "bus", "usb", "devices", "2-1:1.0")
 	if err := os.Remove(filepath.Join(stick, "driver")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the driver link of the stick: %v", err)
 	}
 	if err := os.RemoveAll(filepath.Join(stick, "host0")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the host directory of the stick: %v", err)
 	}
 	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 
 	paths := specPaths(t, fixture, "claim-1")
 	if !slices.Equal(paths, []string{"/dev/bus/usb/002/004"}) {
-		t.Errorf("paths = %v, want the bus node alone", paths)
+		t.Errorf("the spec device nodes are %v, want the bus node alone", paths)
 	}
 }
 
-func TestRefreshDeliversUHIDAfterTheModuleLoads(t *testing.T) {
-	// The module loop loads a declared module with no reboot, so
+func TestRefreshAddsUHIDAfterTheModuleLoads(t *testing.T) {
+	// The operator loads a declared module without a reboot, so
 	// /dev/uhid can appear after the kubelet prepared the adapter's
-	// claim, and the pass that follows writes it into the spec the
-	// next pod receives.
+	// claim. The next refresh adds it to the spec.
 	fixture := newDRAFixture(t)
 	fixture.addBluetooth(t)
 	fixture.allocated = "usb-1-8-1-0"
@@ -226,34 +213,31 @@ func TestRefreshDeliversUHIDAfterTheModuleLoads(t *testing.T) {
 	paths := specPaths(t, fixture, "claim-1")
 	slices.Sort(paths)
 	if !slices.Equal(paths, []string{"/dev/bus/usb/001/008", "/dev/uhid"}) {
-		t.Errorf("paths = %v, want the uhid node beside the usbfs node", paths)
+		t.Errorf("the spec device nodes are %v, want the uhid node beside the usbfs node", paths)
 	}
 }
 
 func TestRefreshIgnoresFilesItDidNotWrite(t *testing.T) {
-	// containerd reads every spec in this directory, and another
-	// driver's file can sit beside liken's.
+	// Other CDI drivers write their specs to the same directory.
 	fixture := newDRAFixture(t)
 	fixture.enumerate(t, 4)
 	prepared(t, fixture)
 
 	foreign := filepath.Join(fixture.cdi, "nvidia.com-gpu.json")
 	if err := os.WriteFile(foreign, []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the other driver spec: %v", err)
 	}
 	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 
 	raw, err := os.ReadFile(foreign)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the other driver spec: %v", err)
 	}
 	if string(raw) != "{}" {
-		t.Errorf("the other driver's spec = %s, want it untouched", raw)
+		t.Errorf("the other driver's spec is %s, want it unchanged", raw)
 	}
 }
 
-// A machine where no claim was prepared on this boot has no CDI
-// directory, and the refresh reads nothing and records nothing.
 func TestTheRefreshWithNoDirectoryDoesNothing(t *testing.T) {
 	isolatePass(t)
 	cdiDir = filepath.Join(t.TempDir(), "absent")
@@ -262,21 +246,21 @@ func TestTheRefreshWithNoDirectoryDoesNothing(t *testing.T) {
 	refreshCDISpecs(t.TempDir(), out, machineEvents{})
 
 	if out.failureCount() != 0 || len(out.writes) != 0 {
-		t.Errorf("the refresh recorded %+v", out)
+		t.Errorf("the refresh recorded %+v, want no failures and no writes", out)
 	}
 }
 
-// A spec that cannot be read is a failure of the refresh, and a
-// device in it that names another claim is left as it is.
+// A spec path that cannot be read is a failure of the refresh. A device
+// whose name does not start with its claim's UID is left unchanged.
 func TestTheRefreshReportsASpecItCannotRead(t *testing.T) {
 	isolatePass(t)
 	if err := os.Mkdir(cdiSpecPath("claim-1"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating a directory at the spec path: %v", err)
 	}
 	foreign := cdiSpec{Version: "0.6.0", Kind: cdiKind, Devices: []cdiDevice{{Name: "claim-9-usb-2-1-1-0"}}}
 	raw, _ := json.Marshal(foreign)
 	if err := os.WriteFile(cdiSpecPath("claim-2"), raw, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the spec of claim-2: %v", err)
 	}
 	out := &passOutcome{}
 
@@ -288,23 +272,23 @@ func TestTheRefreshReportsASpecItCannotRead(t *testing.T) {
 	}
 }
 
-// A spec that cannot be written is an error for the prepare to answer,
-// whether the directory cannot be made or the file cannot be written.
-// A spec that cannot be removed is an error for the unprepare.
+// cdiDir under a regular file cannot be created, a read-only cdiDir
+// refuses the spec file, and a spec path that is a non-empty directory
+// cannot be removed.
 func TestTheSpecWritesReportTheirFailures(t *testing.T) {
 	isolatePass(t)
 	file := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(file, nil, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing a regular file: %v", err)
 	}
 	readOnly := t.TempDir()
 	if err := os.Chmod(readOnly, 0o555); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the directory read-only: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(readOnly, 0o755) })
 	full := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(full, "liken.sh-claim-1.json", "child"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating a non-empty directory at the spec path: %v", err)
 	}
 
 	cdiDir = filepath.Join(file, "cdi")
@@ -315,23 +299,22 @@ func TestTheSpecWritesReportTheirFailures(t *testing.T) {
 	noRemove := removeCDISpec("claim-1")
 
 	if noDirectory == nil || noFile == nil || noRemove == nil {
-		t.Errorf("errors = %v, %v, %v; want three", noDirectory, noFile, noRemove)
+		t.Errorf("writeCDISpec returned %v for a missing directory and %v for a read-only one, and removeCDISpec returned %v for a non-empty directory, want an error from each", noDirectory, noFile, noRemove)
 	}
 }
 
-// A spec's evdev nodes carry a file mode, and a refresh that reads the
-// spec back finds them equal to the nodes it would write, so a claim on
-// an input device is not rewritten on every pass. The mode is a pointer
-// in the spec, and two pointers to the same mode are not equal.
+// An evdev node has a file mode, which is a pointer. A refresh must
+// find the nodes it reads back from a spec equal to the nodes it would
+// write, or it rewrites a claim on an input device on every pass.
 func TestAnEvdevNodeReadBackFromItsSpecIsCurrent(t *testing.T) {
 	written := deviceNodes([]string{"/dev/input/event3", "/dev/hidraw0"})
 	raw, err := json.Marshal(written)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the device nodes: %v", err)
 	}
 	var read []cdiDeviceNode
 	if err := json.Unmarshal(raw, &read); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the device nodes: %v", err)
 	}
 
 	if !sameDeviceNodes(read, deviceNodes([]string{"/dev/input/event3", "/dev/hidraw0"})) {

@@ -7,7 +7,7 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-func TestSerioConditionNamesTheFirstEntryNotAttached(t *testing.T) {
+func TestSerioConditionReportsTheFirstEntryThatIsNotAttached(t *testing.T) {
 	attached := machine.SerioStatus{Protocol: "pulse8-cec", USB: pulse8Serio.USB, TTY: "ttyACM0", State: machine.SerioAttached}
 	missing := machine.SerioStatus{Protocol: "pulse8-cec", USB: pulse8Serio.USB, State: machine.SerioMissing,
 		Message: "no USB device 2548:1002 is plugged in"}
@@ -19,9 +19,9 @@ func TestSerioConditionNamesTheFirstEntryNotAttached(t *testing.T) {
 		want     api.Condition
 	}{
 		{"nothing declared", nil, api.Condition{Type: "SerioAttached", Status: api.ConditionTrue,
-			Reason: "NothingDeclared", Message: "no serio entries declared"}},
+			Reason: "NothingDeclared", Message: "No serio entries are declared"}},
 		{"every entry attached", []machine.SerioStatus{attached}, api.Condition{Type: "SerioAttached",
-			Status: api.ConditionTrue, Reason: "AllAttached", Message: "all 1 serio attachments hold"}},
+			Status: api.ConditionTrue, Reason: "AllAttached", Message: "All 1 serio entries are attached"}},
 		{"an adapter unplugged", []machine.SerioStatus{attached, missing}, api.Condition{Type: "SerioAttached",
 			Status: api.ConditionFalse, Reason: "Missing",
 			Message: "pulse8-cec 2548:1002: no USB device 2548:1002 is plugged in"}},
@@ -32,15 +32,14 @@ func TestSerioConditionNamesTheFirstEntryNotAttached(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if got := serioCondition(test.observed); got != test.want {
-				t.Errorf("got %+v", got)
+				t.Errorf("serioCondition(%+v) = %+v, want %+v", test.observed, got, test.want)
 			}
 		})
 	}
 }
 
-// A machine with an unplugged adapter works, and its workloads that do
-// not use the adapter run as before, so the condition changes neither
-// the phase nor the Ready roll-up.
+// A machine with an unplugged adapter keeps working, so the condition
+// changes neither the phase nor the Ready roll-up.
 func TestSerioAttachedLeavesTheMachineReady(t *testing.T) {
 	conditions := []api.Condition{
 		condition("SpecConverged", "True", "Converged"),
@@ -48,9 +47,9 @@ func TestSerioAttachedLeavesTheMachineReady(t *testing.T) {
 		condition("SerioAttached", "False", "Refused"),
 	}
 	if phase := decidePhase(conditions); phase != api.PhaseReady {
-		t.Errorf("phase = %s", phase)
+		t.Errorf("the phase is %s, want Ready", phase)
 	}
 	if ready := readyCondition(conditions); ready.Status != api.ConditionTrue {
-		t.Errorf("Ready = %+v", ready)
+		t.Errorf("the Ready condition is %+v, want status True", ready)
 	}
 }

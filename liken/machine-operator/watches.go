@@ -1,82 +1,75 @@
 package main
 
-// The machine operator's watches, and the reads a pass makes through
-// them.
+// The operator watches each API object that a pass reads and keeps a
+// copy of it in memory. A pass reads the copies, and most passes start
+// because a copy changed. Without the watches, every pass would send a
+// request for this machine's Machine, its Node, the Cluster, the
+// registry credentials Secret, this node's operator pod, this node's
+// ResourceSlice, and its Disruptions, and most of those requests would
+// return nothing new.
 //
-// A pass judges seven kinds of API object: this machine's Machine, its
-// Node, the Cluster, the registry credentials Secret, this node's own
-// operator pod, this node's ResourceSlice, and this machine's
-// Disruptions. A pass that read each object from the API server would
-// send seven requests on every pass from every
-// machine, and on most passes find nothing new. So the operator watches
-// each object, keeps a copy in memory, and the pass reads the copies,
-// and a change to a copy is what wakes most passes.
+// Each watch uses a field selector or a label selector to receive only
+// the objects of this machine. An unselected watch would wake every
+// machine in the fleet for each write to another machine's objects.
 //
-// Each watch is scoped to the one object, or the few objects, this
-// machine reads, by field selector and label selector, so no other
-// machine's writes reach this pod. A five-hundred-machine fleet must
-// not cost every machine five hundred wakes.
+// Each watch also decides which changes start a pass:
 //
-// A watch also decides whether a change wakes the loop at once:
+//   - Every Machine change except the echo of this operator's own
+//     status write. cluster-operator's reboot grant and the Lost
+//     phase that its sweep writes are status writes too, and the pass
+//     must act on them.
+//   - A Cluster change only when its spec changed. The cluster
+//     operator rewrites the Cluster's status after each change in the
+//     fleet.
+//   - A Node change unless only the heartbeat times of its conditions
+//     changed (withoutHeartbeats). The kubelet rewrites them every five
+//     minutes. A pass for each of those writes would keep resetting the
+//     backstop timer (backstop.go), so the backstop pass would never
+//     run. A person's change to a label or a taint starts a pass, so
+//     the pass restores spec.nodeLabels and spec.nodeTaints at once.
+//     The pass leaves alone a label, a taint, or a cordon that the
+//     operator did not set (labels.go, taints.go, drain.go).
+//   - Every change to the Secret and to the operator pod. Both change
+//     rarely.
+//   - A Disruption that is created, deleted, or whose spec changed.
+//     cluster-operator's status writes start no pass.
+//   - A ResourceSlice that is deleted, or updated by another writer
+//     (sliceHandler). The kubelet deletes a driver's slices when it
+//     starts, so a k3s restart deletes this node's slice, and the pass
+//     writes it again.
 //
-//   - The Machine wakes the loop on every change, because the
-//     conductor's grant and the sweep's Lost verdict are status writes
-//     the pass must act on, and they arrive among this operator's own.
-//   - The Cluster wakes the loop only on an edit to its spec. The
-//     cluster operator writes the Cluster's status after every change
-//     in the fleet, and none of that concerns one machine.
-//   - The Node wakes the loop on every change except the heartbeat
-//     times in its conditions (withoutHeartbeats). The kubelet writes
-//     the Node's status every five minutes even when nothing changed,
-//     and a pass for each of those writes would also hide every repair
-//     from the backstop (backstop.go). A cordon, a label, or a taint
-//     that somebody set by hand is reverted at once.
-//   - The Secret and the operator pod wake the loop on every change,
-//     and both change rarely.
-//   - The machine's Disruptions wake the loop on an edit: a person's
-//     new request, an approval, and a deleted request. The pass writes
-//     its own request's spec too, and the echo of that write wakes one
-//     more pass, which finds nothing to do. The conductor's status
-//     writes wake nothing.
-//   - The ResourceSlice wakes the loop when it is deleted, or updated
-//     by another writer (sliceHandler). The kubelet deletes a driver's
-//     slices when it starts, so a restart of k3s deletes this node's
-//     slice, and the pass writes it again. Without this wake a deleted
-//     slice would stay deleted until the next pass for another reason.
+// Some waits also watch the node's pods, the PodDisruptionBudgets, the
+// HelmCharts, or the LoadBalancer Services, and only while they wait
+// (waits.go).
 //
-// Three waits watch more than these six objects, and only while they
-// wait: the image proof and the drain watch the node's pods, the drain
-// watches the PodDisruptionBudgets, and a feature removal watches the
-// HelmCharts or the Services (waits.go).
+// Each watch starts a pass when its first list finishes. A pass that
+// ran before then read the API server, and a change made between that
+// read and the list arrives in no watch event.
 //
-// A watch that the API server accepts again after an outage wakes the
-// loop too, and the pass it starts reads every kind from the API
-// server (reader.throughAPIOnce), because a pass whose writes failed
-// during the outage has nothing else to start it.
+// A copy is used only while its watch is synced, and the pass reads the
+// API server otherwise. This covers the first seconds after a start.
+// It also covers a release upgrade, when this binary can run under the
+// previous release's RBAC, which may not grant list or watch on some of
+// these kinds. The watch retries with a backoff until the new RBAC is
+// applied.
 //
-// Every watch wakes the loop once when its first read is done. A pass
-// that ran before then read the API server, and a change made between
-// that read and the watch's first read is in no event.
+// With informer.Options.UnreadyOnWatchError, a copy is also not used
+// after its watch fails, for example while k3s restarts, until the API
+// server accepts a watch again. The reflector backs off between
+// attempts, and the copy misses each write made in that time, such as
+// a withdrawn Cluster rollback or a removed reboot approval. A pass
+// that read the stale copy could stage the old target and write the
+// reboot intent before a 409 stopped it. So the pass reads the API
+// server, and while the API server is down those reads fail. A failed
+// Machine read makes the pass use its last copy of the Machine
+// (loop.go). A failed Node read makes a granted reboot skip the drain,
+// as during a demotion (disruptions.go).
 //
-// A copy that cannot answer, because its watch has not synced yet, is
-// never read as the truth. The pass reads the API server instead, the
-// way it did before the watch existed. That covers the first seconds
-// of a start, and it covers a release skew: right after an upgrade,
-// this binary can run under the previous release's RBAC, which grants
-// no list or watch on some of these kinds. The watch then keeps
-// retrying with a backoff, and every pass reads the API server until
-// the new RBAC lands.
-//
-// A copy also stops answering after any watch that fails, such as each
-// watch while k3s restarts (informer.Options.UnreadyOnWatchError), until
-// the API server accepts a watch again. The reflector waits out a
-// backoff of up to a minute before that, and a write made in that time,
-// such as a withdrawn Cluster rollback or a removed reboot approval, is
-// in no copy. A pass that acted on the copy could stage the old target
-// and write the reboot intent before any 409 stopped it. So the pass
-// reads the API server, which fails while it is down: the Node read
-// then fails and a granted reboot skips the drain, and the Machine read
-// keeps the last copy for the status the pass publishes.
+// A watch that the API server accepts again reports synced before the
+// events that it missed arrive. So the next pass reads every kind from
+// the API server (reader.throughAPIOnce). The recovery also starts a
+// pass, because a pass whose writes failed during the outage
+// scheduled nothing else to run it again.
 
 import (
 	"context"
@@ -100,7 +93,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// The kinds this operator watches, as the dynamic client names them.
 var (
 	likenVersion       = schema.GroupVersion{Group: "liken.sh", Version: strings.TrimPrefix(api.APIVersion, "liken.sh/")}
 	machineResource    = likenVersion.WithResource("machines")
@@ -114,7 +106,7 @@ var (
 	operatorPodLabel   = "app=liken-machine-operator"
 )
 
-// The kind labels of liken_watch_restarts_total, one for each watch.
+// The values of the kind label of liken_watch_restarts_total.
 const (
 	nodeKind          = "Node"
 	clusterWatchKind  = "Cluster"
@@ -124,20 +116,20 @@ const (
 	disruptionKind    = "Disruption"
 )
 
-// watchKinds lists every kind label above, with the Machine's, so the
-// counter reports a zero for each watch before its first restart.
+// watchKinds lists every kind label, including the Machine's, so the
+// counter reports 0 for each watch before its first restart.
 var watchKinds = []string{machineKind, nodeKind, clusterWatchKind, secretKind, podKind, resourceSliceKind, disruptionKind}
 
-// reader reads each API object a pass judges: from the copy a watch
-// keeps, or from the API server when the copy cannot answer. A reader
-// with no copies at all reads the API server every time, which is what
-// the tests of a pass use.
+// reader reads each API object that a pass uses, from the watch's copy
+// when the copy is synced, and from the API server otherwise. A reader
+// with no copies, as in the tests of a pass, reads the API server every
+// time.
 type reader struct {
 	client *apiclient.Client
 
 	// recorder posts the Events of a pass about its Machine (events.go).
-	// It is here because every part of a pass that acts reads through
-	// the reader. A nil recorder posts nothing.
+	// It is a field of reader because every step of a pass that acts
+	// receives the reader. A nil recorder posts nothing.
 	recorder *events.Recorder
 
 	machines    *informer.Collection
@@ -148,53 +140,49 @@ type reader struct {
 	slices      *informer.Collection
 	disruptions *informer.Collection
 
-	// machineVersions is the memo of this operator's own status writes
-	// to its Machine, and of its reads of it from the API server
-	// (kubernetes/memo). The watch delivers a write a moment after the
-	// API server answers it, so without the memo the next pass could
-	// start from a copy older than the status it just wrote. The pass
-	// also writes its Node's taints and its ResourceSlice with the
-	// version it read, and a copy older than its own write ends in a
-	// 409 that the next pass repairs, so neither kind has a memo. Its
-	// other Node writes are merge patches that a second pass sends
-	// again with no harm.
+	// machineVersions records the resourceVersion of each status write
+	// this operator makes to its Machine, and of each read of it from
+	// the API server (kubernetes/memo). The watch receives a write a
+	// moment after the API server responds to it, so without the
+	// record the next pass could read a copy older than the status it
+	// just wrote.
+	//
+	// The Node and the ResourceSlice need no such record. The pass
+	// writes the Node's taints and the ResourceSlice with the
+	// resourceVersion it read, so a write from a stale copy fails with
+	// 409 and the next pass retries. Its other Node writes are merge
+	// patches, which are safe to send again.
 	machineVersions *memo.Versions
 
-	// statusWritten remembers this operator's own last status write to
-	// its Machine (kubernetes.OwnWrite). The Machine watch reads it to
-	// tell the conductor's grant or the sweep's verdict from the echo
-	// of the write, which would otherwise wake a second pass for each
-	// write.
+	// statusWritten records this operator's last status write to its
+	// Machine (kubernetes.OwnWrite), so the Machine watch starts no
+	// pass for the echo of that write.
 	statusWritten *kubernetes.OwnWrite
 
-	// slicesWritten remembers this operator's own last write of its
-	// ResourceSlice (kubernetes.SliceWriter). The slice watch reads it
-	// to tell another writer's update from this operator's echo.
+	// slicesWritten records this operator's last write of its
+	// ResourceSlice (kubernetes.SliceWriter), so the slice watch starts
+	// no pass for the echo of that write.
 	slicesWritten *kubernetes.SliceWriter
 
-	// recovered is set by a watch that the API server accepts again
-	// after a watch on the same kind failed, and the loop clears it at
-	// the start of the next pass. A copy is marked ready the moment the
-	// resumed watch is accepted, before the events missed during the
-	// outage arrive, so that pass reads every kind from the API server
-	// (throughAPI).
+	// recovered is set when the API server accepts a watch again after
+	// a watch of the same kind failed, and throughAPIOnce clears it.
 	recovered *atomic.Bool
 
 	// throughAPI makes every read of this pass go to the API server.
 	throughAPI bool
 
-	// sysctls keeps what the operator last wrote to each kernel
-	// parameter (conditions.go). A nil memory remembers nothing.
+	// sysctls records the value that the operator last wrote to each
+	// kernel parameter, and the value it read back (conditions.go).
 	sysctls *sysctlMemory
 
-	// waits runs the watches of the waits (waits.go). A nil waits
-	// watches nothing, and those reads go to the API server.
+	// waits runs the watches that the waits use (waits.go). A nil value
+	// starts no watch, and those reads go to the API server.
 	waits *waits
 }
 
-// withoutHeartbeats removes the times that the kubelet rewrites in a
-// Node's conditions on each status report, so a report that changed no
-// condition wakes no pass.
+// withoutHeartbeats removes lastHeartbeatTime from each of a Node's
+// conditions, so a kubelet status report that changed no condition
+// compares equal to the previous copy.
 func withoutHeartbeats(fields map[string]any) {
 	conditions, _, _ := unstructured.NestedSlice(fields, "status", "conditions")
 	for _, c := range conditions {
@@ -207,16 +195,16 @@ func withoutHeartbeats(fields map[string]any) {
 	}
 }
 
-// within answers a reader for one pass whose requests end with ctx.
+// within returns a reader whose requests stop when ctx ends.
 func (r *reader) within(ctx context.Context) *reader {
 	pass := *r
 	pass.client = kubernetes.Within(r.client, ctx)
 	return &pass
 }
 
-// observedBy answers a reader for one pass, whose client reports the
-// final answer to each request into the pass's outcome. It shares
-// every copy, memo, and recorder with r. A nil outcome answers r.
+// observedBy returns a reader whose client reports the final result of
+// each request to out. It shares every copy, version record, and
+// recorder with r. A nil out returns r.
 func (r *reader) observedBy(out *passOutcome) *reader {
 	if out == nil {
 		return r
@@ -226,10 +214,10 @@ func (r *reader) observedBy(out *passOutcome) *reader {
 	return &pass
 }
 
-// watchThisMachine opens the watches and returns the reader over their
-// copies. Each change that needs a pass calls wake. clusterName is
-// empty on a machine with no cluster document, which reads no Cluster
-// and no Secret, so it opens neither watch.
+// watchThisMachine opens the watches and returns the reader of their
+// copies. A change that needs a pass calls wake. clusterName is empty
+// on a machine with no cluster document, which reads no Cluster or
+// Secret, so it opens neither watch.
 func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *apiclient.Client,
 	name, clusterName string, wake func(), restarted func(kind string)) *reader {
 	r := &reader{client: client, machineVersions: memo.New(),
@@ -244,13 +232,12 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 				r.recovered.Store(true)
 				wake()
 			},
-			// A copy stops answering after any failed watch, as the
-			// head of this file says.
+			// See the comment at the top of this file.
 			UnreadyOnWatchError: true,
 		}
-		// A cluster whose leaders run a release from before the
-		// Disruptions does not serve the kind until a leader boots a
-		// release that has it (requests.go).
+		// When the cluster's leaders run a release that has no
+		// Disruption CRD, the list returns 404. The copy is then empty
+		// and reports synced (requests.go).
 		if kind == disruptionKind {
 			options.Absent = apierrors.IsNotFound
 		}
@@ -280,14 +267,11 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 	return r
 }
 
-// sliceHandler wakes the loop when the slice is deleted, or updated by
-// a writer other than this operator. The kubelet deletes a driver's
-// slices when it starts, so a restart of k3s deletes this node's slice,
-// and the pass writes it again. The operator's own write reaches the
-// watch as an update at the version the write answered, and wakes
-// nothing (kubernetes.SliceWriter). An update that the informer
-// delivers after it reads the collection again, at a resourceVersion
-// that did not move, is no change.
+// sliceHandler wakes the loop when the slice is deleted or updated by a
+// writer other than this operator. The echo of the operator's own write
+// is an update at the resourceVersion that the write returned. An
+// update with an unchanged resourceVersion, which the informer sends
+// after it lists again, is not a change.
 func sliceHandler(written *kubernetes.SliceWriter, wake func()) cache.ResourceEventHandler {
 	return cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(before, after any) {
@@ -302,10 +286,10 @@ func sliceHandler(written *kubernetes.SliceWriter, wake func()) cache.ResourceEv
 	}
 }
 
-// throughAPIOnce answers the reader for one pass: one that reads every
-// kind from the API server when a watch recovered since the last pass,
-// and r otherwise. The flag is set before the recovery's wake, so the
-// pass that clears it reads after the recovery, whichever pass that is.
+// throughAPIOnce returns a reader that reads every kind from the API
+// server when a watch has recovered since the last call, and r
+// otherwise. recovered is set before the recovery wakes the loop, so
+// the pass that clears it always starts after the recovery.
 func (r *reader) throughAPIOnce() *reader {
 	if r.recovered == nil || !r.recovered.Swap(false) {
 		return r
@@ -315,10 +299,9 @@ func (r *reader) throughAPIOnce() *reader {
 	return &pass
 }
 
-// machine reads this machine's own Machine. The copy answers only at
-// the version of this operator's own last status write or read, and
-// the pass otherwise reads the API server once, so a pass never starts
-// from a copy older than the status it just wrote.
+// machine reads this machine's Machine. It uses the copy only when the
+// copy is at the version of this operator's last status write or read
+// (machineVersions), and reads the API server otherwise.
 func (r *reader) machine(name string) (*machine.Machine, error) {
 	if r.throughAPI {
 		return r.freshMachine(name)
@@ -327,20 +310,17 @@ func (r *reader) machine(name string) (*machine.Machine, error) {
 		informer.Held{View: r.machines.View(), Versions: r.machineVersions}, name, kubernetes.MachinesPath+"/"+name)
 }
 
-// freshMachine reads this machine's Machine from the API server, and
-// notes the version for the Machine's copy.
+// freshMachine reads this machine's Machine from the API server and
+// records the version it read.
 func (r *reader) freshMachine(name string) (*machine.Machine, error) {
 	return informer.ReadFresh[machine.Machine](r.client, r.machineVersions, name, kubernetes.MachinesPath+"/"+name)
 }
 
-// publishStatus writes this machine's status, and notes the version the
-// API server answered for the Machine's copy. A write that fails notes
-// that this operator holds no current copy, because a request that
-// timed out can still have landed, so the next read goes to the API
-// server.
-//
-// The write is also this operator's own, so the Machine watch does not
-// wake the loop for its echo.
+// publishStatus writes this machine's status and records the version
+// that the API server returned, and records the write as this
+// operator's own. When the write fails, the record marks the copy as
+// possibly stale and the next read goes to the API server, because a
+// request that timed out can still have been applied.
 func (r *reader) publishStatus(m *machine.Machine, status *machine.MachineStatus) error {
 	return r.ownStatusWrites().Send(func() (string, error) {
 		var version string
@@ -353,8 +333,8 @@ func (r *reader) publishStatus(m *machine.Machine, status *machine.MachineStatus
 	})
 }
 
-// ownStatusWrites answers the reader's memory of its status writes, or
-// one that remembers nothing for a reader with no watches.
+// ownStatusWrites returns the record of this reader's status writes. A
+// reader with no watches gets an empty record that nothing consults.
 func (r *reader) ownStatusWrites() *kubernetes.OwnWrite {
 	if r.statusWritten == nil {
 		return &kubernetes.OwnWrite{}
@@ -362,7 +342,6 @@ func (r *reader) ownStatusWrites() *kubernetes.OwnWrite {
 	return r.statusWritten
 }
 
-// node reads this machine's Node.
 func (r *reader) node(name string) (*nodeObject, error) {
 	if n, found, ok := watch.Get[nodeObject](r.view(r.nodes), name); ok {
 		return orNotFound(n, found)
@@ -370,7 +349,6 @@ func (r *reader) node(name string) (*nodeObject, error) {
 	return getNode(r.client, name)
 }
 
-// cluster reads the Cluster this machine belongs to.
 func (r *reader) cluster(name string) (*cluster.Cluster, error) {
 	if c, found, ok := watch.Get[cluster.Cluster](r.view(r.clusters), name); ok {
 		return orNotFound(c, found)
@@ -391,8 +369,8 @@ func (r *reader) registryCredentials() (*kubernetes.Secret, error) {
 	return kubernetes.GetRegistryCredentialsSecret(r.client)
 }
 
-// operatorPods reads this node's own machine-operator pod, as a list
-// of one, or none early in a boot.
+// operatorPods lists this node's machine-operator pod. The list is
+// empty early in a boot, before the pod exists.
 func (r *reader) operatorPods(nodeName string) ([]kubernetes.Pod, error) {
 	if pods, ok := watch.List[kubernetes.Pod](r.view(r.ownPods)); ok {
 		return pods, nil
@@ -400,8 +378,8 @@ func (r *reader) operatorPods(nodeName string) ([]kubernetes.Pod, error) {
 	return kubernetes.List[kubernetes.Pod](r.client, ownPodPath(nodeName))
 }
 
-// resourceSlice reads this node's ResourceSlice, nil when it does not
-// exist.
+// resourceSlice reads this node's ResourceSlice, and returns nil when
+// it does not exist.
 func (r *reader) resourceSlice(nodeName string) (*kubernetes.ResourceSlice, error) {
 	if s, found, ok := watch.Get[kubernetes.ResourceSlice](r.view(r.slices), kubernetes.ResourceSliceName(nodeName)); ok {
 		if !found {
@@ -412,9 +390,9 @@ func (r *reader) resourceSlice(nodeName string) (*kubernetes.ResourceSlice, erro
 	return kubernetes.GetResourceSlice(r.client, nodeName)
 }
 
-// view answers a copy's view, or the view of no copy on a pass that
-// reads through the API server, which answers nothing, so the read
-// goes to the API server.
+// view returns the view of a copy. When throughAPI is set it returns
+// the view of a nil collection, which is never ready, so the read goes
+// to the API server.
 func (r *reader) view(c *informer.Collection) informer.View {
 	if r.throughAPI {
 		var none *informer.Collection
@@ -423,8 +401,8 @@ func (r *reader) view(c *informer.Collection) informer.View {
 	return c.View()
 }
 
-// orNotFound turns a ready store's answer into the answer a direct read
-// gives: the object, or apiclient.ErrNotFound.
+// orNotFound converts the result of a store read into the result of a
+// direct read: the object, or apiclient.ErrNotFound.
 func orNotFound[T any](item *T, found bool) (*T, error) {
 	if !found {
 		return nil, apiclient.ErrNotFound
@@ -432,8 +410,8 @@ func orNotFound[T any](item *T, found bool) (*T, error) {
 	return item, nil
 }
 
-// sliceWriter answers the reader's slice writer, or a writer with no
-// memory for a reader that has none.
+// sliceWriter returns the record of this reader's ResourceSlice writes.
+// A reader with no watches gets an empty record that nothing consults.
 func (r *reader) sliceWriter() *kubernetes.SliceWriter {
 	if r.slicesWritten == nil {
 		return &kubernetes.SliceWriter{}

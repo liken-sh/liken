@@ -1,27 +1,18 @@
 package main
 
-// Draining empties a node of workloads before its granted reboot.
+// The drain moves pods off this machine's node before a reboot, the
+// way `kubectl drain` does. It cordons the node so nothing new is
+// scheduled there, then evicts each pod through the Eviction API. The
+// API server refuses an eviction with a 429 when it would break the
+// workload's PodDisruptionBudget, which a plain delete would ignore.
+// The drain starts when cluster-operator grants this machine its
+// reboot turn (cluster-operator/rollout.go).
 //
-// An unannounced reboot stops every pod on the machine at once, in
-// the middle of whatever it was doing. Kubernetes answers this
-// problem with `kubectl drain`: mark the node unschedulable so
-// nothing new lands on it (a cordon), then ask each pod to leave
-// through the Eviction API. Asking, rather than deleting directly,
-// is the point. The API server refuses an eviction (429) when it
-// would violate the workload's own PodDisruptionBudget. That
-// refusal is the entire benefit over plain deletion: the workload's
-// availability promise holds while the machine empties. This file
-// implements that procedure. The machine's own operator runs it on
-// itself when the rollout conductor grants its turn (rollout.go).
-//
-// The drain runs in steps, by design. One reconcile pass cordons
-// the node and asks pods to leave; the next pass checks what
-// remains and asks again. Blocking a pass until the node empties
-// would stop the operator's heartbeat, and a machine that stops
-// sending its heartbeat gets declared Lost. So the drain must never
-// make a healthy machine look dead. The drain's state lives on the
-// Node itself, in annotations, so a restarted operator resumes where
-// it left off.
+// Each reconcile pass cordons the node if needed, evicts what it can,
+// and returns. A pass that blocked until the node was empty would stop
+// the heartbeat, and cluster-operator marks a machine without a
+// heartbeat Lost. The drain's state is in annotations on the Node, so
+// a restarted operator continues the same drain.
 
 import (
 	"encoding/json"
@@ -36,58 +27,53 @@ import (
 )
 
 const (
-	// cordonedAnnotation marks a cordon as one that liken applied.
-	// Uncordoning checks this annotation: a node that was already
-	// unschedulable when the drain started was cordoned by a person,
-	// and the operator must not remove their cordon.
+	// cordonedAnnotation marks a cordon that the operator applied. A
+	// node that was already unschedulable when the drain started was
+	// cordoned by a person, so only a node with this annotation is
+	// uncordoned.
 	cordonedAnnotation = "liken.sh/cordoned"
 
-	// drainingSinceAnnotation records when the drain's deadline
-	// started. It lives on the Node rather than in memory, so the
-	// deadline keeps running across operator restarts.
+	// drainingSinceAnnotation records when the drain started. The
+	// deadline counts from it, so an operator restart does not reset
+	// the deadline.
 	drainingSinceAnnotation = "liken.sh/draining-since"
 
-	// mirrorPodAnnotation is how the kubelet marks a static pod's
-	// reflection in the API server. The kubelet recreates mirror pods
-	// from disk, so the operator cannot evict them, and the drain
-	// skips them.
+	// mirrorPodAnnotation marks the API object of a static pod. The
+	// kubelet runs that pod from a manifest on disk, so evicting it does
+	// nothing.
 	mirrorPodAnnotation = "kubernetes.io/config.mirror"
 
-	// unschedulableTaint is the taint that a cordon puts on a Node.
+	// unschedulableTaint is the taint that Kubernetes adds to a
+	// cordoned Node.
 	unschedulableTaint = "node.kubernetes.io/unschedulable"
 
-	// drainDeadline limits how long workloads may delay the reboot. A
-	// pod that has not moved by this deadline (because a
-	// PodDisruptionBudget can never be satisfied, or a workload has
-	// nowhere to go) stays running through the reboot instead. A
-	// machine that can never apply its staged change is worse than a
-	// pod that has to restart.
+	// drainDeadline is the longest that pods can delay the reboot. A
+	// PodDisruptionBudget can refuse an eviction forever, or a pod can
+	// have no other node to go to. The machine reboots anyway at the
+	// deadline, because a machine that can never apply its staged change
+	// is worse than a pod that restarts.
 	drainDeadline = 5 * time.Minute
 )
 
-// evictablePods returns the pods a drain actually has to move. It
-// excludes DaemonSet pods, because the DaemonSet controller ignores
-// the cordon and would just recreate them (this operator is itself
-// a DaemonSet pod). It also excludes mirror pods, because the
-// kubelet recreates those from disk, and pods that have already run
-// to completion.
+// evictablePods returns the pods that the drain has to move. It leaves
+// out:
+//   - pods that have completed.
+//   - mirror pods, which the kubelet recreates from disk.
+//   - DaemonSet pods, because the DaemonSet controller ignores the
+//     cordon and would recreate them. This operator is one of them.
+//   - pods that tolerate the cordon's taint by its key. The scheduler
+//     can put such a pod, or its replacement, back on the cordoned
+//     node, so evicting it only restarts it. Pods tolerate the cordon
+//     on purpose so that they keep running on a drained node: the pod
+//     that works on the machine while a Disruption holds the reboot
+//     turn (hold.go), and the operator that releases that hold. A
+//     toleration with an empty key and the Exists operator matches
+//     every taint, but it is not aimed at the cordon, so that pod is
+//     still evicted.
 //
-// It also excludes a pod that tolerates the cordon by its key. The
-// scheduler can place such a pod, or its replacement, straight back
-// onto the cordoned node, so an eviction moves nothing, and a drain
-// that repeats it only restarts the pod until the deadline. A pod
-// says this on purpose: a requester whose pod works on the machine
-// while a Disruption holds the turn (hold.go), and the operator that
-// removes the hold, which must keep running on a machine it holds
-// drained when no other node accepts it. A blanket toleration with no
-// key states nothing about the cordon, so that pod still moves.
-//
-// A completed pod also stops counting as a claim holder, and that is
-// safe for its DRA driver. The kubelet unprepares a pod's claims after
-// its containers stop and before it reports a terminal phase, and its
-// status manager holds the phase back while the DRA manager still
-// holds a claim for the pod. So a pod that the listing shows as
-// Succeeded or Failed needs no unprepare call from its driver.
+// A completed pod needs nothing more from its DRA driver, because the
+// kubelet unprepares a pod's claims before the pod reports a terminal
+// phase.
 func evictablePods(pods []kubernetes.Pod) []kubernetes.Pod {
 	var evictable []kubernetes.Pod
 	for _, p := range pods {
@@ -105,8 +91,8 @@ func evictablePods(pods []kubernetes.Pod) []kubernetes.Pod {
 	return evictable
 }
 
-// toleratesCordon reports whether a toleration names the cordon's
-// taint by its key, for the effect NoSchedule that the cordon sets.
+// toleratesCordon reports whether the pod has a toleration with the
+// cordon's taint key that matches the NoSchedule effect.
 func toleratesCordon(p kubernetes.Pod) bool {
 	for _, t := range p.Spec.Tolerations {
 		if t.Key != unschedulableTaint || (t.Effect != "" && t.Effect != "NoSchedule") {
@@ -119,35 +105,25 @@ func toleratesCordon(p kubernetes.Pod) bool {
 	return false
 }
 
-// draPluginPaths are the kubelet directories that a DRA driver's
-// pod mounts from the host. The kubelet discovers a driver by
-// watching plugins_registry for the driver's registration socket,
-// and it makes its prepare and unprepare calls on a second socket,
-// which the driver serves from its own directory under plugins. A
-// pod that mounts neither of these cannot be serving a driver.
+// draPluginPaths are the kubelet directories that a DRA driver's pod
+// mounts from the host. The kubelet finds a driver by its registration
+// socket in plugins_registry, and calls prepare and unprepare on a
+// socket in the driver's directory under plugins.
 var draPluginPaths = []string{
 	"/var/lib/kubelet/plugins_registry",
 	"/var/lib/kubelet/plugins",
 }
 
-// servesDRAPlugin reports whether the pod serves a DRA driver on
-// this node. The test reads the pod's own hostPath mounts, which the
-// drain already has in hand, and it needs no read of the node's
-// ResourceSlices. That second route does not reach a pod anyway:
-// a slice names its driver, and nothing in the API links a driver
-// name back to the pod that serves it.
+// servesDRAPlugin reports whether the pod mounts a DRA driver's kubelet
+// directories. Nothing in the API links a driver in a ResourceSlice to
+// the pod that serves it, so the hostPath mounts are the only signal.
+// The check also matches a CSI driver, which registers in the same
+// directory. That only moves the pod to the second phase of
+// drainOrder.
 //
-// The test names no driver, so it also matches pods that mount these
-// directories for another reason: a CSI driver registers through the
-// same directory, and so would a pod that mounts it to look at it.
-// The cost of a wrong match is ordering alone. Such a pod leaves in
-// the second phase, a few seconds later than it could have.
-//
-// liken's own driver, liken.sh, is this operator. It matches the
-// test and never reaches it, because it runs as a DaemonSet pod and
-// evictablePods drops those first. So nothing ever sequences against
-// liken's driver, which is correct: the kubelet keeps calling it
-// until the machine reboots.
+// This operator is the DRA driver for liken.sh and matches the check.
+// evictablePods leaves it out as a DaemonSet pod, so the kubelet can
+// call it until the machine reboots.
 func servesDRAPlugin(p kubernetes.Pod) bool {
 	for _, v := range p.Spec.Volumes {
 		if v.HostPath == nil {
@@ -162,51 +138,30 @@ func servesDRAPlugin(p kubernetes.Pod) bool {
 	return false
 }
 
-// holdsResourceClaim reports whether the pod consumes DRA devices.
-// spec.resourceClaims is the whole signal. A pod that names a claim
-// directly and a pod that gets one from a template both carry an
-// entry there, and the kubelet calls NodeUnprepareResources for
-// either one. What the entry points at does not change the order the
-// pods leave in, so the drain reads no further.
+// holdsResourceClaim reports whether the pod uses DRA devices. The
+// kubelet unprepares every entry of spec.resourceClaims, whether it
+// names a ResourceClaim or a template.
 func holdsResourceClaim(p kubernetes.Pod) bool {
 	return len(p.Spec.ResourceClaims) > 0
 }
 
-// drainOrder returns the pods to ask to leave on this pass, so that
-// a claim holder always leaves before the driver that prepared its
-// claim.
+// drainOrder returns the pods to evict on this pass. Pods that use DRA
+// claims must leave before the DRA drivers. While a pod terminates, the
+// kubelet calls NodeUnprepareResources on its driver. When the driver
+// is already gone, the call fails and the kubelet retries it without
+// limit, so the pod never finishes terminating.
 //
-// The kubelet calls NodeUnprepareResources while a pod terminates,
-// on the driver's own socket. A driver whose pod is already gone
-// answers nothing, and the kubelet retries the unprepare with no
-// bound, so the pod never finishes terminating. The drain then sits
-// until drainDeadline and the machine reboots with the pod still on
-// it, which is the outcome the drain exists to avoid.
+// So drainOrder evicts every pod that is not a driver first. It adds
+// the drivers only on a pass where no pod with a claim is in the
+// listing. A terminating pod stays in the listing until the kubelet
+// finishes with it, so a terminating pod with a claim still holds back
+// the drivers. A terminating pod is not evicted again.
 //
-// The first phase asks every other pod to leave, claim holders
-// included. The second phase asks the driver pods, and it starts
-// only on a pass where no claim holder is left on the node. The
-// Eviction API returns as soon as the API server accepts the
-// request, long before the pod is gone, so the pod listing is what
-// reports the termination: a terminating pod stays in the listing
-// until the kubelet finishes with it. The node's pod watch wakes a pass
-// when a pod leaves, and each pass runs this split again, so the wait
-// blocks nothing, and drainDeadline bounds it. Past the deadline decideDrainStep
-// clears the drain and the reboot proceeds.
-//
-// A driver pod that holds a claim of its own belongs in the second
-// phase, and the driver test runs first to put it there. A device
-// operator claims its raw hardware from liken.sh, whose driver is
-// this operator, which no drain evicts. So a driver pod's own claim
-// has no pod to wait for, and the first phase would only make the
-// pod wait for itself.
-//
-// A pod that is already terminating is not asked again, because an
-// earlier pass asked it and the API server accepted. This holds for a
-// driver pod too. A terminating claim holder still counts as a holder
-// until it completes or leaves the listing, because the kubelet
-// unprepares its claim while it terminates, and the driver must stay
-// until that call is done.
+// A driver pod that has a claim of its own goes with the drivers. A
+// device operator claims its hardware from liken.sh, whose driver is
+// this operator, and the drain never evicts this operator. If that
+// claim held back the drivers, the device operator would wait for
+// itself.
 func drainOrder(evictable []kubernetes.Pod) []kubernetes.Pod {
 	var first, drivers []kubernetes.Pod
 	holders := 0
@@ -230,32 +185,27 @@ func drainOrder(evictable []kubernetes.Pod) []kubernetes.Pod {
 	return append(first, drivers...)
 }
 
-// A drainStep is one pass's worth of drain: the Node patch to apply
-// (nil when the cordon and deadline record are already in place),
-// the pods to ask to leave on this pass, how many pods still have to
-// move, and whether the node is clear, meaning nothing is left
-// delaying the reboot. The two pod counts differ while the drain
-// holds a driver back for its claim holders.
+// A drainStep is what one pass of the drain does.
 type drainStep struct {
-	patch     []byte
+	// patch cordons the node and sets draining-since. It is nil when
+	// both are already set.
+	patch []byte
+	// evict holds the pods to evict on this pass. It is shorter than
+	// remaining while the drivers wait for the pods with claims.
 	evict     []kubernetes.Pod
 	remaining int
-	clear     bool
-
-	// deadline is when the drain stops waiting: draining-since plus
-	// drainDeadline. The annotation holds whole seconds, so the
-	// deadline comes from the parsed annotation, not from the time in
-	// memory.
+	// clear is true when the node can reboot.
+	clear bool
+	// deadline is draining-since plus drainDeadline, at the whole
+	// seconds of the annotation.
 	deadline time.Time
 }
 
-// decideDrainStep is the drain's decision for one pass. The
-// deadline runs from the draining-since annotation. A node without
-// this annotation gets it recorded now, along with the cordon, if
-// the node is not already unschedulable. The pass that reaches the
-// deadline lets the reboot proceed, the same rule Cluster API uses for
-// its drain timeout, so the pass that the deadline's own wake starts
-// does not hold.
+// decideDrainStep returns what one pass of the drain does. When the
+// node is schedulable or has no valid draining-since annotation, the
+// step sets draining-since to now, and it cordons the node when it is
+// schedulable. At or after the deadline the step clears the node with
+// pods still on it, as Cluster API does when its drain timeout passes.
 func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) drainStep {
 	var step drainStep
 
@@ -273,7 +223,7 @@ func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) dra
 
 	step.deadline = since.Add(drainDeadline)
 	if !now.Before(step.deadline) {
-		step.clear = true // the reboot proceeds; whatever remains stays running through it
+		step.clear = true
 		return step
 	}
 	evictable := evictablePods(pods)
@@ -283,76 +233,69 @@ func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) dra
 	return step
 }
 
-// gateThroughDrain intercepts a convergence that requires a reboot
-// and releases it only once this machine's node is clear. It cordons
-// the node and evicts pods. Until nothing evictable remains, or the
-// deadline passes, it holds the reboot and reports the drain's
-// progress on the same condition. The cordon posts one Event about
-// the Machine, because it is the start of the drain and the Node
-// carries no record of who cordoned it or why.
+// gateThroughDrain withholds the reboot of conv until the node is
+// clear or the deadline passes, and reports the drain on conv's
+// condition. The cordon posts an Event on the Machine, because the
+// Node does not record who cordoned it or why.
 //
-// Three things wake the pass that looks again. The node's pod watch
-// wakes it when a pod leaves, the budget watch wakes it when a budget
-// allows an eviction it refused (waits.go), and the outcome asks for a
-// pass at the deadline.
+// The next pass starts when a pod leaves the node, when a
+// PodDisruptionBudget changes (watchBudgets in waits.go), or at the
+// deadline.
 func gateThroughDrain(r *reader, node *nodeObject, conv convergence, now time.Time, notes machineEvents, out *passOutcome) convergence {
 	r.watchBudgets()
 	pods, err := r.nodePods(node.Metadata.Name)
 	if err != nil {
-		fmt.Printf("listing pods for the drain: %v\n", err)
-		return holdForDrain(conv, "listing this node's pods failed; retrying")
+		fmt.Printf("listing the pods of Node %s for the drain: %v\n", node.Metadata.Name, err)
+		return holdForDrain(conv, "The reboot waits because the pods of the Node cannot be listed. The operator retries")
 	}
 	step := decideDrainStep(node, pods, now)
 	if step.patch != nil {
 		if err := kubernetes.PatchJSON(r.client, nodesPath+"/"+node.Metadata.Name, step.patch); err != nil {
-			fmt.Printf("cordoning %s: %v\n", node.Metadata.Name, err)
-			return holdForDrain(conv, "cordoning this node failed; retrying")
+			fmt.Printf("cordoning Node %s: %v\n", node.Metadata.Name, err)
+			return holdForDrain(conv, "The reboot waits because the Node is not cordoned. The operator retries")
 		}
-		fmt.Printf("cordoned %s ahead of its reboot\n", node.Metadata.Name)
-		notes.normal(reasonCordoned, fmt.Sprintf("cordoned the Node %s ahead of the reboot; %d pods to move", node.Metadata.Name, step.remaining))
+		fmt.Printf("cordoned Node %s ahead of its reboot\n", node.Metadata.Name)
+		notes.normal(reasonCordoned, fmt.Sprintf("Cordoned the Node %s before the reboot. Pods to evict: %d", node.Metadata.Name, step.remaining))
 	}
 	evict(r, step.evict, now, out)
 	if step.clear {
 		return conv
 	}
 	out.wakeBy(step.deadline)
-	return holdForDrain(conv, fmt.Sprintf("draining this node ahead of the reboot; %d pods still to move", step.remaining))
+	return holdForDrain(conv, fmt.Sprintf("The Node is draining before the reboot. Pods left to evict: %d", step.remaining))
 }
 
-// evict asks each pod to leave, and sorts the answers the way
-// `kubectl drain` does (k8s.io/kubectl/pkg/drain). A 404 means the pod
-// is gone already, which happens when the copy is a moment behind. A
-// 429 means a PodDisruptionBudget refused it, and the budget is working
-// as intended: when the answer states a wait, the pass asks for a wake
-// then, and otherwise the budget watch wakes the pass when a budget
-// allows an eviction. Neither is a failure of the pass. Every other
-// refusal, such as a 403, a 5xx, or no answer, reaches the outcome
-// through the pass's observer, for milestone 76's retry.
+// evict evicts each pod and handles the responses as `kubectl drain`
+// does (k8s.io/kubectl/pkg/drain). A 404 means the pod is already
+// gone. A 429 means a PodDisruptionBudget refused the eviction, and it
+// is not a failure: the pass wakes at the Retry-After time when the
+// response has one, and otherwise waits for the budget to change. The
+// observer records every other error as a failure of the pass, so the
+// loop retries.
 func evict(r *reader, pods []kubernetes.Pod, now time.Time, out *passOutcome) {
 	if len(pods) == 0 {
 		return
 	}
-	client := r.client.WithObserver(func(answer apiclient.Outcome) {
-		if answer.Status == http.StatusNotFound || answer.Status == http.StatusTooManyRequests {
+	client := r.client.WithObserver(func(result apiclient.Outcome) {
+		if result.Status == http.StatusNotFound || result.Status == http.StatusTooManyRequests {
 			return
 		}
-		out.observe(answer)
+		out.observe(result)
 	})
 	for _, p := range pods {
 		err := kubernetes.EvictPod(client, p)
 		if err == nil {
 			continue
 		}
-		fmt.Printf("evicting %s/%s: %v\n", p.Metadata.Namespace, p.Metadata.Name, err)
+		fmt.Printf("evicting Pod %s/%s: %v\n", p.Metadata.Namespace, p.Metadata.Name, err)
 		if seconds := apiclient.RetryAfterSeconds(err); seconds > 0 {
 			out.wakeBy(now.Add(time.Duration(seconds) * time.Second))
 		}
 	}
 }
 
-// holdForDrain keeps reporting the convergence on its own condition
-// while the drain works. It keeps the same condition type, withholds
-// the reboot, and sets the reason to Draining.
+// holdForDrain withholds the reboot and sets conv's condition to False
+// with the reason Draining.
 func holdForDrain(conv convergence, message string) convergence {
 	conv.requestReboot = false
 	conv.condition = api.Condition{
@@ -361,30 +304,26 @@ func holdForDrain(conv convergence, message string) convergence {
 	return conv
 }
 
-// decideUncordon reports whether a node carries a cordon that this
-// operator applied. It returns true only for the operator's own
-// cordon: the annotation records that the operator set it, and a
-// cordon without the annotation belongs to a person.
+// decideUncordon reports whether the node has a cordon that this
+// operator applied.
 func decideUncordon(node *nodeObject) bool {
 	return node.Spec.Unschedulable && node.Metadata.Annotations[cordonedAnnotation] == "true"
 }
 
-// uncordonMessage says why the cordon ends. The drain records when it
-// began on the Node, and a boot that started after that moment is the
-// reboot the drain was for. A boot from before it means the request
-// went away during the drain, a person's deleted Disruption or a
-// staged document taken back, and the machine never rebooted.
+// uncordonMessage returns the Event message for the uncordon. A boot
+// before draining-since means the machine did not reboot, because the
+// reboot request ended during the drain: for example, a person deleted
+// the Disruption or withdrew the staged document.
 func uncordonMessage(node *nodeObject, boot *time.Time) string {
 	since, err := time.Parse(time.RFC3339, node.Metadata.Annotations[drainingSinceAnnotation])
 	if err == nil && boot != nil && boot.Before(since) {
-		return "uncordoned the Node " + node.Metadata.Name + "; nothing waits for its reboot any more, so it did not reboot"
+		return "Uncordoned the Node " + node.Metadata.Name + " without a reboot, because no request waits for one"
 	}
-	return "uncordoned the Node " + node.Metadata.Name + "; its reboot is complete"
+	return "Uncordoned the Node " + node.Metadata.Name + " after its reboot"
 }
 
-// uncordonPatch releases the node back to the scheduler and removes
-// the drain's recorded state. In a merge patch, a null value deletes
-// the key.
+// uncordonPatch makes the node schedulable and deletes the drain's
+// annotations. In a JSON merge patch, null deletes a key.
 func uncordonPatch() []byte {
 	patch, _ := json.Marshal(map[string]any{
 		"spec": map[string]any{"unschedulable": false},

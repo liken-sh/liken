@@ -1,9 +1,5 @@
 package main
 
-// A libusb program in a pod leaves its interface with no driver. The
-// end of the claim must give the interface back to the kernel, and it
-// must do that without ever failing the unprepare call.
-
 import (
 	"os"
 	"path/filepath"
@@ -13,55 +9,56 @@ import (
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 )
 
-// detach removes a device's driver symlink. This is what sysfs shows
-// after a libusb program claims the interface and stops.
+// detach removes a device's driver symlink, as a libusb program does
+// when it detaches the driver.
 func (f *draFixture) detach(t *testing.T, bus, address string) {
 	t.Helper()
 	if err := os.Remove(filepath.Join(draSysfsRoot, "bus", bus, "devices", address, "driver")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the driver symlink of %s: %v", address, err)
 	}
 }
 
-// driversProbe creates the USB bus attribute the repair writes to. On
-// a real machine the kernel creates it with the bus, write-only. Here
-// it is readable, so a test can check what the repair wrote.
+// driversProbe creates the USB bus's drivers_probe file. The kernel
+// makes it write-only, but here it is readable so that a test can
+// check what was written.
 func (f *draFixture) driversProbe(t *testing.T) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(draSysfsRoot, "bus", "usb", "drivers_probe"), nil, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating drivers_probe: %v", err)
 	}
 }
 
-// probed reads back the address the repair wrote.
-func probed(t *testing.T) string {
+// readProbe returns the address that was written to drivers_probe.
+func readProbe(t *testing.T) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(draSysfsRoot, "bus", "usb", "drivers_probe"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading drivers_probe: %v", err)
 	}
 	return string(raw)
 }
 
-// held writes the spec file a prepare would leave for one claim. The
-// file is the only record unprepare has of what the claim held.
-func held(t *testing.T, claimUID, allocated string) {
+// leaveClaimSpec writes the CDI spec file that prepare writes for a
+// claim.
+func leaveClaimSpec(t *testing.T, claimUID, allocated string) {
 	t.Helper()
 	if err := writeCDISpec(claimUID, []cdiDevice{{Name: claimUID + "-" + allocated}}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec of claim %s: %v", claimUID, err)
 	}
 }
 
-// unprepared runs one unprepare call and requires that it succeeds.
+// unprepared calls unprepare and fails the test if the response has
+// an error.
 func unprepared(t *testing.T, fixture *draFixture, claimUID string) {
 	t.Helper()
 	resp, err := fixture.plugin.NodeUnprepareResources(t.Context(), &drav1.NodeUnprepareResourcesRequest{
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: claimUID}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("calling NodeUnprepareResources: %v", err)
 	}
-	if answer := resp.Claims[claimUID]; answer == nil || answer.Error != "" {
-		t.Fatalf("answer = %+v", answer)
+	if result := resp.Claims[claimUID]; result == nil || result.Error != "" {
+		t.Fatalf("the unprepare response for the claim is %+v, want no error", result)
 	}
 }
 
@@ -69,84 +66,73 @@ func TestUnprepareBindsADriverAgainToADetachedInterface(t *testing.T) {
 	fixture := newDRAFixture(t)
 	fixture.driversProbe(t)
 	fixture.detach(t, "usb", "2-1:1.0")
-	held(t, "claim-1", "usb-2-1-1-0")
+	leaveClaimSpec(t, "claim-1", "usb-2-1-1-0")
 
 	unprepared(t, fixture, "claim-1")
 
-	if address := probed(t); address != "2-1:1.0" {
-		t.Errorf("drivers_probe = %q, want the interface the claim held", address)
+	if address := readProbe(t); address != "2-1:1.0" {
+		t.Errorf("drivers_probe = %q, want the interface of the claim", address)
 	}
 	if _, err := os.Stat(filepath.Join(fixture.cdi, "liken.sh-claim-1.json")); !os.IsNotExist(err) {
-		t.Error("the spec file must be gone")
+		t.Error("the CDI spec file still exists, want it removed")
 	}
 }
 
 func TestUnprepareBindsADriverAgainForACompanionName(t *testing.T) {
-	// A companion is one wire of the same physical device, so its name
-	// names the same interface, and that interface is what the repair
-	// gives back.
 	fixture := newDRAFixture(t)
 	fixture.driversProbe(t)
 	fixture.detach(t, "usb", "2-1:1.0")
-	held(t, "claim-1", "usb-2-1-1-0-i2c-dev")
+	leaveClaimSpec(t, "claim-1", "usb-2-1-1-0-i2c-dev")
 
 	unprepared(t, fixture, "claim-1")
 
-	if address := probed(t); address != "2-1:1.0" {
+	if address := readProbe(t); address != "2-1:1.0" {
 		t.Errorf("drivers_probe = %q, want the parent device's interface", address)
 	}
 }
 
 func TestUnprepareLeavesAnInterfaceThatKeptItsDriverAlone(t *testing.T) {
-	// The pod never detached the driver. The interface still holds
-	// usb-storage, so the repair must not write.
+	// The fixture's interface is still bound to usb-storage.
 	fixture := newDRAFixture(t)
 	fixture.driversProbe(t)
-	held(t, "claim-1", "usb-2-1-1-0")
+	leaveClaimSpec(t, "claim-1", "usb-2-1-1-0")
 
 	unprepared(t, fixture, "claim-1")
 
-	if address := probed(t); address != "" {
+	if address := readProbe(t); address != "" {
 		t.Errorf("drivers_probe = %q, want no write", address)
 	}
 }
 
 func TestUnprepareLeavesADeviceOnAnotherBusAlone(t *testing.T) {
-	// A PCI function with no driver is a different case. It binds
-	// through its own bus, and the USB attribute names nothing that
-	// could match it.
 	fixture := newDRAFixture(t)
 	fixture.addGPU(t)
 	fixture.driversProbe(t)
 	fixture.detach(t, "pci", "0000:00:02.0")
-	held(t, "claim-1", "pci-0000-00-02-0")
+	leaveClaimSpec(t, "claim-1", "pci-0000-00-02-0")
 
 	unprepared(t, fixture, "claim-1")
 
-	if address := probed(t); address != "" {
+	if address := readProbe(t); address != "" {
 		t.Errorf("drivers_probe = %q, want no write", address)
 	}
 }
 
 func TestUnprepareWithNoSpecFileWritesNothing(t *testing.T) {
-	// The kubelet repeats an unprepare it is not sure of. The second
-	// call has no record to act on, and it must not walk sysfs or write
-	// anything.
+	// The kubelet can repeat an unprepare, and the repeat finds no
+	// spec file.
 	fixture := newDRAFixture(t)
 	fixture.driversProbe(t)
 	fixture.detach(t, "usb", "2-1:1.0")
 
 	unprepared(t, fixture, "claim-1")
 
-	if address := probed(t); address != "" {
+	if address := readProbe(t); address != "" {
 		t.Errorf("drivers_probe = %q, want no write", address)
 	}
 }
 
 func TestUnprepareSucceedsWhenTheRepairFails(t *testing.T) {
-	// A device that keeps no driver is a problem for the next pod that
-	// claims it. It must never block the deletion of a pod that has
-	// already stopped.
 	cases := map[string]func(*testing.T, *draFixture){
 		"the tree has no drivers_probe": func(t *testing.T, fixture *draFixture) {
 			fixture.detach(t, "usb", "2-1:1.0")
@@ -162,29 +148,28 @@ func TestUnprepareSucceedsWhenTheRepairFails(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			fixture := newDRAFixture(t)
 			setup(t, fixture)
-			held(t, "claim-1", "usb-2-1-1-0")
+			leaveClaimSpec(t, "claim-1", "usb-2-1-1-0")
 
 			unprepared(t, fixture, "claim-1")
 
 			if _, err := os.Stat(filepath.Join(fixture.cdi, "liken.sh-claim-1.json")); !os.IsNotExist(err) {
-				t.Error("the spec file must be gone")
+				t.Error("the CDI spec file still exists, want it removed")
 			}
 		})
 	}
 }
 
-// A spec that cannot be read binds nothing, and the unprepare still
-// answers, so the kubelet can delete the pod.
+// A directory at the spec's path makes the read fail.
 func TestUnprepareWithAnUnreadableSpecBindsNothing(t *testing.T) {
 	isolatePass(t)
 	if err := os.Mkdir(cdiSpecPath("claim-1"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating a directory at the spec path: %v", err)
 	}
 	walked := false
 
 	rebindClaimDevices("claim-1", func() map[string]hardware.Device { walked = true; return nil })
 
 	if walked {
-		t.Error("the repair walked sysfs for a spec it could not read")
+		t.Error("sysfs was walked for a spec that could not be read, want no walk")
 	}
 }

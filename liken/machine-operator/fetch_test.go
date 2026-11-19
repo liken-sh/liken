@@ -1,9 +1,9 @@
 package main
 
-// The fetcher, tested against the in-memory release server of
-// download_test.go: the hold, the backoff, and the retarget. Each test
-// runs in a synctest bubble, so a download that stalls for a minute
-// costs no real time.
+// Tests of the fetcher against the in-memory release server of
+// download_test.go. They cover the Rejected state, the retry backoff,
+// and a new request during a download. Each test runs in a synctest
+// bubble, so a download that stalls for a minute takes no real time.
 
 import (
 	"fmt"
@@ -20,23 +20,22 @@ import (
 	"github.com/liken-sh/liken/liken/releases"
 )
 
-func TestAChangedAskClearsTheHold(t *testing.T) {
+func TestANewRequestClearsARejectedState(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bad := makeRelease("0.2.0")
 		bad.artifacts["liken.cpio"] = []byte("corrupted")
-		// The corrected release is published under a new version. This
-		// is the recovery the design calls for, and the new ask fetches.
+		// A corrected release is published under a new version.
 		good := makeRelease("0.2.1")
 		server := serveRelease(t, new(atomic.Int64), bad, good)
 		slot := t.TempDir()
 
 		f := fetcherFor(server)
-		f.Ensure(askFor(bad, slot, activeSlot(t)))
+		f.Ensure(fetchFor(bad, slot, activeSlot(t)))
 		awaitSettled(f)
 
-		f.Ensure(askFor(good, slot, activeSlot(t)))
+		f.Ensure(fetchFor(good, slot, activeSlot(t)))
 		if snap := awaitSettled(f); snap.state != fetchVerified {
-			t.Errorf("a new ask starts fresh: %+v", snap)
+			t.Errorf("after the request changed from a rejected release, the state is %+v, want Verified", snap)
 		}
 	})
 }
@@ -66,28 +65,28 @@ func TestServerFailuresAreTransientAndRetried(t *testing.T) {
 		slot := t.TempDir()
 
 		f := fetcherFor(server)
-		ask := askFor(release, slot, activeSlot(t))
-		f.Ensure(ask)
+		fetch := fetchFor(release, slot, activeSlot(t))
+		f.Ensure(fetch)
 		if snap := awaitSettled(f); snap.state != fetchFailed {
-			t.Fatalf("a down server is a transient failure: %+v", snap)
+			t.Fatalf("with a server that answers 500, the state is %+v, want Failed", snap)
 		}
 
-		// The retry must carry the failure's reason, so a condition
-		// written while the retry runs still says what failed, and it
-		// stays a retry, so the condition's reason does not flip back
-		// to Downloading for each attempt.
+		// The retry keeps the last failure's detail and stays marked as
+		// a retry. Otherwise a condition written while it runs would
+		// lose the failure, and its reason would change to Downloading
+		// on each attempt.
 		broken.Store(false)
 		time.Sleep(fetchFirstRetry * 11 / 10)
-		if snap := f.Ensure(ask); snap.state != fetchRunning || !snap.retrying || !strings.Contains(snap.detail, "retrying after") {
-			t.Errorf("a retry should say what it's retrying after: %+v", snap)
+		if snap := f.Ensure(fetch); snap.state != fetchRunning || !snap.retrying || !strings.Contains(snap.detail, "retrying after") {
+			t.Errorf("the retry is %+v, want Running, retrying, and a detail that contains \"retrying after\"", snap)
 		}
 		if snap := awaitSettled(f); snap.state != fetchVerified || snap.retrying {
-			t.Errorf("recovery: %+v", snap)
+			t.Errorf("after the server recovered, the state is %+v, want Verified and not retrying", snap)
 		}
 	})
 }
 
-// brokenServer answers every request with a 500 and counts them.
+// brokenServer responds to every request with a 500 and counts them.
 func brokenServer(t *testing.T, hits *atomic.Int64) *apiservertest.Server {
 	return apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		hits.Add(1)
@@ -95,23 +94,23 @@ func brokenServer(t *testing.T, hits *atomic.Int64) *apiservertest.Server {
 	}))
 }
 
-// A transient failure waits out its backoff: a pass before the retry
-// time starts no download, and says when the retry comes.
+// Ensure does not start a download before the retry time of a failed
+// one, and it returns the same retryAt.
 func TestATransientFailureWaitsOutItsBackoff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var hits atomic.Int64
 		f := &fetcher{client: brokenServer(t, &hits).Client(), jitter: noJitter}
-		ask := askFor(makeRelease("0.2.0"), t.TempDir(), activeSlot(t))
-		f.Ensure(ask)
+		fetch := fetchFor(makeRelease("0.2.0"), t.TempDir(), activeSlot(t))
+		f.Ensure(fetch)
 		failed := awaitSettled(f)
 		sent := hits.Load()
 
-		early := f.Ensure(ask)
+		early := f.Ensure(fetch)
 		synctest.Wait()
 
 		if early.state != fetchFailed || hits.Load() != sent || !early.retryAt.Equal(failed.retryAt) ||
 			time.Until(failed.retryAt) != fetchFirstRetry {
-			t.Errorf("a pass before the retry time answered %+v and sent %d more requests; want Failed, retry in %s, and none",
+			t.Errorf("Ensure before the retry time returned %+v and sent %d more requests; want Failed, retry in %s, and none",
 				early, hits.Load()-sent, fetchFirstRetry)
 		}
 	})
@@ -122,10 +121,10 @@ func TestTheDownloadBackoffDoublesToTwoMinutes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var hits atomic.Int64
 		f := &fetcher{client: brokenServer(t, &hits).Client(), jitter: noJitter}
-		ask := askFor(makeRelease("0.2.0"), t.TempDir(), activeSlot(t))
+		fetch := fetchFor(makeRelease("0.2.0"), t.TempDir(), activeSlot(t))
 		var delays []time.Duration
 		for range 6 {
-			f.Ensure(ask)
+			f.Ensure(fetch)
 			snap := awaitSettled(f)
 			delays = append(delays, time.Until(snap.retryAt))
 			time.Sleep(time.Until(snap.retryAt))
@@ -138,19 +137,19 @@ func TestTheDownloadBackoffDoublesToTwoMinutes(t *testing.T) {
 	})
 }
 
-// A new ask is a new release, so it starts at once, whatever the
-// last ask's backoff.
-func TestANewAskStartsAtOnceAfterAFailure(t *testing.T) {
+// A new request starts at once, without waiting for the backoff of
+// the previous one.
+func TestANewRequestStartsAtOnceAfterAFailure(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var hits atomic.Int64
 		f := &fetcher{client: brokenServer(t, &hits).Client(), jitter: noJitter}
-		f.Ensure(askFor(makeRelease("0.2.0"), t.TempDir(), activeSlot(t)))
+		f.Ensure(fetchFor(makeRelease("0.2.0"), t.TempDir(), activeSlot(t)))
 		awaitSettled(f)
 
-		snap := f.Ensure(askFor(makeRelease("0.3.0"), t.TempDir(), activeSlot(t)))
+		snap := f.Ensure(fetchFor(makeRelease("0.3.0"), t.TempDir(), activeSlot(t)))
 
 		if snap.state != fetchRunning {
-			t.Errorf("a new ask after a failure answered %+v, want Running", snap)
+			t.Errorf("a changed request after a failure returned %+v, want Running", snap)
 		}
 		awaitSettled(f)
 	})
@@ -160,41 +159,40 @@ func TestEnsureNeverBlocksOnTheDownload(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := makeRelease("0.2.0")
 		server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			<-req.Context().Done() // the server never answers
+			<-req.Context().Done() // the server never responds
 		}))
 
-		// This is a small-scale version of the heartbeat's guarantee.
-		// Ensure must return while the server still has not answered a
-		// byte, with no time passing on the bubble's clock.
+		// Ensure must return while the server has sent nothing, with no
+		// time passed on the bubble's clock, because a pass that waits
+		// longer than stuckAfter stops the heartbeat (liveness.go).
 		f := fetcherFor(server)
 		start := time.Now()
-		snap := f.Ensure(askFor(release, t.TempDir(), activeSlot(t)))
+		snap := f.Ensure(fetchFor(release, t.TempDir(), activeSlot(t)))
 		if snap.state != fetchRunning || time.Since(start) != 0 {
-			t.Errorf("Ensure must start the download and return at once: %+v after %v", snap, time.Since(start))
+			t.Errorf("Ensure returned %+v after %v, want Running with no wait", snap, time.Since(start))
 		}
 	})
 }
 
-// A server that holds the release's initramfs: it sends the first
-// half, then nothing until the client goes away. Every other file it
-// serves whole. It counts the downloads in flight and the most that
-// were ever in flight at once.
-type holdingServer struct {
+// stallingServer serves the first half of one release's liken.cpio and
+// then sends nothing until the client disconnects. It serves every
+// other file whole, and counts the most requests in progress at once.
+type stallingServer struct {
 	*apiservertest.Server
 	inFlight, mostInFlight atomic.Int64
-	holding                atomic.Bool
+	stalling               atomic.Bool
 }
 
-func serveHolding(t *testing.T, held *fakeRelease, published ...*fakeRelease) *holdingServer {
+func serveStalling(t *testing.T, stalled *fakeRelease, published ...*fakeRelease) *stallingServer {
 	t.Helper()
-	h := &holdingServer{}
-	h.holding.Store(true)
+	h := &stallingServer{}
+	h.stalling.Store(true)
 	h.Server = apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		now := h.inFlight.Add(1)
 		defer h.inFlight.Add(-1)
 		for most := h.mostInFlight.Load(); now > most && !h.mostInFlight.CompareAndSwap(most, now); most = h.mostInFlight.Load() {
 		}
-		for _, r := range append(published, held) {
+		for _, r := range append(published, stalled) {
 			if req.URL.Path == "/releases/"+r.version+"/release.yaml" {
 				w.Write(r.document)
 				return
@@ -203,7 +201,7 @@ func serveHolding(t *testing.T, held *fakeRelease, published ...*fakeRelease) *h
 				if req.URL.Path != "/releases/"+r.version+"/"+name {
 					continue
 				}
-				if r != held || name != "liken.cpio" || !h.holding.Load() {
+				if r != stalled || name != "liken.cpio" || !h.stalling.Load() {
 					w.Write(contents)
 					return
 				}
@@ -219,24 +217,25 @@ func serveHolding(t *testing.T, held *fakeRelease, published ...*fakeRelease) *h
 	return h
 }
 
-// A retarget stops the download of the old release before the new
-// one starts, so one writer at a time changes the slot.
-func TestARetargetStopsTheOldDownloadFirst(t *testing.T) {
+// When the request changes, the download of the old release stops
+// before the new one starts, so only one download writes the slot at a
+// time.
+func TestANewRequestStopsTheOldDownloadFirst(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		old, wanted := makeRelease("0.2.0"), makeRelease("0.3.0")
-		server := serveHolding(t, old, wanted)
+		server := serveStalling(t, old, wanted)
 		slot, active := t.TempDir(), activeSlot(t)
 		f := fetcherFor(server.Server)
-		f.Ensure(askFor(old, slot, active))
+		f.Ensure(fetchFor(old, slot, active))
 		awaitSettled(f)
 
-		waiting := f.Ensure(askFor(wanted, slot, active))
+		waiting := f.Ensure(fetchFor(wanted, slot, active))
 		stopped := awaitSettled(f)
-		started := f.Ensure(askFor(wanted, slot, active))
+		started := f.Ensure(fetchFor(wanted, slot, active))
 		done := awaitSettled(f)
 
 		if waiting.state != fetchIdle || !strings.Contains(waiting.detail, "previous download") {
-			t.Errorf("the retarget answered %+v, want a wait for the old download", waiting)
+			t.Errorf("the changed request returned %+v, want Idle and a wait for the old download", waiting)
 		}
 		if stopped.state != fetchIdle {
 			t.Errorf("after the old download stopped: %+v, want the new one not started", stopped)
@@ -256,75 +255,76 @@ func TestARetargetStopsTheOldDownloadFirst(t *testing.T) {
 	})
 }
 
-// A download for another release removes the slot's document before
-// it writes a byte, so the slot claims no release while it holds the
-// files of two.
-func TestADownloadOfAnotherReleaseWithdrawsTheSlotsDocument(t *testing.T) {
+// A download of another release deletes the slot's release.yaml before
+// it writes any file. So while the slot has files of two releases, it
+// has no release.yaml that claims one of them.
+func TestADownloadOfAnotherReleaseRemovesTheSlotsDocument(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		old, wanted := makeRelease("0.2.0"), makeRelease("0.3.0")
-		server := serveHolding(t, wanted, old)
+		server := serveStalling(t, wanted, old)
 		slot, active := t.TempDir(), activeSlot(t)
 		f := fetcherFor(server.Server)
-		f.Ensure(askFor(old, slot, active))
+		f.Ensure(fetchFor(old, slot, active))
 		awaitSettled(f)
 
-		f.Ensure(askFor(wanted, slot, active))
+		f.Ensure(fetchFor(wanted, slot, active))
 		awaitSettled(f)
 
 		kernel, _ := os.ReadFile(filepath.Join(slot, "vmlinuz"))
 		if string(kernel) != string(wanted.artifacts["vmlinuz"]) {
-			t.Fatalf("the slot's kernel is %q, want the new release's, written before the hold", kernel)
+			t.Fatalf("the slot's kernel is %q, want the new release's, written before the server stalled the download", kernel)
 		}
 		if _, err := os.Stat(filepath.Join(slot, "release.yaml")); !os.IsNotExist(err) {
-			t.Errorf("the slot still carries a release document beside the new kernel: %v", err)
+			t.Errorf("the slot still has a release document beside the new kernel: %v", err)
 		}
 	})
 }
 
-// A server that stops sending fails the download after the stall
-// limit, and the first pass after its backoff retries it.
+// A download fails when the server stops sending for releases.StallLimit,
+// and the first Ensure after the backoff retries it.
 func TestAStalledDownloadFailsAndIsRetried(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := makeRelease("0.2.0")
-		server := serveHolding(t, release)
+		server := serveStalling(t, release)
 		f := fetcherFor(server.Server)
-		ask := askFor(release, t.TempDir(), activeSlot(t))
-		f.Ensure(ask)
+		fetch := fetchFor(release, t.TempDir(), activeSlot(t))
+		f.Ensure(fetch)
 		awaitSettled(f)
 
 		time.Sleep(releases.StallLimit)
 		stalled := awaitSettled(f)
-		server.holding.Store(false)
+		server.stalling.Store(false)
 		time.Sleep(time.Until(stalled.retryAt))
-		f.Ensure(ask)
+		f.Ensure(fetch)
 		retried := awaitSettled(f)
 
 		if stalled.state != fetchFailed || !strings.Contains(stalled.detail, "no bytes arrived") {
-			t.Errorf("after the stall limit: %+v, want a failure that names the stall", stalled)
+			t.Errorf("after the stall limit, the state is %+v, want a failure that names the stall", stalled)
 		}
 		if retried.state != fetchVerified {
-			t.Errorf("the retry: %+v, want verified", retried)
+			t.Errorf("after the retry, the state is %+v, want Verified", retried)
 		}
 	})
 }
 
-// A download that a changed ask cancelled did not fail, even when the
-// ask changes back before it stops. The machine starts the download
-// again at once, with no backoff and no failure in its condition.
-func TestAnAskThatChangesBackRestartsWithNoBackoff(t *testing.T) {
+// A download that Ensure cancelled for a new request did not fail,
+// even when the request changes back before the download stops.
+// Ensure starts the download again with no backoff and records no
+// failure.
+func TestARequestThatChangesBackRestartsWithNoBackoff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		first, second := makeRelease("0.2.0"), makeRelease("0.3.0")
-		server := serveHolding(t, first, second)
+		server := serveStalling(t, first, second)
 		f := fetcherFor(server.Server)
 		slot, active := t.TempDir(), activeSlot(t)
-		f.Ensure(askFor(first, slot, active))
+		f.Ensure(fetchFor(first, slot, active))
 		synctest.Wait()
 
-		f.Ensure(askFor(second, slot, active))
-		f.Ensure(askFor(first, slot, active))
+		f.Ensure(fetchFor(second, slot, active))
+		f.Ensure(fetchFor(first, slot, active))
 		stopped := awaitSettled(f)
-		server.holding.Store(false)
-		restarted := f.Ensure(askFor(first, slot, active))
+		server.stalling.Store(false)
+		restarted := f.Ensure(fetchFor(first, slot, active))
 		awaitSettled(f)
 
 		if stopped.state == fetchFailed || restarted.state != fetchRunning {
@@ -333,14 +333,14 @@ func TestAnAskThatChangesBackRestartsWithNoBackoff(t *testing.T) {
 	})
 }
 
-// Every download that ends wakes the loop: one that is verified, one
-// that fails, and one that a retarget stopped. The pass the wake starts
-// finds the fetcher idle, so it reads the result or starts the next
-// download.
+// Every download that ends calls wake, whether it verified, failed, or
+// was cancelled by a new request. The fetcher is not busy when wake
+// runs, so the pass that it starts can read the result or start the
+// next download.
 func TestEveryDownloadThatEndsWakesTheLoop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		old, wanted := makeRelease("0.2.0"), makeRelease("0.3.0")
-		server := serveHolding(t, old, wanted)
+		server := serveStalling(t, old, wanted)
 		slot, active := t.TempDir(), activeSlot(t)
 		f := fetcherFor(server.Server)
 		var wakes atomic.Int64
@@ -352,12 +352,12 @@ func TestEveryDownloadThatEndsWakesTheLoop(t *testing.T) {
 			wakes.Add(1)
 		}
 
-		f.Ensure(askFor(old, slot, active))
+		f.Ensure(fetchFor(old, slot, active))
 		awaitSettled(f)
-		f.Ensure(askFor(wanted, slot, active))
+		f.Ensure(fetchFor(wanted, slot, active))
 		awaitSettled(f)
 		afterStop := wakes.Load()
-		f.Ensure(askFor(wanted, slot, active))
+		f.Ensure(fetchFor(wanted, slot, active))
 		awaitSettled(f)
 
 		if afterStop != 1 || wakes.Load() != 2 || busyAtWake.Load() {

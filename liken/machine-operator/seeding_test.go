@@ -1,9 +1,5 @@
 package main
 
-// The seeding loops: making the boot manifest's Machine and the
-// image's Cluster real in the API. These loops tolerate the races
-// and not-yet-served CRDs of a fleet booting together.
-
 import (
 	"encoding/json"
 	"net/http"
@@ -16,14 +12,12 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// machineAPI is a small API server for the machine seeding loop.
-// It remembers whether the Machine exists, and it can be told to
-// answer creates with 404 for a while (the CRD not served yet, the
-// ordinary condition during a machine's first minutes) or to fail
-// them outright.
+// machineAPI is a fake API server for ensureMachine. It responds to
+// the first notServed creates with 404, as the API server does before
+// it serves the CRD, and to every create with 500 when fail is set.
 type machineAPI struct {
 	exists    bool
-	notServed int // creates to answer 404 before the CRD "arrives"
+	notServed int
 	fail      bool
 	creates   int
 }
@@ -70,13 +64,13 @@ func TestEnsureMachineCreatesWhenAbsent(t *testing.T) {
 	client := testClient(t, fake.handler())
 	current, err := ensureMachine(client, seedMachine(), nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("ensuring the Machine: %v", err)
 	}
 	if fake.creates != 1 {
-		t.Errorf("expected one create, got %d", fake.creates)
+		t.Errorf("creates = %d, want 1", fake.creates)
 	}
 	if current.Metadata.ResourceVersion != "5" {
-		t.Errorf("the server's copy comes back, resourceVersion and all: %+v", current.Metadata)
+		t.Errorf("the returned metadata is %+v, want the server's copy with resourceVersion 5", current.Metadata)
 	}
 }
 
@@ -84,29 +78,29 @@ func TestEnsureMachineReturnsAnExistingMachine(t *testing.T) {
 	fake := &machineAPI{exists: true}
 	client := testClient(t, fake.handler())
 	if _, err := ensureMachine(client, seedMachine(), nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("ensuring the Machine: %v", err)
 	}
 	if fake.creates != 0 {
-		t.Errorf("an existing machine should never be re-created; got %d creates", fake.creates)
+		t.Errorf("for an existing Machine creates = %d, want 0", fake.creates)
 	}
 }
 
 func TestEnsureMachineWaitsOutAnUnservedCRD(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// k3s applies the Machine CRD around the same time it starts
-		// this pod, so the first creates can happen before the API
-		// serves it.
+		// k3s applies the Machine CRD at about the time it starts this
+		// pod, so the first creates can reach the API before it serves
+		// the CRD.
 		fake := &machineAPI{notServed: 2}
 		client := testClient(t, fake.handler())
 		start := time.Now()
 		if _, err := ensureMachine(client, seedMachine(), nil); err != nil {
-			t.Fatal(err)
+			t.Fatalf("ensuring the Machine: %v", err)
 		}
 		if fake.creates != 3 {
-			t.Errorf("the loop retries until the CRD is served: %d creates", fake.creates)
+			t.Errorf("creates = %d, want 3: two refused while the CRD is not served, then one accepted", fake.creates)
 		}
-		// Each of the two refused creates costs one retry pause of five
-		// seconds, increased at random by up to half again.
+		// Each of the two 404s is followed by a pause of 5 seconds plus
+		// a random amount of up to half of that.
 		if waited := time.Since(start); waited < 10*time.Second || waited >= 15*time.Second {
 			t.Errorf("the loop waited %s for two refused creates, want two pauses of 5s to 7.5s", waited)
 		}
@@ -117,19 +111,17 @@ func TestEnsureMachineReturnsAHardCreateFailure(t *testing.T) {
 	fake := &machineAPI{fail: true}
 	client := testClient(t, fake.handler())
 	if _, err := ensureMachine(client, seedMachine(), nil); err == nil {
-		t.Fatal("a 500 is not a startup condition to wait out; it comes back to the caller")
+		t.Fatal("a 500 response returned no error, want the error returned without a retry")
 	}
 }
 
-// clusterAPI is a small API server for the cluster seeding loop.
-// It remembers whether the Cluster exists, and it can be told to
-// answer the first create with a conflict (as the real server would
-// when another machine's operator created the object first), with
-// 404 for a while (the CRD not served yet), or to fail outright.
+// clusterAPI is a fake API server for ensureCluster, like machineAPI.
+// When conflict is set, it responds to a create with 409 Conflict, as
+// the API server does when another machine created the Cluster first.
 type clusterAPI struct {
 	exists    bool
 	conflict  bool
-	notServed int // creates to answer 404 before the CRD "arrives"
+	notServed int
 	fail      bool
 	creates   int
 }
@@ -158,8 +150,7 @@ func (fake *clusterAPI) handler() http.Handler {
 				return
 			}
 			if fake.conflict {
-				// Someone else's create landed first. The object
-				// exists now, no matter who created it.
+				// Another operator created it first, so it exists.
 				fake.exists = true
 				w.WriteHeader(http.StatusConflict)
 				return
@@ -182,10 +173,10 @@ func TestEnsureClusterCreatesWhenAbsent(t *testing.T) {
 	fake := &clusterAPI{}
 	client := testClient(t, fake.handler())
 	if err := ensureCluster(client, seedCluster()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("ensuring the Cluster: %v", err)
 	}
 	if fake.creates != 1 {
-		t.Errorf("expected one create, got %d", fake.creates)
+		t.Errorf("creates = %d, want 1", fake.creates)
 	}
 }
 
@@ -193,10 +184,10 @@ func TestEnsureClusterLeavesAnExistingClusterAlone(t *testing.T) {
 	fake := &clusterAPI{exists: true}
 	client := testClient(t, fake.handler())
 	if err := ensureCluster(client, seedCluster()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("ensuring the Cluster: %v", err)
 	}
 	if fake.creates != 0 {
-		t.Errorf("an existing cluster should never be re-created; got %d creates", fake.creates)
+		t.Errorf("for an existing Cluster creates = %d, want 0", fake.creates)
 	}
 }
 
@@ -204,7 +195,7 @@ func TestEnsureClusterTreatsLosingTheRaceAsSuccess(t *testing.T) {
 	fake := &clusterAPI{conflict: true}
 	client := testClient(t, fake.handler())
 	if err := ensureCluster(client, seedCluster()); err != nil {
-		t.Fatalf("a lost race is a seeded cluster: %v", err)
+		t.Fatalf("a create that loses the race with another machine returned %v, want no error", err)
 	}
 }
 
@@ -214,13 +205,13 @@ func TestEnsureClusterWaitsOutAnUnservedCRD(t *testing.T) {
 		client := testClient(t, fake.handler())
 		start := time.Now()
 		if err := ensureCluster(client, seedCluster()); err != nil {
-			t.Fatal(err)
+			t.Fatalf("ensuring the Cluster: %v", err)
 		}
 		if fake.creates != 3 {
-			t.Errorf("the loop retries until the CRD is served: %d creates", fake.creates)
+			t.Errorf("creates = %d, want 3: two refused while the CRD is not served, then one accepted", fake.creates)
 		}
-		// Each of the two refused creates costs one retry pause of five
-		// seconds, increased at random by up to half again.
+		// Each of the two 404s is followed by a pause of 5 seconds plus
+		// a random amount of up to half of that.
 		if waited := time.Since(start); waited < 10*time.Second || waited >= 15*time.Second {
 			t.Errorf("the loop waited %s for two refused creates, want two pauses of 5s to 7.5s", waited)
 		}
@@ -231,6 +222,6 @@ func TestEnsureClusterReturnsAHardCreateFailure(t *testing.T) {
 	fake := &clusterAPI{fail: true}
 	client := testClient(t, fake.handler())
 	if err := ensureCluster(client, seedCluster()); err == nil {
-		t.Fatal("a 500 is not a startup condition to wait out; it comes back to the caller")
+		t.Fatal("a 500 response returned no error, want the error returned without a retry")
 	}
 }

@@ -1,30 +1,20 @@
 package main
 
-// The DRA driver's inventory half: publishing this machine's driven
-// devices as a ResourceSlice.
+// The dynamic resource allocation (DRA) inventory: the ResourceSlice
+// that lists this machine's devices that have a driver.
 //
-// liken's answer to the question of how workloads reach hardware is
-// dynamic resource allocation, and the driver is this operator: one
-// more job in a process that already runs on every node, not a
-// second daemon, because the memory envelope has no room for one.
-// The driver symlink divides the milestone's two halves. A device
-// with no driver is init's unclaimed report in Machine status, aimed
-// at the person who can declare a module. A device with a driver is
-// working equipment, and working equipment belongs in the cluster's
-// own inventory API, where DeviceClasses can select it and pods can
-// claim it. spec.modules is the gate between the two: declaring a
-// driver is what moves a device from one report to the other.
+// This operator is the DRA driver, because the nodes have no memory
+// to spare for a second daemon. A device with no driver goes in
+// status.hardware.unclaimed of the Machine, so a person can add its
+// module to spec.modules. When the driver binds, the device moves to
+// the ResourceSlice, where a DeviceClass can select it and a pod can
+// claim it.
 //
-// The operator walks sysfs itself, rather than reading init's
-// facts. This is deliberate. The facts tree carries what init
-// observes for the Machine status, and inventory is not status: it
-// is a separate report, to a separate audience, with a separate
-// lifetime. Slices end with the Node; status lives with the Machine.
-// The walk uses the same shared package init uses, so the two
-// reports can never disagree about what a device is. The walk runs
-// on each pass, and a uevent for a device that arrives, leaves, or
-// changes its driver wakes a pass (machineevents.go), so a device
-// reaches the slice about a second after the kernel reports it.
+// The operator walks sysfs on each pass instead of reading the facts
+// that init writes, and a uevent for a device that arrives, leaves,
+// or changes its driver starts a pass (machineevents.go). init's walk
+// and this one use the same hardware package, so the Machine status
+// and the ResourceSlice agree on what a device is.
 
 import (
 	"fmt"
@@ -39,19 +29,14 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// The operator reads the host's sysfs directly, because this pod
-// runs in the host's namespaces, and names PCI devices from the
-// database the image ships. These are variables so tests can
-// substitute both, the same seam init's hardware watcher leaves.
+// Tests point these at fixtures.
 var (
 	draSysfsRoot  = "/sys"
 	draPCIIDsPath = "/usr/share/hwdata/pci.ids"
 )
 
-// draNaming loads the PCI naming database once per process. The
-// file is part of the image, so it cannot change while the operator
-// runs. A missing database degrades the device names, but never the
-// inventory itself.
+// draNaming loads the PCI name database once. When the database is
+// missing, the devices have no name attribute and are still published.
 var draNaming = sync.OnceValue(func() *hardware.PCIIDs {
 	naming, err := hardware.LoadPCIIDs(draPCIIDsPath)
 	if err != nil {
@@ -61,28 +46,22 @@ var draNaming = sync.OnceValue(func() *hardware.PCIIDs {
 	return naming
 })
 
-// maxSliceDevices is the API's limit on devices in one
-// ResourceSlice. One slice per node is enough: a physical device
-// publishes a primary and a few companions, four in the widest shape
-// the fleet has met, so a busy server's dozens of physical devices
-// stay far under the limit of 128. If a machine ever
-// exceeds this limit, the operator drops the overflow and reports
-// it, rather than splitting devices across slices. This will change
-// if real hardware needs the multi-slice pool protocol.
+// maxSliceDevices is the API's limit on devices in one ResourceSlice.
+// The operator writes one slice per node. When a machine has more
+// devices, it logs the count and drops the devices past the limit,
+// because the slice writer writes each pool as a single slice.
 const maxSliceDevices = 128
 
-// publishDeviceInventory converges this node's ResourceSlice with
-// what sysfs shows right now. The function logs failures and answers
-// them, and the pass's outcome sets the retry, instead of reporting
-// them as a condition. Inventory is a report about hardware, and a failure to
-// write it is a problem in the operator's own machinery, not a fact
-// about the machine.
+// publishDeviceInventory writes this node's ResourceSlice from a walk
+// of sysfs. A failure is logged and returned, so the pass retries. It
+// sets no condition, because a failed write is a fault of the operator
+// and not a fact about the machine.
 func publishDeviceInventory(r *reader, node *nodeObject, facts *machine.MachineStatus, serio []machine.SerioAttachment, mm *machineMetrics) error {
-	held := heldNodes(draSysfsRoot)
+	reserved := reservedNodes(draSysfsRoot)
 	devices := inventoryDevices(
 		hardware.DiscoverInventory(draSysfsRoot, draNaming()),
 		func(d hardware.Device) hardware.Delivery {
-			return withoutHeld(hardware.InspectDelivery(draSysfsRoot, d), held)
+			return withoutReserved(hardware.InspectDelivery(draSysfsRoot, d), reserved)
 		},
 		protectionOf(facts), serio)
 	devices = withVirtualization(devices, virtualizationSliceDevices(draSysfsRoot, sysctlRoot))
@@ -91,14 +70,11 @@ func publishDeviceInventory(r *reader, node *nodeObject, facts *machine.MachineS
 			len(devices), maxSliceDevices)
 		devices = devices[:maxSliceDevices]
 	}
-	// The device metric counts the very list the slice carries, so
-	// the count comes from this pass's one sysfs walk and never from
-	// a second one (metrics.go).
+	// The metric counts before taintUnplugged adds the devices that are
+	// gone, so it counts only hardware that is present.
 	mm.observeDevices(devices)
-	// A device that a prepared claim held when it was unplugged is
-	// published with a taint that evicts the claim's pods
-	// (unplugged.go). The metric counts the hardware, so it counts
-	// before these entries join.
+	// A device that was unplugged while a prepared claim held it stays
+	// in the slice with a taint that evicts the claim's pods.
 	devices = taintUnplugged(devices, unpluggedDevices())
 
 	owner := kubernetes.OwnerReference{
@@ -112,17 +88,16 @@ func publishDeviceInventory(r *reader, node *nodeObject, facts *machine.MachineS
 		err = r.sliceWriter().Write(r.client, node.Metadata.Name, current, owner, devices)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "device inventory: %v\n", err)
+		fmt.Fprintf(os.Stderr, "device inventory: writing the ResourceSlice: %v\n", err)
 	}
 	return err
 }
 
-// serioInEffect is the spec.serio list the machine holds attachments
-// for: the spec's entries, and the boot record's. A retracted entry
-// stays in the boot record until the next boot, and its holder keeps
-// the port until then, so its tty must stay withheld until then too.
-// An entry added since the boot is in the spec before init reports it,
-// so its tty is withheld from the first pass after the edit.
+// serioInEffect returns the serio entries whose serial line the slice
+// must not offer: those in spec.serio and those that init attached at
+// boot. An entry removed from the spec keeps its line attached until
+// the next boot. An entry added to the spec withholds its line from
+// the first pass after the edit, before the line is attached.
 func serioInEffect(spec []machine.SerioAttachment, facts *machine.MachineStatus) []machine.SerioAttachment {
 	if facts == nil {
 		return slices.Clone(spec)
@@ -130,12 +105,11 @@ func serioInEffect(spec []machine.SerioAttachment, facts *machine.MachineStatus)
 	return slices.Concat(spec, facts.Boot.Serio)
 }
 
-// serioDeclared carries serioInEffect to the DRA plugin, which
-// prepares claims on the kubelet's schedule, apart from the reconcile
-// pass. main seeds it from the boot manifest and the boot's facts
-// before the plugin serves, and every pass sets it again from the
-// live spec, so the plugin never resolves a claim to a serial line
-// that init holds.
+// serioDeclared is the result of serioInEffect for the DRA plugin,
+// which prepares claims when the kubelet calls it, outside the
+// reconcile pass. main sets it at startup, and each pass sets it from
+// the Machine's spec, so the plugin never resolves a claim to a serial
+// line that a serio driver is attached to.
 var serioDeclared atomic.Pointer[[]machine.SerioAttachment]
 
 func setDeclaredSerio(entries []machine.SerioAttachment) {
@@ -149,53 +123,38 @@ func declaredSerio() []machine.SerioAttachment {
 	return nil
 }
 
-// inventoryDevices applies the publish rule to the devices
-// hardware.DiscoverInventory finds: the pci and usb devices, and the
-// devices on the board that own a node, such as a firmware TPM or a
-// laptop's keyboard. A device is offered to workloads when it passes
-// all three tests:
+// inventoryDevices returns the slice devices for the PCI, USB, and
+// board devices that hardware.DiscoverInventory finds. The scheduler
+// allocates only what the slice lists, so this filter decides what a
+// DeviceClass can claim. A device is published when all of these are
+// true:
 //
-//  1. The device has a driver and is not part of the bus structure
-//     itself. Undriven hardware belongs in the unclaimed report
-//     instead. usbcore's device nodes, hubs, and PCIe ports are the
-//     structure that the peripherals connect to, not peripherals
-//     themselves. A USB device that no driver binds at all is the
-//     exception: a program in userspace drives it, and the device
-//     publishes whole (userspace.go).
-//  2. Claiming the device would deliver something: its subtree
-//     carries device nodes that a pod could receive. A NIC or a
-//     bare controller fails this test, because it is real hardware
-//     with nothing to hand to a pod. A Bluetooth adapter is the one
-//     device that passes on its driver instead. hci is a socket
-//     interface, so the radio registers no node, and a working
-//     adapter has an empty subtree. This test alone would refuse
-//     hardware that workloads do claim. publishing.go carries the
-//     rest of that story.
-//  3. The machine does not depend on the device: nothing in its
-//     subtree backs a storage role, and while the facts do not read,
-//     nothing in its subtree is a disk (protection.go). The console
-//     and the clock that init writes leave the delivery before this test,
-//     so a device whose only nodes they are has nothing to deliver
-//     (held.go).
+//  1. It has a driver other than `usb`, `hub`, or `pcieport`. `usb`
+//     binds each USB device itself, and the drivers of its interfaces
+//     are what a pod uses. When no kernel driver binds any interface
+//     of a USB device, the device is published whole, because a
+//     program in userspace drives it (userspace.go).
+//  2. It has a device node that a pod can receive. A NIC has none. A
+//     Bluetooth adapter is published by its driver alone, because hci
+//     is a socket interface and the adapter has no node.
+//  3. None of its nodes is a block device that backs a storage role.
+//     When the facts cannot be read, no device with a block node is
+//     published (protection.go). inspect removes the console and the
+//     clock that init uses, so a device with only those nodes fails
+//     test 2 (reserved.go).
 //
-// A serial line that init holds a serio attachment for passes the
-// three tests with its tty node, and the policy then publishes the
-// devices the attached driver created and never the tty
-// (publishingserio.go). serio names those lines.
-//
-// A ResourceSlice is an offer, not a full record of the hardware.
-// The scheduler can only allocate what a slice lists, so publishing
-// the slice is itself the enforcement, ahead of whatever checks a
-// deployment's DeviceClasses perform.
+// For a serial line with a serio attachment, the slice gets the
+// devices that the serio driver created, and never the tty
+// (publishingserio.go).
 func inventoryDevices(discovered []hardware.Device,
 	inspect func(hardware.Device) hardware.Delivery, platform protection,
 	serio []machine.SerioAttachment) []kubernetes.SliceDevice {
-	plumbing := map[string]bool{"usb": true, "hub": true, "pcieport": true}
+	busDrivers := map[string]bool{"usb": true, "hub": true, "pcieport": true}
 	var out []kubernetes.SliceDevice
 	for _, d := range discovered {
 		if userspace, ok := userspaceDevice(d, discovered); ok {
 			d = userspace
-		} else if d.Driver == "" || plumbing[d.Driver] {
+		} else if d.Driver == "" || busDrivers[d.Driver] {
 			continue
 		}
 		delivery := inspect(d)
@@ -205,32 +164,21 @@ func inventoryDevices(discovered []hardware.Device,
 		if platform.withholds(delivery) {
 			continue
 		}
-		// One physical device can publish more than one slice
-		// device: the loop publishes one slice device for each device
-		// the policy derived from this delivery. Its suffix names the
-		// slice device, joined to the physical device's own name, so
-		// the primary keeps the bare name and an allocation made
-		// before a split stays valid.
+		// One physical device can become several slice devices. The
+		// first keeps the device's own name and each other one adds a
+		// suffix, so an allocation made by the device's name stays valid.
 		for _, p := range publishFor(d, delivery, serio) {
 			attrs := map[string]kubernetes.DeviceAttribute{}
-			// Attribute names are unqualified, so the Kubernetes API
-			// places them under the driver's own domain: a DeviceClass
-			// selector reads them as device.attributes["liken.sh"].driver
-			// and similar names. The code omits absent facts instead of
-			// publishing them empty, so a selector like
-			// `has(device.attributes["liken.sh"].serial)` means what it
-			// says. Every published device carries its physical parent's
-			// identifying attributes: the companion is the same silicon,
-			// the same driver, and the same address as its primary.
+			// An unqualified attribute name is in the driver's domain,
+			// so a DeviceClass reads it as
+			// device.attributes["liken.sh"].driver. An empty value is
+			// left out, so `has(device.attributes["liken.sh"].serial)`
+			// tests for a serial.
 			//
-			// The address is also what pairs one physical device's
-			// published devices back together. On a machine with two
-			// GPUs, a claim that asks for a render node and a card node
-			// constrains its two requests with matchAttribute, and
-			// matchAttribute reads an attribute, never a name. The
-			// address is equal across the devices of one card and
-			// different across cards, so it is the fact that constraint
-			// needs.
+			// Every slice device of one physical device has its address.
+			// On a machine with two GPUs, a claim that requests a render
+			// node and a card node puts matchAttribute on the address,
+			// so the scheduler allocates both from one card.
 			for name, value := range map[string]string{
 				"bus":       d.Bus,
 				"address":   d.Address,
@@ -248,55 +196,39 @@ func inventoryDevices(discovered []hardware.Device,
 					attrs[name] = kubernetes.AttrString(value)
 				}
 			}
-			// The bus number and device number are published as numbers
-			// for every USB device, because the facts belong to the
-			// device. firmware-operator builds the usbfs path of a bare
-			// chip from them, and tells a new appearance of a device in
-			// a port from the last by the device number. A claim must
-			// not select on either one: both change each time the
-			// device enumerates. They add no writes to the slice,
-			// because a device that enumerates again leaves the slice
-			// and comes back in it anyway.
+			// firmware-operator builds a USB device's usbfs path from
+			// these, and compares the device number to find out that a
+			// device enumerated again. A claim must not select on
+			// either, because both change at each enumeration.
 			if d.BusNumber > 0 && d.DeviceNumber > 0 {
 				attrs["busNumber"] = kubernetes.AttrInt(int64(d.BusNumber))
 				attrs["deviceNumber"] = kubernetes.AttrInt(int64(d.DeviceNumber))
 			}
-			// A render node is the fact a workload actually selects on. A
-			// person who deploys a transcoder asks for any GPU that can
-			// encode, and asking for a vendor and a product ID instead
-			// names one machine's hardware in a document meant for a
-			// fleet. A DeviceClass that selects on it can never allocate
-			// the monitor buses by mistake.
+			// A transcoder's DeviceClass selects renderNode, so it
+			// matches any GPU without vendor and product IDs, and never
+			// matches a GPU's i2c device.
 			if p.RenderNode {
 				attrs["renderNode"] = kubernetes.AttrBool(true)
 			}
-			// A display node is the other fact a workload selects on: the
-			// card node that carries modesetting authority, which a
-			// player or a kiosk needs and a transcoder never does. The two
-			// facts are exclusive of each other, so a DeviceClass that
-			// asks for one can never allocate the other by mistake.
+			// A player or a kiosk selects displayNode, because it needs
+			// the card node to set display modes and a transcoder does
+			// not. No device has both renderNode and displayNode, so a
+			// class that selects one never allocates the other.
 			if p.DisplayNode {
 				attrs["displayNode"] = kubernetes.AttrBool(true)
 			}
-			// The sound attribute states that a sound server can run
-			// against this device. It is qualified where every other
-			// attribute here is bare, because sound.liken.sh belongs to
-			// no single driver: any driver may stamp the attribute, and
-			// a DeviceClass that selects it names no driver, so a device
-			// that supports a sound server joins that class by stamping
-			// this one field. monitor.liken.sh/id takes the same form
-			// for pairing a monitor's outputs.
+			// This attribute is in the sound.liken.sh domain and not the
+			// driver's, because other drivers set it too. A DeviceClass
+			// that selects it matches every device that can run a sound
+			// server, whichever driver published it.
 			if p.Subsystem == "sound" {
 				attrs["sound.liken.sh/supportsSound"] = kubernetes.AttrBool(true)
 			}
-			// The bare address pairs the devices of one card only
-			// inside this driver, because a bare name belongs to the
-			// driver that published it. Another driver's device for
-			// the same card, such as media-operator's statement of
-			// what a GPU decodes, pairs with these devices through
-			// the attribute Kubernetes defines for a PCI device's
-			// address. A sysfs PCI address is already the extended
-			// BDF that the attribute's format names.
+			// address is in this driver's domain, so matchAttribute on
+			// it pairs only this driver's devices. Another driver, such
+			// as media-operator with its devices for what a GPU decodes,
+			// pairs with these on the standard PCI attribute. sysfs
+			// writes a PCI address in the same extended BDF format.
 			if d.Bus == "pci" {
 				attrs[pciBusIDAttribute] = kubernetes.AttrString(d.Address)
 			}
@@ -311,19 +243,14 @@ func inventoryDevices(discovered []hardware.Device,
 			out = append(out, device)
 		}
 	}
-	// The list is sorted, so the same hardware always publishes the
-	// same slice. This lets the change detection in
-	// WriteResourceSlice see actual inventory changes, and nothing
-	// caused only by the order of the walk.
+	// The sort makes the same hardware produce the same slice, so the
+	// writer finds a change only when the devices change.
 	slices.SortFunc(out, func(a, b kubernetes.SliceDevice) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 	return out
 }
 
-// withVirtualization joins the virtualization devices to the
-// hardware's, and sorts the whole list by name again, so the same
-// machine always publishes the same slice.
 func withVirtualization(devices, virtual []kubernetes.SliceDevice) []kubernetes.SliceDevice {
 	out := append(slices.Clone(devices), virtual...)
 	slices.SortFunc(out, func(a, b kubernetes.SliceDevice) int {
@@ -332,21 +259,15 @@ func withVirtualization(devices, virtual []kubernetes.SliceDevice) []kubernetes.
 	return out
 }
 
-// deviceName turns a sysfs address into the DNS label the API
-// requires. The function prefixes the label with the bus, because
-// addresses are unique only within a bus, lowercases it, and
-// replaces the address punctuation (PCI's colons and dots, USB's
-// dots and colons) with dashes. The address is the right identity
-// for a slice device, because it names the slot, not the individual
-// unit. Replacing a failed dongle in the same port produces the
-// same device name, which is the behavior a claim against "the UPS
-// on this wall" needs. When the hardware carries a serial number,
-// the serial attribute is what identifies the individual unit.
+// deviceName turns a bus and a sysfs address into the DNS label that
+// the API requires for a device name. The bus is in the name because
+// an address is unique only within its bus. A board device's address
+// comes from the firmware, such as MSFT0101:00 for a TPM.
 //
-// A device on the board takes its name from the firmware, such as
-// MSFT0101:00 for a TPM or acpi.video_bus.0 for the display's
-// brightness keys, so every character a DNS label cannot hold
-// becomes a dash, and the name stops at the label's 63 characters.
+// A USB address names the port and not the unit, so a replacement
+// dongle in the same port gets the same name, and a claim for the UPS
+// on that port still matches. The serial attribute identifies the
+// unit.
 func deviceName(d hardware.Device) string {
 	name := []byte(strings.ToLower(d.Bus + "-" + d.Address))
 	for i, c := range name {
@@ -357,12 +278,9 @@ func deviceName(d hardware.Device) string {
 	return strings.Trim(string(name[:min(len(name), 63)]), "-")
 }
 
-// attributeString limits a free-text value to the API's
-// 64-character limit on attribute strings. Identifiers, such as
-// addresses, hex IDs, and modaliases on these buses, always fit
-// within this limit. Only the human-readable names that the
-// hardware or pci.ids provides can run longer, and a truncated name
-// still identifies the device.
+// attributeString cuts a value to the API's limit of 64 characters
+// for an attribute string. The names from the hardware and from
+// pci.ids can be longer.
 func attributeString(s string) string {
 	if len(s) <= 64 {
 		return s
@@ -370,10 +288,7 @@ func attributeString(s string) string {
 	return s[:64]
 }
 
-// pciBusIDAttribute is the standard attribute that Kubernetes defines
-// for the address of a PCI device, in the `resource.kubernetes.io`
-// domain that belongs to no single driver. Its value is the extended
-// BDF notation, Domain:Bus:Device.Function, so it identifies one
-// device on a node. The reference is
+// pciBusIDAttribute is the standard Kubernetes attribute for a PCI
+// address, in the extended BDF format Domain:Bus:Device.Function. See
 // https://kubernetes.io/docs/reference/node/dra-standard-device-attributes/.
 const pciBusIDAttribute = "resource.kubernetes.io/pciBusID"

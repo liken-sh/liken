@@ -1,9 +1,5 @@
 package main
 
-// The kubelet plugin's behavior: what prepare delivers, what it
-// refuses, and that both gRPC services actually answer on their
-// sockets the way the kubelet will call them.
-
 import (
 	"context"
 	"encoding/json"
@@ -24,22 +20,18 @@ import (
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
 )
 
-// draFixture builds everything one prepare call touches: a fake
-// sysfs with the stick plugged in, a fake API server holding one
-// allocated claim, and a CDI directory to write into. The package
-// seams (draSysfsRoot, cdiDir) point at the fixture, and the test
-// restores them afterward.
+// draFixture is a fake sysfs with a USB stick, a fake API server with
+// one allocated claim, and a temporary CDI directory, with draSysfsRoot
+// and cdiDir pointed at them for the test.
 type draFixture struct {
 	plugin    *draPlugin
 	cdi       string
 	allocated string
 
-	// owner is the claim's owner references. A claim from a
-	// ResourceClaimTemplate is owned by its pod, and a named claim has
-	// no owner.
+	// owner is the claim's ownerReferences. A claim made from a
+	// ResourceClaimTemplate is owned by its pod.
 	owner []map[string]any
 
-	// released receives the plugin's wake after an unprepare.
 	released chan struct{}
 }
 
@@ -52,7 +44,7 @@ func newDRAFixture(t *testing.T) *draFixture {
 	stick := filepath.Join(sysfs, "bus", "usb", "devices", "2-1:1.0")
 	sda := filepath.Join(stick, "host0", "target0:0:0", "0:0:0:0", "block", "sda")
 	if err := os.MkdirAll(sda, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	files := map[string]string{
 		filepath.Join(stick, "modalias"): "usb:v46F4p0001d0100dc00dsc00dp00ic08isc06ip50in00\n",
@@ -65,22 +57,22 @@ func newDRAFixture(t *testing.T) *draFixture {
 			continue
 		}
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the file: %v", err)
 		}
 	}
 	driver := filepath.Join(sysfs, "bus", "usb", "drivers", "usb-storage")
 	if err := os.MkdirAll(driver, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	if err := os.Symlink(driver, filepath.Join(stick, "driver")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the symlink: %v", err)
 	}
 	block := filepath.Join(sysfs, "class", "block")
 	if err := os.MkdirAll(block, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	if err := os.Symlink(block, filepath.Join(sda, "subsystem")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the symlink: %v", err)
 	}
 
 	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +98,7 @@ func newDRAFixture(t *testing.T) *draFixture {
 	}))
 	credentials := t.TempDir()
 	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("t"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the file: %v", err)
 	}
 
 	cdi := t.TempDir()
@@ -121,27 +113,25 @@ func newDRAFixture(t *testing.T) *draFixture {
 	return fixture
 }
 
-// enumerate writes the usb_device that the stick's interface belongs
-// to, with the numbers the bus assigned it. The bus number names the
-// controller and does not change. The bus assigns the device number
-// in order at each enumeration, so a replug of the same hardware in
-// the same port produces a different one.
+// enumerate writes the USB device that the stick's interface belongs
+// to, with its busnum and devnum. The kernel gives a device a new
+// devnum each time it enumerates, so the same stick plugged into the
+// same port again gets a different one.
 func (f *draFixture) enumerate(t *testing.T, devnum int) {
 	t.Helper()
 	device := filepath.Join(draSysfsRoot, "bus", "usb", "devices", "2-1")
 	if err := os.MkdirAll(device, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	for name, value := range map[string]string{"busnum": "2", "devnum": fmt.Sprint(devnum)} {
 		if err := os.WriteFile(filepath.Join(device, name), []byte(value+"\n"), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the file: %v", err)
 		}
 	}
 }
 
-// addGPU plants an integrated GPU beside the stick: two drm nodes and
-// one i2c monitor bus under one PCI device, the shape i915 gives a
-// real machine.
+// addGPU adds an Intel integrated GPU bound to i915: a card node, a
+// render node, and a monitor's i2c bus under one PCI device.
 func (f *draFixture) addGPU(t *testing.T) {
 	t.Helper()
 	gpu := filepath.Join(draSysfsRoot, "bus", "pci", "devices", "0000:00:02.0")
@@ -152,43 +142,42 @@ func (f *draFixture) addGPU(t *testing.T) {
 	}
 	driver := filepath.Join(draSysfsRoot, "bus", "pci", "drivers", "i915")
 	if err := os.MkdirAll(driver, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	if err := os.MkdirAll(gpu, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(gpu, "modalias"), []byte("pci:v00008086d000046D2sv00000301sd000002F3bc03sc00i00\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the file: %v", err)
 	}
 	if err := os.Symlink(driver, filepath.Join(gpu, "driver")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the symlink: %v", err)
 	}
 	for rel, node := range children {
 		dir := filepath.Join(gpu, rel)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the directory: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(dir, "dev"), []byte("226:0\n"), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the file: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(dir, "uevent"), []byte("DEVNAME="+node[1]+"\n"), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the file: %v", err)
 		}
 		class := filepath.Join(draSysfsRoot, "class", node[0])
 		if err := os.MkdirAll(class, 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the directory: %v", err)
 		}
 		if err := os.Symlink(class, filepath.Join(dir, "subsystem")); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the symlink: %v", err)
 		}
 	}
 }
 
-// addBluetooth plants a Bluetooth adapter beside the stick: a USB
-// interface bound to btusb, with the hci object the kernel registers
-// under it and a game controller connected to that object. The
-// adapter's own subtree carries no device node, which is the shape a
-// working radio has.
+// addBluetooth adds a USB Bluetooth adapter bound to btusb, its hci0,
+// and a connected game controller with an evdev node under hci0. As on
+// real hardware, the adapter has no device node of its own except
+// the usbfs node.
 func (f *draFixture) addBluetooth(t *testing.T) {
 	t.Helper()
 	devices := filepath.Join(draSysfsRoot, "bus", "usb", "devices")
@@ -196,13 +185,13 @@ func (f *draFixture) addBluetooth(t *testing.T) {
 	controller := filepath.Join(adapter, "bluetooth", "hci0", "hci0:11", "0005:054C:0CE6.0004")
 	event := filepath.Join(controller, "input", "input25", "event20")
 	if err := os.MkdirAll(event, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(event, "dev"), []byte("13:84\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the file: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(event, "uevent"), []byte("DEVNAME=input/event20\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the file: %v", err)
 	}
 	for class, dir := range map[string]string{
 		"bluetooth": filepath.Join(adapter, "bluetooth", "hci0"),
@@ -210,38 +199,36 @@ func (f *draFixture) addBluetooth(t *testing.T) {
 	} {
 		target := filepath.Join(draSysfsRoot, "class", class)
 		if err := os.MkdirAll(target, 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the directory: %v", err)
 		}
 		if err := os.Symlink(target, filepath.Join(dir, "subsystem")); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the symlink: %v", err)
 		}
 	}
 	if err := os.WriteFile(filepath.Join(adapter, "modalias"), []byte("usb:v8087p0033d0001dcE0dsc01dp01icE0isc01ip01in00\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the file: %v", err)
 	}
 	driver := filepath.Join(draSysfsRoot, "bus", "usb", "drivers", "btusb")
 	if err := os.MkdirAll(driver, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	if err := os.Symlink(driver, filepath.Join(adapter, "driver")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the symlink: %v", err)
 	}
 	device := filepath.Join(devices, "1-8")
 	if err := os.MkdirAll(device, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 	for name, value := range map[string]string{"busnum": "1", "devnum": "8"} {
 		if err := os.WriteFile(filepath.Join(device, name), []byte(value+"\n"), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the file: %v", err)
 		}
 	}
 }
 
 func TestPrepareDeliversTheUsbfsNodeOfABluetoothAdapter(t *testing.T) {
-	// A claim on an adapter receives the usbfs node, which is the only
-	// node the adapter has. The connected controller's event node stays
-	// out: it belongs to the controller, and it leaves when somebody
-	// turns the controller off.
+	// The controller's event node is not delivered, because it
+	// disappears when the controller turns off.
 	fixture := newDRAFixture(t)
 	fixture.addBluetooth(t)
 	fixture.allocated = "usb-1-8-1-0"
@@ -250,23 +237,22 @@ func TestPrepareDeliversTheUsbfsNodeOfABluetoothAdapter(t *testing.T) {
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
-	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
-		t.Fatalf("answer = %+v", answer)
+	if result := resp.Claims["claim-1"]; result == nil || result.Error != "" {
+		t.Fatalf("the prepare result for claim-1 is %+v, want no error", result)
 	}
 
 	paths := specPaths(t, fixture, "claim-1")
 	if !slices.Equal(paths, []string{"/dev/bus/usb/001/008"}) {
-		t.Errorf("paths = %v, want the adapter's usbfs node alone", paths)
+		t.Errorf("the paths are %v, want the adapter's usbfs node alone", paths)
 	}
 }
 
 func TestPrepareDeliversUHIDWithABluetoothAdapter(t *testing.T) {
-	// BlueZ carries HID over GATT in userspace and presents the
-	// peripheral as an input device by writing /dev/uhid, so a stack
-	// in an unprivileged container needs that node beside the
-	// adapter, and the HID profile fails without it.
+	// BlueZ implements HID over GATT in userspace and creates the
+	// input device through /dev/uhid, so the HID profile fails in an
+	// unprivileged container without that node.
 	fixture := newDRAFixture(t)
 	fixture.addBluetooth(t)
 	miscDevice(t, draSysfsRoot, "uhid", 239)
@@ -276,22 +262,20 @@ func TestPrepareDeliversUHIDWithABluetoothAdapter(t *testing.T) {
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
-	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
-		t.Fatalf("answer = %+v", answer)
+	if result := resp.Claims["claim-1"]; result == nil || result.Error != "" {
+		t.Fatalf("the prepare result for claim-1 is %+v, want no error", result)
 	}
 
 	paths := specPaths(t, fixture, "claim-1")
 	slices.Sort(paths)
 	if !slices.Equal(paths, []string{"/dev/bus/usb/001/008", "/dev/uhid"}) {
-		t.Errorf("paths = %v, want the usbfs node and the uhid node", paths)
+		t.Errorf("the paths are %v, want the usbfs node and the uhid node", paths)
 	}
 }
 
 func TestPrepareDeliversUHIDToNoOtherDevice(t *testing.T) {
-	// /dev/uhid belongs to the adapter's claim alone, because a
-	// Bluetooth stack is what the node exists for.
 	fixture := newDRAFixture(t)
 	fixture.enumerate(t, 4)
 	miscDevice(t, draSysfsRoot, "uhid", 239)
@@ -300,26 +284,24 @@ func TestPrepareDeliversUHIDToNoOtherDevice(t *testing.T) {
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
-	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
-		t.Fatalf("answer = %+v", answer)
+	if result := resp.Claims["claim-1"]; result == nil || result.Error != "" {
+		t.Fatalf("the prepare result for claim-1 is %+v, want no error", result)
 	}
 
 	paths := specPaths(t, fixture, "claim-1")
 	slices.Sort(paths)
 	if !slices.Equal(paths, []string{"/dev/bus/usb/002/004", "/dev/sda"}) {
-		t.Errorf("paths = %v, want the stick's own nodes", paths)
+		t.Errorf("the paths are %v, want the stick's own nodes", paths)
 	}
 }
 
 func TestPrepareDeliversTheInputNodesWithABluetoothAdapter(t *testing.T) {
-	// A Bluetooth stack in an unprivileged container relays a controller's
-	// events from the evdev node the radio link creates into a uinput
-	// virtual device with a stable minor. The spec states the evdev range
-	// by number, because the kernel registers each of those nodes only
-	// while a controller is connected, and the container must hold a node
-	// for a minor that appears later.
+	// The Bluetooth stack reads a controller's evdev node and writes
+	// a uinput device. The kernel creates an evdev node only while a
+	// controller is connected, which can be after the container
+	// starts, so the spec lists evdev minors 64 to 95 by number.
 	fixture := newDRAFixture(t)
 	fixture.addBluetooth(t)
 	miscDevice(t, draSysfsRoot, "uhid", 239)
@@ -330,10 +312,10 @@ func TestPrepareDeliversTheInputNodesWithABluetoothAdapter(t *testing.T) {
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
-	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
-		t.Fatalf("answer = %+v", answer)
+	if result := resp.Claims["claim-1"]; result == nil || result.Error != "" {
+		t.Fatalf("the prepare result for claim-1 is %+v, want no error", result)
 	}
 
 	mode := 0o600
@@ -350,7 +332,7 @@ func TestPrepareDeliversTheInputNodesWithABluetoothAdapter(t *testing.T) {
 	want = append(want, cdiDeviceNode{Path: "/dev/bus/usb/001/008"})
 
 	if nodes := specNodes(t, fixture, "claim-1"); !reflect.DeepEqual(nodes, want) {
-		t.Errorf("nodes = %+v, want %+v", nodes, want)
+		t.Errorf("the nodes are %+v, want %+v", nodes, want)
 	}
 }
 
@@ -363,19 +345,19 @@ func TestPrepareDeliversOnlyTheRenderNodeOfAGPU(t *testing.T) {
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
-	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
-		t.Fatalf("answer = %+v", answer)
+	if result := resp.Claims["claim-1"]; result == nil || result.Error != "" {
+		t.Fatalf("the prepare result for claim-1 is %+v, want no error", result)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(fixture.cdi, "liken.sh-claim-1.json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CDI spec: %v", err)
 	}
 	var spec cdiSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the CDI spec: %v", err)
 	}
 	var paths []string
 	for _, n := range spec.Devices[0].ContainerEdits.DeviceNodes {
@@ -383,14 +365,13 @@ func TestPrepareDeliversOnlyTheRenderNodeOfAGPU(t *testing.T) {
 	}
 	slices.Sort(paths)
 	if !slices.Equal(paths, []string{"/dev/dri/renderD128"}) {
-		t.Errorf("paths = %v, want the render node, with no card node and no monitor bus", paths)
+		t.Errorf("the paths are %v, want the render node, with no card node and no monitor bus", paths)
 	}
 }
 
 func TestPrepareDeliversTheCardNodeForTheDisplayName(t *testing.T) {
-	// A claim on the display companion receives the card node, which
-	// carries modesetting authority, and nothing else. A workload that
-	// modesets and renders holds both devices, one request each.
+	// The card node allows modesetting. A workload that sets modes
+	// and renders requests both the display companion and the GPU.
 	fixture := newDRAFixture(t)
 	fixture.addGPU(t)
 	fixture.allocated = "pci-0000-00-02-0-display"
@@ -399,26 +380,26 @@ func TestPrepareDeliversTheCardNodeForTheDisplayName(t *testing.T) {
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
-	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
-		t.Fatalf("answer = %+v", answer)
+	if result := resp.Claims["claim-1"]; result == nil || result.Error != "" {
+		t.Fatalf("the prepare result for claim-1 is %+v, want no error", result)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(fixture.cdi, "liken.sh-claim-1.json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CDI spec: %v", err)
 	}
 	var spec cdiSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the CDI spec: %v", err)
 	}
 	var paths []string
 	for _, n := range spec.Devices[0].ContainerEdits.DeviceNodes {
 		paths = append(paths, n.Path)
 	}
 	if !slices.Equal(paths, []string{"/dev/dri/card0"}) {
-		t.Errorf("paths = %v, want the card node alone", paths)
+		t.Errorf("the paths are %v, want the card node alone", paths)
 	}
 }
 
@@ -431,23 +412,23 @@ func TestPrepareDeliversTheMonitorBusesForTheCompanionName(t *testing.T) {
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
-	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
-		t.Fatalf("answer = %+v", answer)
+	if result := resp.Claims["claim-1"]; result == nil || result.Error != "" {
+		t.Fatalf("the prepare result for claim-1 is %+v, want no error", result)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(fixture.cdi, "liken.sh-claim-1.json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CDI spec: %v", err)
 	}
 	var spec cdiSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the CDI spec: %v", err)
 	}
 	nodes := spec.Devices[0].ContainerEdits.DeviceNodes
 	if len(nodes) != 1 || nodes[0].Path != "/dev/i2c-0" {
-		t.Errorf("nodes = %+v, want the monitor bus alone", nodes)
+		t.Errorf("the nodes are %+v, want the monitor bus alone", nodes)
 	}
 }
 
@@ -460,10 +441,10 @@ func TestPrepareFailsANameNoDevicePublishes(t *testing.T) {
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
 	if resp.Claims["claim-1"].Error == "" {
-		t.Error("a name the hardware no longer publishes must fail the claim")
+		t.Error("the claim has no error, want one for a name that no device publishes")
 	}
 }
 
@@ -474,44 +455,42 @@ func TestPrepareDeliversTheClaimedDevicesNodes(t *testing.T) {
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
-	answer := resp.Claims["claim-1"]
-	if answer == nil || answer.Error != "" {
-		t.Fatalf("answer = %+v", answer)
+	result := resp.Claims["claim-1"]
+	if result == nil || result.Error != "" {
+		t.Fatalf("the prepare result for claim-1 is %+v, want no error", result)
 	}
-	if len(answer.Devices) != 1 {
-		t.Fatalf("devices = %+v", answer.Devices)
+	if len(result.Devices) != 1 {
+		t.Fatalf("the devices are %+v, want one", result.Devices)
 	}
-	d := answer.Devices[0]
+	d := result.Devices[0]
 	if d.PoolName != "node-1" || d.DeviceName != "usb-2-1-1-0" {
-		t.Errorf("device = %+v", d)
+		t.Errorf("the device is %+v, want pool node-1 and name usb-2-1-1-0", d)
 	}
 	if len(d.CdiDeviceIds) != 1 || d.CdiDeviceIds[0] != "liken.sh/device=claim-1-usb-2-1-1-0" {
-		t.Errorf("cdi ids = %v", d.CdiDeviceIds)
+		t.Errorf("the CDI IDs are %v, want [liken.sh/device=claim-1-usb-2-1-1-0]", d.CdiDeviceIds)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(fixture.cdi, "liken.sh-claim-1.json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CDI spec: %v", err)
 	}
 	var spec cdiSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the CDI spec: %v", err)
 	}
 	if spec.Kind != "liken.sh/device" || len(spec.Devices) != 1 {
-		t.Fatalf("spec = %+v", spec)
+		t.Fatalf("the spec is %+v, want kind liken.sh/device and one device", spec)
 	}
 	nodes := spec.Devices[0].ContainerEdits.DeviceNodes
 	if len(nodes) != 1 || nodes[0].Path != "/dev/sda" {
-		t.Errorf("device nodes = %+v", nodes)
+		t.Errorf("the device nodes are %+v, want /dev/sda alone", nodes)
 	}
 }
 
 func TestPrepareDeliversTheUsbfsNodeBesideTheDriversNodes(t *testing.T) {
-	// The stick's driver delivers a block node. A userspace driver that
-	// speaks to the same hardware over libusb needs the usbfs node
-	// instead, and the pod cannot open a node the spec does not name.
+	// A userspace driver that uses libusb needs the usbfs node.
 	fixture := newDRAFixture(t)
 	fixture.enumerate(t, 4)
 
@@ -519,16 +498,16 @@ func TestPrepareDeliversTheUsbfsNodeBesideTheDriversNodes(t *testing.T) {
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
-	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
-		t.Fatalf("answer = %+v", answer)
+	if result := resp.Claims["claim-1"]; result == nil || result.Error != "" {
+		t.Fatalf("the prepare result for claim-1 is %+v, want no error", result)
 	}
 
 	paths := specPaths(t, fixture, "claim-1")
 	slices.Sort(paths)
 	if !slices.Equal(paths, []string{"/dev/bus/usb/002/004", "/dev/sda"}) {
-		t.Errorf("paths = %v, want the block node and the usbfs node", paths)
+		t.Errorf("the paths are %v, want the block node and the usbfs node", paths)
 	}
 }
 
@@ -539,35 +518,35 @@ func TestPrepareRefusesAClaimWhoseUIDChanged(t *testing.T) {
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "an-older-claim"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
 	if resp.Claims["an-older-claim"].Error == "" {
-		t.Error("a recreated claim is a different grant and must be refused")
+		t.Error("the claim has no error, want one because its UID changed")
 	}
 }
 
 func TestPrepareReportsAMissingDevicePerClaim(t *testing.T) {
 	fixture := newDRAFixture(t)
-	// Unplug the stick: the walk no longer finds the allocated name.
+	// Unplug the stick.
 	if err := os.RemoveAll(filepath.Join(draSysfsRoot, "bus", "usb", "devices", "2-1:1.0")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the directory: %v", err)
 	}
 
 	resp, err := fixture.plugin.NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
 	if resp.Claims["claim-1"].Error == "" {
-		t.Error("hardware that left must fail the claim, in-band, for the kubelet to retry")
+		t.Error("the claim has no error, want one because its device is gone")
 	}
 }
 
 func TestUnprepareRemovesTheSpecAndIsIdempotent(t *testing.T) {
 	fixture := newDRAFixture(t)
 	if err := writeCDISpec("claim-1", []cdiDevice{{Name: "x"}}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec: %v", err)
 	}
 
 	req := &drav1.NodeUnprepareResourcesRequest{
@@ -575,26 +554,25 @@ func TestUnprepareRemovesTheSpecAndIsIdempotent(t *testing.T) {
 	}
 	resp, err := fixture.plugin.NodeUnprepareResources(t.Context(), req)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("unpreparing the claim: %v", err)
 	}
 	if resp.Claims["claim-1"].Error != "" {
-		t.Fatalf("answer = %+v", resp.Claims["claim-1"])
+		t.Fatalf("the unprepare result for claim-1 is %+v, want no error", resp.Claims["claim-1"])
 	}
 	if _, err := os.Stat(filepath.Join(fixture.cdi, "liken.sh-claim-1.json")); !os.IsNotExist(err) {
-		t.Error("the spec file must be gone")
+		t.Error("the spec file still exists, want it removed")
 	}
 
-	// A second unprepare of the same claim still succeeds.
 	resp, err = fixture.plugin.NodeUnprepareResources(t.Context(), req)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("unpreparing the claim: %v", err)
 	}
 	if resp.Claims["claim-1"].Error != "" {
-		t.Errorf("unprepare must be idempotent: %+v", resp.Claims["claim-1"])
+		t.Errorf("the second unprepare returned %+v, want no error", resp.Claims["claim-1"])
 	}
 }
 
-func TestServeAnswersOnBothSockets(t *testing.T) {
+func TestServeRespondsOnBothSockets(t *testing.T) {
 	fixture := newDRAFixture(t)
 
 	sockets := t.TempDir()
@@ -609,50 +587,47 @@ func TestServeAnswersOnBothSockets(t *testing.T) {
 	t.Cleanup(func() {
 		cancel()
 		if err := <-done; err != nil {
-			t.Error(err)
+			t.Errorf("serving the DRA plugin: %v", err)
 		}
 	})
 
-	// The registration handshake, exactly as the kubelet's plugin
-	// watcher performs it.
+	// Call the sockets in the order that the kubelet does.
 	registration := filepath.Join(sockets, "liken.sh-reg.sock")
 	waitForSocket(t, registration)
 	regConn, err := grpc.NewClient("unix://"+registration, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the gRPC client: %v", err)
 	}
 	defer regConn.Close()
 	info, err := regv1.NewRegistrationClient(regConn).GetInfo(t.Context(), &regv1.InfoRequest{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("getting the plugin info: %v", err)
 	}
 	if info.Type != regv1.DRAPlugin || info.Name != "liken.sh" {
-		t.Errorf("info = %+v", info)
+		t.Errorf("the plugin info is %+v, want type DRAPlugin and name liken.sh", info)
 	}
 	if len(info.SupportedVersions) != 1 || info.SupportedVersions[0] != "v1.DRAPlugin" {
-		t.Errorf("versions = %v", info.SupportedVersions)
+		t.Errorf("the supported versions are %v, want [v1.DRAPlugin]", info.SupportedVersions)
 	}
 
-	// Then dial the endpoint the registration announced and prepare a
-	// claim over the wire.
 	draConn, err := grpc.NewClient("unix://"+info.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the gRPC client: %v", err)
 	}
 	defer draConn.Close()
 	resp, err := drav1.NewDRAPluginClient(draConn).NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
-	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
-		t.Errorf("answer = %+v", answer)
+	if result := resp.Claims["claim-1"]; result == nil || result.Error != "" {
+		t.Errorf("the prepare result for claim-1 is %+v, want no error", result)
 	}
 }
 
-// waitForSocket polls for a unix socket to exist. The server sets
-// its sockets up in a goroutine, and the test can run ahead of it.
+// waitForSocket waits for serveDRAPlugin, which runs in another
+// goroutine, to create a socket file.
 func waitForSocket(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -661,7 +636,7 @@ func waitForSocket(t *testing.T, path string) {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("socket %s never appeared", path)
+			t.Fatalf("the socket %s does not exist after 5 seconds", path)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

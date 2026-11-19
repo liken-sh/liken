@@ -6,20 +6,20 @@ import (
 	"github.com/liken-sh/liken/liken/cluster"
 )
 
-// localAPIEndpoint returns the machine's own path to the API
-// server, chosen instead of the service VIP that the pod environment
-// offers. The VIP works through iptables NAT: each connection is
-// pinned to one API server. When that server's machine dies
-// silently, everything pinned to it stalls on timeouts, for long
-// enough that healthy machines' heartbeats lapse and read as Lost.
-// This pod runs on the host's network, so localhost reaches the
-// machine, and the machine always has a better path. A leader runs
-// an API server of its own on 6443, and a follower runs k3s's agent
-// load balancer on 6444, which checks the health of every server and
-// fails over between them. These are the same endpoints the
-// machine's own kubelet uses, so the operator's view of the API can
-// never be worse than the kubelet's. A machine with no cluster
-// document falls back to the environment's endpoint ("").
+// localAPIEndpoint returns the API server URL that the operator uses
+// in place of the service VIP from the pod's environment. With no
+// cluster document it returns "", and the caller uses the VIP. The VIP
+// goes through iptables NAT, which pins each connection to one API
+// server. When that server's machine dies without closing its
+// connections, each pinned connection waits for a timeout, and that
+// can last long enough for the heartbeats of healthy machines to lapse
+// and for them to be reported Lost.
+//
+// The pod runs on the host network, so localhost is the machine
+// itself. A leader runs an API server on 6443. A follower runs the k3s
+// agent's load balancer on 6444, which checks the health of every API
+// server and fails over between them. The machine's kubelet uses the
+// same endpoints.
 func localAPIEndpoint(clusterDoc *cluster.Cluster, name string) string {
 	if clusterDoc == nil {
 		return ""

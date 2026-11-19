@@ -1,11 +1,7 @@
 package main
 
-// Tests for the demotion cleanup decision. A machine whose
-// derived role is follower, but whose Node object still claims
-// control-plane, was demoted. The leftover Node, with its etcd
-// membership, must be removed automatically, because a dead etcd
-// member still counts toward the quorum size and breaks the
-// majority math the next time an actual leader reboots.
+// A follower whose Node still has control-plane labels was demoted, and
+// its Node must be deleted so that k3s removes its etcd member.
 
 import (
 	"encoding/json"
@@ -22,10 +18,10 @@ func TestDemotionCleanupFiresForADemotedFollower(t *testing.T) {
 	labels := map[string]string{"node-role.kubernetes.io/control-plane": "true"}
 	d := decideDemotion(api.RoleFollower, labels, machine.RebootAuto, turnGranted)
 	if !d.cleanup {
-		t.Error("a follower with a control-plane Node needs cleanup")
+		t.Error("the decision has no cleanup, want cleanup for a follower with a control-plane Node")
 	}
 	if d.condition.Status != "False" || d.condition.Reason != "DemotionRebooting" {
-		t.Errorf("got %+v", d.condition)
+		t.Errorf("the condition is %+v, want False with reason DemotionRebooting", d.condition)
 	}
 }
 
@@ -33,28 +29,27 @@ func TestDemotionCleanupWaitsUnderManualPolicy(t *testing.T) {
 	labels := map[string]string{"node-role.kubernetes.io/etcd": "true"}
 	d := decideDemotion(api.RoleFollower, labels, machine.RebootManual, turnGranted)
 	if d.cleanup {
-		t.Error("cleanup deletes the Node and reboots; Manual policy must gate it")
+		t.Error("the decision has a cleanup, want none because the cleanup deletes the Node and reboots, and the Manual policy forbids that")
 	}
 	if d.condition.Status != "False" || d.condition.Reason != "DemotionPending" {
-		t.Errorf("got %+v", d.condition)
+		t.Errorf("the condition is %+v, want False with reason DemotionPending", d.condition)
 	}
 }
 
 func TestACleanFollowerNeedsNothing(t *testing.T) {
 	d := decideDemotion(api.RoleFollower, map[string]string{"kubernetes.io/hostname": "node-4"}, machine.RebootAuto, turnGranted)
 	if d.cleanup || d.condition.Status != "True" {
-		t.Errorf("got %+v", d)
+		t.Errorf("the decision is %+v, want no cleanup and a True condition", d)
 	}
 }
 
 func TestALeaderIsAlwaysCurrent(t *testing.T) {
-	// A leader's control-plane labels are exactly right. A leader
-	// still starting up, with labels not yet set, is k3s's job, not
-	// the operator's.
+	// A leader with control-plane labels is correct. One without them
+	// is still starting, and k3s adds them.
 	labels := map[string]string{"node-role.kubernetes.io/control-plane": "true"}
 	d := decideDemotion(api.RoleLeader, labels, machine.RebootAuto, turnGranted)
 	if d.cleanup || d.condition.Status != "True" {
-		t.Errorf("got %+v", d)
+		t.Errorf("the decision is %+v, want no cleanup and a True condition", d)
 	}
 }
 
@@ -62,17 +57,16 @@ func TestDemotionWaitsForItsRebootTurn(t *testing.T) {
 	labels := map[string]string{"node-role.kubernetes.io/control-plane": "true"}
 	d := decideDemotion(api.RoleFollower, labels, machine.RebootAuto, turnAwaiting)
 	if d.cleanup {
-		t.Error("no turn granted means no Node deletion and no reboot")
+		t.Error("the decision has a cleanup, want none because no reboot turn is granted")
 	}
 	if d.condition.Reason != "AwaitingTurn" {
-		t.Errorf("got %+v", d.condition)
+		t.Errorf("the condition is %+v, want reason AwaitingTurn", d.condition)
 	}
 }
 
-// The demotion deletes the Node only while it is the instance the pass
-// read. The delete carries the UID as a precondition, so a Node that
-// k3s registered again after the read, under the same name, is kept:
-// the API server answers 409 and deletes nothing.
+// The delete sends the UID of the Node the pass read as a precondition.
+// If k3s registered a new Node under the same name after that read, the
+// API server returns 409 and deletes nothing.
 func TestTheDemotionDeletesOnlyTheNodeItRead(t *testing.T) {
 	var sent struct {
 		Kind          string `json:"kind"`
@@ -88,7 +82,7 @@ func TestTheDemotionDeletesOnlyTheNodeItRead(t *testing.T) {
 	}))
 
 	if err := deleteNode(client, "node-2", "uid-read"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("deleting the Node: %v", err)
 	}
 
 	if method != http.MethodDelete || path != "/api/v1/nodes/node-2" || sent.Kind != "DeleteOptions" || sent.Preconditions.UID != "uid-read" {
@@ -96,8 +90,9 @@ func TestTheDemotionDeletesOnlyTheNodeItRead(t *testing.T) {
 	}
 }
 
-// demotingNode answers the stale control-plane Node a demotion cleans
-// up, and a server that records each DELETE and answers it with status.
+// demotingNode returns the stale control-plane Node that a demotion
+// removes, and a handler that records each DELETE path and responds
+// with status.
 func demotingNode(t *testing.T, status int) (*nodeObject, *[]string, http.Handler) {
 	t.Helper()
 	node := &nodeObject{}
@@ -112,10 +107,7 @@ func demotingNode(t *testing.T, status int) (*nodeObject, *[]string, http.Handle
 	})
 }
 
-// The cleanup writes the reboot intent before it deletes the Node,
-// because the delete kills this pod, and the reboot must already be
-// asked for when it does.
-func TestTheDemotionAsksForTheRebootAndDeletesTheNode(t *testing.T) {
+func TestTheDemotionWritesTheRebootIntentAndDeletesTheNode(t *testing.T) {
 	node, deleted, handler := demotingNode(t, http.StatusOK)
 	runDir := t.TempDir()
 	out := &passOutcome{}
@@ -132,7 +124,7 @@ func TestTheDemotionAsksForTheRebootAndDeletesTheNode(t *testing.T) {
 }
 
 // A reboot intent that cannot be written leaves the Node in place,
-// because deleting it would kill this pod with no reboot to follow.
+// because deleting it would delete this pod with no reboot to follow.
 func TestADemotionWhoseIntentFailsKeepsTheNode(t *testing.T) {
 	node, deleted, handler := demotingNode(t, http.StatusOK)
 	runDir := filepath.Join(t.TempDir(), "missing")
@@ -145,8 +137,9 @@ func TestADemotionWhoseIntentFailsKeepsTheNode(t *testing.T) {
 	}
 }
 
-// A delete that fails after the intent landed leaves a failure for the
-// pass to retry, and the reboot goes ahead.
+// A delete that fails after the intent was written is recorded as a
+// transient failure for the pass to retry, and the reboot still
+// happens.
 func TestADemotionWhoseDeleteFailsIsRetried(t *testing.T) {
 	node, _, handler := demotingNode(t, http.StatusServiceUnavailable)
 	runDir := t.TempDir()

@@ -1,12 +1,11 @@
 package main
 
-// The operator's access to its own Kubernetes Node object. The Node
-// is the kubelet's record of this machine, and the operator reads
-// and writes it for several jobs: mirroring its health onto the
-// Machine (conditions.go), reconciling its labels (labels.go),
-// reconciling its taints (taints.go), cordoning and draining it ahead
-// of a reboot (drain.go), and deleting it to finish a demotion
-// (demotion.go).
+// The operator's access to the Kubernetes Node object of its own
+// machine. The kubelet maintains that Node, and the operator reads and
+// writes it to copy its health onto the Machine (conditions.go),
+// reconcile its labels (labels.go) and taints (taints.go), cordon and
+// drain it before a reboot (drain.go), and delete it to finish a
+// demotion (demotion.go).
 
 import (
 	"encoding/json"
@@ -16,20 +15,13 @@ import (
 	"github.com/liken-sh/liken/liken/api"
 )
 
-// nodesPath is the core API's home for Node objects: no group, just
-// a version, which is what "core" means in the URL scheme.
 const nodesPath = "/api/v1/nodes"
 
-// nodeObject holds the small part of a Kubernetes Node that the
-// operator needs: the labels, where a demoted machine's old role
-// still shows; the conditions, where the kubelet's health shows
-// (reconcile.go mirrors the Node's Ready condition onto the
-// Machine); the cordon state, meaning the unschedulable flag plus
-// the annotations that record whether liken set it (drain.go); the
-// taints, which the operator rewrites as a whole list under the
-// resourceVersion it read (taints.go); and the UID, which ties the
-// device inventory's owner reference to this instance of the node
-// (dra.go).
+// nodeObject is the part of a Node that the operator reads. The
+// taints are written back as a whole list under the resourceVersion
+// that was read (taints.go). The UID is the precondition of
+// deleteNode and names the Node in the owner reference of the
+// machine's ResourceSlice (dra.go).
 type nodeObject struct {
 	Metadata struct {
 		Name            string            `json:"name"`
@@ -47,10 +39,8 @@ type nodeObject struct {
 	} `json:"status"`
 }
 
-// nodeTaint is one entry of the Node's spec.taints, in the Node's own
-// shape rather than the Machine spec's. The value carries omitempty,
-// because a taint with no value stores no value field at all, and a
-// written empty string would be a value the API server keeps.
+// nodeTaint is one entry of the Node's spec.taints. Value has
+// omitempty, as in the core/v1 Taint type.
 type nodeTaint struct {
 	Key    string `json:"key"`
 	Value  string `json:"value,omitempty"`
@@ -65,12 +55,12 @@ func getNode(c *apiclient.Client, name string) (*nodeObject, error) {
 	return n, nil
 }
 
-// deleteNode deletes the Node instance whose UID the caller read. The
-// UID is a precondition of the delete: a Node that k3s registered again
-// under the same name after the read has another UID, and the API
-// server answers 409 and keeps it. Without the precondition, a pass
-// that acted on a stale copy could delete the Node a machine just
-// registered.
+// deleteNode deletes the Node only when it still has the UID that the
+// caller read. When k3s registers the Node again under the same name
+// after the read, the new Node has another UID, and the API server
+// returns 409 Conflict and keeps it. Without the precondition, a pass
+// that works from a stale copy could delete the Node that the machine
+// just registered.
 func deleteNode(c *apiclient.Client, name, uid string) error {
 	body, err := json.Marshal(map[string]any{
 		"apiVersion":    "v1",

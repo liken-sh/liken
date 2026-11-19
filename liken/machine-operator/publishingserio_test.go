@@ -11,16 +11,16 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// pulse8Line is the Pulse-Eight's communications interface, the one
-// that owns the tty.
+// pulse8Line is the Pulse-Eight's communications interface, which
+// cdc_acm binds and which has the tty.
 var pulse8Line = hardware.Device{
 	Bus: "usb", Address: "1-4:1.0", Driver: "cdc_acm", ClassCode: "02",
 	Vendor: "2548", Product: "1002",
 }
 
 // attachedDelivery is what the delivery walk finds under the interface
-// once init holds the attachment: the tty, the CEC adapter under the
-// port, and the remote's event node under the adapter.
+// after init attaches the line: the tty, the CEC adapter under the
+// port, and the remote's input event node under the adapter.
 var attachedDelivery = hardware.Delivery{
 	Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/ttyACM0", Subsystem: "tty"},
@@ -30,12 +30,8 @@ var attachedDelivery = hardware.Delivery{
 	BusNode: "/dev/bus/usb/001/004",
 }
 
-// The fourth examined shape: the tty is never published, and the CEC
-// node and the input node publish as two exclusive devices, each with
-// a suffix. No device keeps the bare name, so a claim allocated to the
-// tty before the entry was declared resolves to nothing. The usbfs
-// node is delivered nowhere, because through it a claimant could
-// detach cdc_acm and end the port under the other claim.
+// An attached line publishes the CEC node and the input node and
+// neither the tty nor the usbfs node.
 func TestASerioAttachmentPublishesTheBusAndTheRemote(t *testing.T) {
 	published := publishFor(pulse8Line, attachedDelivery, []machine.SerioAttachment{pulse8Serio})
 
@@ -44,7 +40,7 @@ func TestASerioAttachmentPublishesTheBusAndTheRemote(t *testing.T) {
 		{Suffix: "-input", Subsystem: "input", Nodes: []string{"/dev/input/event13"}},
 	}
 	if !slices.EqualFunc(published, want, samePublished) {
-		t.Errorf("published = %+v", published)
+		t.Errorf("the devices are %+v, want %+v", published, want)
 	}
 }
 
@@ -54,33 +50,30 @@ func TestASerioLinePublishesNothingBeforeTheAttachment(t *testing.T) {
 		BusNode: "/dev/bus/usb/001/004",
 	}
 	if published := publishFor(pulse8Line, tty, []machine.SerioAttachment{pulse8Serio}); len(published) != 0 {
-		t.Errorf("published = %+v", published)
+		t.Errorf("the devices are %+v, want none before the attachment", published)
 	}
 }
 
-// pulse8HID is the adapter's HID interface, which hid-generic binds
-// for the firmware's keyboard mode. It has the adapter's USB identity
-// and no serial line.
+// pulse8HID is the adapter's HID interface, for its keyboard mode. It
+// has the adapter's vendor and product and no serial line.
 var pulse8HID = hardware.Device{Bus: "usb", Address: "1-4:1.2", Driver: "usbhid", Vendor: "2548", Product: "1002"}
 
 var pulse8HIDDelivery = hardware.Delivery{Nodes: []hardware.DeliveredNode{
 	{Path: "/dev/hidraw0", Subsystem: "hidraw"},
 }, BusNode: "/dev/bus/usb/001/004"}
 
-// Without an entry, the adapter is an ordinary serial line and keeps
-// the default.
+// Without a spec.serio entry, the adapter is an ordinary serial line
+// and publishes as any other device.
 func TestTheSerioShapeNeedsAnEntry(t *testing.T) {
 	got := publishFor(pulse8Line, attachedDelivery, nil)
 	want := publishDevices(pulse8Line, attachedDelivery)
 	if !slices.EqualFunc(got, want, samePublished) {
-		t.Errorf("published = %+v, want %+v", got, want)
+		t.Errorf("the devices are %+v, want %+v, the devices of publishDevices", got, want)
 	}
 }
 
-// The HID interface keeps its own device, but not the usbfs node: the
-// node opens the whole adapter, and a USBDEVFS_RESET through it would
-// end the attachment under every CEC claim. Without an entry, the
-// interface delivers the node as before.
+// With an entry, the HID interface keeps its device and loses the
+// usbfs node. Without an entry, it keeps the node.
 func TestASiblingInterfaceOfAnAttachedLineLosesTheUsbfsNode(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -94,7 +87,7 @@ func TestASiblingInterfaceOfAnAttachedLineLosesTheUsbfsNode(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			got := publishFor(pulse8HID, pulse8HIDDelivery, test.serio)
 			if len(got) != 1 || !slices.Equal(got[0].Nodes, test.want) || got[0].Subsystem != "hidraw" {
-				t.Errorf("published = %+v", got)
+				t.Errorf("the devices are %+v, want one hidraw device with nodes %v", got, test.want)
 			}
 		})
 	}
@@ -105,8 +98,8 @@ func samePublished(a, b publishedDevice) bool {
 		a.RenderNode == b.RenderNode && a.DisplayNode == b.DisplayNode && a.Shareable == b.Shareable
 }
 
-// Both devices carry the adapter's identity, so a claim pairs them by
-// address, and neither allows a second allocation.
+// Both devices have the adapter's attributes, so a claim can pair them
+// by address, and neither allows a second allocation.
 func TestTheInventoryPublishesBothSerioDevicesExclusive(t *testing.T) {
 	devices := inventoryDevices([]hardware.Device{pulse8Line}, delivering(attachedDelivery), noRoles,
 		[]machine.SerioAttachment{pulse8Serio})
@@ -116,17 +109,17 @@ func TestTheInventoryPublishesBothSerioDevicesExclusive(t *testing.T) {
 		names = append(names, d.Name)
 		subsystems = append(subsystems, stringAttribute(d, "subsystem"))
 		if d.AllowMultipleAllocations != nil || stringAttribute(d, "address") != "1-4:1.0" {
-			t.Errorf("device = %+v", d)
+			t.Errorf("device %s is %+v, want address 1-4:1.0 and no multiple allocations", d.Name, d)
 		}
 	}
 	if !slices.Equal(names, []string{"usb-1-4-1-0-cec", "usb-1-4-1-0-input"}) ||
 		!slices.Equal(subsystems, []string{"cec", "input"}) {
-		t.Errorf("names = %v, subsystems = %v", names, subsystems)
+		t.Errorf("device names are %v and subsystems are %v, want usb-1-4-1-0-cec and usb-1-4-1-0-input with cec and input", names, subsystems)
 	}
 }
 
-// stringAttribute reads one string attribute of a slice device, or ""
-// when the device does not carry it.
+// stringAttribute returns one string attribute of a slice device, or
+// "" when the device has no such attribute.
 func stringAttribute(d kubernetes.SliceDevice, name string) string {
 	if a, ok := d.Attributes[name]; ok && a.String != nil {
 		return *a.String
@@ -134,8 +127,9 @@ func stringAttribute(d kubernetes.SliceDevice, name string) string {
 	return ""
 }
 
-// A retracted entry's holder keeps the port until the next boot, so
-// the boot record's entries count with the spec's.
+// A line whose entry is removed from the spec stays attached until the
+// next boot, so serioInEffect returns the entries of the spec and of
+// the boot record.
 func TestDeclaredSerioJoinsTheSpecAndTheBootRecord(t *testing.T) {
 	withSerial := pulse8Serio
 	withSerial.USB.Serial = "A1"
@@ -146,7 +140,7 @@ func TestDeclaredSerioJoinsTheSpecAndTheBootRecord(t *testing.T) {
 
 	if !slices.Equal(got, []machine.SerioAttachment{pulse8Serio, withSerial}) ||
 		!slices.Equal(nilFacts, []machine.SerioAttachment{pulse8Serio}) {
-		t.Errorf("got %v and %v", got, nilFacts)
+		t.Errorf("serioInEffect with a boot record is %v and without is %v, want the spec and boot entries, then the spec entry alone", got, nilFacts)
 	}
 }
 
@@ -155,14 +149,13 @@ func TestDeclaredSerioIsWhatWasLastSet(t *testing.T) {
 	setDeclaredSerio([]machine.SerioAttachment{pulse8Serio})
 
 	if got := declaredSerio(); !slices.Equal(got, []machine.SerioAttachment{pulse8Serio}) {
-		t.Errorf("got %v", got)
+		t.Errorf("declaredSerio() = %v, want the entry that setDeclaredSerio stored", got)
 	}
 }
 
-// While an allocated serio device is absent, or publishes nothing, its
-// claim's spec names a node that does not exist, so a container that
-// starts in that window fails to start instead of receiving whatever
-// device took the old node's number meanwhile.
+// While an allocated serio device is absent, its claim's CDI spec names
+// a node that does not exist, so a container fails to start and does
+// not open another device that took the old node's device number.
 func TestAnAbsentSerioDeviceFailsClosed(t *testing.T) {
 	old := cdiDir
 	cdiDir = t.TempDir()
@@ -173,20 +166,20 @@ func TestAnAbsentSerioDeviceFailsClosed(t *testing.T) {
 		{Name: "claim-1-usb-2-1-1-0", ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/sda"})}},
 	}
 	if err := writeCDISpec("claim-1", devices); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec: %v", err)
 	}
 
 	if err := refreshCDISpec(t.TempDir(), "claim-1", map[string]hardware.Device{}, nil, machineEvents{}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("refreshing the CDI spec: %v", err)
 	}
 
 	raw, err := os.ReadFile(cdiSpecPath("claim-1"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CDI spec: %v", err)
 	}
 	var spec cdiSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the CDI spec: %v", err)
 	}
 	want := [][]string{{serioAbsentNode}, {serioAbsentNode}, {deviceAbsentNode}}
 	for i, device := range spec.Devices {
@@ -194,20 +187,19 @@ func TestAnAbsentSerioDeviceFailsClosed(t *testing.T) {
 		for _, node := range device.ContainerEdits.DeviceNodes {
 			paths = append(paths, node.Path)
 			if node.Major != 0 {
-				t.Errorf("%s names a device number: %+v", device.Name, node)
+				t.Errorf("%s has the device number of %+v, want none", device.Name, node)
 			}
 		}
 		if !slices.Equal(paths, want[i]) {
-			t.Errorf("%s = %v", device.Name, paths)
+			t.Errorf("%s has nodes %v, want %v", device.Name, paths, want[i])
 		}
 	}
 }
 
-// A claim allocated before the entry holds the interface's bare name,
-// which was the tty's device, and its spec names the tty and the usbfs
-// node. After the entry, that name resolves to nothing, and the old
-// nodes are the two that end the attachment: TIOCSETD on the tty and
-// USBDEVFS_RESET on the usbfs node. So the spec fails closed.
+// A claim allocated to the interface's bare name before the entry
+// existed has the tty and the usbfs node in its CDI spec. TIOCSETD on
+// the tty and USBDEVFS_RESET on the usbfs node each end the attachment,
+// so the spec fails closed.
 func TestAClaimOnTheTTYFromBeforeTheEntryFailsClosed(t *testing.T) {
 	old := cdiDir
 	cdiDir = t.TempDir()
@@ -219,24 +211,24 @@ func TestAClaimOnTheTTYFromBeforeTheEntryFailsClosed(t *testing.T) {
 		ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/ttyACM0", "/dev/bus/usb/001/004"})},
 	}}
 	if err := writeCDISpec("claim-1", devices); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec: %v", err)
 	}
 
 	byName := map[string]hardware.Device{deviceName(pulse8Line): pulse8Line}
 	if err := refreshCDISpec(t.TempDir(), "claim-1", byName, nil, machineEvents{}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("refreshing the CDI spec: %v", err)
 	}
 
 	raw, err := os.ReadFile(cdiSpecPath("claim-1"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CDI spec: %v", err)
 	}
 	var spec cdiSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the CDI spec: %v", err)
 	}
 	nodes := spec.Devices[0].ContainerEdits.DeviceNodes
 	if len(nodes) != 1 || nodes[0].Path != serioAbsentNode {
-		t.Errorf("nodes = %+v", nodes)
+		t.Errorf("the nodes are %+v, want only %s", nodes, serioAbsentNode)
 	}
 }

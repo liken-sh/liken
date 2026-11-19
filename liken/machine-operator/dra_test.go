@@ -1,10 +1,7 @@
 package main
 
-// The DRA inventory mapping: which discovered devices become
-// slice devices, what they are named, and which attributes they
-// carry. The publish rule has three tests: driven and not part of
-// the bus structure, deliverable, and not the platform's own disk.
-// Each test has a case that refuses its counterexample.
+// Tests of which discovered devices become ResourceSlice devices, and
+// of their names and attributes.
 
 import (
 	"fmt"
@@ -18,14 +15,13 @@ import (
 	"github.com/liken-sh/liken/liken/metrics"
 )
 
-// delivering builds an inspect function that reports the same
-// delivery for every device. It replaces the sysfs walk in these
-// tests.
+// delivering returns an inspect function that gives every device the
+// same delivery, in place of a sysfs walk.
 func delivering(d hardware.Delivery) func(hardware.Device) hardware.Delivery {
 	return func(hardware.Device) hardware.Delivery { return d }
 }
 
-// noRoles is the protection of a machine whose facts read and name no
+// noRoles is the protection of a machine with known facts and no
 // disk-backed role, so it withholds nothing.
 var noRoles = protection{known: true}
 
@@ -66,10 +62,9 @@ func TestInventoryPublishesDrivenDeliverableDevices(t *testing.T) {
 	}
 }
 
-// A USB device publishes its bus number and device number as numbers,
-// because firmware-operator builds the usbfs path from them and tells
-// one enumeration of a device from the next by the device number. A
-// PCI device has neither, and publishes neither.
+// A USB device publishes its bus number and device number, which
+// firmware-operator uses to build the usbfs path and to tell
+// enumerations of a device apart. A PCI device has neither.
 func TestInventoryPublishesTheUSBBusAndDeviceNumbers(t *testing.T) {
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "usb", Address: "1-4.1.2", Driver: "usb", Vendor: "1618", Product: "0920", BusNumber: 1, DeviceNumber: 12},
@@ -90,12 +85,9 @@ func TestInventoryPublishesTheUSBBusAndDeviceNumbers(t *testing.T) {
 	}
 }
 
-// gpu is the testbed's integrated GPU: a driven display device whose
-// subtree delivers its two DRM nodes, the legacy framebuffer that
-// fbdev emulation creates beside them, and the i2c monitor-control
-// buses i915 registers for its display outputs. The lab guest showed
-// the framebuffer, and the testbed showed the i2c buses; each one
-// disproved a narrower rule.
+// gpu returns an integrated GPU with the nodes that i915 creates: the
+// two DRM nodes, the framebuffer that fbdev emulation adds, and the
+// i2c buses for monitor control.
 func gpu() ([]hardware.Device, func(hardware.Device) hardware.Delivery) {
 	return []hardware.Device{{
 		Bus: "pci", Address: "0000:00:02.0", Driver: "i915", Class: "display",
@@ -122,54 +114,49 @@ func TestInventorySplitsTheGPUAndSharesTheGraphicsHalf(t *testing.T) {
 		t.Errorf("name = %q, want the bare name plus the display suffix", display.Name)
 	}
 	if display.AllowMultipleAllocations != nil {
-		t.Error("one card node carries modesetting authority for one process")
+		t.Error("the display device allows multiple allocations, want exclusive because one process holds the card node")
 	}
 	if display.Attributes["displayNode"].Bool == nil || !*display.Attributes["displayNode"].Bool {
-		t.Error("a display node is the fact a player selects on")
+		t.Error("the display device has no true displayNode attribute, want one for a Player to select on")
 	}
 	if _, ok := display.Attributes["renderNode"]; ok {
-		t.Error("the display companion delivers no render node")
+		t.Error("the display device has a renderNode attribute, want none")
 	}
 	if _, ok := graphics.Attributes["displayNode"]; ok {
-		t.Error("the graphics device delivers no card node")
+		t.Error("the graphics device has a displayNode attribute, want none")
 	}
 
 	if graphics.Name != "pci-0000-00-02-0" {
 		t.Errorf("name = %q, want the bare name, so an existing allocation stays valid", graphics.Name)
 	}
 	if graphics.AllowMultipleAllocations == nil || !*graphics.AllowMultipleAllocations {
-		t.Error("a device that delivers only DRM nodes may be allocated more than once")
+		t.Error("the graphics device does not allow multiple allocations, want shared because it delivers only DRM nodes")
 	}
 	if graphics.Attributes["renderNode"].Bool == nil || !*graphics.Attributes["renderNode"].Bool {
-		t.Error("a render node is the fact a transcoding workload selects on")
+		t.Error("the graphics device has no true renderNode attribute, want one for a transcoding workload to select on")
 	}
 	if got := graphics.Attributes["subsystem"].String; got == nil || *got != "drm" {
-		t.Errorf("subsystem = %v, want drm now that the delivery is one kind", got)
+		t.Errorf("subsystem = %v, want drm because every node of the graphics device is DRM", got)
 	}
 
 	if i2c.Name != "pci-0000-00-02-0-i2c-dev" {
 		t.Errorf("name = %q, want the bare name plus the subsystem", i2c.Name)
 	}
 	if i2c.AllowMultipleAllocations != nil {
-		t.Error("two raw writers on one i2c wire have no arbitration contract")
+		t.Error("the i2c device allows multiple allocations, want exclusive because two writers on one i2c bus have no arbitration")
 	}
 	if _, ok := i2c.Attributes["renderNode"]; ok {
-		t.Error("the i2c companion has no render node")
+		t.Error("the i2c device has a renderNode attribute, want none")
 	}
 	if got := i2c.Attributes["subsystem"].String; got == nil || *got != "i2c-dev" {
-		t.Errorf("subsystem = %v", got)
+		t.Errorf("subsystem = %v, want i2c-dev", got)
 	}
 	if got := i2c.Attributes["driver"].String; got == nil || *got != "i915" {
-		t.Errorf("driver = %v, want the parent's identifying attributes", got)
+		t.Errorf("driver = %v, want i915, the parent device's driver", got)
 	}
 }
 
 func TestInventoryGivesOneCardsDevicesOneAddress(t *testing.T) {
-	// Two GPUs in one machine. A claim that asks for a render node and
-	// a card node pairs its requests with a matchAttribute constraint,
-	// and a constraint reads an attribute, never a name. Every device
-	// published from one card carries that card's address, and the
-	// second card carries its own.
 	discovered, inspect := gpu()
 	discovered = append(discovered, hardware.Device{
 		Bus: "pci", Address: "0000:03:00.0", Driver: "amdgpu", Class: "display",
@@ -192,15 +179,11 @@ func TestInventoryGivesOneCardsDevicesOneAddress(t *testing.T) {
 		"pci-0000-03-00-0-i2c-dev": "0000:03:00.0",
 	}
 	if !maps.Equal(addresses, want) {
-		t.Errorf("addresses = %v, want every device of a card to carry that card's own address", addresses)
+		t.Errorf("addresses = %v, want each device to have its own card's address", addresses)
 	}
 }
 
 func TestInventoryStampsThePCIBusIDOnEveryDeviceOfAPCICard(t *testing.T) {
-	// A device of another driver, such as media-operator's statement
-	// of what a GPU decodes, pairs with this card's render node through
-	// matchAttribute. The standard attribute is the name both drivers
-	// can publish, and a USB device has no PCI bus ID to state.
 	discovered, inspect := gpu()
 	discovered = append(discovered, hardware.Device{
 		Bus: "usb", Address: "2-1:1.0", Driver: "uas", Class: "mass-storage",
@@ -225,12 +208,11 @@ func TestInventoryStampsThePCIBusIDOnEveryDeviceOfAPCICard(t *testing.T) {
 }
 
 func TestInventoryPublishesAnAudioControllerExclusively(t *testing.T) {
-	// The HDA controller on the testbed, with the nodes its sysfs
-	// subtree holds: the card's own nodes, and the input device that
-	// ALSA registers for each HDMI jack the codec can sense. The card
-	// is exclusive because one sound server owns every PCM on it, and
-	// a second claimant should wait in the scheduler rather than meet
-	// EBUSY at play time.
+	// An HDA controller has the card's nodes and an input device that
+	// ALSA registers for each HDMI jack. One sound server opens every
+	// PCM of the card, so the card goes to one claim. A second claim
+	// then stays pending in the scheduler instead of failing with EBUSY
+	// when it plays.
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "pci", Address: "0000:00:1f.3", Driver: "snd_hda_intel", Class: "multimedia",
 			Name: "Alder Lake-N PCH High Definition Audio"},
@@ -244,13 +226,13 @@ func TestInventoryPublishesAnAudioControllerExclusively(t *testing.T) {
 		t.Fatalf("devices = %+v, want the controller", devices)
 	}
 	if devices[0].AllowMultipleAllocations != nil && *devices[0].AllowMultipleAllocations {
-		t.Error("an audio controller belongs to one claim")
+		t.Error("the audio controller allows multiple allocations, want exclusive")
 	}
 	if got := devices[0].Attributes["subsystem"].String; got == nil || *got != "sound" {
 		t.Errorf("subsystem = %v, want sound", got)
 	}
 	if _, ok := devices[0].Attributes["renderNode"]; ok {
-		t.Error("an audio controller has no render node")
+		t.Error("the audio controller has a renderNode attribute, want none")
 	}
 }
 
@@ -283,14 +265,13 @@ func TestInventoryStampsSupportsSoundOnNothingElse(t *testing.T) {
 		t.Fatalf("devices = %+v, want the card device", devices)
 	}
 	if _, ok := devices[0].Attributes["sound.liken.sh/supportsSound"]; ok {
-		t.Error("a display device supports no sound server")
+		t.Error("the display device has a supportsSound attribute, want none")
 	}
 }
 
 func TestInventoryRefusesToShareARenderNodeBesideSomethingElse(t *testing.T) {
 	// A render node beside a node from outside the graphics stack is
-	// hardware liken has not met. It stays exclusive until somebody
-	// looks at it.
+	// an unknown kind of device, so it stays exclusive.
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "pci", Address: "0000:00:02.0", Driver: "novel", Class: "display"},
 	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
@@ -299,14 +280,12 @@ func TestInventoryRefusesToShareARenderNodeBesideSomethingElse(t *testing.T) {
 	}}), noRoles, nil)
 
 	if devices[0].AllowMultipleAllocations != nil {
-		t.Error("only a whole graphics device may be shared")
+		t.Error("the device allows multiple allocations, want exclusive because it has a node outside the graphics stack")
 	}
 }
 
 func TestInventoryKeepsEveryOtherDeviceExclusive(t *testing.T) {
-	// A USB serial adapter. One process opens the port, so the API
-	// must allocate it once, and the device says nothing rather than
-	// claiming to be exclusive.
+	// One process opens a serial port, so the device goes to one claim.
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "usb", Address: "3-1:1.0", Driver: "cp210x", Class: "vendor-specific", ClassCode: "ff"},
 	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
@@ -317,17 +296,16 @@ func TestInventoryKeepsEveryOtherDeviceExclusive(t *testing.T) {
 		t.Fatalf("devices = %+v, want 1", devices)
 	}
 	if devices[0].AllowMultipleAllocations != nil {
-		t.Error("a device that does not divide publishes nothing about sharing")
+		t.Error("the serial device allows multiple allocations, want exclusive")
 	}
 	if _, ok := devices[0].Attributes["renderNode"]; ok {
-		t.Error("a serial port has no render node")
+		t.Error("the serial device has a renderNode attribute, want none")
 	}
 }
 
 func TestInventoryNamesNoSubsystemForAMixedDelivery(t *testing.T) {
-	// A device that hands over two kinds of node at once has no
-	// single answer, and it is not shareable on the strength of one
-	// of them.
+	// A delivery of two kinds of node has no single subsystem, and
+	// one kind alone does not make the device shareable.
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "pci", Address: "0000:00:1f.3", Driver: "snd_hda_intel", Class: "multimedia"},
 	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
@@ -336,10 +314,10 @@ func TestInventoryNamesNoSubsystemForAMixedDelivery(t *testing.T) {
 	}}), noRoles, nil)
 
 	if _, ok := devices[0].Attributes["subsystem"]; ok {
-		t.Error("a mixed delivery names no one subsystem")
+		t.Error("the device has a subsystem attribute, want none because its nodes are of two subsystems")
 	}
 	if devices[0].AllowMultipleAllocations != nil {
-		t.Error("only a delivery that is entirely DRM may be shared")
+		t.Error("the device allows multiple allocations, want exclusive because only part of its delivery is DRM")
 	}
 }
 
@@ -349,11 +327,11 @@ func TestInventorySkipsUndrivenDevices(t *testing.T) {
 	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/dri/card0", Subsystem: "drm"}}}), noRoles, nil)
 
 	if len(devices) != 0 {
-		t.Errorf("devices = %+v, want none: undriven hardware is the unclaimed report's story", devices)
+		t.Errorf("devices = %+v, want none because no driver is bound", devices)
 	}
 }
 
-func TestInventorySkipsBusPlumbing(t *testing.T) {
+func TestInventorySkipsUSBDevicesHubsAndPorts(t *testing.T) {
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "usb", Address: "2-1", Driver: "usb", Name: "QEMU QEMU USB HARDDRIVE"},
 		{Bus: "usb", Address: "usb2", Driver: "usb", Name: "Linux Foundation xHCI Host Controller"},
@@ -362,7 +340,7 @@ func TestInventorySkipsBusPlumbing(t *testing.T) {
 	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/bus/usb/002/001", Subsystem: "usb"}}}), noRoles, nil)
 
 	if len(devices) != 0 {
-		t.Errorf("devices = %+v, want none: plumbing is not claimable inventory", devices)
+		t.Errorf("devices = %+v, want none because hubs, host controllers, and ports are not published", devices)
 	}
 }
 
@@ -373,16 +351,14 @@ func TestInventorySkipsUndeliverableDevices(t *testing.T) {
 	}, delivering(hardware.Delivery{}), noRoles, nil)
 
 	if len(devices) != 0 {
-		t.Errorf("devices = %+v, want none: a device with no nodes has nothing to hand a pod", devices)
+		t.Errorf("devices = %+v, want none because the device has no nodes", devices)
 	}
 }
 
 func TestInventoryPublishesAnIdleBluetoothAdapter(t *testing.T) {
-	// An adapter with nothing connected to it delivers no node from its
-	// subtree, because hci is a socket interface and the radio has no
-	// node. The device is still real hardware a workload claims, so the
-	// driver is what puts it in the slice, and the usbfs node is what
-	// the claim delivers.
+	// An adapter has no device node, because hci is a socket
+	// interface. The btusb driver alone puts it in the slice, and a
+	// claim receives its usbfs node.
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "usb", Address: "1-8:1.0", Driver: "btusb", Class: "wireless", ClassCode: "e0",
 			Name: "Intel AX211 Bluetooth", Vendor: "8087", Product: "0033"},
@@ -396,13 +372,13 @@ func TestInventoryPublishesAnIdleBluetoothAdapter(t *testing.T) {
 		t.Errorf("name = %q, want the sanitized bus address", adapter.Name)
 	}
 	if adapter.AllowMultipleAllocations != nil {
-		t.Error("one Bluetooth stack drives one radio")
+		t.Error("the adapter allows multiple allocations, want exclusive")
 	}
 	if got := adapter.Attributes["driver"].String; got == nil || *got != "btusb" {
 		t.Errorf("driver = %v, want btusb, the attribute a DeviceClass selects an adapter by", got)
 	}
 	if _, ok := adapter.Attributes["subsystem"]; ok {
-		t.Error("the usbfs node is not a kind of node the policy sorts by")
+		t.Error("the adapter has a subsystem attribute, want none because its only node is the usbfs node")
 	}
 }
 
@@ -417,7 +393,7 @@ func TestInventoryWithholdsThePlatformsOwnDisks(t *testing.T) {
 	}}), platform, nil)
 
 	if len(devices) != 0 {
-		t.Errorf("devices = %+v, want none: a platform role holds this disk", devices)
+		t.Errorf("devices = %+v, want none because a platform role holds the disk", devices)
 	}
 }
 
@@ -431,7 +407,7 @@ func TestInventoryPublishesAnUnroledDisk(t *testing.T) {
 	}}), platform, nil)
 
 	if len(devices) != 1 {
-		t.Errorf("devices = %+v, want the stick: no platform role holds it", devices)
+		t.Errorf("devices = %+v, want the stick because no platform role holds it", devices)
 	}
 }
 
@@ -446,7 +422,7 @@ func TestInventoryOmitsAttributesTheHardwareLacks(t *testing.T) {
 		t.Fatalf("devices = %+v, want 1", devices)
 	}
 	if _, ok := devices[0].Attributes["serial"]; ok {
-		t.Error("a device with no serial must not carry an empty serial attribute")
+		t.Error("the device has a serial attribute, want none because the hardware has no serial")
 	}
 }
 
@@ -457,15 +433,15 @@ func TestInventoryNamesAreValidDNSLabels(t *testing.T) {
 	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/snd/pcmC0D0p", Subsystem: "sound"}}}), noRoles, nil)
 
 	if devices[0].Name != "pci-0000-00-1f-3" {
-		t.Errorf("name = %q, want lowercased with separators dashed", devices[0].Name)
+		t.Errorf("name = %q, want pci-0000-00-1f-3", devices[0].Name)
 	}
 	if devices[1].Name != "usb-2-1-4-1-0" {
-		t.Errorf("name = %q, want lowercased with separators dashed", devices[1].Name)
+		t.Errorf("name = %q, want usb-2-1-4-1-0", devices[1].Name)
 	}
 }
 
-// A board device takes its name from the firmware, which uses
-// characters a DNS label cannot hold.
+// A board device is named by the firmware, with characters that a DNS
+// label cannot hold.
 func TestInventoryNamesBoardDevicesAsDNSLabels(t *testing.T) {
 	cases := []struct {
 		device hardware.Device
@@ -485,9 +461,9 @@ func TestInventoryNamesBoardDevicesAsDNSLabels(t *testing.T) {
 	}
 }
 
-// A TPM on the platform bus publishes like any device: driven, with
-// nodes to deliver, and exclusive, because nothing has examined
-// whether two workloads can share one.
+// A TPM on the platform bus publishes like any device with a driver
+// and nodes. It is exclusive, because nothing shows that two
+// workloads can share a TPM.
 func TestInventoryPublishesABoardTPM(t *testing.T) {
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "platform", Address: "MSFT0101:00", Driver: "tpm_crb_acpi", Modalias: "acpi:MSFT0101:"},
@@ -503,12 +479,12 @@ func TestInventoryPublishesABoardTPM(t *testing.T) {
 		t.Errorf("driver = %v, want tpm_crb_acpi", got)
 	}
 	if devices[0].AllowMultipleAllocations != nil {
-		t.Error("a device nobody examined publishes exclusive")
+		t.Error("the TPM allows multiple allocations, want exclusive")
 	}
 }
 
-// One slice holds at most 128 devices. A machine with more publishes
-// the first 128 in name order and drops the rest.
+// A ResourceSlice holds at most 128 devices. For a machine with more,
+// the slice has the first 128 in name order.
 func TestTheInventoryDropsTheDevicesPastOneSlice(t *testing.T) {
 	isolatePass(t)
 	for i := range maxSliceDevices + 1 {
@@ -523,9 +499,9 @@ func TestTheInventoryDropsTheDevicesPastOneSlice(t *testing.T) {
 
 	slice := &kubernetes.ResourceSlice{}
 	if readErr := client.RequestJSON(http.MethodGet, kubernetes.ResourceSlicesPath+"/node-1-liken.sh", nil, slice); err != nil || readErr != nil {
-		t.Fatalf("publishing: %v; reading: %v", err, readErr)
+		t.Fatalf("publishing the inventory: %v; reading the ResourceSlice: %v", err, readErr)
 	}
 	if got := len(slice.Spec.Devices); got != maxSliceDevices || slice.Spec.Devices[0].Name != "pci-0000-01-00-0" {
-		t.Errorf("the slice holds %d devices starting at %s, want %d starting at pci-0000-01-00-0", got, slice.Spec.Devices[0].Name, maxSliceDevices)
+		t.Errorf("the slice has %d devices starting at %s, want %d starting at pci-0000-01-00-0", got, slice.Spec.Devices[0].Name, maxSliceDevices)
 	}
 }

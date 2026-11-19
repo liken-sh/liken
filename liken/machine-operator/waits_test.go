@@ -1,7 +1,7 @@
 package main
 
-// The watches of the waits, against the fake API server's watch
-// streams in a synctest bubble.
+// Tests for the watches of the waits, using the fake API server's
+// watch streams in a synctest bubble.
 
 import (
 	"context"
@@ -22,7 +22,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// waitAPI holds the collections the waits watch.
+// waitAPI returns a fake API server with the collections that the
+// waits watch.
 func waitAPI(pods, charts []map[string]any) *fakeapi.Server {
 	return fakeapi.New(map[string]*fakeapi.Collection{
 		"/api/v1/pods":                         {APIVersion: "v1", Kind: "Pod", Items: pods},
@@ -42,8 +43,8 @@ func podObject(name, namespace, image string, ready bool) map[string]any {
 	})
 }
 
-// waitingReader is a reader with the waits over the fake, and the
-// channel its watches wake.
+// waitingReader returns a reader whose waits watch the fake server,
+// and the channel that the watches signal.
 func waitingReader(t *testing.T, fake *fakeapi.Server) (*reader, chan struct{}) {
 	t.Helper()
 	client, watcher := passClients(t, fake)
@@ -53,17 +54,17 @@ func waitingReader(t *testing.T, fake *fakeapi.Server) (*reader, chan struct{}) 
 	return &reader{client: client, waits: newWaits(ctx, watcher, watch.Signal(wakes), "node-1")}, wakes
 }
 
-// put writes one object back to the fake, the way another program's
-// write reaches the API server.
+// put replaces an object on the fake server, as a write from another
+// program does.
 func put(t *testing.T, r *reader, path string, object map[string]any) {
 	t.Helper()
 	body, _ := json.Marshal(object)
 	if err := r.client.RequestJSON(http.MethodPut, path, body, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing %s: %v", path, err)
 	}
 }
 
-// woke answers whether a wake is waiting, and takes it.
+// woke reports whether a wake signal is pending, and consumes it.
 func woke(wakes chan struct{}) bool {
 	synctest.Wait()
 	select {
@@ -74,10 +75,11 @@ func woke(wakes chan struct{}) bool {
 	}
 }
 
-// The image proof's first pass reads the API server and starts the pod
-// watch. The last OS container that becomes Ready wakes the next pass,
-// which reads the watch's copy and promotes the record, with no tick.
-func TestTheImageProofPromotesWhenTheWatchSeesTheLastContainerReady(t *testing.T) {
+// The first pass of the image proof reads the API server and starts the
+// pod watch. When the last OS container becomes Ready, the watch wakes
+// the next pass, which reads the copy and promotes the record without
+// waiting for a timer.
+func TestTheImageProofPromotesWhenTheLastContainerBecomesReady(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		containerStoreDir = t.TempDir()
 		t.Cleanup(func() { containerStoreDir = machine.K3sAgentDir })
@@ -100,10 +102,9 @@ func TestTheImageProofPromotesWhenTheWatchSeesTheLastContainerReady(t *testing.T
 	})
 }
 
-// A drain sees a pod leave through the pod watch, with no tick, and the
-// pod watch and the budget watch stop after the first pass that does
-// not drain.
-func TestADrainSeesAPodLeaveAndItsWatchesStopWhenItEnds(t *testing.T) {
+// The pod watch wakes a drain when a pod leaves. The pod watch and the
+// budget watch stop after the first pass that does not drain.
+func TestADrainWakesWhenAPodLeavesAndItsWatchesStopWhenItEnds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fake := waitAPI([]map[string]any{podObject("web", "default", "nginx", true)}, nil)
 		r, wakes := waitingReader(t, fake)
@@ -113,7 +114,7 @@ func TestADrainSeesAPodLeaveAndItsWatchesStopWhenItEnds(t *testing.T) {
 		r.waits.endPass()
 		woke(wakes)
 		if err := r.client.RequestJSON(http.MethodDelete, "/api/v1/pods/web", nil, nil); err != nil {
-			t.Fatal(err)
+			t.Fatalf("deleting the pod web: %v", err)
 		}
 		wokeOnLeave := woke(wakes)
 		clear := gateThroughDrain(r, node, rebootingConvergence(), drainNow, machineEvents{}, nil)
@@ -131,11 +132,12 @@ func TestADrainSeesAPodLeaveAndItsWatchesStopWhenItEnds(t *testing.T) {
 	})
 }
 
-// The kubelet writes a pod's status while a container restarts, and a
-// write that changes no field the trim keeps wakes no pass. Each pass of
-// a drain asks every pod to leave again, so a wake for each kubelet write
-// asks a budget that refused it again every few seconds.
-func TestAKubeletWriteThePassDoesNotReadWakesNoDrain(t *testing.T) {
+// The kubelet updates a pod's status while a container restarts. A
+// write that changes none of the fields that trimPod keeps must not
+// wake a pass. Each drain pass tries to evict every pod again, so a
+// wake on each kubelet write would retry an eviction that a budget
+// refused.
+func TestAPodWriteOutsideTheTrimmedFieldsDoesNotWakeTheDrain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fake := waitAPI([]map[string]any{podObject("web", "default", "nginx", false)}, nil)
 		r, wakes := waitingReader(t, fake)
@@ -156,9 +158,10 @@ func TestAKubeletWriteThePassDoesNotReadWakesNoDrain(t *testing.T) {
 	})
 }
 
-// A drain that holds asks for a pass at its deadline, and the pass at
-// the deadline lets the reboot proceed. An operator that starts in the
-// middle of a drain reads the deadline from the annotation.
+// A drain that is still waiting sets a wake time at its deadline, and
+// the pass at the deadline lets the reboot proceed. The deadline comes
+// from the drain annotation, so an operator that restarts during a
+// drain computes the same one.
 func TestADrainWakesAtItsDeadlineAndProceedsThere(t *testing.T) {
 	since := drainNow.Add(-time.Minute)
 	node := drainNode(true, true, since.Format(time.RFC3339))
@@ -169,15 +172,15 @@ func TestADrainWakesAtItsDeadlineAndProceedsThere(t *testing.T) {
 	atDeadline := decideDrainStep(node, []kubernetes.Pod{pod("stubborn", "default")}, since.Add(drainDeadline))
 
 	if want := since.Add(drainDeadline); !out.wake.Equal(want) {
-		t.Errorf("the drain asked for a pass at %s, want %s", out.wake, want)
+		t.Errorf("the drain set the wake time to %s, want %s", out.wake, want)
 	}
 	if !atDeadline.clear {
-		t.Error("the pass at the deadline still holds the reboot")
+		t.Error("the pass at the deadline did not request the reboot, want it requested")
 	}
 }
 
-// evictionAPI answers each eviction by the pod's name: a budget's 429
-// with a wait, a budget's 429 with none, a 500, and a 404.
+// evictionAPI responds to an eviction by the pod's name: 429 with a
+// Retry-After header, 429 without one, 500, or 404.
 func evictionAPI(t *testing.T) http.Handler {
 	t.Helper()
 	pods := []kubernetes.Pod{pod("waits", "default"), pod("refused", "default"), pod("broken", "default"), pod("gone", "default")}
@@ -198,11 +201,12 @@ func evictionAPI(t *testing.T) http.Handler {
 	})
 }
 
-// The drain sorts the eviction answers. A budget's refusal is not a
-// failure: one that states a wait asks for a pass then, and one that
-// states none waits for the budget watch. A 404 is a pod already gone.
-// A 500 is a failure for the retry.
-func TestADrainSortsTheEvictionAnswers(t *testing.T) {
+// The drain handles each eviction response differently. A 429 from a
+// budget is not a failure. With a Retry-After header, the drain sets
+// the wake time to that moment, and without one it waits for the
+// budget watch. A 404 means the pod is already gone. A 500 is a
+// failure that the next pass retries.
+func TestADrainHandlesEachEvictionResponse(t *testing.T) {
 	out := &passOutcome{}
 	client := testClient(t, evictionAPI(t)).WithObserver(out.observe)
 	node := drainNode(true, true, drainNow.Add(-time.Minute).Format(time.RFC3339))
@@ -213,13 +217,13 @@ func TestADrainSortsTheEvictionAnswers(t *testing.T) {
 		t.Errorf("failures %+v, want the 500 alone", out.failures)
 	}
 	if want := drainNow.Add(7 * time.Second); !out.wake.Equal(want) {
-		t.Errorf("the drain asked for a pass at %s, want the 429's %s", out.wake, want)
+		t.Errorf("the drain set the wake time to %s, want the 429's %s", out.wake, want)
 	}
 }
 
-// A budget wakes the drain when it allows more disruptions than it did,
-// and when it is deleted. A budget that allows fewer, or a new one,
-// guards more, and wakes nothing.
+// A budget wakes the drain when it allows more disruptions than
+// before and when it is deleted. A budget that allows fewer, or a new
+// budget, only restricts more and wakes nothing.
 func TestABudgetWakesTheDrainWhenItAllowsAnEviction(t *testing.T) {
 	budget := func(allowed int64) *unstructured.Unstructured {
 		u := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"disruptionsAllowed": allowed}}}
@@ -274,39 +278,38 @@ func TestABudgetWakesTheDrainWhenItAllowsAnEviction(t *testing.T) {
 	}
 }
 
-// A held feature removal finishes when the last HelmChart is deleted,
-// on the wake the chart watch sends, and the watch stops after the
-// first pass that no longer waits.
-func TestAHeldRemovalFinishesWhenTheLastChartIsDeleted(t *testing.T) {
+// The chart watch wakes the pass when the last HelmChart is deleted,
+// and stops after the first pass that no longer waits.
+func TestAHeldRetractionFinishesWhenTheLastChartIsDeleted(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		chart := fakeapi.Object("helm.cattle.io/v1", "HelmChart", "kube-system", "traefik", nil)
 		fake := waitAPI(nil, []map[string]any{chart})
 		r, wakes := waitingReader(t, fake)
 
-		heldFirst, _, err := evaluatePrecondition(r, cluster.NoHelmCharts)
+		satisfiedFirst, _, err := evaluatePrecondition(r, cluster.NoHelmCharts)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("evaluating the helm precondition: %v", err)
 		}
 		r.waits.endPass()
 		woke(wakes)
 		if err := r.client.RequestJSON(http.MethodDelete, "/apis/helm.cattle.io/v1/helmcharts/traefik", nil, nil); err != nil {
-			t.Fatal(err)
+			t.Fatalf("deleting the HelmChart traefik: %v", err)
 		}
 		wokeOnDelete := woke(wakes)
-		satisfied, _, _ := evaluatePrecondition(r, cluster.NoHelmCharts)
+		satisfiedSecond, _, _ := evaluatePrecondition(r, cluster.NoHelmCharts)
 		r.waits.endPass()
 		r.waits.endPass()
 
-		if heldFirst || !wokeOnDelete || !satisfied || len(r.waits.running) != 0 {
+		if satisfiedFirst || !wokeOnDelete || !satisfiedSecond || len(r.waits.running) != 0 {
 			t.Errorf("first satisfied %v, woke %v, second satisfied %v, %d watches left; want false, true, true, 0",
-				heldFirst, wokeOnDelete, satisfied, len(r.waits.running))
+				satisfiedFirst, wokeOnDelete, satisfiedSecond, len(r.waits.running))
 		}
 	})
 }
 
-// The LoadBalancer count reads the Service watch's copy, which keeps
-// each Service's type, and counts the LoadBalancers alone.
-func TestTheLoadBalancerCountReadsTheServiceCopy(t *testing.T) {
+// loadBalancerServices reads the Service watch's copy, which keeps each
+// Service's type, and returns only the LoadBalancer Services.
+func TestLoadBalancerServicesReadsTheServiceCopy(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fake := fakeapi.New(map[string]*fakeapi.Collection{"/api/v1/services": {APIVersion: "v1", Kind: "Service", Items: []map[string]any{
 			fakeapi.Object("v1", "Service", "media", "jellyfin", map[string]any{"spec": map[string]any{"type": "LoadBalancer", "ports": []any{map[string]any{"port": 8096}}}}),
@@ -326,9 +329,9 @@ func TestTheLoadBalancerCountReadsTheServiceCopy(t *testing.T) {
 	})
 }
 
-// A Service wakes the removal when it appears, leaves, or changes its
-// type, and not when anything else about it changes.
-func TestAServiceWakesTheRemovalOnlyForItsPresenceOrType(t *testing.T) {
+// A Service wakes the retraction when it is added, deleted, or changes
+// its type, and not when any other field changes.
+func TestAServiceWakesTheRetractionOnlyForItsPresenceOrType(t *testing.T) {
 	service := func(kind string, port int64) *unstructured.Unstructured {
 		return &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{"type": kind, "port": port}}}
 	}
@@ -349,8 +352,8 @@ func TestAServiceWakesTheRemovalOnlyForItsPresenceOrType(t *testing.T) {
 	}
 }
 
-// A full pod and the same pod trimmed for the wait's copy convert to
-// the same kubernetes.Pod, except for the annotations no code reads.
+// A full pod and the same pod after trimPod convert to the same
+// kubernetes.Pod, except for annotations that no code reads.
 func TestTheTrimKeepsEveryFieldThePodTypeReads(t *testing.T) {
 	raw := `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"player","namespace":"media","uid":"u-1","resourceVersion":"42",
 		"deletionTimestamp":"2026-10-09T15:00:00Z","labels":{"app":"player"},
@@ -364,7 +367,7 @@ func TestTheTrimKeepsEveryFieldThePodTypeReads(t *testing.T) {
 		"status":{"phase":"Running","podIP":"10.42.0.9","containerStatuses":[{"name":"main","image":"mpv:1","ready":true,"restartCount":3}]}}`
 	full := &unstructured.Unstructured{}
 	if err := full.UnmarshalJSON([]byte(raw)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the pod: %v", err)
 	}
 	trimmed := full.DeepCopy()
 	trimPod(trimmed)
@@ -381,8 +384,8 @@ func TestTheTrimKeepsEveryFieldThePodTypeReads(t *testing.T) {
 	}
 }
 
-// A reader with no waits reads the API server, as every reader in a
-// pass test does.
+// A reader with no waits reads from the API server, as the readers in
+// the pass tests do.
 func TestAReaderWithNoWaitsListsTheAPIServer(t *testing.T) {
 	fake := &drainAPI{pods: []kubernetes.Pod{pod("web", "default")}}
 	r := &reader{client: testClient(t, fake.handler())}

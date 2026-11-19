@@ -15,12 +15,11 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-// noJitter is the jitter of a schedule whose delays a test reads
-// exactly.
+// noJitter makes a schedule's delays exact, so a test can compare them.
 func noJitter() float64 { return 0 }
 
 // failingPasses runs n passes through the schedule, each with the
-// failures fail adds, and answers the delay after each one.
+// failures that fail adds, and returns the delay after each pass.
 func failingPasses(s *retrySchedule, n int, fail func(*passOutcome)) []time.Duration {
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	var delays []time.Duration
@@ -81,14 +80,14 @@ func TestAPassWithNoFailuresStopsTheRetryAndResetsTheDelay(t *testing.T) {
 	again := failingPasses(s, 1, transientFailure)
 
 	if retry || again[0] != time.Second {
-		t.Errorf("a clean pass asked for a retry: %v; the next failure waited %s, want 1s", retry, again[0])
+		t.Errorf("after a clean pass, a retry was scheduled = %v and the next failure waited %s, want false and 1s", retry, again[0])
 	}
 }
 
-// A step's wake does not bring a pass in before a 429's Retry-After
-// allows it, because that pass would send the same requests to a
-// throttled API server.
-func TestAWakeWaitsForA429sRetryAfter(t *testing.T) {
+// A step's requested wake time does not start a pass before the
+// Retry-After of a 429, because that pass would send the same requests
+// to a throttled API server.
+func TestARequestedWakeTimeWaitsForA429sRetryAfter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		out := &passOutcome{}
 		out.observe(apiclient.Outcome{Method: http.MethodPut, Status: http.StatusTooManyRequests, Err: throttledAfter(t, 30)})
@@ -148,9 +147,10 @@ func TestAPassWakesAtTheTimeAStepAskedFor(t *testing.T) {
 	}
 }
 
-// A 429 asks the client to wait, and liken's client answers it at once
-// with no wait, so the retry waits at least as long as the API server
-// asked.
+// The client stops waiting out a 429 after a limit and returns
+// ErrThrottled with the wait the API server asked for. The next pass
+// must wait at least that long. The test's client stops waiting at
+// once.
 func TestARetryAfterA429WaitsAsLongAsTheServerAsked(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		out := &passOutcome{}
@@ -165,8 +165,8 @@ func TestARetryAfterA429WaitsAsLongAsTheServerAsked(t *testing.T) {
 	})
 }
 
-// throttledAfter answers the error liken's client returns for a 429
-// that asked for seconds of wait.
+// throttledAfter returns the error that liken's client returns for a
+// 429 whose Retry-After is the given number of seconds.
 func throttledAfter(t *testing.T, seconds int) error {
 	t.Helper()
 	client := apiclient.New(apiservertest.Host, apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

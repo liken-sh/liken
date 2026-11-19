@@ -1,18 +1,16 @@
 package main
 
-// Host entries, reconciled live from the Machine spec's
-// spec.network.hostEntries, alongside sysctls in the same pass.
+// Reconciles /etc/hosts with spec.network.hostEntries of the Machine,
+// in the same pass that applies sysctls.
 //
-// Init writes /etc/hosts once, at boot, so the entries hold before
-// k3s starts and every boot proves the cold-start order on its own.
-// This file is the second writer: the operator reconciles the same
-// file on every pass, so a later edit lands within one reconcile
-// pass, with no reboot. When another process rewrites the file, the
-// inotify watch on it wakes a pass, and the pass writes the entries
-// back (machineevents.go). The pass's own write wakes one more pass,
-// which finds the file converged and writes nothing. The two writers
-// share one renderer, machine.HostsFile, so they can only ever produce
-// one shape of the file.
+// Init writes /etc/hosts at boot, so the entries are in place before
+// k3s starts. The operator writes the file again whenever it differs
+// from the spec, so an edit to the spec needs no reboot. When another
+// process rewrites the file, the inotify watch on it starts a pass that
+// writes the entries back (machineevents.go). The pass's own write
+// starts one more pass, which finds the file unchanged and writes
+// nothing. Init and the operator both render the file with
+// machine.HostsFile, so they write the same bytes.
 
 import (
 	"errors"
@@ -25,34 +23,19 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// hostsPath is the file this operator reconciles: the host's
-// /etc/hosts, reached through the /host/etc hostPath mount
-// (manifests/machine-operator.yaml explains why the mount is the
-// directory rather than the file). It is a package variable, the
-// same pattern init's sysctlDir uses, so a test can point it at a
-// tempdir's file instead of a real path under /host.
+// hostsPath is the host's /etc/hosts, through the /host/etc hostPath
+// mount. The mount is the directory and not the file, because a bind
+// mount of the file would keep the old inode after the rename in
+// writeFileAtomically (manifests/machine-operator.yaml).
 var hostsPath = "/host/etc/hosts"
 
-// applyHostEntries reconciles /etc/hosts against the desired entries.
-// This is the write-on-divergence rule this milestone applies to
-// every live reconciliation: render the desired file with the shared
-// renderer, read the actual file, and write only when the bytes
-// differ. A converged machine is the common case, and skipping the
-// write leaves no false modification signal, an mtime bump or an
-// inotify event, for whatever else watches the file. The same rule is
-// what gives the file its healing property: a file that an outside
-// edit changed differs from the render, so the next pass rewrites it.
+// applyHostEntries makes the hosts file at path match the desired
+// entries, and writes only when the file differs from the render, so a
+// pass that changes nothing leaves the mtime alone and sends no inotify
+// event. A missing file counts as different, so the pass creates it.
 //
-// A missing file reads as maximally divergent rather than as an
-// error, because the first pass on a machine, or a pass right after
-// an unrelated file loss, must still converge the file instead of
-// giving up. Any other read failure comes back to the caller, the
-// same as a write failure does.
-//
-// The returned entries come from a fresh read of the file after this
-// pass, not from the desired list, so the caller's status report is
-// observed, not assumed. The pass's outcome records the write, and a
-// failure for the retry.
+// It returns the entries read back from the file after the write, so
+// the status reports what the file has.
 func applyHostEntries(path, hostname string, desired []machine.HostEntry, out *passOutcome) ([]machine.HostEntry, error) {
 	entries, err := reconcileHostsFile(path, hostname, desired, out)
 	out.fail("writing the host entries", err)
@@ -64,38 +47,32 @@ func reconcileHostsFile(path, hostname string, desired []machine.HostEntry, out 
 
 	actual, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
+		return nil, fmt.Errorf("reading the hosts file: %w", err)
 	}
 
 	if string(actual) != render {
 		if err := writeFileAtomically(path, render); err != nil {
-			return nil, fmt.Errorf("writing %s: %w", path, err)
+			return nil, fmt.Errorf("writing the hosts file: %w", err)
 		}
 		out.wrote("writing the host entries")
 	}
 
-	holds, err := os.ReadFile(path)
+	written, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
+		return nil, fmt.Errorf("reading the hosts file: %w", err)
 	}
-	return parseHostEntries(holds), nil
+	return parseHostEntries(written), nil
 }
 
-// writeFileAtomically replaces path's contents without ever exposing
-// a reader to a partial write. It creates a temporary file beside the
-// target, on the same filesystem, so the rename that follows is one
-// atomic directory-entry swap rather than a copy. A reader that opens
-// path mid-write always sees either the old bytes or the new ones,
-// never a mix. The rename also shapes the operator's mount: a bind
-// mount of the file itself would hold the inode the rename discards,
-// so the hostPath mount covers the /etc directory instead
-// (manifests/machine-operator.yaml).
+// writeFileAtomically replaces the contents of path so that a reader
+// sees either the old bytes or the new ones. It writes a temporary file
+// in the same directory, so the rename is atomic and not a copy.
 func writeFileAtomically(path, content string) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name()) // no-op once the rename below succeeds
+	defer os.Remove(tmp.Name()) // fails harmlessly after a successful rename
 	if _, err := tmp.WriteString(content); err != nil {
 		tmp.Close()
 		return err
@@ -109,11 +86,10 @@ func writeFileAtomically(path, content string) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// parseHostEntries recovers the host entries from a rendered hosts
-// file: the lines below the three fixed lines that machine.HostsFile
-// always writes first. It is the inverse of HostsFile, close enough
-// for status, because applyHostEntries only ever calls it against a
-// file this pass already brought into the shared renderer's shape.
+// parseHostEntries returns the entries of a file that machine.HostsFile
+// rendered: every line after its three fixed lines. It does not parse
+// an arbitrary hosts file, because applyHostEntries calls it only on a
+// file that it has just made match the render.
 func parseHostEntries(raw []byte) []machine.HostEntry {
 	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
 	if len(lines) <= 3 {

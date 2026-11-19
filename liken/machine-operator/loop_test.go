@@ -1,9 +1,7 @@
 package main
 
-// These tests run the reconcile loop in a synctest bubble, so every
-// pass after the first comes from a wake the test can name: the retry
-// timer, a watch, one of the machine's readers, the check of the
-// sysctls, or the backstop.
+// These tests run the reconcile loop in a synctest bubble, so the
+// retry, sysctl, backstop, and lease timers run on the fake clock.
 
 import (
 	"context"
@@ -24,37 +22,37 @@ import (
 	"github.com/liken-sh/liken/liken/metrics"
 )
 
-// fakeFactsWatch is a facts watch the test controls. It counts the
-// loop's Sync calls, one for each pass.
+// fakeFactsWatch is a facts watch that the test controls. The loop
+// calls sync once at the start of each pass, so syncs counts passes.
 type fakeFactsWatch struct {
 	wake  chan struct{}
 	syncs atomic.Int64
 }
 
-// watch answers the facts watch the loop holds over the fake.
 func (w *fakeFactsWatch) watch() *factsWatch {
 	return &factsWatch{wake: w.wake, sync: func() error { w.syncs.Add(1); return nil }}
 }
 
-// seedSysctls writes every OS sysctl into the isolated sysctl tree
-// with its value, the way a booted machine holds them, so a pass finds
-// them converged and leaves no failure behind.
-func seedSysctls(t *testing.T) {
+// writeAppliedSysctls writes every OS sysctl with its value into the isolated
+// sysctl tree, so a pass finds them already applied and records no
+// failure.
+func writeAppliedSysctls(t *testing.T) {
 	t.Helper()
 	for name, value := range machine.OSSysctls {
 		path := filepath.Join(sysctlRoot, strings.ReplaceAll(name, ".", "/"))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the sysctl directory: %v", err)
 		}
 		if err := os.WriteFile(path, []byte(value), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the sysctl value: %v", err)
 		}
 	}
 }
 
 // testLoop builds a loop over a reader that reads the API server
-// directly, with a backstop of exactly backstopEvery. Each call to its facts watch opener answers
-// the next of watches.
+// directly, with a backstop delay of exactly backstopEvery. Each call
+// to its watchFactsTree returns the next of watches, and the returned
+// counter counts those calls.
 func testLoop(t *testing.T, api http.Handler, watches ...*fakeFactsWatch) (*loop, *atomic.Int64) {
 	t.Helper()
 	client, _ := passClients(t, api)
@@ -85,7 +83,7 @@ func runLoop(t *testing.T, l *loop, d time.Duration) {
 	t.Helper()
 	current, err := l.objects.machine("node-1")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Machine: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
@@ -98,8 +96,8 @@ func runLoop(t *testing.T, l *loop, d time.Duration) {
 	<-done
 }
 
-// refusingStatus answers every status write with a 503 and records
-// when each one came.
+// refusingStatus responds to every status write with a 503 and
+// records the time of each write.
 type refusingStatus struct {
 	next http.Handler
 	mu   sync.Mutex
@@ -127,13 +125,13 @@ func (h *refusingStatus) gaps() []time.Duration {
 	return gaps
 }
 
-// A status write that the API server refuses is sent again after one
-// second, then two, four, and eight, and then every ten seconds, with
-// no ticker and no watch to start the passes.
+// A status write that the API server refuses is retried after one
+// second, then two, four, and eight, and then every ten seconds. No
+// other event starts these passes.
 func TestARefusedStatusWriteRetriesOnTheBackoff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		api := &refusingStatus{next: newPassAPI()}
 		l, _ := testLoop(t, api, &fakeFactsWatch{wake: make(chan struct{}, 1)})
 
@@ -146,13 +144,14 @@ func TestARefusedStatusWriteRetriesOnTheBackoff(t *testing.T) {
 	})
 }
 
-// A settled machine runs one pass at the start and one backstop pass
-// every five minutes after the last, and nothing else, for an hour.
-// Its lease renews every 8 seconds the whole time.
+// A settled machine runs one pass at the start, then one backstop pass
+// five minutes after each pass, and no other pass. Its lease never
+// goes longer than renewEvery plus HeartbeatRenewAfter without a
+// write.
 func TestASettledLoopRunsOnlyTheBackstopAndKeepsItsLeaseFresh(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		watch := &fakeFactsWatch{wake: make(chan struct{}, 1)}
 		api := &leaseLog{next: newPassAPI()}
 		l, _ := testLoop(t, api, watch)
@@ -169,10 +168,10 @@ func TestASettledLoopRunsOnlyTheBackstopAndKeepsItsLeaseFresh(t *testing.T) {
 	})
 }
 
-// countingMachineReads counts the reads of node-1's Machine. A loop
-// over a reader with no watches reads it once at the start of each
-// pass, so after the test's own first read, the count is the count of
-// passes.
+// countingMachineReads counts the GET requests for node-1's Machine.
+// A loop over a reader with no watches reads it once at the start of
+// each pass, so after the test's own first read, the count equals the
+// number of passes.
 type countingMachineReads struct {
 	next  http.Handler
 	reads atomic.Int64
@@ -185,8 +184,8 @@ func (h *countingMachineReads) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	h.next.ServeHTTP(w, r)
 }
 
-// goneMachine answers 404 for node-1's Machine while gone is set, as
-// the API server does once a person deletes the Machine.
+// goneMachine responds 404 to a GET of node-1's Machine while gone is
+// set, as the API server does after someone deletes the Machine.
 type goneMachine struct {
 	next http.Handler
 	gone atomic.Bool
@@ -200,14 +199,12 @@ func (h *goneMachine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.next.ServeHTTP(w, r)
 }
 
-// A Machine that is gone gets no heartbeat. The lease names the
-// Machine as its owner, so a renewal would create a lease that the
-// garbage collector deletes again. The renewals start again on the
-// first pass that reads the Machine back.
+// While the Machine is gone, the loop writes no lease. Renewals resume
+// after the first pass that reads the Machine again.
 func TestALoopRenewsNoLeaseWhileItsMachineIsGone(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		gone := &goneMachine{next: newPassAPI()}
 		api := &leaseLog{next: gone}
 		facts := &fakeFactsWatch{wake: make(chan struct{}, 1)}
@@ -234,12 +231,12 @@ func TestALoopRenewsNoLeaseWhileItsMachineIsGone(t *testing.T) {
 	})
 }
 
-// The loop renews the lease before its first pass, with this machine's
-// Machine as the owner, so deleting the Machine deletes the lease.
+// The loop writes the lease before its first pass, with this
+// machine's Machine as the owner.
 func TestTheLeaseIsRenewedFirstAndOwnedByTheMachine(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		api := &leaseLog{next: newPassAPI()}
 		l, _ := testLoop(t, api, &fakeFactsWatch{wake: make(chan struct{}, 1)})
 
@@ -247,7 +244,7 @@ func TestTheLeaseIsRenewedFirstAndOwnedByTheMachine(t *testing.T) {
 
 		lease := &kubernetes.Lease{}
 		if err := l.objects.client.RequestJSON(http.MethodGet, "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases/node-1", nil, lease); err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the lease: %v", err)
 		}
 		want := []kubernetes.OwnerReference{{APIVersion: "liken.sh/v1alpha1", Kind: "Machine", Name: "node-1", UID: "uid-node-1"}}
 		if !slices.Equal(lease.Metadata.OwnerReferences, want) || api.firstWrite() != "lease" {
@@ -257,8 +254,6 @@ func TestTheLeaseIsRenewedFirstAndOwnedByTheMachine(t *testing.T) {
 	})
 }
 
-// A pass with many failures names the first three in its log line and
-// counts the rest, because the steps logged each one already.
 func TestTheUnfinishedLineNamesThreeFailuresAndCountsTheRest(t *testing.T) {
 	failures := make([]passFailure, 5)
 	for i := range failures {
@@ -268,6 +263,6 @@ func TestTheUnfinishedLineNamesThreeFailuresAndCountsTheRest(t *testing.T) {
 	got := describeUnfinished(failures)
 
 	if !strings.Contains(got, "sysctl 2 unfinished") || strings.Contains(got, "sysctl 3") || !strings.HasSuffix(got, "; and 2 more") {
-		t.Errorf("line = %q, want three named and \"and 2 more\"", got)
+		t.Errorf("the description is %q, want three steps named and \"and 2 more\"", got)
 	}
 }

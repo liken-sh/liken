@@ -5,19 +5,19 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// The condition types this operator writes. A pass starts from the
-// conditions it owns and drops every other type, so a condition that
-// a newer release wrote does not outlive a rollback. The older phase
-// table reads a reason it does not know as Degraded, and a Degraded
-// machine holds every other machine's reboot turn, so a stale False
-// such as an unplugged adapter's would stall the fleet until a person
-// edited the status by hand.
+// ownedConditionTypes lists the condition types this operator writes.
+// Each pass keeps only the Machine's conditions of these types, so
+// after a rollback the conditions that the newer release wrote are
+// dropped. Without that, a stale False condition, such as one for an
+// unplugged adapter, would make the machine Degraded under the older
+// release's phase table and block every other machine's reboot turn
+// until a person edited the status by hand.
 //
-// RebootApproved is the one condition another program writes: the
-// cluster operator grants a turn with it, and this operator carries
-// it unchanged. A type that a pass writes but this list misses would
-// vanish at the start of each pass and return at its end, and a test
-// (ownedconditions_test.go) fails on that.
+// RebootApproved is not in the list because the cluster operator
+// writes it, and ownsCondition keeps it. A type that a pass writes
+// must be in the list, or each pass drops it at its start and writes
+// it again at its end. TestEveryConditionAPassWritesIsOwned checks
+// this.
 var ownedConditionTypes = map[string]bool{
 	"Ready":                    true,
 	"FactsPublished":           true,
@@ -42,13 +42,13 @@ var ownedConditionTypes = map[string]bool{
 	"RebootRequestHonored":     true,
 }
 
-// ownsCondition reports whether a pass keeps a condition of the type.
+// ownsCondition reports whether a pass keeps conditions of this type.
 func ownsCondition(conditionType string) bool {
 	return ownedConditionTypes[conditionType] || conditionType == machine.RebootApprovedCondition
 }
 
-// ownedConditions answers the conditions of the types a pass keeps,
-// in a new slice.
+// ownedConditions returns a new slice, so the caller can change it
+// without changing the Machine it read.
 func ownedConditions(conditions []api.Condition) []api.Condition {
 	var kept []api.Condition
 	for _, c := range conditions {

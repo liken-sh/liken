@@ -1,25 +1,26 @@
 package main
 
-// When the loop runs the next pass after one that did not finish.
+// This file decides when the loop runs the next pass after a pass that
+// failed.
 //
-// A pass that leaves a failure behind asks for a retry, and the loop
-// keeps one timer for it. The delay depends on the kind of failure
+// A pass that ends with a failure requests a retry, and the loop keeps
+// one timer for it. The delay depends on the kind of failure
 // (outcome.go). A failure that a retry can clear starts at one second
-// and doubles up to ten, so a write that failed because the API server
-// restarted lands within a second or two of the server's return, and
-// a server that stays away is asked every ten seconds. A
+// and doubles up to ten. A write that failed because the API server
+// restarted is then retried within a second or two of the server's
+// return, and a server that stays down is tried every ten seconds. A
 // failure that will not clear by itself starts at ten seconds and
 // doubles up to five minutes, so a misconfigured machine does not send
-// the same refused request every ten seconds forever. A person who
-// fixes the spec sends a watch event, and that pass tries at once.
+// the same refused request every ten seconds forever. When a person
+// fixes the spec, the watch event starts a pass at once.
 //
-// No pass comes sooner than a 429's Retry-After asked, not even one a
-// step asked for, because that pass would send the same requests to a
+// No pass runs sooner than the Retry-After of a 429, even a pass that
+// a step asked for, because it would send the same requests to a
 // throttled API server.
 //
-// Each delay gets up to a tenth more at random. When the API server
-// fails, every machine in the fleet fails at the same moment, and
-// without the jitter they would all retry at the same moments too.
+// Each delay gets a random addition of up to a tenth. When the API
+// server fails, every machine in the fleet fails at the same moment,
+// and without the jitter they would all retry at the same moments too.
 
 import (
 	"math/rand/v2"
@@ -33,19 +34,20 @@ const (
 	lastingRetryLimit   = 5 * time.Minute
 )
 
-// retrySchedule holds the current delay for each kind of failure, from
-// one pass to the next. A zero delay means the last pass had no failure
-// of that kind.
+// retrySchedule keeps the current delay for each kind of failure
+// between passes. A zero delay means the last pass had no failure of
+// that kind.
 type retrySchedule struct {
 	transient time.Duration
 	lasting   time.Duration
 
-	// jitter answers a number in [0, 1). Nil means math/rand.
+	// jitter returns a number in [0, 1). When nil, it uses math/rand.
 	jitter func() float64
 }
 
-// next answers when the loop should run a pass after one that ended at
-// now with this outcome, and false when nothing asks for one.
+// next returns when the loop should run its next pass, given a pass
+// that ended at now with this outcome. It returns false when nothing
+// requires another pass.
 func (s *retrySchedule) next(out *passOutcome, now time.Time) (time.Time, bool) {
 	var hasTransient, hasLasting bool
 	for _, f := range out.failures {
@@ -80,9 +82,9 @@ func (s *retrySchedule) next(out *passOutcome, now time.Time) (time.Time, bool) 
 	return at, ok
 }
 
-// grow answers the next delay for one kind of failure: the first delay
-// after a pass without one, double the last after a pass with one, and
-// zero after a pass without one.
+// grow returns the next delay for one kind of failure: zero when the
+// pass had no such failure, first when the previous pass had none, and
+// otherwise double the last delay, up to limit.
 func grow(last time.Duration, failed bool, first, limit time.Duration) time.Duration {
 	switch {
 	case !failed:

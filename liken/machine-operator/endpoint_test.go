@@ -1,9 +1,5 @@
 package main
 
-// The machine's endpoint to the API. Leaders use their own API
-// server. Followers use k3s's health-checked local load balancer. A
-// standalone machine uses whatever the pod environment offers.
-
 import (
 	"testing"
 
@@ -22,13 +18,13 @@ func TestLocalAPIEndpointByRole(t *testing.T) {
 	}
 	for _, c := range cases {
 		if got := localAPIEndpoint(clusterDoc, c.name); got != c.want {
-			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
+			t.Errorf("localAPIEndpoint(%s) = %s, want %s", c.name, got, c.want)
 		}
 	}
 }
 
 func TestLocalAPIEndpointWithoutACluster(t *testing.T) {
 	if got := localAPIEndpoint(nil, "node-1"); got != "" {
-		t.Errorf("a standalone machine uses the environment's endpoint: %q", got)
+		t.Errorf("localAPIEndpoint with no Cluster = %q, want empty so that a standalone machine uses the environment's endpoint", got)
 	}
 }

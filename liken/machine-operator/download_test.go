@@ -1,10 +1,8 @@
 package main
 
-// The download, tested against an in-memory HTTP server serving a
-// real, tiny release: two artifacts and a release.yaml whose digests
-// are computed from their actual bytes, exactly the way the releases
-// package computes them at publish time. The fetcher tests in
-// fetch_test.go serve the same releases.
+// Tests of the download against an in-memory HTTP server that serves a
+// small release whose release.yaml has the real digests of its
+// artifacts. fetch_test.go serves the same releases.
 
 import (
 	"crypto/sha256"
@@ -22,8 +20,8 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// A fake published release: contents by artifact name, plus the
-// release.yaml derived from them and its catalog digest.
+// fakeRelease is a release as the server publishes it. digest is the
+// document's digest, the value a catalog entry would list.
 type fakeRelease struct {
 	version   string
 	artifacts map[string][]byte
@@ -51,8 +49,8 @@ func makeRelease(version string) *fakeRelease {
 	return r
 }
 
-// serveRelease publishes fake releases the way `make serve` does,
-// counting requests so tests can assert what was actually fetched.
+// serveRelease serves each fake release under /releases/<version>/,
+// and counts the requests.
 func serveRelease(t *testing.T, hits *atomic.Int64, published ...*fakeRelease) *apiservertest.Server {
 	t.Helper()
 	return apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -73,26 +71,25 @@ func serveRelease(t *testing.T, hits *atomic.Int64, published ...*fakeRelease) *
 	}))
 }
 
-// activeSlot builds the slot this machine is running from, as far
-// as the fetcher cares: the deployment layer and the sidecar that
-// confirms it, which every fetch must carry to the inactive slot.
+// activeSlot builds the slot the machine runs from, with only the files
+// that the fetcher reads: the deployment layer and its sidecar.
 func activeSlot(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	layer := []byte("the deployment layer")
 	if err := os.WriteFile(filepath.Join(dir, machine.LayerName), layer, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the layer: %v", err)
 	}
 	sum := sha256.Sum256(layer)
 	sidecar := machine.FormatLayerSidecar(hex.EncodeToString(sum[:]))
 	if err := os.WriteFile(filepath.Join(dir, machine.LayerSidecarName), sidecar, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the layer sidecar: %v", err)
 	}
 	return dir
 }
 
-func askFor(r *fakeRelease, slotDir, activeSlotDir string) fetchAsk {
-	return fetchAsk{
+func fetchFor(r *fakeRelease, slotDir, activeSlotDir string) releaseFetch {
+	return releaseFetch{
 		version:       r.version,
 		digest:        r.digest,
 		source:        apiservertest.Host + "/releases",
@@ -102,13 +99,12 @@ func askFor(r *fakeRelease, slotDir, activeSlotDir string) fetchAsk {
 	}
 }
 
-// fetcherFor is a fetcher whose downloads reach the server.
 func fetcherFor(server *apiservertest.Server) *fetcher {
 	return &fetcher{client: server.Client()}
 }
 
-// awaitSettled waits until every goroutine in the bubble is blocked
-// or done, and answers the fetcher's state.
+// awaitSettled waits until every goroutine in the bubble is blocked or
+// done, and returns the fetcher's state.
 func awaitSettled(f *fetcher) fetchSnapshot {
 	synctest.Wait()
 	f.mu.Lock()
@@ -124,29 +120,29 @@ func TestFetchesAndVerifiesARelease(t *testing.T) {
 		slot := t.TempDir()
 
 		f := fetcherFor(server)
-		snap := f.Ensure(askFor(release, slot, activeSlot(t)))
+		snap := f.Ensure(fetchFor(release, slot, activeSlot(t)))
 		if snap.state != fetchRunning {
-			t.Fatalf("Ensure should start the download: %+v", snap)
+			t.Fatalf("Ensure returned %+v, want a running download", snap)
 		}
 		snap = awaitSettled(f)
 		if snap.state != fetchVerified {
-			t.Fatalf("wanted Verified, got %s (%s)", snap.state, snap.detail)
+			t.Fatalf("the fetch state is %s (%s), want Verified", snap.state, snap.detail)
 		}
 
 		for name, contents := range release.artifacts {
 			got, err := os.ReadFile(filepath.Join(slot, name))
 			if err != nil || string(got) != string(contents) {
-				t.Errorf("%s on the slot: %q, %v", name, got, err)
+				t.Errorf("%s in the slot is %q (error %v), want the release artifact", name, got, err)
 			}
 		}
 		doc, err := os.ReadFile(filepath.Join(slot, "release.yaml"))
 		if err != nil || string(doc) != string(release.document) {
-			t.Errorf("the slot should carry the release document: %v", err)
+			t.Errorf("the slot has no matching release.yaml (error %v), want the release document", err)
 		}
 	})
 }
 
-func TestCarriesTheLayerToTheInactiveSlot(t *testing.T) {
+func TestCopiesTheLayerToTheInactiveSlot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := makeRelease("0.2.0")
 		server := serveRelease(t, new(atomic.Int64), release)
@@ -154,60 +150,59 @@ func TestCarriesTheLayerToTheInactiveSlot(t *testing.T) {
 		active := activeSlot(t)
 
 		f := fetcherFor(server)
-		f.Ensure(askFor(release, slot, active))
+		f.Ensure(fetchFor(release, slot, active))
 		if snap := awaitSettled(f); snap.state != fetchVerified {
-			t.Fatalf("wanted Verified, got %s (%s)", snap.state, snap.detail)
+			t.Fatalf("the fetch state is %s (%s), want Verified", snap.state, snap.detail)
 		}
 
 		for _, name := range []string{machine.LayerName, machine.LayerSidecarName} {
 			got, err := os.ReadFile(filepath.Join(slot, name))
 			if err != nil {
-				t.Fatalf("%s must be carried to the inactive slot: %v", name, err)
+				t.Fatalf("reading %s from the inactive slot: %v", name, err)
 			}
 			want, err := os.ReadFile(filepath.Join(active, name))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the active slot file: %v", err)
 			}
 			if string(got) != string(want) {
-				t.Errorf("%s on the inactive slot differs from the active slot's", name)
+				t.Errorf("%s in the inactive slot differs from the active slot's, want a copy", name)
 			}
 		}
 	})
 }
 
-func TestAMissingActiveLayerIsRejectedAndHeld(t *testing.T) {
+func TestAMissingActiveLayerIsRejectedAndNotRetried(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := makeRelease("0.2.0")
 		var hits atomic.Int64
 		server := serveRelease(t, &hits, release)
 		slot := t.TempDir()
 
-		// The active slot has no layer at all: an old-format install, or
-		// real damage. Either way, no retry can produce the layer, so
-		// this holds the way corruption does.
+		// The running slot has no layer, after damage or an install in
+		// an older format. A retry cannot create the layer.
 		f := fetcherFor(server)
-		ask := askFor(release, slot, t.TempDir())
-		f.Ensure(ask)
+		fetch := fetchFor(release, slot, t.TempDir())
+		f.Ensure(fetch)
 		snap := awaitSettled(f)
 		if snap.state != fetchRejected {
-			t.Fatalf("wanted Rejected, got %s (%s)", snap.state, snap.detail)
+			t.Fatalf("the fetch state is %s (%s), want Rejected", snap.state, snap.detail)
 		}
 		if !strings.Contains(snap.detail, "layer") {
-			t.Errorf("the hold must name the layer as the problem: %s", snap.detail)
+			t.Errorf("the rejection detail is %q, want it to name the layer", snap.detail)
 		}
-		if strings.Contains(snap.detail, "publish a corrected release") {
-			t.Errorf("the remedy is local, not a republish: %s", snap.detail)
+		if strings.Contains(snap.detail, "Publish a corrected release") {
+			t.Errorf("the rejection detail is %q, want no advice to publish a corrected release because the repair is local", snap.detail)
 		}
 		if _, err := os.Stat(filepath.Join(slot, "release.yaml")); !os.IsNotExist(err) {
-			t.Error("a slot without its layer is not bootable and must not carry the release document")
+			t.Error("the slot has release.yaml, want none because it has no layer")
 		}
 
 		before := hits.Load()
-		if snap := f.Ensure(ask); snap.state != fetchRejected {
-			t.Errorf("an unusable active layer holds: %+v", snap)
+		if snap := f.Ensure(fetch); snap.state != fetchRejected {
+			t.Errorf("after the retry the fetch state is %+v, want Rejected", snap)
 		}
 		if hits.Load() != before {
-			t.Error("a held ask must not touch the network again")
+			t.Error("the fetcher made a request after a rejection, want none")
 		}
 	})
 }
@@ -217,15 +212,15 @@ func TestATornActiveSidecarIsRejected(t *testing.T) {
 		release := makeRelease("0.2.0")
 		server := serveRelease(t, new(atomic.Int64), release)
 		active := activeSlot(t)
-		// The crash-tear shape: the sidecar exists but is empty.
+		// A crash can leave a sidecar that exists but is empty.
 		if err := os.WriteFile(filepath.Join(active, machine.LayerSidecarName), nil, 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the torn sidecar: %v", err)
 		}
 
 		f := fetcherFor(server)
-		f.Ensure(askFor(release, t.TempDir(), active))
+		f.Ensure(fetchFor(release, t.TempDir(), active))
 		if snap := awaitSettled(f); snap.state != fetchRejected {
-			t.Errorf("a torn sidecar makes the layer unverifiable: %+v", snap)
+			t.Errorf("with an empty sidecar the fetch state is %+v, want Rejected", snap)
 		}
 	})
 }
@@ -237,27 +232,26 @@ func TestAStaleInactiveLayerIsReplaced(t *testing.T) {
 		slot := t.TempDir()
 		active := activeSlot(t)
 
-		// The inactive slot still carries an older install's layer,
-		// with a sidecar that confirms those older bytes. The carry
-		// must replace both with the running slot's.
+		// The inactive slot has a layer from an older install, with a
+		// sidecar that matches it.
 		stale := []byte("a previous deployment layer")
 		sum := sha256.Sum256(stale)
 		if err := os.WriteFile(filepath.Join(slot, machine.LayerName), stale, 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the stale layer: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(slot, machine.LayerSidecarName),
 			machine.FormatLayerSidecar(hex.EncodeToString(sum[:])), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the stale layer: %v", err)
 		}
 
 		f := fetcherFor(server)
-		f.Ensure(askFor(release, slot, active))
+		f.Ensure(fetchFor(release, slot, active))
 		if snap := awaitSettled(f); snap.state != fetchVerified {
-			t.Fatalf("wanted Verified, got %s (%s)", snap.state, snap.detail)
+			t.Fatalf("the fetch state is %s (%s), want Verified", snap.state, snap.detail)
 		}
 		got, err := os.ReadFile(filepath.Join(slot, machine.LayerName))
 		if err != nil || string(got) != "the deployment layer" {
-			t.Errorf("the stale layer must be replaced by the active slot's: %q, %v", got, err)
+			t.Errorf("the layer in the inactive slot is %q (error %v), want the active slot's layer", got, err)
 		}
 	})
 }
@@ -269,33 +263,31 @@ func TestALayerWithoutItsSidecarIsRecompleted(t *testing.T) {
 		slot := t.TempDir()
 		active := activeSlot(t)
 
-		// A previous carry died between the layer's rename and the
-		// sidecar's write. The layer is already correct. The next pass
-		// must finish the job, instead of rejecting it or blindly
-		// copying it again.
+		// An earlier copy stopped after it renamed the layer and before
+		// it wrote the sidecar. The next run writes only the sidecar.
 		layer, err := os.ReadFile(filepath.Join(active, machine.LayerName))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("preparing the inactive slot: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(slot, machine.LayerName), layer, 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("preparing the inactive slot: %v", err)
 		}
 
 		f := fetcherFor(server)
-		f.Ensure(askFor(release, slot, active))
+		f.Ensure(fetchFor(release, slot, active))
 		if snap := awaitSettled(f); snap.state != fetchVerified {
-			t.Fatalf("wanted Verified, got %s (%s)", snap.state, snap.detail)
+			t.Fatalf("the fetch state is %s (%s), want Verified", snap.state, snap.detail)
 		}
 		sidecar, err := os.ReadFile(filepath.Join(slot, machine.LayerSidecarName))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the layer sidecar: %v", err)
 		}
 		digest, err := machine.ParseLayerSidecar(sidecar)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("parsing the layer sidecar: %v", err)
 		}
 		if err := machine.VerifyLayer(digest, strings.NewReader(string(layer))); err != nil {
-			t.Errorf("the recompleted sidecar must vouch for the layer: %v", err)
+			t.Errorf("the new sidecar does not match the layer: %v, want a match", err)
 		}
 	})
 }
@@ -307,19 +299,17 @@ func TestResumesByVerificationNotRefetching(t *testing.T) {
 		server := serveRelease(t, &hits, release)
 		slot := t.TempDir()
 
-		// One artifact already landed, from a previous run interrupted
-		// after vmlinuz. Only the other artifact should be fetched.
+		// An earlier run stopped after it wrote vmlinuz.
 		if err := os.WriteFile(filepath.Join(slot, "vmlinuz"), release.artifacts["vmlinuz"], 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("preparing the inactive slot: %v", err)
 		}
 
 		f := fetcherFor(server)
-		f.Ensure(askFor(release, slot, activeSlot(t)))
+		f.Ensure(fetchFor(release, slot, activeSlot(t)))
 		awaitSettled(f)
 
-		// release.yaml + liken.cpio, and nothing else.
 		if got := hits.Load(); got != 2 {
-			t.Errorf("expected 2 requests (the document and the missing artifact), saw %d", got)
+			t.Errorf("the server got %d requests, want 2 (the release document and the missing artifact)", got)
 		}
 	})
 }
@@ -332,51 +322,50 @@ func TestVerifiedIsIdempotentAcrossPasses(t *testing.T) {
 		slot := t.TempDir()
 
 		f := fetcherFor(server)
-		ask := askFor(release, slot, activeSlot(t))
-		f.Ensure(ask)
+		fetch := fetchFor(release, slot, activeSlot(t))
+		f.Ensure(fetch)
 		awaitSettled(f)
 		before := hits.Load()
 
-		if snap := f.Ensure(ask); snap.state != fetchVerified {
-			t.Errorf("a verified ask stays verified: %+v", snap)
+		if snap := f.Ensure(fetch); snap.state != fetchVerified {
+			t.Errorf("after a second Ensure the fetch state is %+v, want Verified", snap)
 		}
 		if hits.Load() != before {
-			t.Error("re-ensuring a verified ask must not touch the network")
+			t.Error("the second Ensure made a request, want none")
 		}
 	})
 }
 
-func TestCorruptArtifactIsRejectedAndHeld(t *testing.T) {
+func TestCorruptArtifactIsRejectedAndNotRetried(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := makeRelease("0.2.0")
-		// The server's copy of liken.cpio is damaged after publish. The
-		// document still promises the original digest (make corrupt).
+		// The server's liken.cpio changed after the release was
+		// published.
 		release.artifacts["liken.cpio"] = []byte("pretend initramfs 0.2.0 with a flipped bit")
 		var hits atomic.Int64
 		server := serveRelease(t, &hits, release)
 		slot := t.TempDir()
 
 		f := fetcherFor(server)
-		ask := askFor(release, slot, activeSlot(t))
-		f.Ensure(ask)
+		fetch := fetchFor(release, slot, activeSlot(t))
+		f.Ensure(fetch)
 		snap := awaitSettled(f)
 		if snap.state != fetchRejected {
-			t.Fatalf("wanted Rejected, got %s (%s)", snap.state, snap.detail)
+			t.Fatalf("the fetch state is %s (%s), want Rejected", snap.state, snap.detail)
 		}
 		if _, err := os.Stat(filepath.Join(slot, "liken.cpio")); !os.IsNotExist(err) {
-			t.Error("a corrupt artifact must never land under its final name")
+			t.Error("the corrupt artifact is in the slot under its final name, want no file")
 		}
 		if _, err := os.Stat(filepath.Join(slot, "release.yaml")); !os.IsNotExist(err) {
-			t.Error("an incomplete slot must not carry the release document")
+			t.Error("the slot has release.yaml, want none because an artifact is missing")
 		}
 
-		// The hold: the same ask never refetches.
 		before := hits.Load()
-		if snap := f.Ensure(ask); snap.state != fetchRejected {
-			t.Errorf("a rejected ask holds: %+v", snap)
+		if snap := f.Ensure(fetch); snap.state != fetchRejected {
+			t.Errorf("after the retry the fetch state is %+v, want Rejected", snap)
 		}
 		if hits.Load() != before {
-			t.Error("a rejected ask must not touch the network again")
+			t.Error("the fetcher made a request after a rejection, want none")
 		}
 	})
 }
@@ -384,13 +373,13 @@ func TestCorruptArtifactIsRejectedAndHeld(t *testing.T) {
 func TestCorruptDocumentIsRejected(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := makeRelease("0.2.0")
-		release.digest = "sha256:" + hex.EncodeToString(make([]byte, 32)) // the catalog promises different bytes
+		release.digest = "sha256:" + hex.EncodeToString(make([]byte, 32))
 		server := serveRelease(t, new(atomic.Int64), release)
 
 		f := fetcherFor(server)
-		f.Ensure(askFor(release, t.TempDir(), activeSlot(t)))
+		f.Ensure(fetchFor(release, t.TempDir(), activeSlot(t)))
 		if snap := awaitSettled(f); snap.state != fetchRejected {
-			t.Errorf("a document that fails the catalog digest is corrupt: %+v", snap)
+			t.Errorf("with a wrong catalog digest the fetch state is %+v, want Rejected", snap)
 		}
 	})
 }

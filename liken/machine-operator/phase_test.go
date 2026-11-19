@@ -1,8 +1,5 @@
 package main
 
-// The phase table, pinned: which condition puts a machine in which
-// phase, and which phase wins when several conditions disagree.
-
 import (
 	"testing"
 
@@ -31,12 +28,12 @@ func TestDecidePhase(t *testing.T) {
 		{"everything true is ready", allTrue, api.PhaseReady},
 		{"no conditions at all is ready", nil, api.PhaseReady},
 		{
-			"unreadable facts give the operator nothing to judge",
+			"unreadable facts are Unknown",
 			[]api.Condition{condition("FactsPublished", "False", "FactsUnreadable")},
 			api.PhaseUnknown,
 		},
 		{
-			"no boot record yet means init is still working",
+			"no boot record yet is Booting",
 			[]api.Condition{
 				condition("SpecConverged", "Unknown", "FactsIncomplete"),
 				condition("ClusterConverged", "Unknown", "FactsIncomplete"),
@@ -49,17 +46,17 @@ func TestDecidePhase(t *testing.T) {
 			api.PhaseBlocked,
 		},
 		{
-			"a spec the machine can't satisfy is blocked",
+			"a spec the machine cannot stage is blocked",
 			[]api.Condition{condition("SpecConverged", "False", "StagingRejected")},
 			api.PhaseBlocked,
 		},
 		{
-			"nowhere durable to stage is blocked",
+			"a machine with no persistent storage to stage on is blocked",
 			[]api.Condition{condition("ClusterConverged", "False", "MachineStateEphemeral")},
 			api.PhaseBlocked,
 		},
 		{
-			"a machine with no system slots can never take a release",
+			"a machine with no system slots is blocked",
 			[]api.Condition{condition("VersionConverged", "False", "NoSystemSlots")},
 			api.PhaseBlocked,
 		},
@@ -69,7 +66,7 @@ func TestDecidePhase(t *testing.T) {
 			api.PhaseBlocked,
 		},
 		{
-			"a machine not booted from a slot can't take releases",
+			"a machine that did not boot from a slot is blocked",
 			[]api.Condition{condition("VersionConverged", "False", "NotInstalled")},
 			api.PhaseBlocked,
 		},
@@ -104,8 +101,6 @@ func TestDecidePhase(t *testing.T) {
 			api.PhaseDownloading,
 		},
 		{
-			// A download finishes on its own. A change that waits on a
-			// person, or a fault, needs that person sooner.
 			"a change waiting on a reboot shows over a download",
 			[]api.Condition{
 				condition("VersionConverged", "False", "Downloading"),
@@ -127,15 +122,11 @@ func TestDecidePhase(t *testing.T) {
 			api.PhaseUpdating,
 		},
 		{
-			"staged and waiting on a manual reboot",
+			"a change staged for a manual reboot is pending",
 			[]api.Condition{condition("ClusterConverged", "False", "RebootPending")},
 			api.PhaseUpdatePending,
 		},
 		{
-			// The change needs no disruption of its own, but the
-			// machine still does not run the deployment's document
-			// yet, so the listing shows it as pending rather than
-			// Ready.
 			"a document staged for the next boot is pending",
 			[]api.Condition{condition("ClusterConverged", "False", "StagedForNextBoot")},
 			api.PhaseUpdatePending,
@@ -151,10 +142,10 @@ func TestDecidePhase(t *testing.T) {
 			api.PhaseDegraded,
 		},
 		{
-			// A default that will not apply ships with the release, so
-			// every machine reports it at once. Degrading the fleet on
-			// it would bury whichever machine has a real fault.
-			"a default liken could not apply is not degradation",
+			// A default that cannot apply comes with the release, so
+			// every machine reports it at once, and a Degraded fleet
+			// would hide the machine with a real fault.
+			"a default that liken could not apply is not degradation",
 			[]api.Condition{condition("SysctlsApplied", "True", "DefaultsIncomplete")},
 			api.PhaseReady,
 		},
@@ -169,7 +160,7 @@ func TestDecidePhase(t *testing.T) {
 			api.PhaseDegraded,
 		},
 		{
-			"the gravest condition wins",
+			"the most severe phase wins",
 			[]api.Condition{
 				condition("SysctlsApplied", "False", "ApplyFailed"),
 				condition("SpecConverged", "False", "RebootPending"),
@@ -178,7 +169,7 @@ func TestDecidePhase(t *testing.T) {
 			api.PhaseBlocked,
 		},
 		{
-			"the ready roll-up never argues on its own",
+			"the Ready roll-up indicates no phase",
 			[]api.Condition{condition("Ready", "False", "Degraded")},
 			api.PhaseReady,
 		},
@@ -186,7 +177,7 @@ func TestDecidePhase(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := decidePhase(tt.conditions); got != tt.want {
-				t.Errorf("got %s, want %s", got, tt.want)
+				t.Errorf("decidePhase returns %s, want %s", got, tt.want)
 			}
 		})
 	}
@@ -197,7 +188,7 @@ func TestAwaitingTurnIsUpdatePending(t *testing.T) {
 		{Type: "ClusterConverged", Status: "False", Reason: "AwaitingTurn"},
 	})
 	if phase != api.PhaseUpdatePending {
-		t.Errorf("waiting on the cluster's grant is a pending update: %s", phase)
+		t.Errorf("the phase is %s, want UpdatePending because the machine waits for its turn", phase)
 	}
 }
 
@@ -206,7 +197,7 @@ func TestReadyRollupAllTrue(t *testing.T) {
 		condition("HostEntriesApplied", "True", "Applied"),
 	})
 	if c.Status != api.ConditionTrue || c.Reason != "Reconciled" {
-		t.Errorf("got %+v", c)
+		t.Errorf("the Ready condition is %+v, want status True with reason Reconciled", c)
 	}
 }
 
@@ -215,27 +206,27 @@ func TestReadyRollupReasonFollowsThePhase(t *testing.T) {
 		condition("HostEntriesApplied", "False", "AwaitingPodRefresh"),
 	})
 	if c.Status != api.ConditionFalse || c.Reason != "UpdatePending" {
-		t.Errorf("a waiting machine is not degraded: %+v", c)
+		t.Errorf("the Ready condition is %+v, want status False with reason UpdatePending", c)
 	}
 }
 
-func TestReadyRollupDegradedWhenThePhaseSaysSo(t *testing.T) {
+func TestReadyRollupIsDegradedWhenThePhaseIsDegraded(t *testing.T) {
 	c := readyCondition([]api.Condition{
 		condition("SysctlsApplied", "False", "ApplyFailed"),
 	})
 	if c.Status != api.ConditionFalse || c.Reason != "Degraded" {
-		t.Errorf("got %+v", c)
+		t.Errorf("the Ready condition is %+v, want status False with reason Degraded", c)
 	}
 }
 
-func TestReadyRollupSkipsThePriorReadyAndTheGrant(t *testing.T) {
+func TestReadyRollupSkipsThePreviousReadyAndRebootApproved(t *testing.T) {
 	c := readyCondition([]api.Condition{
 		condition("Ready", "False", "Degraded"),
 		condition(machine.RebootApprovedCondition, "True", "DisruptionBudgetAllows"),
 		condition("HostEntriesApplied", "True", "Applied"),
 	})
 	if c.Status != api.ConditionTrue || c.Reason != "Reconciled" {
-		t.Errorf("a stale roll-up and the grant say nothing about health: %+v", c)
+		t.Errorf("the Ready condition is %+v, want status True with reason Reconciled because Ready and RebootApproved are skipped", c)
 	}
 }
 
@@ -244,12 +235,13 @@ func TestAwaitingPodRefreshIsUpdatePending(t *testing.T) {
 		{Type: "HostEntriesApplied", Status: "False", Reason: "AwaitingPodRefresh"},
 	})
 	if phase != api.PhaseUpdatePending {
-		t.Errorf("a stale pod template waiting on the steward's refresh is a pending update: %s", phase)
+		t.Errorf("the phase is %s, want UpdatePending because the pod template is stale", phase)
 	}
 }
 
-// healthyBesides is a machine whose every other condition is True, so
-// the radio's own verdict decides the phase by itself.
+// healthyBesides returns the conditions of a machine where everything
+// is True except the wireless condition, so that condition alone
+// decides the phase.
 func healthyBesides(wireless api.Condition) []api.Condition {
 	return []api.Condition{
 		condition("FactsPublished", "True", "FactsRead"),
@@ -261,8 +253,8 @@ func healthyBesides(wireless api.Condition) []api.Condition {
 	}
 }
 
-// oneRadio is a machine with one wired port and one radio in the
-// given state, as the facts tree reports it.
+// oneRadio returns the interfaces of a machine with one wired port and
+// one radio in the given state.
 func oneRadio(state machine.WirelessState) []machine.InterfaceStatus {
 	return []machine.InterfaceStatus{
 		{Name: "eth0", Address: "10.10.0.5/24"},
@@ -271,32 +263,26 @@ func oneRadio(state machine.WirelessState) []machine.InterfaceStatus {
 }
 
 func TestARadioStillJoiningLeavesTheMachineReady(t *testing.T) {
-	// The boot handed the radio to the background on purpose, so the
-	// join window is not a fault. A listing that showed every such
-	// machine as Degraded for the length of a join would teach a
-	// person to ignore the column.
 	wireless := wirelessCondition(oneRadio(machine.WirelessAssociating))
 	if wireless.Status != api.ConditionFalse || wireless.Reason != "Joining" {
-		t.Fatalf("the condition still reports what the boot actuated: %+v", wireless)
+		t.Fatalf("the wireless condition is %+v, want status False with reason Joining", wireless)
 	}
 	if phase := decidePhase(healthyBesides(wireless)); phase != api.PhaseReady {
-		t.Errorf("a radio still joining put the machine in %s", phase)
+		t.Errorf("the phase is %s with a radio still joining, want Ready", phase)
 	}
 }
 
 func TestASettledRadioFailureIsDegraded(t *testing.T) {
-	// Only the join window is soft. Every state a radio settles on is
-	// a fault a person must see in the listing.
 	for _, state := range []machine.WirelessState{
 		machine.WirelessNoCarrier, machine.WirelessNotRaised, machine.WirelessWrongKey,
 	} {
 		t.Run(string(state), func(t *testing.T) {
 			wireless := wirelessCondition(oneRadio(state))
 			if wireless.Reason != "NotJoined" {
-				t.Errorf("got reason %q", wireless.Reason)
+				t.Errorf("the wireless reason is %q, want NotJoined", wireless.Reason)
 			}
 			if phase := decidePhase(healthyBesides(wireless)); phase != api.PhaseDegraded {
-				t.Errorf("put the machine in %s", phase)
+				t.Errorf("the phase is %s after a settled radio failure, want Degraded", phase)
 			}
 		})
 	}
@@ -307,15 +293,15 @@ func TestDrainingIsUpdating(t *testing.T) {
 		{Type: "SpecConverged", Status: "False", Reason: "Draining"},
 	})
 	if phase != api.PhaseUpdating {
-		t.Errorf("draining is the reboot's opening move: %s", phase)
+		t.Errorf("the phase is %s, want Updating because draining comes before a reboot", phase)
 	}
 }
 
-func TestALiveLoadInFlightIsUpdating(t *testing.T) {
+func TestALiveLoadInProgressIsUpdating(t *testing.T) {
 	phase := decidePhase([]api.Condition{
 		{Type: "SpecConverged", Status: "False", Reason: "LoadRequested"},
 	})
 	if phase != api.PhaseUpdating {
-		t.Errorf("a requested live load is a change in progress: %s", phase)
+		t.Errorf("the phase is %s, want Updating because a live load is in progress", phase)
 	}
 }

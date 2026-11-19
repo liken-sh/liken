@@ -1,28 +1,15 @@
 package main
 
-// Layer 3 for the machine operator: the metrics that make this
-// program what it is.
+// The machine operator's own metrics, which the liken/metrics package
+// calls layer 3. Most are fields of the Machine's status exported as
+// gauges. They are set from the same status and device list that the
+// pass publishes, so a graph agrees with `kubectl get machine -o yaml`
+// and with the ResourceSlice.
 //
-// Most of these are Machine status fields, and that is the design.
-// The status says what the machine is now, and the metric is the
-// same fact over time. Console parity says that what init prints
-// must also reach Machine status. This file extends that one step
-// further, to Prometheus, under one rule: every metric here reads
-// the fact that the status writer reads, and never a second source.
-// So observeStatus takes the very status value that reconcile is
-// about to publish, and observeDevices takes the very device list
-// that the ResourceSlice is about to carry.
-//
-// Three metrics from the plan's table are missing:
-//
-//   - liken_upgrade_duration_seconds. Measuring an upgrade from
-//     staged to booted needs a staging time that survives the
-//     reboot, and the system release record carries no timestamp.
-//   - liken_firmware_info and liken_firmware_update_pending. The
-//     firmware's version and the updates offered for it are status
-//     on the Firmware objects that firmware-operator writes, and
-//     Machine status reports only the firmware's boot entries. So
-//     these metrics are not this program's to export.
+// The firmware version and its offered updates are status of the
+// Firmware objects, so firmware-operator exports them. There is no
+// upgrade duration, because it would need a staging time that survives
+// the reboot, and the system release record has no timestamp.
 
 import (
 	"fmt"
@@ -37,14 +24,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// serveMetrics builds this operator's whole registry, the contract's
-// layer 1 and layer 2 beside this machine's layer 3, and starts the
-// listener that answers a scrape. A listener that cannot bind
-// reports itself and nothing more: the machine must keep operating
-// whether or not anybody watches it. This pod runs on the host
-// network, so a port another program already holds is the ordinary
-// way that bind fails. /healthz answers health, for the liveness
-// probe.
+// serveMetrics builds the operator's registry with layers 1 and 2 and
+// this machine's layer 3, and starts the HTTP listener that serves
+// /metrics and /healthz, which reports the liveness check. When the
+// listener cannot bind, it logs the error and returns, because the
+// machine must keep running without monitoring. The pod uses the host
+// network, so another program on the machine can already hold the port.
 func serveMetrics(address string, f *fetcher, health func() error) (*metrics.Operator, *machineMetrics) {
 	o := metrics.NewOperator(component, machine.Version,
 		[]string{machineKind}, watchKinds)
@@ -60,9 +45,7 @@ func serveMetrics(address string, f *fetcher, health func() error) (*metrics.Ope
 	return o, layer
 }
 
-// machineMetrics holds this operator's layer 3. One instance lives
-// for the life of the process, and the reconcile pass hands it the
-// facts it has already gathered.
+// machineMetrics holds the layer 3 metrics for the life of the process.
 type machineMetrics struct {
 	release       *prometheus.GaugeVec
 	bootTimestamp optionalGauge
@@ -75,20 +58,17 @@ type machineMetrics struct {
 	repairs       *prometheus.CounterVec
 	passes        *prometheus.CounterVec
 
-	// classes remembers every device class this machine has
-	// published. A class whose devices all disappear is set to zero
-	// rather than removed, because the plan asks for a drop that a
-	// graph can show, and a series that stops reporting draws a gap
-	// instead of a fall.
+	// classes holds every device class this machine has published. A
+	// class whose devices all disappear is set to zero and not
+	// removed, because a series that stops reporting shows as a gap in
+	// a graph, and a series at zero shows the drop.
 	classes map[string]bool
 }
 
-// An optionalGauge is a gauge that a pass may leave unpublished. A
-// machine with no crash on record must publish no crash timestamp,
-// because zero reads as 1970 on a graph, while an absent series
-// reads as "nothing to report", which is the fact. A GaugeVec with
-// no labels gives exactly that: one sample while a pass sets it, and
-// no metric family at all while nothing does.
+// An optionalGauge is a gauge that a pass can leave out of the scrape.
+// A machine with no crash on record must not publish a crash
+// timestamp, because 0 plots as 1970. A GaugeVec with no labels has
+// one sample after set and no metric family after clear.
 type optionalGauge struct{ vec *prometheus.GaugeVec }
 
 func newOptionalGauge(name, help string) optionalGauge {
@@ -100,25 +80,15 @@ func (g optionalGauge) set(value float64) { g.vec.WithLabelValues().Set(value) }
 
 func (g optionalGauge) clear() { g.vec.Reset() }
 
-// tierOf turns a staged disruption's kind into the tier word the
-// contract publishes. liken has four tiers of convergence
-// (cluster/changes.go), and only two of them ever wait: an in-place
-// change applies on the pass that finds it, and a next-boot change
-// waits for no disruption of its own.
 func tierOf(kind machine.DisruptionKind) string {
 	return strings.ToLower(string(kind))
 }
 
-// pendingTiers are the tiers that can hold a change back. Both are
-// published on every pass, so a fleet that is waiting for nothing
-// reports zero rather than nothing at all.
+// pendingTiers are the kinds of change that wait for a disruption
+// (cluster/changes.go). The pending gauge sets each one on every pass,
+// so a machine with nothing pending reports 0, not a missing series.
 var pendingTiers = []machine.DisruptionKind{machine.DisruptionReboot, machine.DisruptionRestart}
 
-// newMachineMetrics registers layer 3 on the operator's registry.
-// The fetcher is a parameter because two of these metrics are
-// counters that only the fetcher can total: it is the one thing that
-// downloads a release, and it keeps those totals across the passes
-// that ask it for its state (fetch.go).
 func newMachineMetrics(o *metrics.Operator, f *fetcher) *machineMetrics {
 	m := &machineMetrics{
 		release: prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -132,7 +102,7 @@ func newMachineMetrics(o *metrics.Operator, f *fetcher) *machineMetrics {
 			Help: "Staged changes that wait for a disruption, by the tier that applies them.",
 		}, []string{"tier"}),
 		converged: newOptionalGauge(metrics.Prefix+"machine_converged",
-			"1 while the machine runs the spec the cluster holds, and 0 while it does not."),
+			"1 while the machine runs the spec in its Machine, and 0 while it does not."),
 		devices: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: metrics.Prefix + "devices",
 			Help: "Devices this node offers to workloads, by class.",
@@ -145,7 +115,7 @@ func newMachineMetrics(o *metrics.Operator, f *fetcher) *machineMetrics {
 		}),
 		repairs: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: metrics.Prefix + "machine_backstop_repairs_total",
-			Help: "Writes by a pass that only the backstop started, by step. Each one names a wake the operator does not send.",
+			Help: "Writes by a pass that only the backstop started, by step. Each one shows a code path that changed state without starting a pass.",
 		}, []string{"step"}),
 		passes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: metrics.Prefix + "machine_passes_total",
@@ -154,12 +124,9 @@ func newMachineMetrics(o *metrics.Operator, f *fetcher) *machineMetrics {
 		classes: map[string]bool{},
 	}
 
-	// The two download counters read the fetcher's own totals at
-	// scrape time. A counter function suits them because the fetcher
-	// already keeps these numbers for its own use, and copying them
-	// into a second place on every pass would let the two disagree.
-	// Reading them costs one mutex and no I/O, so a scrape still
-	// touches nothing but memory.
+	// The download counters read the fetcher's totals at each scrape,
+	// so no second copy can disagree with it. Each read takes the
+	// fetcher's mutex and does no I/O (fetch.go).
 	downloadBytes := prometheus.NewCounterFunc(prometheus.CounterOpts{
 		Name: metrics.Prefix + "release_download_bytes_total",
 		Help: "Release artifact bytes this machine has downloaded and verified onto a slot.",
@@ -179,10 +146,8 @@ func newMachineMetrics(o *metrics.Operator, f *fetcher) *machineMetrics {
 	return m
 }
 
-// observeStatus reads the status that this pass is about to publish.
-// Every value here comes from that one struct, so the graph and the
-// `kubectl get machine -o yaml` output can never disagree.
-// observePass raises the longest pass when took is longer. A nil
+// observePass raises the longest pass when took is longer. Only the
+// loop's goroutine calls it, so m.longest needs no lock. A nil
 // machineMetrics observes nothing.
 func (m *machineMetrics) observePass(took time.Duration) {
 	if m == nil {
@@ -211,10 +176,9 @@ func (m *machineMetrics) backstopRepaired(step string) {
 }
 
 func (m *machineMetrics) observeStatus(status *machine.MachineStatus) {
-	// Reset before the set, because a machine that upgrades or falls
-	// back changes both labels. Without the reset, the old release
-	// would keep reporting 1 beside the new one, and a fleet panel
-	// would count the machine twice.
+	// The reset removes the series of the previous version and slot.
+	// Without it, a machine that upgraded or fell back would report 1
+	// for both releases and a fleet panel would count it twice.
 	m.release.Reset()
 	if status.Version.Liken != "" {
 		m.release.WithLabelValues(status.Version.Liken, status.Boot.Slot).Set(1)
@@ -234,9 +198,9 @@ func (m *machineMetrics) observeStatus(status *machine.MachineStatus) {
 		m.changePending.WithLabelValues(tier).Set(pending[tier])
 	}
 
-	// SpecConverged is the condition that answers "does this machine
-	// run the spec the cluster holds". A pass that could not judge it
-	// publishes nothing, because Unknown is not 0.
+	// SpecConverged is 1 when True and 0 when False. When the
+	// condition is Unknown or missing, the series is absent, because
+	// Unknown is not the same as not converged.
 	m.converged.clear()
 	if c := api.FindCondition(status.Conditions, "SpecConverged"); c != nil {
 		switch c.Status {
@@ -253,9 +217,6 @@ func (m *machineMetrics) observeStatus(status *machine.MachineStatus) {
 	}
 }
 
-// observeDevices counts the devices this node offers to workloads,
-// by class. It takes the list that the ResourceSlice carries, so the
-// count and the offer come from the one sysfs walk the pass made.
 func (m *machineMetrics) observeDevices(devices []kubernetes.SliceDevice) {
 	counts := map[string]float64{}
 	for _, d := range devices {
@@ -272,11 +233,10 @@ func (m *machineMetrics) observeDevices(devices []kubernetes.SliceDevice) {
 	}
 }
 
-// deviceClass reads the class word a slice device publishes. The
-// buses name a class in a table with a fixed set of words
-// (hardware/names.go), so this label stays bounded. A device on a
-// bus whose table has no word for it counts as unknown, rather than
-// leaving the totals short of the slice.
+// deviceClass returns the device's class attribute. The class names
+// come from a fixed table (hardware/names.go), so the label has a
+// bounded set of values. A device with no class counts as "unknown",
+// so the counts add up to the number of devices in the slice.
 func deviceClass(d kubernetes.SliceDevice) string {
 	if attr, held := d.Attributes["class"]; held && attr.String != nil && *attr.String != "" {
 		return *attr.String
@@ -284,6 +244,6 @@ func deviceClass(d kubernetes.SliceDevice) string {
 	return "unknown"
 }
 
-// machineKind is the resource kind this operator's loop reconciles,
-// and the label every layer 2 series carries.
+// machineKind is the resource kind that the loop reconciles. It is the
+// kind label of the layer 2 metrics.
 const machineKind = "Machine"

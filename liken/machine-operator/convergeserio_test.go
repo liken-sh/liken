@@ -11,10 +11,10 @@ var pulse8Serio = machine.SerioAttachment{
 	USB:      machine.SerioUSB{Vendor: "2548", Product: "1002"},
 }
 
-// spec.serio converges on the terms spec.modules does: an addition
-// loads live, alone or beside added modules, and a retraction waits
-// for a boot. A serio line beside any reboot-class drift takes the
-// reboot.
+// A change to spec.serio converges like one to spec.modules. An added
+// entry loads without a reboot, alone or with added modules. A
+// removed entry waits for a reboot. An added entry that comes with a
+// change needing a reboot waits for the reboot too.
 func TestSerioEditsConvergeLikeModules(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -54,15 +54,15 @@ func TestSerioEditsConvergeLikeModules(t *testing.T) {
 			conv := decideConvergence(m, facts, nil, "", turnStandalone)
 
 			if conv.condition.Reason != test.wantReason || conv.requestLoad != test.wantLoad || conv.requestReboot {
-				t.Errorf("got %+v, load %v", conv.condition, conv.requestLoad)
+				t.Errorf("reason %s, load %v, reboot %v, want reason %s, load %v, no reboot", conv.condition.Reason, conv.requestLoad, conv.requestReboot, test.wantReason, test.wantLoad)
 			}
 		})
 	}
 }
 
-// A manifest that reached the machine without admission can carry an
-// entry that could never match, and staging it would cost a reboot to
-// learn that.
+// A manifest that skipped admission can hold an entry that never
+// matches a device. The operator refuses to stage it, so the machine
+// does not reboot to find that out.
 func TestDecideConvergenceRefusesAnInvalidSerioEntry(t *testing.T) {
 	m := labMachine()
 	m.Spec.Serio = []machine.SerioAttachment{{Protocol: "pulse8-cec", USB: machine.SerioUSB{Vendor: "2548", Product: "10020"}}}
@@ -70,6 +70,6 @@ func TestDecideConvergenceRefusesAnInvalidSerioEntry(t *testing.T) {
 	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
 
 	if conv.condition.Reason != "StagingRejected" || conv.stage {
-		t.Errorf("got %+v", conv.condition)
+		t.Errorf("reason %s, stage %v, want reason StagingRejected and no stage", conv.condition.Reason, conv.stage)
 	}
 }

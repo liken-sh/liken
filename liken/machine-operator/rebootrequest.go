@@ -1,37 +1,29 @@
 package main
 
-// The reboot a person asks for, with nothing to apply.
+// A person can request a reboot of a machine that has nothing staged.
 //
-// Every other reboot in liken is the tail of a staged document: the
-// operator finds drift, stages the new bytes, and the boot actuates
-// them (converge.go). That leaves no way to reboot a machine that
-// has no drift at all, and a machine with no shell and no SSH server
-// has no other way to get one. Two cases need one anyway. A kernel
-// driver that bound the wrong device releases it only at boot, and a
-// machine used as a testbed needs a clean boot between experiments.
-// The only other way to start that boot is the power button, which
-// takes no turn from the cluster, cordons nothing, and drains
-// nothing.
+// Other reboots apply a staged document (converge.go), so a machine
+// with no drift never reboots, and it has no shell or SSH server to
+// reboot from. A person still needs a reboot when a kernel driver bound
+// the wrong device, because the driver releases it only at boot, and a
+// testbed needs a clean boot between experiments. The power button
+// reboots too, but without a turn from the cluster, a cordon, or a
+// drain.
 //
-// The request is a person's Disruption for the machine (requests.go),
-// whose spec.hash names the identity of the boot that is running now.
-// That value is what makes the request one-shot: the boot that comes
-// back has a different identity, so the request no longer names the
-// running boot, and machine-operator marks it Complete. A later
-// request is a new Disruption, named for the new boot.
+// The request is a person's Disruption for the machine (requests.go)
+// with spec.hash set to the running boot's ID. After the reboot the
+// boot ID differs, so machine-operator marks the request Complete, and
+// another reboot needs a new Disruption.
 //
-// From the gate onward this is an ordinary disruption. The decision
-// below builds the same convergence value the documents build and
-// hands it to gateDisruption, so rebootPolicy, the rollout
-// conductor's turn, and the drain all apply unchanged, and
-// status.pending carries the request where liken approve-reboot can
-// find it.
+// decideRebootRequest passes the request through gateDisruption, as a
+// staged document does, so rebootPolicy, the rollout turn, and the
+// drain all apply, and the request is listed in status.pending, where
+// liken approve-reboot finds it.
 //
-// What the request never does is stage anything. A boot's slot
-// bookkeeping reads the staged system release on machineState, not
-// the reboot intent (armProvingBoot in init/proving.go), so a boot
-// that no download preceded arms no trial and promotes no slot. The
-// machine comes back on the documents it already ran.
+// The reboot stages nothing. init arms a proving boot only from a staged
+// system release in machineState, never from the reboot intent
+// (armProvingBoot in init/proving.go), so the machine comes back on the
+// documents it already ran.
 
 import (
 	"fmt"
@@ -43,21 +35,18 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// rebootRequestCondition reports whether a requested reboot is still
-// outstanding. True covers both settled states: no request at all,
-// and a request whose reboot has happened.
+// rebootRequestCondition is True when no requested reboot is waiting
+// to run.
 const rebootRequestCondition = "RebootRequestHonored"
 
-// decideRebootRequest is the whole decision, as a pure function over
-// the machine's requests and the boot record. A request that names
-// this boot gates the reboot on the policy and the turn, and its
-// approvedHash approves it on a Manual machine. With no such request,
-// nothing was asked for. The message then names this boot's identity,
-// because that is the value a request created with kubectl can carry,
-// and kubectl describe machine is where a person goes to find it. A
-// machine with no boot record publishes no identity for a request to
-// name, so while a person's request waits, the verdict is Unknown
-// rather than a guess.
+// decideRebootRequest returns the convergence for a person's request to
+// reboot the running boot. On a Manual machine, the request's
+// approvedHash approves it.
+//
+// With no request, the condition message gives this boot's ID, because
+// a person who creates the Disruption with kubectl must put it in
+// spec.hash. With no boot record, an open request has no boot ID to
+// match, so the condition is Unknown.
 func decideRebootRequest(m *machine.Machine, facts *machine.MachineStatus, t turn, requests []disruption.Disruption) convergence {
 	bootID := ""
 	if facts != nil {
@@ -68,9 +57,9 @@ func decideRebootRequest(m *machine.Machine, facts *machine.MachineStatus, t tur
 	}
 	d := requestForBoot(requests, bootID)
 	if d == nil || bootID == "" {
-		message := "no reboot has been requested"
+		message := "No reboot is requested"
 		if bootID != "" {
-			message = fmt.Sprintf("no reboot has been requested; to ask for one, run liken request-reboot, or create a Disruption for this machine with spec.hash %.12s, this boot's identity",
+			message = fmt.Sprintf("No reboot is requested. To request one, run liken request-reboot, or create a Disruption for this machine with spec.hash %.12s, the identity of this boot",
 				bootID)
 		}
 		return convergence{condition: converged(rebootRequestCondition, "NothingRequested", message)}
@@ -84,22 +73,16 @@ func decideRebootRequest(m *machine.Machine, facts *machine.MachineStatus, t tur
 	gateDisruption(&c, rebootRequestCondition, m.Spec.RebootPolicyOrDefault(), t, false,
 		approval,
 		"a reboot of this machine, with no change to apply",
-		fmt.Sprintf("a reboot is requested for this boot (%.12s); rebootPolicy is Manual, so approve the reboot (or set rebootPolicy: Auto) to let it run", bootID),
-		fmt.Sprintf("a reboot is requested for this boot (%.12s); waiting for the cluster to grant a reboot turn", bootID),
-		fmt.Sprintf("reboot requested for this boot (%.12s); nothing is staged, so the machine comes back on the documents it runs now", bootID))
+		fmt.Sprintf("A reboot is requested for this boot (%.12s). rebootPolicy is Manual, so approve the reboot or set rebootPolicy to Auto to let it run", bootID),
+		fmt.Sprintf("A reboot is requested for this boot (%.12s) and waits for a reboot turn from the cluster", bootID),
+		fmt.Sprintf("A reboot is requested for this boot (%.12s). Nothing is staged, so the machine comes back with the documents that it runs now", bootID))
 	return c
 }
 
-// carryOutRebootRequest performs the decision's one side effect. The
-// documents go through carryOutConvergence, which writes a store and
-// then the intent. This request has no store, and giving it one would
-// open a path to the write a plain reboot must never make. dir is the
-// operator's intent channel to init, named rather than assumed so a
-// test can read what lands in it.
-//
-// The intent deliberately carries no manifest hash. That field names
-// the staged document a reboot applies, and this reboot applies
-// none.
+// carryOutRebootRequest writes the reboot intent into dir when conv
+// requests a reboot, and returns the condition to publish. Unlike
+// carryOutConvergence, it writes no store and leaves the intent's
+// ManifestHash empty, because the reboot applies no staged document.
 func carryOutRebootRequest(dir string, conv convergence, now time.Time, out *passOutcome) api.Condition {
 	if !conv.requestReboot {
 		return conv.condition
@@ -112,9 +95,9 @@ func carryOutRebootRequest(dir string, conv convergence, now time.Time, out *pas
 	if err := machine.WriteRebootIntent(dir, intent); err != nil {
 		out.fail("writing the requested reboot's intent", err)
 		return api.Condition{Type: rebootRequestCondition, Status: api.ConditionFalse,
-			Reason: "RequestFailed", Message: err.Error()}
+			Reason: "RequestFailed", Message: "The reboot intent is not written: " + err.Error()}
 	}
 	out.wrote("writing the requested reboot's intent")
-	fmt.Printf("requested a reboot that a person asked for; nothing is staged to apply (boot %.12s)\n", conv.hash)
+	fmt.Printf("requested the reboot that a Disruption asks for, with no staged change to apply (boot %.12s)\n", conv.hash)
 	return conv.condition
 }

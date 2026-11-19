@@ -7,62 +7,63 @@ import (
 	"github.com/liken-sh/liken/liken/disruption"
 )
 
-// disruptions is one pass's running record of what has already
-// started: whether some document requested the reboot, and whether
-// a drain is holding one back. The documents pass through the gate
-// in a fixed order: the Machine's spec, the cluster document, the
-// system release, the registry credentials, and finally the
-// demotion. The restart suppression in gate depends on this order.
-// A reboot requested by an earlier document silences a later
-// document's restart, never the reverse.
+// disruptions records what one reconcile pass has done so far about
+// reboots and drains. Each document's convergence decision goes
+// through gate in this order: the Machine's spec, the cluster
+// document, the system release, the registry credentials, and the
+// demotion. The order matters because gate drops the restart of a
+// document that comes after a reboot it let through, but cannot take
+// back a restart it already let through.
 type disruptions struct {
 	draining  bool
 	rebooting bool
 
-	// holding is the requests that hold this machine's turn after its
-	// drain (hold.go), and drained records that the drain finished
-	// while one did, so the pass sets their Held condition.
+	// holding lists the requests that keep this machine's turn after
+	// its drain (hold.go). drained is true when the drain finished
+	// while a request held the turn, and the pass then sets the Held
+	// condition of those requests.
 	holding []disruption.Disruption
 	drained bool
 
-	// handover names the request whose requester set BootNext for this
-	// turn's reboot (handoverRequest), or is empty.
+	// handover is the name of the request whose requester set BootNext
+	// for this turn's reboot (handoverRequest), or empty when none did.
 	handover string
 
-	// events posts the drain's cordon about this Machine.
+	// events posts the Events about this Machine that the drain
+	// writes, such as the cordon.
 	events machineEvents
 
-	// out records what the drain did not finish, and when the drain's
-	// deadline wants a pass.
+	// out records the work that the drain left unfinished and the time
+	// when the next pass must run to check the drain's deadline.
 	out *passOutcome
 }
 
-// gate intercepts one document's convergence decision on its way to
-// its side effects. A reboot already requested this pass covers any
-// restart: the boot path re-renders everything a restart would have
-// applied, so a second intent would only add noise. (Init also
-// prefers the reboot file when both exist, so this guard is not
-// strictly needed, but it does no harm.) A granted reboot goes
-// through the drain first (drain.go): the node is cordoned and
-// emptied before the intent is written, so workloads move to other
-// nodes instead of being killed by the reboot. A pass whose Node
-// read failed skips the drain, because during a demotion there is
-// no Node to cordon, and the reboot must still happen. The Node's
-// copy stops answering after a failed watch (watches.go), so while the
-// API server is down the Node read fails and the drain is skipped the
-// same way. A Node that reads but whose pods do not list holds the
-// reboot (gateThroughDrain): a slow API server must not let a reboot
-// kill pods past their disruption budgets.
+// gate takes one document's convergence decision and returns the
+// decision to carry out. It drops a restart when this pass already
+// requested a reboot, because the boot re-renders everything that the
+// restart would apply. Init also prefers the reboot file when both
+// exist, so the drop only avoids writing a second request.
 //
-// A request that holds the turn stops the reboot once the drain is
-// clear (hold.go). A holding request's turn ends in a reboot, which
-// covers every restart, so no restart runs while one holds. Once a
-// request is Held the drain is over, and the gate drains no more,
+// A granted reboot goes through the drain first (drain.go), so the
+// node's workloads move to other nodes before the reboot request is
+// written. The drain is skipped when the pass failed to read the Node.
+// During a demotion there is no Node to cordon and the reboot must
+// still happen. While the API server is down, the operator does not use
+// its cached Node (watches.go), so the read fails and the drain is
+// skipped the same way. When the Node reads but its pods do not list,
+// gateThroughDrain holds the reboot, because a slow API server must not
+// let a reboot kill pods past their disruption budgets.
+//
+// A request that holds the turn stops the reboot after the drain
+// finishes (hold.go). That turn ends in a reboot, which applies
+// everything a restart would, so no restart runs while a request holds
+// the turn. Once a request is Held, the gate does not drain again,
 // because the requester's pod runs on the cordoned node.
 //
-// Every reboot the gate lets through carries the handover, because
-// whichever document's intent init reads first ends the boot, and the
-// requester's BootNext must survive that reboot (hold.go).
+// Every reboot that the gate lets through has the handover as its
+// keepBootNext, because init acts on whichever document's reboot
+// request it reads first, and the requester's BootNext must survive
+// that reboot (hold.go).
 func (d *disruptions) gate(r *reader, node *nodeObject, nodeErr error, t turn, now time.Time, conv convergence) convergence {
 	holding := t == turnGranted && len(d.holding) > 0
 	conv.requestRestart = conv.requestRestart && !d.rebooting && !holding

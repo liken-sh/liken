@@ -1,37 +1,30 @@
 package main
 
-// The Events the machine operator posts about its own Machine.
-// `kubectl describe machine` lists them under the status, so a person
-// reads what happened to a machine in the last hour with no log to
-// open. kubernetes/events writes them, and root plan 78 gives the rule
-// for a condition, an Event, and a log line.
+// The Events that the machine operator posts about its own Machine,
+// which `kubectl describe machine` lists.
 //
 // A Machine is cluster-scoped, so its Events are in the namespace
-// default. `kubectl describe` finds them there, and `kubectl events
-// --for machine/<name>` finds them only with -n default or -A.
+// default. `kubectl events --for machine/<name>` finds them only with
+// -n default or -A.
 //
-//   - Each condition transition posts one Event, with the condition's
-//     reason, after the status write lands (postStatusEvents). The
-//     transitions of Ready are the transitions of the phase, because
-//     Ready's reason is the phase word when it is False. A spec that
-//     the operator refuses to stage posts StagingRejected, and a
-//     release or a spec that fell back at boot posts RejectedLastBoot.
-//     A reboot requested to apply a document posts RebootRequested.
-//     RebootApproved posts nothing here: the cluster operator writes
-//     it and posts its own Events.
-//   - A new kernel crash record and a new refused boot each post one
-//     Event, because both arrive as status fields and not as
-//     conditions.
-//   - The operator's own actions on the Node post one Event each:
-//     the cordon before a drain and the uncordon after the reboot.
-//   - The creation of the Machine from the boot manifest posts one
-//     Event.
-//   - Each new association of a radio posts one Event: Roamed when the
-//     radio moved from one access point to another, and Associated when
-//     status named no access point before, or named the same one.
+// The operator posts an Event for:
 //
-// Nothing that repeats on each pass posts an Event: a refused
-// eviction, a sysctl written back, or a heartbeat renewal.
+//   - Each condition transition, after the status write succeeds. The
+//     Event's reason is the condition's reason, such as
+//     StagingRejected, RejectedLastBoot, or RebootRequested. When Ready
+//     is not True its reason is the phase, so Ready's Events record
+//     the phase changes. RebootApproved posts nothing here, because
+//     the cluster operator sets it and posts its own Event.
+//   - A new kernel crash record and a new refused boot, which are
+//     status fields and not conditions.
+//   - The cordon before a drain, and the uncordon after the reboot.
+//   - The creation of the Machine from the boot manifest.
+//   - A radio's new association with an access point.
+//   - A prepared claim's device that was unplugged.
+//   - A write by a backstop pass.
+//
+// An action that repeats on each pass posts nothing: a refused
+// eviction, a sysctl written again, or a heartbeat renewal.
 
 import (
 	"fmt"
@@ -43,8 +36,7 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// The reasons of the Events that are not condition transitions. A
-// transition's Event takes the condition's own reason.
+// The reasons of the Events that are not condition transitions.
 const (
 	reasonMachineJoined = "MachineJoined"
 	reasonKernelCrashed = "KernelCrashed"
@@ -54,19 +46,16 @@ const (
 	reasonRoamed        = "Roamed"
 	reasonAssociated    = "Associated"
 
-	// reasonDeviceUnplugged marks a device that a prepared claim held
-	// when it was unplugged. The slice taints it, and the taint evicts
-	// the claim's pods (unplugged.go).
+	// reasonDeviceUnplugged is for a device that was unplugged while
+	// a prepared claim used it (unplugged.go).
 	reasonDeviceUnplugged = "DeviceUnplugged"
 
-	// reasonBackstopRepaired marks a write by a pass that only the
-	// backstop started, which names a wake the code does not send
-	// (backstop.go).
+	// reasonBackstopRepaired is for a write by a backstop pass, which
+	// means that a code path in this operator changed state without
+	// waking the loop (backstop.go).
 	reasonBackstopRepaired = "BackstopRepaired"
 )
 
-// machineReference answers the object reference of a Machine, for an
-// Event about it.
 func machineReference(m *machine.Machine) events.ObjectReference {
 	return events.ObjectReference{
 		APIVersion: api.APIVersion, Kind: machineKind,
@@ -75,8 +64,7 @@ func machineReference(m *machine.Machine) events.ObjectReference {
 }
 
 // machineEvents posts the Events about one Machine. The zero value
-// posts nothing, because a nil recorder posts nothing, so a test of a
-// decision that posts no Event passes machineEvents{}.
+// posts nothing, because a nil recorder posts nothing.
 type machineEvents struct {
 	recorder *events.Recorder
 	machine  events.ObjectReference
@@ -90,9 +78,8 @@ func (e machineEvents) warning(reason, message string) {
 	e.recorder.Warning(e.machine, reason, message)
 }
 
-// postStatusEvents posts the Events of one status write that landed:
-// one for each condition that transitioned from stored, and one for
-// each new crash or refused boot that the facts carried in.
+// postStatusEvents posts the Events for a status write that
+// succeeded, by comparing the written status with the stored one.
 func postStatusEvents(e machineEvents, stored, written *machine.MachineStatus) {
 	for _, c := range api.Transitions(stored.Conditions, written.Conditions) {
 		if c.Type == machine.RebootApprovedCondition {
@@ -102,7 +89,7 @@ func postStatusEvents(e machineEvents, stored, written *machine.MachineStatus) {
 	}
 	if crash := written.LastCrash; crash != nil && crash.Time != nil && !sameCrash(stored.LastCrash, crash) {
 		e.recorder.Warning(e.machine, reasonKernelCrashed, fmt.Sprintf(
-			"the kernel recorded a %s at %s: %s; status.lastCrash names the records",
+			"The kernel recorded a %s at %s: %s. status.lastCrash has the records",
 			crash.Reason, crash.Time.UTC().Format(time.RFC3339), crash.Message))
 	}
 	if stop := written.LastFailStop; stop != nil && (stored.LastFailStop == nil || !stored.LastFailStop.Time.Equal(stop.Time)) {
@@ -113,11 +100,12 @@ func postStatusEvents(e machineEvents, stored, written *machine.MachineStatus) {
 	postAssociationEvents(e, stored, written)
 }
 
-// postAssociationEvents posts one Event for each radio whose time of
-// association moved. Init moves it only on a new association, so a
-// radio that stays with one access point posts nothing. The Event is
-// the one record of the access point a radio left, because status
-// names only the current one.
+// postAssociationEvents posts an Event for each radio whose
+// associatedAt changed, which init sets only on a new association.
+// The reason is Roamed when the stored status had another BSSID, and
+// Associated otherwise. A Roamed Event is the only record of the
+// access point that the radio left, because status has only the
+// current one.
 func postAssociationEvents(e machineEvents, stored, written *machine.MachineStatus) {
 	before := map[string]*machine.WirelessStatus{}
 	for _, iface := range stored.Network.Interfaces {
@@ -146,22 +134,17 @@ func postAssociationEvents(e machineEvents, stored, written *machine.MachineStat
 	}
 }
 
-// accessPoint names an access point by its BSSID, its channel's
-// frequency, and its band.
 func accessPoint(w *machine.WirelessStatus) string {
 	return fmt.Sprintf("%s on %d MHz (%s)", w.BSSID, w.Frequency, w.Band)
 }
 
-// sameCrash reports whether the stored status already names the crash
-// at the same time.
 func sameCrash(stored, crash *machine.CrashStatus) bool {
 	return stored != nil && stored.Time != nil && stored.Time.Equal(*crash.Time)
 }
 
-// transitionEvent answers the condition an Event reports. Five
-// convergence conditions share one set of reasons, and Converged
-// alone says nothing about which document converged, so the message
-// starts with the condition's type and status.
+// transitionEvent prefixes the condition's message with its type and
+// status, because several conditions use the same reasons, such as
+// Converged, and the reason alone does not say which one changed.
 func transitionEvent(c api.Condition) api.Condition {
 	prefix := c.Type + " is " + string(c.Status)
 	if c.Message == "" {
@@ -172,12 +155,11 @@ func transitionEvent(c api.Condition) api.Condition {
 	return c
 }
 
-// badStatus answers the status of a condition that needs a person,
-// for events.Recorder.Transition. A condition needs a person when the
-// phase it argues for is Blocked, Degraded, or Unknown. A False that
-// argues for Downloading, Updating, UpdatePending, or Booting is a
-// change in progress, which needs no one. Ready's reason is the phase
-// word.
+// badStatus returns the status that events.Recorder.Transition posts
+// as a Warning: c.Status when the condition's phase is Blocked,
+// Degraded, or Unknown, and empty otherwise. A False condition in
+// another phase, such as Updating, is a change in progress, so its
+// Event is Normal.
 func badStatus(c api.Condition) conditions.Status {
 	phase := conditionPhase(c)
 	if c.Type == "Ready" && c.Status != api.ConditionTrue {

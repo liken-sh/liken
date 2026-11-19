@@ -1,10 +1,8 @@
 package main
 
-// The seeding loops: making the boot manifest's Machine and the
-// image's Cluster real in the API at startup. Seeding tolerates the
-// races and not-yet-served CRDs of a fleet booting together. It runs
-// once, before the reconcile loop starts. From then on, the
-// cluster's copies are authoritative.
+// At startup, before the reconcile loop, the operator creates the
+// Machine and the Cluster from the boot manifests when the API has
+// none. After that, the objects in the API are the source of truth.
 
 import (
 	"encoding/json"
@@ -20,25 +18,21 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// ensureMachine makes the manifest's Machine real in the cluster.
-// The retry-forever loop covers the operator's first minutes. k3s
-// applies the Machine CRD from its manifests directory around the
-// same time it starts this pod, and until the API server serves
-// that CRD, the operator's requests get a 404. The loop waits
-// instead of crashing, because that 404 is expected during startup,
-// not a sign that something is wrong.
+// ensureMachine returns this node's Machine, and creates it from the
+// boot manifest when it does not exist. k3s applies the Machine CRD
+// from its manifests directory at about the time it starts this pod,
+// so a create can get 404 until the CRD is served, and ensureMachine
+// retries it.
 //
-// A Machine this function creates posts MachineJoined, once the
-// server's copy reads back with its UID: the machine's first boot in
-// the cluster, or its first boot after a person deleted the Machine.
-func ensureMachine(c *apiclient.Client, seed *machine.Machine, recorder *events.Recorder) (*machine.Machine, error) {
+// When it created the Machine, it posts a MachineJoined Event.
+func ensureMachine(c *apiclient.Client, manifest *machine.Machine, recorder *events.Recorder) (*machine.Machine, error) {
 	created := false
 	for {
-		current, err := kubernetes.GetMachine(c, seed.Metadata.Name)
+		current, err := kubernetes.GetMachine(c, manifest.Metadata.Name)
 		if err == nil {
 			if created {
 				recorder.Normal(machineReference(current), reasonMachineJoined,
-					"created the Machine from the boot manifest, because the cluster held none")
+					"Created the Machine from the boot manifest, because the cluster had none")
 			}
 			return current, nil
 		}
@@ -49,20 +43,20 @@ func ensureMachine(c *apiclient.Client, seed *machine.Machine, recorder *events.
 		body, err := json.Marshal(&machine.Machine{
 			APIVersion: api.APIVersion,
 			Kind:       "Machine",
-			Metadata:   api.ObjectMeta{Name: seed.Metadata.Name},
-			Spec:       seed.Spec,
+			Metadata:   api.ObjectMeta{Name: manifest.Metadata.Name},
+			Spec:       manifest.Spec,
 		})
 		if err != nil {
 			return nil, err
 		}
 		err = c.RequestJSON(http.MethodPost, kubernetes.MachinesPath, body, nil)
 		if err == nil {
-			fmt.Printf("created machine %s from %s\n", seed.Metadata.Name, machine.BootManifestPath)
+			fmt.Printf("created the Machine %s from %s\n", manifest.Metadata.Name, machine.BootManifestPath)
 			created = true
-			continue // re-read so the function returns the server's copy, resourceVersion and all
+			continue // read it back to return the server's copy, with its resourceVersion
 		}
 		if errors.Is(err, apiclient.ErrNotFound) {
-			fmt.Println("machine API not served yet; waiting")
+			fmt.Println("the Machine API is not served yet, waiting")
 			kubernetes.RetryPause()
 			continue
 		}
@@ -70,16 +64,14 @@ func ensureMachine(c *apiclient.Client, seed *machine.Machine, recorder *events.
 	}
 }
 
-// ensureCluster makes the manifest's Cluster real in the cluster.
-// It waits out an unserved CRD the same way ensureMachine does, and
-// it tolerates one extra answer: 409 Conflict. Every machine's
-// operator races to create the same object at boot, so all but one
-// of those POSTs will conflict. That conflict causes no harm: the
-// loop's next GET confirms the object exists, which is the only
-// outcome that matters.
-func ensureCluster(c *apiclient.Client, seed *cluster.Cluster) error {
+// ensureCluster creates the Cluster from the boot manifest when it
+// does not exist, and waits for the CRD as ensureMachine does. The
+// operator on every machine creates the same Cluster, so a 409
+// Conflict means another machine created it first, and the next GET
+// finds it.
+func ensureCluster(c *apiclient.Client, manifest *cluster.Cluster) error {
 	for {
-		if _, err := kubernetes.GetCluster(c, seed.Metadata.Name); err == nil {
+		if _, err := kubernetes.GetCluster(c, manifest.Metadata.Name); err == nil {
 			return nil
 		} else if !errors.Is(err, apiclient.ErrNotFound) {
 			return err
@@ -88,20 +80,20 @@ func ensureCluster(c *apiclient.Client, seed *cluster.Cluster) error {
 		body, err := json.Marshal(&cluster.Cluster{
 			APIVersion: api.APIVersion,
 			Kind:       "Cluster",
-			Metadata:   api.ObjectMeta{Name: seed.Metadata.Name},
-			Spec:       seed.Spec,
+			Metadata:   api.ObjectMeta{Name: manifest.Metadata.Name},
+			Spec:       manifest.Spec,
 		})
 		if err != nil {
 			return err
 		}
 		switch err := c.RequestJSON(http.MethodPost, kubernetes.ClustersPath, body, nil); {
 		case err == nil:
-			fmt.Printf("created cluster %s from %s\n", seed.Metadata.Name, cluster.ClusterManifestPath)
+			fmt.Printf("created the Cluster %s from %s\n", manifest.Metadata.Name, cluster.ClusterManifestPath)
 		case errors.Is(err, apiclient.ErrNotFound):
-			fmt.Println("cluster API not served yet; waiting")
+			fmt.Println("the Cluster API is not served yet, waiting")
 			kubernetes.RetryPause()
 		case errors.Is(err, apiclient.ErrConflict):
-			// Another machine's operator got there first.
+			// Another machine's operator created it first.
 		default:
 			return err
 		}

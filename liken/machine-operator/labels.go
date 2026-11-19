@@ -1,24 +1,16 @@
 package main
 
-// Node labels, reconciled live from the Machine spec.
+// The operator keeps the labels of spec.nodeLabels on the running Node.
 //
-// Workloads schedule based on node labels, so spec.nodeLabels sets a
-// machine's scheduling identity, and it reaches the Node in two
-// ways. Init renders the labels into the k3s boot drop-in, so the
-// node registers with them already applied, which covers a
-// machine's first moments. But registration only adds labels: the
-// kubelet applies labels and never removes one, so a label taken out
-// of the spec would stay on the Node forever. Live reconciliation
-// belongs here, in the same pass that re-applies sysctls.
+// init writes spec.nodeLabels into the k3s drop-in (init/k3s.go), so
+// the node registers with them. Registration only adds labels, and the
+// kubelet never removes one, so a label deleted from the spec would stay
+// on the Node. Each pass therefore patches the Node to match the spec.
 //
-// Removing a label needs a record. Nothing about a label on a Node
-// says who put it there, and the operator must never remove one that
-// a person or another controller applied. The record is an
-// annotation on the Node that lists exactly the keys this operator
-// manages. When a key is in the annotation but not in the spec, that
-// difference tells the operator to remove it. This is the same
-// method the drain uses to tell its own cordon apart from a
-// person's.
+// The operator removes only labels that it set, never one that a person
+// or another controller set. The annotation ownedLabelsAnnotation on the
+// Node lists the keys it set, so a key in the annotation but not in the
+// spec is one to remove.
 
 import (
 	"encoding/json"
@@ -32,28 +24,23 @@ import (
 	"github.com/liken-sh/liken/liken/kubernetes"
 )
 
-// ownedLabelsAnnotation records, on the Node itself, which label
-// keys liken manages. Its value is the spec's keys, sorted and
-// joined with commas. It lives on the Node rather than in the
-// Machine's status, so the record and the labels it describes can
-// never drift apart across operator restarts or Machine rewrites.
+// ownedLabelsAnnotation holds the spec's label keys, sorted and joined
+// with commas. It is on the Node, not in the Machine's status, so the
+// same patch writes it and the labels, and a rewrite of the Machine
+// cannot lose it.
 const ownedLabelsAnnotation = "liken.sh/node-labels"
 
-// A labelStep is one pass's worth of label reconciliation: the Node
-// patch to apply (nil when the Node already matches the spec) and
-// the condition to publish once the patch lands.
+// labelStep is the merge patch for the Node, nil when the Node already
+// matches the spec, and the condition to publish once the patch applies.
 type labelStep struct {
 	patch     []byte
 	condition api.Condition
 }
 
-// decideNodeLabels compares the spec's labels against the Node and
-// produces the merge patch that closes the gap. It reapplies
-// missing and changed labels, deletes removed ones (a null value in
-// a merge patch deletes the key), and keeps the ownership annotation
-// matching the spec. Labels outside both the spec and the
-// annotation belong to someone else, and the function never touches
-// them.
+// decideNodeLabels returns the merge patch that sets missing and
+// changed labels, deletes each label that the annotation lists and the
+// spec does not, and updates the annotation. A null value in a merge
+// patch deletes the key.
 func decideNodeLabels(desired map[string]string, node *nodeObject) labelStep {
 	labels := map[string]any{}
 	for key, value := range desired {
@@ -84,10 +71,10 @@ func decideNodeLabels(desired map[string]string, node *nodeObject) labelStep {
 	}
 
 	condition := api.Condition{Type: "NodeLabelsApplied", Status: api.ConditionTrue, Reason: "Applied",
-		Message: fmt.Sprintf("the Node carries all %d declared labels", len(desired))}
+		Message: fmt.Sprintf("The Node has all %d declared labels", len(desired))}
 	if len(desired) == 0 {
 		condition = api.Condition{Type: "NodeLabelsApplied", Status: api.ConditionTrue, Reason: "NothingDeclared",
-			Message: "no node labels declared"}
+			Message: "No node labels are declared"}
 	}
 
 	if len(labels) == 0 && len(annotations) == 0 {
@@ -104,16 +91,16 @@ func decideNodeLabels(desired map[string]string, node *nodeObject) labelStep {
 	return labelStep{patch: patch, condition: condition}
 }
 
-// carryOutNodeLabels applies the step's patch. It downgrades the
-// condition when the API server refuses the patch. The next pass
-// reads the Node again, builds the step again, and patches again.
+// carryOutNodeLabels applies the step's patch to the Node. When the
+// patch fails, it returns a False condition, and the next pass decides
+// again from a fresh read of the Node.
 func carryOutNodeLabels(c *apiclient.Client, name string, step labelStep) api.Condition {
 	if step.patch == nil {
 		return step.condition
 	}
 	if err := kubernetes.PatchJSON(c, nodesPath+"/"+name, step.patch); err != nil {
 		return api.Condition{Type: "NodeLabelsApplied", Status: api.ConditionFalse, Reason: "ApplyFailed",
-			Message: fmt.Sprintf("patching the Node's labels: %v", err)}
+			Message: fmt.Sprintf("The Node does not have the declared labels: %v", err)}
 	}
 	return step.condition
 }

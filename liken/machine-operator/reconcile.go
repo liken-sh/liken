@@ -1,8 +1,5 @@
 package main
 
-// This file is the working half of the reconcile loop. Each pass
-// observes the machine, acts on the spec, and reports status.
-
 import (
 	"encoding/json"
 	"fmt"
@@ -15,60 +12,48 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// factsTree is the facts init publishes, read through the operator's
-// read-only /run/liken hostPath. It is a package variable so a test can
-// point it at a tempdir instead of the machine's real /run.
+// factsTree reads the facts that init publishes, through the
+// operator's read-only /run/liken hostPath. A test points it at a
+// temporary directory.
 var factsTree = machine.FactsTree{Dir: machine.FactsDir}
 
-// sysctlRoot is the kernel's tuning interface the pass writes. It is a
-// package variable for the same reason as factsTree: a test of a whole
-// pass points it at a tempdir, so the test never writes the host's
-// kernel parameters.
+// sysctlRoot is the directory the pass writes kernel parameters to.
+// A test of a whole pass points it at a temporary directory, so the
+// test does not change the host's kernel parameters.
 var sysctlRoot = machine.SysctlDir
 
-// reconcile is one full pass of the operator's job, always
-// starting from the current state: read the facts init left, apply
-// the spec's sysctls, read back what actually holds, and publish
-// all of it as status. It deliberately keeps no memory between
-// passes. Every value in the status it writes was observed moments
-// ago, which is what the Kubernetes convention means by status
-// being reconstructible.
+// reconcile runs one pass. It reads the facts that init published,
+// applies the spec's sysctls and the other live settings, reads back
+// the values, and publishes the result as the Machine's status. It
+// keeps no state between passes, so every value in the status was read
+// during this pass.
 //
-// The pass returns the status write's error. Everything above that
-// write reports itself as a condition, which is a fact about the
-// machine. A failed status write is different: it is a fault in the
-// operator, and it means nobody outside this pod can see what the pass
-// observed. That is what the layer 2 error counter counts
-// (metrics.go).
+// A failure in a step before the status write becomes a condition,
+// because it describes the machine. reconcile returns only the error
+// of the status write, because after that failure nobody outside this
+// pod can see what the pass read. metrics.go counts those errors.
 //
-// The pass also records into out each step it did not finish, each
-// write it made, and the earliest time a step asks to run again
-// (outcome.go). The pass's client reports every answer from the API
-// server there, and each step on the machine reports its own failures,
-// so the loop can retry the pass when something failed (retry.go).
+// out records each step that did not finish, each write the pass made,
+// and the earliest time a step must run again (outcome.go). The loop
+// reads it to decide when to retry the pass (retry.go).
 func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm *machineMetrics, out *passOutcome) error {
 	now := time.Now()
-	// The requests read and write through a client that reports
-	// nothing into the pass's outcome. A cluster whose RBAC or CRDs
-	// come from the release before the Disruptions refuses those
-	// requests on every pass, and that refusal is no failure of the
-	// pass (requests.go).
+	// quiet reads and writes Disruptions without reporting into out. A
+	// cluster that runs an older release with no Disruption CRD or RBAC
+	// refuses those requests on every pass, and that refusal is not a
+	// failure of the pass (requests.go).
 	quiet := r
 	r = r.observedBy(out)
 	c := r.client
 
-	// This records what the object held before this pass touched
-	// anything. It must be captured now, because it cannot be
-	// captured later: SetCondition edits the slice it is given, so
-	// the conditions this pass builds share their backing array with
-	// m.Status, and by publish time the two are the same list. This
-	// snapshot is what lets the publish step below skip a write that
-	// would change nothing.
+	// The pass copies the status before it changes anything, because
+	// SetCondition edits the slice it is given and the conditions built
+	// below share a backing array with m.Status. publishOwnStatus
+	// compares with this copy to skip a write that changes nothing.
 	before, _ := json.Marshal(&m.Status)
 
-	// The Events of this pass compare the status it writes with the
-	// stored one (events.go), so the stored conditions need their own
-	// copy for the same reason.
+	// postStatusEvents compares the new conditions with these
+	// (events.go), so they need their own copy for the same reason.
 	stored := m.Status
 	stored.Conditions = slices.Clone(m.Status.Conditions)
 	notes := machineEvents{r.recorder, machineReference(m)}
@@ -80,37 +65,31 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 		*status = *facts
 	}
 	out.failSoon("reading the facts", err)
-	// The pass starts from the conditions this release owns, so one
-	// that a newer release wrote drops here (ownedconditions.go).
+	// The pass keeps only the conditions that this release owns, so a
+	// condition that a newer release wrote is dropped (ownedconditions.go).
 	status.Conditions = api.SetCondition(ownedConditions(m.Status.Conditions), factsCondition(err), now)
 
-	// The operator's own existence is the evidence that promotes a
-	// staged cluster document. If this line runs, the machine joined
-	// its cluster under whatever document this boot ran (cluster.go).
-	// The same evidence, together with the version this boot
-	// reported in the facts, promotes a system release's proving
-	// boot (release.go).
+	// A running operator proves that the machine joined its cluster
+	// with the cluster document this boot used, so the pass promotes
+	// that document to proven (cluster.go). It also promotes the system
+	// release that the facts say this boot ran (release.go).
 	settleClusterLifecycle(machine.MachineStateDir, cluster.ClusterManifestPath, facts, out)
 	settleSystemReleaseLifecycle(machine.MachineStateDir, facts, out)
 
-	// The imports lifecycle settles on its own evidence. This is not
-	// this operator's existence, but the Ready condition of every OS
-	// container on this node, because the trial covers every
-	// tarball the boot imported, not only the one this pod runs from
-	// (imports.go).
+	// The pass promotes the record of the image tarballs that this boot
+	// imported only when every container on this node that runs a
+	// liken.sh/ image is Ready (imports.go).
 	status.Conditions = api.SetCondition(status.Conditions,
 		settleImportsLifecycle(r, machine.MachineStateDir, m.Metadata.Name, facts, out), now)
 
-	// Both sets of kernel parameters, on every pass. Applying the
-	// settings every liken machine holds is what returns a parameter
-	// that something else on the machine changed, within one pass and
-	// without a reboot. status.sysctls reports the two together, so an
-	// operator sees every parameter liken sets and its actual value in
-	// one place.
+	// Every pass applies both the default sysctls and the spec's, so a
+	// parameter that something else changed returns to its value within
+	// one pass, with no reboot. status.sysctls reports both sets.
 	//
-	// A module's parameter that has no file yet is not a failure, and
-	// it joins the missing list, so the check of the sysctls applies it
-	// when the module loads (machine.ModuleSysctls).
+	// A parameter of machine.ModuleSysctls whose file does not exist
+	// yet is not a failure. It goes in the missing list, and the sysctl
+	// check (backstop.go) starts a pass when the module loads and the
+	// file appears.
 	defaults, absent := machine.DefaultSysctls(sysctlRoot, m.Spec.Sysctls)
 	sysctls, missing, defaultsErr, specErr := applySysctls(sysctlRoot, defaults, m.Spec.Sysctls, out, r.sysctls)
 	missing = append(missing, absent...)
@@ -120,109 +99,85 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	}
 	status.Conditions = api.SetCondition(status.Conditions, sysctlsCondition(defaultsErr, specErr), now)
 
-	// podStale answers whether this pod's own template predates the
-	// release it is running (staleness.go). A follower that reboots
-	// first always runs its new binary inside the old pod spec for a
-	// while, because the OS DaemonSets update on OnDelete and only a
-	// leader's boot rewrites the AddOn manifests that produce a fresh
-	// template. hostEntriesCondition reads this verdict below to judge
-	// a missing mount as that ordinary lag instead of a fault.
+	// podStale is true when this pod's template is older than the
+	// release it runs. A follower that reboots into a new release
+	// before a leader does runs the new binary in the old pod spec
+	// until a leader's boot rewrites the manifests (staleness.go).
+	// hostEntriesCondition then reports a missing mount as that delay
+	// and not as a fault.
 	podStale := ownPodIsStale(r, m.Metadata.Name, status.Version.Liken)
 
-	// Host entries reconcile live too, under the same write-on-
-	// divergence rule (hosts.go). The hostname is the Machine's own
-	// name rather than a read of the host's hostname, because init
-	// derives the kernel's hostname from this same field
-	// (unix.Sethostname(m.Metadata.Name) in init/main.go) and a
-	// Kubernetes object's name never changes once it exists, so the
-	// two can never disagree the way they could if this program
-	// depended on the pod's network namespace carrying the host's UTS
-	// namespace along with it.
+	// The hostname for the host entries is the Machine's name, not read
+	// from the host. init sets the kernel's hostname from the same name
+	// (unix.Sethostname in init/main.go), and an object's name cannot
+	// change, so the two agree. Reading the host's hostname would work
+	// only while the pod shares the host's UTS namespace.
 	hostEntries, hostsErr := applyHostEntries(hostsPath, m.Metadata.Name, m.Spec.Network.HostEntries, out)
 	status.HostEntries = hostEntries
 	status.Conditions = api.SetCondition(status.Conditions,
 		hostEntriesCondition(m.Spec.Network.HostEntries, hostsErr, podStale), now)
 
-	// Modules judge what the boot reported, not what the spec asks
-	// for now. A freshly declared module has no outcome yet; it
-	// stays SpecConverged's concern until a reboot loads it. This
-	// condition is the other half of that split: SpecConverged can
-	// be True, meaning the boot ran the manifest, while this
-	// condition is False, because a spec the boot honored can still
-	// name modules the booted image never carried.
+	// The modules condition reads what the boot reported, not the
+	// current spec. A module declared since the boot has no result yet,
+	// and SpecConverged reports it as pending until a reboot loads it.
+	// So SpecConverged can be True while this condition is False: the
+	// boot used the current manifest, and the booted image does not
+	// contain a module that the manifest lists.
 	status.Conditions = api.SetCondition(status.Conditions,
 		modulesCondition(status.Modules), now)
 
-	// ModulesLoaded keeps its meaning: a module that loaded is
-	// loaded, whatever happened to its parameters. The parameters
-	// report through their own condition, so each answers one
-	// question and a person reads two plain answers instead of one
-	// mixed one.
+	// Module parameters have their own condition, so a failed parameter
+	// does not make ModulesLoaded False.
 	status.Conditions = api.SetCondition(status.Conditions,
 		moduleParametersCondition(m.Spec.ModuleParameters, status.Modules), now)
 
-	// The serio attachments report what init holds now, not what the
-	// boot did: init's serio watch rewrites status.serio when an
-	// adapter is plugged in or unplugged. An entry declared since the
-	// last pass has no report yet, and SpecConverged carries it until
-	// the live load declares it to init.
+	// The serio condition reads the attachments that init has now, not
+	// at boot, because init rewrites status.serio when an adapter is
+	// plugged in or unplugged. An entry declared since the last pass
+	// has no status yet, and SpecConverged reports it as pending until
+	// init attaches it in a live module load (converge.go).
 	status.Conditions = api.SetCondition(status.Conditions,
 		serioCondition(status.Serio), now)
 
-	// The unclaimed-hardware report deliberately has no condition,
-	// even though it looks like modules and features at first
-	// glance. The difference is that those judge requests: a
-	// declared module that did not load is a broken promise.
-	// Unclaimed devices are hardware that nobody has asked anything
-	// about, and staying undriven is a normal, permanent state.
-	// Every QEMU guest carries a VGA adapter that no server image
-	// drives, and a headless machine with a GPU leaves it undriven
-	// by design. A condition would read every one of those machines
-	// as Degraded forever. So the report follows the same pattern as
-	// the undeclared-disk report instead: inventory in the status
-	// (hardware.unclaimed arrives live from the facts, because
-	// init's uevent watcher republishes on every hot-plug), loud on
-	// the console, and judged by nobody until a person declares the
-	// driver. At that point, status.modules judges the request.
+	// status.hardware.unclaimed has no condition, because a device with
+	// no declared driver is often intended. Every QEMU guest has a VGA
+	// adapter that no server image drives, and a headless machine
+	// leaves its GPU without a driver, so a condition would mark those
+	// machines Degraded permanently. When a person declares the driver,
+	// the modules condition reports whether it loaded.
 
-	// Features judge what the boot reported, on the same terms as
-	// modules. The split from ClusterConverged is the point of this
-	// design: the cluster document's hash proves this boot ran the
-	// document that enables a feature, and this condition proves the
-	// booted image could carry it out. In the middle of a rollout,
-	// the fleet runs mixed releases, so the answers legitimately
-	// differ from machine to machine.
+	// The features condition also reads what the boot reported.
+	// ClusterConverged shows that this boot used the cluster document
+	// that enables a feature, and this condition shows whether the
+	// booted image can run it. During a rollout the machines run
+	// different releases, so this condition can differ between them.
 	status.Conditions = api.SetCondition(status.Conditions,
 		featuresCondition(status.Features), now)
 
-	// The radios judge the boot's report, not the spec. A join
-	// happens once, at boot, on the same terms as a module load, so
-	// a freshly declared wireless entry is SpecConverged's concern
-	// until a reboot joins it. A machine that joined nothing and
-	// still reached this line reached it over some other interface,
-	// which is the degraded case plans/completed/62-wifi.md describes.
+	// The machine joins wireless networks only at boot, so the wireless
+	// condition also reads the boot's report, and SpecConverged reports
+	// an entry declared since the boot as pending until a reboot. A
+	// machine whose wireless join failed but that still runs this
+	// operator reached the cluster over another interface.
 	status.Conditions = api.SetCondition(status.Conditions,
 		wirelessCondition(status.Network.Interfaces), now)
 
 	status.Conditions = api.SetCondition(status.Conditions,
 		clockCondition(status.Time), now)
 
-	// Storage compares the spec's declared roles against the facts'
-	// report of where each is actually backed. The operator cannot
-	// observe the disks directly, because claiming happened before
-	// this cluster existed, so init's facts are the only source, and
-	// this condition checks them against the spec.
+	// The storage condition compares the spec's storage roles with the
+	// disks that init assigned to them at boot, as the facts report
+	// them. The operator does not inspect the disks itself.
 	status.Conditions = api.SetCondition(status.Conditions,
 		storageCondition(m.Spec.Storage, status.Storage), now)
 
-	// t is this machine's standing with the rollout conductor. A
-	// standalone machine reboots whenever it needs to. A cluster
-	// member reboots only on a granted turn, which is this machine's
-	// entry in the Cluster's status.rebootTurns (turn.go). The
-	// conductor still writes a RebootApproved condition for a
-	// machine-operator of the release before, and this operator
-	// carries it along in its own status writes and never sets or
-	// clears it.
+	// t says whether this machine may reboot. A machine with no
+	// cluster reboots whenever it needs to. A cluster member reboots
+	// only when it has a reboot turn, which is its entry in the
+	// Cluster's status.rebootTurns (turn.go). cluster-operator
+	// also writes a RebootApproved condition for a
+	// machine-operator of the previous release. This operator keeps
+	// that condition in its status writes and never sets or clears it.
 	t := turnStandalone
 	if clusterName != "" {
 		t = turnAwaiting
@@ -231,71 +186,64 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 		}
 	}
 
-	// This reads the machine's own Node once. The read serves three
-	// purposes: the NodeHealthy condition, demotion cleanup, and the
-	// cordon state the drain works through. The read can fail
-	// without being a problem, because during a demotion the Node is
-	// deleted and not yet re-registered, and while the API server is
-	// down the Node's copy does not answer (watches.go). A pass where
-	// the read fails simply skips all three, and the next pass
-	// settles them.
+	// The pass reads the machine's Node once, for the NodeHealthy
+	// condition, the demotion cleanup, and the cordon that the drain
+	// uses. The read can fail on a healthy machine. During a demotion
+	// the Node is deleted and not yet registered again, and while the
+	// API server is down the read fails (watches.go). A pass whose read
+	// fails skips the steps that need the Node, and a later pass runs
+	// them.
 	node, nodeErr := r.node(m.Metadata.Name)
 
-	// The device inventory converges on the same cadence as
-	// everything else: one sysfs walk per pass, published as this
-	// node's ResourceSlice (dra.go). It waits on the Node read,
-	// because the slice is owned by the Node's UID. A pass without a
-	// Node, during a demotion, has no owner to attach inventory to,
-	// and skipping is correct: the old slice is being
-	// garbage-collected along with the old Node. The facts supply
-	// the storage roles, which is what keeps the machine's own disks
-	// out of the offer.
+	// The pass publishes the devices it finds in sysfs as this node's
+	// ResourceSlice (dra.go). The Node owns the slice, so the publish
+	// needs the Node's UID and runs only when the Node read succeeds.
+	// During a demotion there is no Node, and the old slice is
+	// garbage-collected with the old Node.
 	//
-	// The serio list is the spec's and the boot record's together
-	// (dra.go), set here for the DRA plugin as well, so the inventory
-	// and the claims it prepares withhold the same serial lines.
-	//
-	// The facts set the protection the same way: the disks that back
-	// a storage role, or every disk when the facts did not read
-	// (protection.go).
+	// The DRA plugin reads the same serio list and disk protection, so
+	// the slice and the claims that the plugin prepares leave out the
+	// same serial lines and disks. The protected disks are those that
+	// back a storage role, or every disk when the facts could not be
+	// read (protection.go).
 	serio := serioInEffect(m.Spec.Serio, facts)
 	setDeclaredSerio(serio)
 	setPlatformProtection(protectionOf(facts))
-	// The claims the kubelet already prepared get the same treatment,
-	// because a device that enumerates again moves the nodes a claim
-	// delivers (cdi.go). This runs without a Node, because a prepared
-	// claim is a file on this machine, and containerd reads that file at
-	// every container creation. It runs before the slice is published,
-	// because it marks the claims whose device was unplugged, and the
-	// slice taints those devices in the same pass (unplugged.go).
+	// A device that enumerates again gets new device nodes, so the pass
+	// also rewrites the CDI files of claims that the kubelet already
+	// prepared (cdi.go). The files are on this machine, so this needs no
+	// Node. It runs before the slice is published, because it marks the
+	// claims whose device was unplugged, and the publish taints those
+	// devices (unplugged.go).
 	refreshCDISpecs(draSysfsRoot, out, notes)
 	if nodeErr == nil {
 		_ = publishDeviceInventory(r, node, facts, serio, mm)
 	}
 
-	// Convergence checks whether the cluster's copy of each document
-	// matches what this boot actuated. If not, it stages the
-	// difference for the next boot (converge.go for the Machine,
-	// cluster.go for the Cluster, release.go for the version
-	// target, registries.go for the credentials). The decisions are
-	// pure functions. carryOutConvergence performs their side
-	// effects against each document's own store. The rejection
-	// records come from the durable store, not from facts, because the
-	// store is the rejections' authority. A rejection cleared in the
-	// middle of a boot, by an edit that reverted, must unblock a retry
-	// the moment it lands, and the store carries that change at once.
-	// Every decision passes
-	// through the disruption gate on its way to its side effects,
-	// and the gate depends on the order in which the documents
-	// converge (see disruptions).
-	// The machine's Disruptions: a person's request for this boot, and
-	// this operator's own request (requests.go). A pass whose read of
-	// them fails acts on no request, and leaves its own request as it
-	// is. The decisions read a copy of the Machine that
-	// carries the own request's approval (requests.go).
+	// For each document, the pass compares the cluster's copy with the
+	// copy this boot used, and stages the new one for the next boot
+	// when they differ: converge.go for the Machine, cluster.go for the
+	// Cluster, release.go for the system release, and registries.go for
+	// the registry credentials. The decide functions have no side
+	// effects. disr.gate decides whether the machine may reboot or
+	// drain for the decision, and carryOutConvergence then writes the
+	// files. The order of the documents below matters to the gate
+	// (disruptions.go).
+	//
+	// The pass reads a rejection from the document's store and not from
+	// the facts, because init writes the facts' copy only at boot. When
+	// an edit that reverts a rejected spec clears the rejection during
+	// a boot, the store shows the change at once, and the retry starts
+	// at once.
+	//
+	// requests are the machine's Disruptions: requests from people and
+	// this operator's own request (requests.go). When the read fails,
+	// the pass acts on no request and leaves its own request unchanged.
+	// The decisions read a copy of the Machine that includes the
+	// approval of the operator's own request.
 	requests, requestsErr := quiet.requests(m.Metadata.Name)
 	if requestsErr != nil {
-		fmt.Printf("reading this machine's Disruptions: %v\n", requestsErr)
+		fmt.Printf("reading the Disruptions of Machine %s: %v\n", m.Metadata.Name, requestsErr)
 	}
 	decided := withRequestApprovals(m, requests)
 
@@ -312,21 +260,19 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 		decideConvergence(decided, facts, machineRejection, readStagedHash(machineStore), t))
 	status.Conditions = api.SetCondition(status.Conditions,
 		carryOutConvergence(conv, machineStore, machine.OperatorRunDir, "spec", now, out), now)
-	// Each gated document also reports itself in status.pending, so
-	// a client that needs the staged hash has a field instead of a
-	// condition message to read. The list rebuilds on every pass,
-	// like the rest of status.
+	// A document that waits for a reboot is also listed in
+	// status.pending, so a client reads the staged hash from a field
+	// and not from a condition message.
 	if conv.pending != nil {
 		status.Pending = append(status.Pending, *conv.pending)
 	}
 
-	// The cluster document converges through the same machinery, per
-	// machine. This machine stages its own copy and reboots on its
-	// own policy, and this condition is where the fleet's temporary
-	// disagreement about the Cluster becomes visible. A machine with
-	// no cluster document carries no operator-authored documents at
-	// all, so the version target and the registry credentials also
-	// converge only on a cluster member.
+	// Each machine stages its own copy of the cluster document and
+	// reboots under its own rebootPolicy, so during a change the
+	// machines of a fleet can run different versions of the Cluster,
+	// and ClusterConverged shows which. The system release and the
+	// registry credentials come from the Cluster, so they converge only
+	// on a cluster member.
 	var liveCluster *cluster.Cluster
 	if clusterName != "" {
 		clusterStore := machine.ClusterManifests(machine.MachineStateDir)
@@ -339,8 +285,8 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 			status.Pending = append(status.Pending, *cconv.pending)
 		}
 
-		// The version target reads the live Cluster's release feed,
-		// so it can converge only on a pass that read the Cluster.
+		// The target system release comes from the Cluster's release
+		// feed, so it converges only in a pass that read the Cluster.
 		if liveCluster != nil {
 			systemStore := machine.SystemReleases(machine.MachineStateDir)
 			vconv := disr.gate(r, node, nodeErr, t, now,
@@ -362,15 +308,13 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 		}
 	}
 
-	// A reboot a person asked for, which no document requires
-	// (rebootrequest.go). It goes through the same gate as every
-	// staged document, so it takes its turn, cordons, and drains
-	// like the rest. It goes last because the gate's order decides
-	// which entry liken approve-reboot offers first, and a staged
-	// document is the more useful answer: approving it reboots the
-	// machine and satisfies the request along the way. This runs
-	// outside the cluster block above, because a standalone machine
-	// can be asked to reboot too.
+	// A person can request a reboot that no document needs
+	// (rebootrequest.go). It goes through disr.gate like a staged
+	// document, so it waits for its reboot turn, cordons, and drains.
+	// It comes last because `liken approve-reboot` offers the entries in
+	// this order, and approving a staged document first also satisfies
+	// the request with the same reboot. A machine with no cluster can
+	// take a reboot request too.
 	rreq := disr.gate(r, node, nodeErr, t, now, decideRebootRequest(m, facts, t, requests))
 	status.Conditions = api.SetCondition(status.Conditions,
 		carryOutRebootRequest(machine.OperatorRunDir, rreq, now, out), now)
@@ -379,60 +323,53 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	}
 
 	if nodeErr == nil {
-		// NodeHealthy mirrors the Node's Ready condition onto the
-		// Machine. This catches the one failure the heartbeat
-		// cannot: this operator runs on the host's network and talks
-		// to the API directly, so it can keep reporting a
-		// healthy-looking machine while the kubelet under it is
-		// dead. The kubelet's own heartbeat, its node lease, which
-		// the node controller turns into the Node's Ready condition,
-		// is the evidence that the machine is actually serving the
-		// cluster, not merely reachable.
+		// NodeHealthy copies the Node's Ready condition to the
+		// Machine. This operator runs on the host network and calls
+		// the API server directly, so it can keep running after the
+		// kubelet has died. The kubelet reports Ready, and the node
+		// controller sets it to Unknown when the kubelet stops
+		// renewing its node lease, so Ready shows that the kubelet
+		// still runs.
 		status.Conditions = api.SetCondition(status.Conditions, nodeHealthyCondition(node), now)
 
-		// Node taints reconcile live, and go before the labels
-		// (taints.go). The taints patch names the resourceVersion this
-		// pass read, and the labels patch names none. Sending the
-		// taints patch first spends that precondition while the
-		// version it names is still current. The labels patch cannot
-		// conflict with the version bump the taints patch causes,
-		// because it states no version to conflict with.
+		// The taints patch sends the resourceVersion that this pass
+		// read, so it goes first, while that version is still current
+		// (taints.go). The labels patch sends no resourceVersion, so
+		// the version change that the taints patch causes cannot make
+		// it conflict.
 		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutNodeTaints(c, m.Metadata.Name, decideNodeTaints(m.Spec.NodeTaints, node)), now)
 
-		// Node labels reconcile live, like sysctls, but against the
-		// Node object instead of the kernel (labels.go). This
-		// reapplies what the spec declares, and removes what it took
-		// out, which the kubelet never does on its own.
+		// The pass sets the spec's labels on the Node again on every
+		// pass and removes the labels that the spec dropped, which the
+		// kubelet does not do (labels.go).
 		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutNodeLabels(c, m.Metadata.Name, decideNodeLabels(m.Spec.NodeLabels, node)), now)
 
-		// Demotion cleanup (demotion.go). A follower whose Node
-		// object still claims control-plane was just demoted. That
-		// stale Node carries a registered etcd membership, so the
-		// operator must delete it.
+		// A follower whose Node still has the control-plane label was a
+		// leader before this boot, and its etcd member is still
+		// registered. The operator deletes the Node, and k3s then
+		// removes the etcd member (demotion.go).
 		d := decideDemotion(status.Role, node.Metadata.Labels, m.Spec.RebootPolicyOrDefault(), t)
 		condition := carryOutDemotion(c, machine.OperatorRunDir, node, d, out)
 		status.Conditions = api.SetCondition(status.Conditions, condition, now)
 		disr.rebooting = disr.rebooting || d.cleanup
 
-		// This operator's own request lists what this pass found
-		// waiting. A pass with no Node read cannot judge the demotion,
-		// so it leaves the request as it is, and so does a machine
-		// with no cluster, which has no conductor to grant a turn.
+		// This operator's own Disruption lists what waits for a reboot
+		// in this pass. A pass that did not read the Node cannot decide
+		// the demotion, so it leaves the request unchanged. A machine
+		// with no cluster has no cluster-operator to grant a reboot
+		// turn, so it makes no request.
 		if clusterName != "" && requestsErr == nil {
 			syncOwnRequest(quiet, m, requests, ownRequest(m.Metadata.Name, status.Pending, d.condition))
 		}
 
-		// When this operator set a cordon and no longer needs it,
-		// because the reboot happened and the machine converged, or
-		// because nothing waits for a reboot any more, the node goes
-		// back to the scheduler. This applies only to
-		// cordons the operator set itself: decideUncordon leaves a
-		// person's cordon in place.
+		// When no reboot or drain is in progress, the operator removes
+		// a cordon that it set. decideUncordon leaves a cordon that a
+		// person set.
 		if !disr.rebooting && !disr.draining && decideUncordon(node) {
 			if err := kubernetes.PatchJSON(c, nodesPath+"/"+node.Metadata.Name, uncordonPatch()); err != nil {
-				fmt.Printf("uncordoning %s: %v\n", node.Metadata.Name, err)
+				fmt.Printf("uncordoning Node %s: %v\n", node.Metadata.Name, err)
 			} else {
 				var boot *time.Time
 				if facts != nil {
@@ -450,35 +387,28 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 		settleHolds(quiet, requests, disr.holding, disr.drained, now)
 	}
 
-	// Ready is the roll-up: True exactly when every other condition
-	// is True, with a reason that agrees with the phase (phase.go).
+	// Ready is True when every other condition is True, and False
+	// otherwise. It skips RebootApproved and the conditions that
+	// reportsOnly lists. Its reason matches the phase (phase.go).
 	status.Conditions = api.SetCondition(status.Conditions, readyCondition(status.Conditions), now)
 
-	// Every condition this pass publishes judged the spec at this
-	// generation. The API server increases metadata.generation only
-	// on spec writes, so recording it here lets a consumer tell a
-	// verdict on the current spec apart from a verdict on a spec
-	// that has since been edited. The conductor's grant keeps its
-	// own generation stamp, because it is the conductor's verdict,
-	// and this writer must not overwrite it. The status carries the
-	// same stamp at its top, where clients that only ask "has the
-	// operator seen my edit yet" expect to find it. A condition that
-	// this pass carried forward keeps its own stamp (observedgeneration.go).
+	// Each condition that this pass set records the generation of the
+	// spec it evaluated, so a reader can tell a result for the current
+	// spec from a result for an older one. A condition that this pass
+	// kept from an earlier pass, and cluster-operator's RebootApproved,
+	// keep their own (observedgeneration.go).
 	status.ObservedGeneration = m.Metadata.Generation
 	stampObservedGeneration(status.Conditions, m.Metadata.Generation, nodeErr == nil)
 
-	// The phase compresses the conditions into the one word a fleet
-	// listing shows (phase.go).
 	status.Phase = decidePhase(status.Conditions)
 
-	// The metrics read the very status this pass is about to
-	// publish, so a graph and a `kubectl get machine -o yaml` always
-	// answer from the same observation (metrics.go).
+	// The metrics read the status that this pass publishes, so they
+	// match `kubectl get machine -o yaml` (metrics.go).
 	mm.observeStatus(status)
 
 	err = publishOwnStatus(r, m, status, before)
 	if err != nil {
-		fmt.Printf("publishing status: %v\n", err)
+		fmt.Printf("publishing the status of Machine %s: %v\n", m.Metadata.Name, err)
 		return err
 	}
 	postStatusEvents(notes, &stored, status)

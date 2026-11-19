@@ -1,9 +1,8 @@
 package main
 
-// The operator reads init's facts from the tree under /run/liken/facts.
-// These tests point the factsTree seam at a tempdir and prove that a
-// tree init could have written reads back as the same facts the
-// operator overlays its own observations onto.
+// The operator reads init's facts from the tree under
+// /run/liken/facts. These tests point factsTree at a temporary
+// directory.
 
 import (
 	"testing"
@@ -13,19 +12,15 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// writeFacts builds a facts tree in a tempdir from a status, by calling
-// every per-subtree writer with the matching fields. It is the operator
-// test's stand-in for init: init owns these writers and spreads them
-// across its boot, so a test composes them in one place. The tree
-// exists so each fact has one owner, so this compose-all pattern lives
-// only in the tests. It returns the tree the seam should read.
+// writeFacts writes s into a facts tree in a temporary directory with
+// the writers that init calls during boot.
 func writeFacts(t *testing.T, s *machine.MachineStatus) machine.FactsTree {
 	t.Helper()
 	tree := machine.FactsTree{Dir: t.TempDir()}
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the facts tree: %v", err)
 		}
 	}
 	must(tree.WriteRole(s.Role))
@@ -83,40 +78,37 @@ func TestOperatorReadsFactsFromTheTree(t *testing.T) {
 
 	got, err := factsTree.Read()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the facts tree: %v", err)
 	}
 
-	// The facts pass through the seam unchanged.
 	if got.Role != want.Role || got.Boot.ManifestSource != machine.ManifestSourceProven || got.Boot.ManifestHash != "abc123" {
-		t.Errorf("the boot identity must round-trip: %+v", got.Boot)
+		t.Errorf("the boot identity is %+v, want the role, manifest source, and manifest hash that were written", got.Boot)
 	}
 	if got.Boot.Time == nil || !got.Boot.Time.Equal(booted) {
-		t.Errorf("the boot time must round-trip: %v", got.Boot.Time)
+		t.Errorf("the boot time is %v, want %v", got.Boot.Time, booted)
 	}
 	if got.Hardware.CPUs != 4 || got.Storage.ClusterState.Backing != machine.BackingPartition {
-		t.Errorf("the hardware and storage facts must round-trip: %+v", got)
+		t.Errorf("the hardware and storage facts are %+v, want 4 CPUs and a partition for the cluster state", got)
 	}
 	if len(got.Modules) != 1 || got.Modules[0].Name != "overlay" {
-		t.Errorf("the module outcomes must round-trip: %+v", got.Modules)
+		t.Errorf("the module outcomes are %+v, want only overlay", got.Modules)
 	}
 
-	// The operator owns phase, conditions, and sysctls, which init never
-	// writes. They read back at their zero value, ready for the operator
-	// to overlay.
+	// Init never writes phase, conditions, or sysctls, because the
+	// operator writes them.
 	if got.Phase != "" || got.Conditions != nil || got.Sysctls != nil {
-		t.Errorf("the operator-owned fields must read as zero: %+v", got)
+		t.Errorf("the phase, conditions, and sysctls are set in %+v, want zero values because init does not write them", got)
 	}
 }
 
 func TestOperatorReportsAMissingFactsTree(t *testing.T) {
-	// A missing tree is a fact the operator must report, not a default
-	// it may invent. Read returns an error the reconcile pass turns into
-	// a condition.
+	// A missing tree is an error, which the pass reports as a
+	// condition, and never a set of default facts.
 	restore := factsTree
 	factsTree = machine.FactsTree{Dir: t.TempDir() + "/absent"}
 	t.Cleanup(func() { factsTree = restore })
 
 	if _, err := factsTree.Read(); err == nil {
-		t.Error("a missing facts tree must be an error")
+		t.Error("reading a facts tree that does not exist returned no error")
 	}
 }

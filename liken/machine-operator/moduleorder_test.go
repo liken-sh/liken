@@ -1,19 +1,14 @@
 package main
 
-// The convergence decisions for the order spec.modules declares. They
-// live in their own file beside the parameter decisions
-// (moduleparameters_test.go) for the same reason: converge_test.go is
-// full.
-
 import (
 	"strings"
 	"testing"
 )
 
-// The order the boot loads modules in is part of what the spec
-// declares. Only a boot can change it, and nothing is wrong on the
-// machine while it waits, so a reorder stages the manifest and asks
-// for no turn.
+// The boot loads modules in the order of spec.modules, so only a reboot
+// applies a new order. A reorder leaves nothing wrong on the running
+// machine, so decideConvergence stages the manifest for the next boot
+// and does not request a reboot turn.
 func TestDecideConvergenceOnAModuleReorder(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -56,43 +51,42 @@ func TestDecideConvergenceOnAModuleReorder(t *testing.T) {
 			facts.Boot.Modules = c.booted
 			conv := decideConvergence(m, facts, nil, "", turnStandalone)
 			if conv.condition.Reason != c.reason {
-				t.Fatalf("got %+v", conv.condition)
+				t.Fatalf("condition is %+v, want reason %s", conv.condition, c.reason)
 			}
 			if conv.stage != c.stage || conv.requestLoad != c.load {
-				t.Errorf("stage %v and load %v: %+v", conv.stage, conv.requestLoad, conv)
+				t.Errorf("stage is %v and load is %v, want %v and %v", conv.stage, conv.requestLoad, c.stage, c.load)
 			}
 			if conv.requestReboot || conv.requestRestart || conv.pending != nil {
-				t.Errorf("a reorder asks for no disruption: %+v", conv)
+				t.Errorf("convergence is %+v, want no reboot, restart, or pending request", conv)
 			}
 			if !strings.Contains(conv.condition.Message, c.message) {
-				t.Errorf("the message should carry the diff: %q", conv.condition.Message)
+				t.Errorf("the message is %q, want it to contain %q", conv.condition.Message, c.message)
 			}
 			if strings.Contains(conv.condition.Message, "no longer declared") {
-				t.Errorf("a reorder is no retraction: %q", conv.condition.Message)
+				t.Errorf("the message is %q, want no mention of a retraction", conv.condition.Message)
 			}
 		})
 	}
 }
 
-// A live load promotes the manifest while the running kernel keeps
-// the order it booted with. An order difference under a matching hash
-// is what that load leaves behind, not the contradiction the
-// BootMismatch guard reports.
+// A live load promotes the manifest but cannot change the order the
+// boot loaded modules in. So after a live load, the hash matches while
+// the order differs, and decideConvergence must not report BootMismatch.
 func TestAnOrderDifferenceUnderAMatchingHashIsNoContradiction(t *testing.T) {
 	m := labMachine()
 	m.Spec.Modules = []string{"snd_hda_codec_alc269", "snd_hda_intel"}
 	_, hash, err := renderManifest(m.Metadata.Name, m.Spec)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the manifest of %s: %v", m.Metadata.Name, err)
 	}
 	facts := labFacts()
 	facts.Boot.ManifestHash = hash
 	facts.Boot.Modules = []string{"snd_hda_intel", "snd_hda_codec_alc269"}
 	conv := decideConvergence(m, facts, nil, "", turnStandalone)
 	if conv.condition.Reason != "StagedForNextBoot" {
-		t.Fatalf("got %+v", conv.condition)
+		t.Fatalf("condition is %+v, want reason StagedForNextBoot", conv.condition)
 	}
 	if !conv.stage {
-		t.Errorf("the reorder stages for the boot that can load it: %+v", conv)
+		t.Errorf("convergence is %+v, want the manifest staged for the boot that can load the new order", conv)
 	}
 }

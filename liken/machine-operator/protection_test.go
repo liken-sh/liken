@@ -1,9 +1,8 @@
 package main
 
-// The machine's own disks stay out of every claim, and a disk whose
-// storage role the operator cannot confirm stays out with them: the
-// facts are the only record of which partitions back a role, so a
-// machine whose facts do not read offers no disk at all.
+// No claim can receive a disk that backs a storage role. When the facts
+// cannot be read, the operator cannot tell which disks back a role, so
+// it offers no disk at all.
 
 import (
 	"errors"
@@ -20,8 +19,7 @@ import (
 	"github.com/liken-sh/liken/liken/metrics"
 )
 
-// protecting sets the protection the DRA plugin and the CDI refresh
-// read, the way a pass sets it from the facts, for one test.
+// protecting sets platformProtection for one test.
 func protecting(t *testing.T, p protection) {
 	t.Helper()
 	saved := platformProtection.Load()
@@ -29,8 +27,8 @@ func protecting(t *testing.T, p protection) {
 	setPlatformProtection(p)
 }
 
-// memoryBacked is the facts of a machine whose every role is in
-// memory: a complete record that names no disk.
+// memoryBacked returns complete facts in which every role is backed by
+// memory, so no disk is protected.
 func memoryBacked() *machine.MachineStatus {
 	facts := &machine.MachineStatus{}
 	for _, name := range machine.StorageRoleNames {
@@ -39,8 +37,6 @@ func memoryBacked() *machine.MachineStatus {
 	return facts
 }
 
-// diskAndGPU is a disk and a GPU, each with the delivery its driver
-// gives it.
 func diskAndGPU() ([]hardware.Device, func(hardware.Device) hardware.Delivery) {
 	devices := []hardware.Device{
 		{Bus: "pci", Address: "0000:00:06.0", Driver: "virtio-pci", Class: "storage"},
@@ -86,8 +82,8 @@ func TestAMemoryBackedMachineOffersItsDisks(t *testing.T) {
 	}
 }
 
-// A slice that offered a disk while the facts read loses the disk on
-// the first pass that cannot read them.
+// A slice that offered a disk while the facts were readable no longer
+// offers it after the first pass that cannot read them.
 func TestAPassWithoutFactsWithdrawsAnOfferedDisk(t *testing.T) {
 	newDRAFixture(t)
 	client, _ := passClients(t, newPassAPI())
@@ -116,20 +112,20 @@ func TestAPassWithoutFactsWithdrawsAnOfferedDisk(t *testing.T) {
 }
 
 // prepareStick runs the kubelet's prepare call for the fixture's claim
-// and answers its error.
+// and returns the claim's error message, which is empty on success.
 func prepareStick(t *testing.T, fixture *draFixture) string {
 	t.Helper()
 	resp, err := fixture.plugin.NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("calling NodePrepareResources: %v", err)
 	}
 	return resp.Claims["claim-1"].Error
 }
 
-// An allocation can outlive the offer it came from, so prepare checks
-// the disk again, whatever the slice said.
+// An allocation can outlive the slice it came from, so prepare checks
+// the disk again.
 func TestPrepareRefusesADiskThatBacksARole(t *testing.T) {
 	fixture := newDRAFixture(t)
 	facts := memoryBacked()
@@ -137,7 +133,7 @@ func TestPrepareRefusesADiskThatBacksARole(t *testing.T) {
 	protecting(t, protectionOf(facts))
 
 	if prepareStick(t, fixture) == "" {
-		t.Error("prepare delivered a disk that backs a storage role")
+		t.Error("prepare returned no error, want a refusal of a disk that backs a storage role")
 	}
 }
 
@@ -146,12 +142,12 @@ func TestPrepareRefusesADiskWhileTheRolesAreUnknown(t *testing.T) {
 	protecting(t, protectionOf(nil))
 
 	if prepareStick(t, fixture) == "" {
-		t.Error("prepare delivered a disk while no facts confirmed the machine does not use it")
+		t.Error("prepare returned no error, want a refusal while no facts show which disks the machine uses")
 	}
 }
 
-// A device with no block node holds nothing a storage role can use,
-// so unknown roles do not stop it.
+// A device with no block node has nothing that a storage role can use,
+// so unreadable facts do not withhold it.
 func TestPrepareDeliversAGPUWhileTheRolesAreUnknown(t *testing.T) {
 	fixture := newDRAFixture(t)
 	fixture.addGPU(t)
@@ -159,14 +155,13 @@ func TestPrepareDeliversAGPUWhileTheRolesAreUnknown(t *testing.T) {
 	protecting(t, protectionOf(nil))
 
 	if message := prepareStick(t, fixture); message != "" {
-		t.Errorf("prepare refused the GPU: %s", message)
+		t.Errorf("prepare returned the error %q, want none for a GPU", message)
 	}
 }
 
-// A prepared disk claim whose disk the operator can no longer confirm
-// names a node that does not exist, so the next container that holds
-// the claim fails to start. When the facts read again, the claim gets
-// its disk back.
+// While the facts cannot be read, a prepared disk claim's CDI spec
+// lists withheldNode in place of its nodes. When the facts can be read
+// again, the spec lists the disk again.
 func TestRefreshWithholdsAPreparedDiskUntilTheRolesAreKnown(t *testing.T) {
 	fixture := newDRAFixture(t)
 	fixture.enumerate(t, 4)
@@ -189,11 +184,11 @@ func TestRefreshWithholdsAPreparedDiskUntilTheRolesAreKnown(t *testing.T) {
 	}
 }
 
-func TestTheFactsConditionSaysTheDisksAreWithheld(t *testing.T) {
+func TestTheFactsConditionReportsThatTheDisksAreWithheld(t *testing.T) {
 	c := factsCondition(errFactsForTest)
 
-	if c.Status != api.ConditionFalse || c.Message != "no facts tree; the device inventory offers no disk until the facts read" {
-		t.Errorf("condition = %+v", c)
+	if c.Status != api.ConditionFalse || c.Message != "The device inventory publishes no disk until the facts can be read: no facts tree" {
+		t.Errorf("condition is %+v, want False with the message that no disk is published until the facts can be read", c)
 	}
 }
 

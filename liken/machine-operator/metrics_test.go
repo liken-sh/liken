@@ -1,9 +1,7 @@
 package main
 
-// Layer 3 for the machine, proven the way a scraper reads it: a real
-// registry, a real HTTP handler, and the text document that comes
-// back. Each test gives the observer the same value the operator
-// gives the API, and asserts on the series that appear.
+// These tests read layer 3 the way Prometheus does: they scrape a real
+// registry through its HTTP handler and parse the text that comes back.
 
 import (
 	"fmt"
@@ -22,19 +20,17 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// observer builds one operator's registry with this machine's layer 3
-// on it, and returns both halves: the layer to observe with, and a
-// function that scrapes what it published. The listener is off,
-// because these tests read the handler directly.
+// observer builds an operator registry with layer 3 on it. It returns
+// the layer and a function that scrapes the registry. The listener is
+// off, because the tests call the handler directly.
 func observer(t *testing.T, f *fetcher) (*machineMetrics, func() string) {
 	t.Helper()
 	o, layer := serveMetrics("", f, nil)
 	return layer, func() string { return scrapeHandler(t, o.Handler()) }
 }
 
-// scrapeHandler reads a registry the way Prometheus reads it: one
-// HTTP GET against the real handler, and the text document that
-// comes back.
+// scrapeHandler makes one HTTP GET against the handler and returns the
+// response body.
 func scrapeHandler(t *testing.T, handler http.Handler) string {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -42,12 +38,12 @@ func scrapeHandler(t *testing.T, handler http.Handler) string {
 
 	resp, err := http.Get(server.URL + "/metrics")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("requesting /metrics: %v", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the scrape: %v", err)
 	}
 	return string(body)
 }
@@ -55,17 +51,17 @@ func scrapeHandler(t *testing.T, handler http.Handler) string {
 func TestTheListenerStartsWithThisMachinesMetrics(t *testing.T) {
 	o, layer := serveMetrics("127.0.0.1:0", &fetcher{}, nil)
 	if o == nil || layer == nil {
-		t.Fatal("the operator started with no metrics")
+		t.Fatalf("serveMetrics returned %v and %v, want an operator and a layer", o, layer)
 	}
 	body := scrapeHandler(t, o.Handler())
 	requireSeries(t, body, `liken_machine_change_pending{tier="reboot"} 0`)
 	if len(series(body, "liken_build_info")) != 1 {
-		t.Errorf("the scrape has no build info: %q", series(body, "liken_build_info"))
+		t.Errorf("liken_build_info is %q, want one series", series(body, "liken_build_info"))
 	}
 }
 
-// series returns every sample line in a scrape whose metric name is
-// name, so a test compares numbers and never help text.
+// series returns the sample lines of the metric called name, so a test
+// compares values and not help text.
 func series(body, name string) []string {
 	var out []string
 	for _, line := range strings.Split(body, "\n") {
@@ -84,14 +80,14 @@ func requireSeries(t *testing.T, body, line string) {
 	name, _, _ := strings.Cut(line, " ")
 	name, _, _ = strings.Cut(name, "{")
 	if found := series(body, name); !slices.Contains(found, line) {
-		t.Errorf("the scrape has no %q; it has %q", line, found)
+		t.Errorf("%s is %q, want it to include %q", name, found, line)
 	}
 }
 
 func requireNoSeries(t *testing.T, body, name string) {
 	t.Helper()
 	if found := series(body, name); len(found) > 0 {
-		t.Errorf("the scrape still has %q", found)
+		t.Errorf("%s is %q, want no series", name, found)
 	}
 }
 
@@ -118,7 +114,7 @@ func TestOnlyTheRunningReleaseReports(t *testing.T) {
 	body := scrape()
 	requireSeries(t, body, `liken_release_info{slot="B",version="2026.09.10-001"} 1`)
 	if lines := series(body, "liken_release_info"); len(lines) != 1 {
-		t.Errorf("a machine reported %d releases: %q", len(lines), lines)
+		t.Errorf("liken_release_info has %d series %q, want 1", len(lines), lines)
 	}
 }
 
@@ -126,8 +122,7 @@ func TestTheBootTimestampIsTheBootsOwnTime(t *testing.T) {
 	booted := time.Date(2026, 9, 10, 8, 30, 0, 0, time.UTC)
 	layer, scrape := observer(t, &fetcher{})
 	layer.observeStatus(&machine.MachineStatus{Boot: machine.BootStatus{Time: &booted}})
-	// Prometheus renders every sample as a float, so the expected
-	// line is the timestamp in that form.
+	// Prometheus writes every sample value as a float.
 	requireSeries(t, scrape(), fmt.Sprintf("liken_machine_boot_timestamp_seconds %g", float64(booted.Unix())))
 }
 
@@ -206,8 +201,7 @@ func TestConvergedFollowsTheSpecConvergedCondition(t *testing.T) {
 	}
 }
 
-// sliceDevice is one device as the ResourceSlice carries it, with
-// the class attribute the metric counts by.
+// sliceDevice returns a ResourceSlice device with a class attribute.
 func sliceDevice(name, class string) kubernetes.SliceDevice {
 	device := kubernetes.SliceDevice{Name: name, Attributes: map[string]kubernetes.DeviceAttribute{}}
 	if class != "" {
@@ -238,8 +232,8 @@ func TestADeviceThatDisappearsReportsZero(t *testing.T) {
 	requireSeries(t, scrape(), `liken_devices{class="display"} 0`)
 }
 
-// downloaded is a fetcher that has run one download of the release,
-// from a channel that is up or down.
+// downloaded returns a fetcher after one download of the release. The
+// download fails when up is false.
 func downloaded(t *testing.T, release *fakeRelease, up bool) *fetcher {
 	t.Helper()
 	var f *fetcher
@@ -247,7 +241,7 @@ func downloaded(t *testing.T, release *fakeRelease, up bool) *fetcher {
 		server := serveRelease(t, new(atomic.Int64), release)
 		server.SetDown(!up)
 		f = fetcherFor(server)
-		f.Ensure(askFor(release, t.TempDir(), activeSlot(t)))
+		f.Ensure(fetchFor(release, t.TempDir(), activeSlot(t)))
 		awaitSettled(f)
 	})
 	return f
@@ -268,7 +262,7 @@ func TestTheDownloadCountersReadTheFetchersTotals(t *testing.T) {
 }
 
 func TestADownloadThatFailsCounts(t *testing.T) {
-	// The channel is unreachable, the transient case.
+	// The release channel is unreachable.
 	f := downloaded(t, makeRelease("2026.09.10-001"), false)
 	_, scrape := observer(t, f)
 
@@ -290,7 +284,7 @@ func TestRepeatedScrapesLeaveTheCountersUnchanged(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			if !slices.Equal(series(first, name), series(second, name)) {
-				t.Errorf("%s moved between scrapes: %q then %q", name, series(first, name), series(second, name))
+				t.Errorf("%s is %q on the first scrape and %q on the second, want the same", name, series(first, name), series(second, name))
 			}
 		})
 	}

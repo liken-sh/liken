@@ -1,9 +1,9 @@
 package main
 
-// The watches hand the pass objects that the unstructured converter
-// decoded, where a direct read decodes them with encoding/json. These
-// tests hold the two decoders to the same answer for every struct the
-// pass reads from a copy, with every field of the struct set.
+// A copy from a watch is decoded by the unstructured converter, and a
+// direct read is decoded by encoding/json. These tests check that both
+// decoders produce the same struct for every type the pass reads from a
+// copy, with every field set.
 
 import (
 	"encoding/json"
@@ -64,28 +64,28 @@ func fill(v reflect.Value, depth int) {
 	}
 }
 
-// decodesAlike fills a T, encodes it, and decodes the bytes both ways:
-// with encoding/json, the way a direct read does, and into the
-// unstructured form a watch delivers and then through the converter.
+// decodesAlike fills a T, encodes it, and decodes the bytes two ways:
+// with encoding/json, as a direct read does, and into the unstructured
+// form that a watch delivers and then through the converter.
 func decodesAlike[T any](t *testing.T) {
 	t.Helper()
 	var filled T
 	fill(reflect.ValueOf(&filled).Elem(), 12)
 	encoded, err := json.Marshal(&filled)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the filled value: %v", err)
 	}
 	var direct T
 	if err := json.Unmarshal(encoded, &direct); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the encoded value directly: %v", err)
 	}
 	var object map[string]any
 	if err := utiljson.Unmarshal(encoded, &object); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the encoded value to a map: %v", err)
 	}
 	watched, err := informer.Convert[T](&unstructured.Unstructured{Object: object})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("converting the map with informer.Convert: %v", err)
 	}
 	if !reflect.DeepEqual(direct, watched) {
 		d, _ := json.Marshal(direct)
@@ -111,9 +111,8 @@ func TestTheCopiesDecodeLikeADirectRead(t *testing.T) {
 	}
 }
 
-// The kubelet rewrites a Node's status every five minutes, with only
-// the heartbeat times in its conditions changed. Such a write wakes no
-// pass, and a write that changes a condition does.
+// A kubelet status report that changes only the heartbeat times wakes
+// no pass, and one that changes a condition does.
 func TestTheNodeWatchIgnoresTheKubeletsHeartbeat(t *testing.T) {
 	node := func(version, ready, heartbeat string) *unstructured.Unstructured {
 		return &unstructured.Unstructured{Object: map[string]any{

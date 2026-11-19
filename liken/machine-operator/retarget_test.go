@@ -1,8 +1,8 @@
 package main
 
-// What a new version target does to a release that is already staged:
-// the record of another release goes before a byte of the new one
-// downloads, and the record of the same release stays.
+// These tests cover a new version target while a release is already
+// staged. A staged record of a different release is withdrawn before
+// the download starts. A staged record of the target itself is kept.
 
 import (
 	"net/http"
@@ -17,25 +17,26 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// stagedStore is a system release store with a release staged for
-// slot B, under the root it answers.
+// stagedStore returns a release store, and its root directory, with a
+// record of the given release staged for slot B.
 func stagedStore(t *testing.T, version, digest string) (machine.ManifestStore, string) {
 	t.Helper()
 	root := t.TempDir()
 	store := machine.SystemReleases(root)
 	raw, _, err := machine.RenderSystemRelease(version, "B", digest)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the SystemRelease of %s: %v", version, err)
 	}
 	if err := store.WriteStaged(raw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged record of %s: %v", version, err)
 	}
 	return store, root
 }
 
-// A fetcher whose channel answers nothing, and the count of what it
-// asked. The test sees the order of the staged record and the first
-// request, and no download writes a slot.
+// refusingFetcher returns a fetcher whose release server responds 404 to
+// every request, and the count of requests the server received. No
+// download completes, so a test sees the staged record as it was when
+// the download started.
 func refusingFetcher(t *testing.T) (*fetcher, *atomic.Int64) {
 	t.Helper()
 	var requests atomic.Int64
@@ -46,7 +47,7 @@ func refusingFetcher(t *testing.T) (*fetcher, *atomic.Int64) {
 	return fetcherFor(server), &requests
 }
 
-func TestANewTargetWithdrawsTheStagedReleaseOfAnother(t *testing.T) {
+func TestANewTargetKeepsOnlyAStagedRecordOfItself(t *testing.T) {
 	cases := []struct {
 		name         string
 		stagedDigest string
@@ -81,7 +82,7 @@ func TestANewTargetWithdrawsAnOlderStagedRelease(t *testing.T) {
 		synctest.Wait()
 
 		if staged, _ := store.LoadStaged(); staged != nil {
-			t.Error("the record of release 0.1.5 still stands while 0.2.0 downloads onto its slot")
+			t.Error("the record of release 0.1.5 is still staged, want it withdrawn before 0.2.0 downloads onto its slot")
 		}
 		if conv.condition.Reason != "Downloading" || requests.Load() == 0 {
 			t.Errorf("%s after %d requests, want the download of 0.2.0 started", conv.condition.Reason, requests.Load())
@@ -89,9 +90,9 @@ func TestANewTargetWithdrawsAnOlderStagedRelease(t *testing.T) {
 	})
 }
 
-// A record that cannot be withdrawn stops the download, so the slot
-// keeps the release that the record names.
-func TestARecordThatStaysStopsTheDownload(t *testing.T) {
+// When the staged record cannot be withdrawn, the download must not
+// start, because it would write into the slot that the record boots.
+func TestAStagedRecordThatCannotBeWithdrawnStopsTheDownload(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store, root := stagedStore(t, "0.1.5", "sha256:"+strings.Repeat("dd", 32))
 		f, requests := refusingFetcher(t)
@@ -100,20 +101,19 @@ func TestARecordThatStaysStopsTheDownload(t *testing.T) {
 		conv := convergeSystemRelease(store, clusterWithTarget("0.2.0"), autoMachine(), slotBackedFacts("0.1.0", "A"), f, turnAwaiting, nil)
 		synctest.Wait()
 
-		if conv.condition.Reason != "StagingFailed" || !strings.Contains(conv.condition.Message, "could not be withdrawn") {
+		if conv.condition.Reason != "StagingFailed" || !strings.Contains(conv.condition.Message, "cannot be withdrawn") {
 			t.Errorf("condition = %s: %s, want the failed withdrawal", conv.condition.Reason, conv.condition.Message)
 		}
 		if requests.Load() != 0 {
-			t.Errorf("%d requests, want none while the old record stands", requests.Load())
+			t.Errorf("%d requests, want none while the old record is staged", requests.Load())
 		}
 	})
 }
 
-// A download that failed asks the loop for a pass at its retry time,
-// and the condition names that time, so its message stays the same
-// from one pass to the next and the status is not written again for
-// it.
-func TestAFailedDownloadAsksForAPassAtItsRetryTime(t *testing.T) {
+// After a failed download, the pass wakes at the retry time. Each pass
+// writes the same retry time into the condition message, so a repeated
+// pass does not change the status.
+func TestAFailedDownloadSetsTheWakeTimeToItsRetryTime(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store, _ := stagedStore(t, "0.1.5", "sha256:"+strings.Repeat("dd", 32))
 		f, _ := refusingFetcher(t)
@@ -128,7 +128,7 @@ func TestAFailedDownloadAsksForAPassAtItsRetryTime(t *testing.T) {
 
 		retryAt := failed.retryAt.UTC().Format(time.RFC3339)
 		if !out.wake.Equal(failed.retryAt) || !strings.Contains(first.condition.Message, retryAt) || first.condition != second.condition {
-			t.Errorf("wake %s, conditions %+v and %+v; want a wake at %s named in one unchanged message",
+			t.Errorf("wake %s, conditions %+v and %+v; want a wake at %s and one unchanged message containing it",
 				out.wake, first.condition, second.condition, retryAt)
 		}
 	})

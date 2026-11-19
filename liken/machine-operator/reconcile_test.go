@@ -1,8 +1,7 @@
 package main
 
-// The reconcile loop's writes against a small API server: the
-// operator's access to its own Node object, and the status publish
-// that resolves conflicts without discarding a pass's observations.
+// These tests run the operator's Node access and its status publish
+// against a small fake API server.
 
 import (
 	"encoding/json"
@@ -17,9 +16,8 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// nodeAPI is a small API server holding one Node. It remembers
-// whether the Node was deleted and what status the operator
-// publishes.
+// nodeAPI is a fake API server with one Node. It records whether the
+// Node was deleted and the path of the last status PUT.
 type nodeAPI struct {
 	deleted       bool
 	publishedPath string
@@ -46,13 +44,13 @@ func TestGetAndDeleteNode(t *testing.T) {
 	client := testClient(t, fake.handler())
 	node, err := getNode(client, "node-1")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Node: %v", err)
 	}
 	if _, ok := node.Metadata.Labels["node-role.kubernetes.io/control-plane"]; !ok {
-		t.Errorf("the labels come through: %+v", node.Metadata.Labels)
+		t.Errorf("the Node labels are %+v, want the control-plane label", node.Metadata.Labels)
 	}
 	if err := deleteNode(client, "node-1", node.Metadata.UID); err != nil || !fake.deleted {
-		t.Errorf("the delete should land: %v", err)
+		t.Errorf("deleting the Node returned %v and the server saw a delete: %v, want no error and a delete", err, fake.deleted)
 	}
 }
 
@@ -61,17 +59,16 @@ func TestPublishStatusWritesTheStatusSubresource(t *testing.T) {
 	client := testClient(t, fake.handler())
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1"}}
 	if _, err := kubernetes.PublishStatus(client, m, &machine.MachineStatus{Phase: api.PhaseReady}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the status: %v", err)
 	}
 	if want := "/apis/liken.sh/v1alpha1/machines/node-1/status"; fake.publishedPath != want {
-		t.Errorf("status goes through the subresource, got %s", fake.publishedPath)
+		t.Errorf("the status was written to %s, want %s", fake.publishedPath, want)
 	}
 }
 
-// conflictAPI is a small API server that answers the first
-// `conflicts` status PUTs with 409, serves a fresh copy of the
-// machine on GET, and records the body of the PUT that finally
-// lands.
+// conflictAPI is a fake API server that responds with 409 to the first
+// `conflicts` status PUTs, returns a newer copy of the Machine on GET,
+// and records the body of the first PUT that succeeds.
 type conflictAPI struct {
 	conflicts int
 	fresh     machine.Machine
@@ -110,10 +107,9 @@ func freshMachine(conditions ...api.Condition) machine.Machine {
 }
 
 func TestPublishOwnStatusSkipsAnUnchangedStatus(t *testing.T) {
-	// A settled machine observes the same status pass after pass.
-	// A write that would change nothing should never leave the
-	// process. The API server would drop it as a no-op anyway, but
-	// only after this machine made every leader consider it.
+	// A machine with nothing to change reads the same status on every
+	// pass, and each identical write would still make the API server
+	// and etcd process a request, so the operator does not send it.
 	fake := &conflictAPI{}
 	client := testClient(t, fake.handler())
 
@@ -122,23 +118,23 @@ func TestPublishOwnStatusSkipsAnUnchangedStatus(t *testing.T) {
 	}}
 	before, err := json.Marshal(status)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the status: %v", err)
 	}
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
 	if err := publishOwnStatus(&reader{client: client}, m, status, before); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the status: %v", err)
 	}
 	if fake.puts != 0 {
-		t.Errorf("an unchanged status stays home: %d puts", fake.puts)
+		t.Errorf("an unchanged status caused %d writes, want none", fake.puts)
 	}
 }
 
 func TestPublishOwnStatusResolvesAConflictWithAFreshRead(t *testing.T) {
-	// The conductor granted a turn between this pass's read and its
-	// write. The retry must carry the resourceVersion of the fresh
-	// copy, and it must adopt the conductor's grant exactly as
-	// written, including its transition time, which the rollout's
-	// stall clock measures from.
+	// cluster-operator granted a reboot turn between this pass's read and
+	// its write. The retry must send the resourceVersion of the newer
+	// copy and keep the grant exactly as cluster-operator wrote it,
+	// because cluster-operator decides that a rollout has stalled from
+	// the grant's LastTransitionTime.
 	granted := grantCondition(testNow)
 	fake := &conflictAPI{conflicts: 1, fresh: freshMachine(granted)}
 	client := testClient(t, fake.handler())
@@ -148,50 +144,49 @@ func TestPublishOwnStatusResolvesAConflictWithAFreshRead(t *testing.T) {
 		{Type: "Ready", Status: api.ConditionTrue, Reason: "Reconciled"},
 	}}
 	if err := publishOwnStatus(&reader{client: client}, m, status, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the status: %v", err)
 	}
 	if fake.published.Metadata.ResourceVersion != "9" {
-		t.Errorf("the retry carries the fresh copy's version: %s", fake.published.Metadata.ResourceVersion)
+		t.Errorf("the retry sent resourceVersion %s, want 9 from the fresh copy", fake.published.Metadata.ResourceVersion)
 	}
 	if c := api.FindCondition(fake.published.Status.Conditions, machine.RebootApprovedCondition); c == nil ||
 		!c.LastTransitionTime.Equal(testNow) {
-		t.Errorf("the conductor's grant comes from the fresh copy unchanged: %+v", c)
+		t.Errorf("the RebootApproved condition is %+v, want the fresh copy's grant unchanged", c)
 	}
 	if c := api.FindCondition(fake.published.Status.Conditions, "Ready"); c == nil || c.Status != api.ConditionTrue {
-		t.Errorf("this pass's own observations still win: %+v", c)
+		t.Errorf("the Ready condition is %+v, want True from this pass", c)
 	}
 }
 
 func TestPublishOwnStatusHonorsAReclaimedGrant(t *testing.T) {
-	// The reverse race: this pass carried a grant that it read
-	// before the conductor reclaimed it. The retry must not bring
-	// it back.
+	// cluster-operator reclaimed a grant after this pass read it. The
+	// retry must not write the grant again.
 	fake := &conflictAPI{conflicts: 1, fresh: freshMachine()}
 	client := testClient(t, fake.handler())
 
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
 	status := &machine.MachineStatus{Conditions: []api.Condition{grantCondition(testNow)}}
 	if err := publishOwnStatus(&reader{client: client}, m, status, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the status: %v", err)
 	}
 	if c := api.FindCondition(fake.published.Status.Conditions, machine.RebootApprovedCondition); c != nil {
-		t.Errorf("a reclaimed grant must stay reclaimed: %+v", c)
+		t.Errorf("the RebootApproved condition is %+v, want none because cluster-operator reclaimed it", c)
 	}
 }
 
 func TestPublishOwnStatusRetriesOnlyOnce(t *testing.T) {
-	// A second conflict means the object is changing faster than
-	// this pass can read it. The watch has already queued the event
-	// that will trigger the next pass, so the write waits for that.
+	// After a second conflict the pass stops trying, because the watch
+	// has already queued the event of the write that won, and that
+	// event starts a pass that publishes.
 	fake := &conflictAPI{conflicts: 2, fresh: freshMachine()}
 	client := testClient(t, fake.handler())
 
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
 	err := publishOwnStatus(&reader{client: client}, m, &machine.MachineStatus{}, nil)
 	if !errors.Is(err, apiclient.ErrConflict) {
-		t.Errorf("the second conflict comes back to the caller: %v", err)
+		t.Errorf("the second conflict returned %v, want apiclient.ErrConflict", err)
 	}
 	if fake.puts != 2 {
-		t.Errorf("one retry, no more: %d puts", fake.puts)
+		t.Errorf("the pass sent %d writes, want 2: the first and one retry", fake.puts)
 	}
 }

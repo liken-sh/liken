@@ -1,26 +1,5 @@
 package main
 
-// The turn: whether the rollout conductor granted this machine its
-// reboot turn.
-//
-// The grant is the machine's entry in the Cluster's status.rebootTurns
-// (cluster-operator/rollout.go). The conductor adds the entry in a
-// write conditional on the Cluster's resourceVersion, after it checked
-// every budget in the same write, so the entry is the budget's own
-// record. A condition on the Machine could land after the turn it
-// reports had ended, from a conductor that paused before it wrote; an
-// entry cannot, because the conductor removes it in the same kind of
-// conditional write.
-//
-// The pass acts on an entry only after it read the Cluster from the API
-// server, because the watch's copy can be older than the conductor's
-// last write, and an entry the conductor removed must not start a
-// drain. A copy that holds no entry answers alone: a copy older than a
-// new entry costs the machine one pass, and the conductor's grant
-// write to the Machine wakes that pass. So a settled fleet sends no
-// read. A read that fails grants nothing, and the machine waits for
-// the next pass.
-
 import (
 	"fmt"
 	"slices"
@@ -29,8 +8,22 @@ import (
 	"github.com/liken-sh/liken/liken/kubernetes"
 )
 
-// holdsTurn reports whether the Cluster's ledger holds an entry for
-// this machine.
+// holdsTurn reports whether this machine has its reboot turn, which
+// is an entry for it in the Cluster's status.rebootTurns
+// (cluster-operator/rollout.go). cluster-operator adds and removes
+// each entry with a status write that is conditional on the
+// Cluster's resourceVersion, so an entry is never stale. A
+// condition on the Machine can be stale, because a cluster-operator
+// that paused before it wrote the condition could write it after the
+// turn had ended.
+//
+// The watch's copy of the Cluster can be older than cluster-operator's
+// last write, so holdsTurn reads the Cluster from the API server
+// before it returns true. A drain never starts for an entry that
+// cluster-operator already removed. When the watch's copy has no entry,
+// holdsTurn returns false without a read, so a fleet with no reboots
+// in progress sends no reads. If that copy missed a new entry,
+// cluster-operator's RebootApproved write to the Machine starts another pass.
 func holdsTurn(r *reader, clusterName, machineName string) bool {
 	held, err := r.cluster(clusterName)
 	if err != nil || !hasEntry(held, machineName) {
@@ -38,7 +31,7 @@ func holdsTurn(r *reader, clusterName, machineName string) bool {
 	}
 	fresh, err := kubernetes.GetCluster(r.client, clusterName)
 	if err != nil {
-		fmt.Printf("reading the Cluster for this machine's reboot turn: %v\n", err)
+		fmt.Printf("reading Cluster %s for the reboot turn of Machine %s: %v\n", clusterName, machineName, err)
 		return false
 	}
 	return hasEntry(fresh, machineName)

@@ -1,7 +1,7 @@
 package main
 
-// The hold: a request that stops the turn after the drain until its
-// requester removes spec.hold.
+// Tests for spec.hold, which stops a turn between the drain and the
+// reboot.
 
 import (
 	"slices"
@@ -16,8 +16,6 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// firmwareRequest is a request from firmware-operator for the boot
-// named by hash, with spec.hold set as given.
 func firmwareRequest(hash string, hold bool) disruption.Disruption {
 	return *disruption.New("node-4.firmware-dbx", requestingNode4(), disruption.Spec{
 		Machine: "node-4", Requester: "firmware.liken.sh/firmware-operator", Kind: disruption.KindReboot,
@@ -29,8 +27,6 @@ func heldOn(d disruption.Disruption) disruption.Disruption {
 	return d
 }
 
-// A request holds the turn only while it asks for a hold, is approved,
-// and is not done.
 func TestHoldingRequestsAreApprovedAndNotDone(t *testing.T) {
 	boot := machine.BootID(machine.BootStatus{Time: &requestBootTime})
 	approved := firmwareRequest(boot, true)
@@ -52,15 +48,14 @@ func TestHoldingRequestsAreApprovedAndNotDone(t *testing.T) {
 			holding := holdingRequests([]disruption.Disruption{c.request}, c.policy, boot)
 
 			if (len(holding) == 1) != c.holds {
-				t.Errorf("holding = %v, want a hold: %v", holding, c.holds)
+				t.Errorf("holding requests = %v, want a hold = %v", holding, c.holds)
 			}
 		})
 	}
 }
 
-// When the drain is clear and a request holds the turn, the reboot
-// waits, the node stays cordoned, and the pass records the drain as
-// done so the request turns Held.
+// With no pods left to drain, the gate cancels the reboot, keeps the
+// cordon, and records the drain as done, so settleHolds sets Held.
 func TestTheGateHoldsTheRebootAfterTheDrain(t *testing.T) {
 	fake := &drainAPI{}
 	client := testClient(t, fake.handler())
@@ -73,12 +68,10 @@ func TestTheGateHoldsTheRebootAfterTheDrain(t *testing.T) {
 		t.Errorf("conv = %+v, want the reboot held for node-4.firmware-dbx", conv)
 	}
 	if !d.drained || !d.draining {
-		t.Errorf("drained = %v, draining = %v; want the drain recorded as done and the cordon kept", d.drained, d.draining)
+		t.Errorf("drained = %v, draining = %v, want both true: the drain is done and the cordon stays", d.drained, d.draining)
 	}
 }
 
-// While the drain still moves pods, the hold waits for it: the request
-// is not Held until the node is clear.
 func TestTheHoldWaitsForTheDrain(t *testing.T) {
 	fake := &drainAPI{pods: []kubernetes.Pod{pod("web", "default")}}
 	client := testClient(t, fake.handler())
@@ -88,13 +81,12 @@ func TestTheHoldWaitsForTheDrain(t *testing.T) {
 	conv := d.gate(&reader{client: client}, drainNode(true, true, since), nil, turnGranted, drainNow, rebootingConvergence())
 
 	if conv.condition.Reason != "Draining" || d.drained || len(fake.evictions) != 1 {
-		t.Errorf("reason = %s, drained = %v, evictions = %v; want the drain to go on", conv.condition.Reason, d.drained, fake.evictions)
+		t.Errorf("reason = %s, drained = %v, evictions = %v, want Draining, not drained, and 1 eviction", conv.condition.Reason, d.drained, fake.evictions)
 	}
 }
 
-// Once a request is Held, the requester's pod runs on the cordoned
-// node, and the gate drains no more.
-func TestAHeldTurnDrainsNoMore(t *testing.T) {
+// A drain after Held would evict the requester's pod.
+func TestAHeldTurnDoesNotDrainAgain(t *testing.T) {
 	fake := &drainAPI{pods: []kubernetes.Pod{pod("firmware-apply", "liken-system")}}
 	client := testClient(t, fake.handler())
 	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
@@ -103,13 +95,12 @@ func TestAHeldTurnDrainsNoMore(t *testing.T) {
 	conv := d.gate(&reader{client: client}, drainNode(true, true, since), nil, turnGranted, drainNow, rebootingConvergence())
 
 	if len(fake.evictions) != 0 || conv.requestReboot || conv.condition.Reason != "Held" {
-		t.Errorf("evictions = %v, conv = %+v; want no eviction and the reboot held", fake.evictions, conv)
+		t.Errorf("evictions = %v, conv = %+v, want no eviction and reason Held", fake.evictions, conv)
 	}
 }
 
-// A holding request's turn ends in a reboot, which covers every
-// restart, so no restart runs while it holds.
-func TestNoRestartRunsWhileARequestHolds(t *testing.T) {
+// The turn ends in a reboot, which makes a separate restart redundant.
+func TestNoRestartRunsWhileARequestIsHeld(t *testing.T) {
 	d := &disruptions{holding: []disruption.Disruption{firmwareRequest("b00t", true)}}
 	restart := convergence{condition: notConverged("ClusterConverged", "RestartRequested", "restart"), requestRestart: true}
 
@@ -120,9 +111,6 @@ func TestNoRestartRunsWhileARequestHolds(t *testing.T) {
 	}
 }
 
-// The pass sets Held on a holding request when the drain is done, and
-// sets it False when the requester removes spec.hold. Each transition
-// posts its Event on the Disruption.
 func TestTheHeldConditionFollowsTheHold(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		waiting := firmwareRequest("b00t", true)
@@ -140,10 +128,10 @@ func TestTheHeldConditionFollowsTheHold(t *testing.T) {
 			return api.FindCondition(d.Status.Conditions, disruption.HeldCondition)
 		}
 		if c := byName("node-4.firmware-dbx"); c == nil || c.Status != api.ConditionTrue || c.Reason != "Drained" {
-			t.Errorf("the waiting request's Held = %+v, want True, Drained", c)
+			t.Errorf("the waiting request's Held = %+v, want True Drained", c)
 		}
 		if c := byName("node-4.firmware-db"); c == nil || c.Status != api.ConditionFalse || c.Reason != "Released" {
-			t.Errorf("the released request's Held = %+v, want False, Released", c)
+			t.Errorf("the released request's Held = %+v, want False Released", c)
 		}
 		synctest.Wait()
 		var reasons []string
@@ -157,8 +145,7 @@ func TestTheHeldConditionFollowsTheHold(t *testing.T) {
 	})
 }
 
-// A pass whose drain is not done leaves a holding request without Held.
-func TestNoHeldBeforeTheDrainIsDone(t *testing.T) {
+func TestNoHeldConditionBeforeTheDrainIsDone(t *testing.T) {
 	waiting := firmwareRequest("b00t", true)
 	c := testClient(t, requestsAPI(waiting))
 

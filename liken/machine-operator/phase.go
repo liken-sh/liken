@@ -5,35 +5,19 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// The machine's phase: the whole set of conditions summarized in
-// one word.
+// The phase is one word that summarizes a machine's conditions for the
+// fleet listing, like a Pod's status.phase. The operator computes it
+// from the conditions on every pass, so it cannot disagree with them.
 //
-// Conditions are the machine's full account of itself, typed,
-// reasoned, and timestamped, and programs consume them (kubectl
-// wait, controllers, the Ready roll-up). But a person scanning a
-// fleet listing does not want five columns of True and False. They
-// want one word per machine that says whether it needs attention.
-// Pods solved this with status.phase (Pending, Running, Succeeded,
-// Failed), and the Machine borrows this idea exactly. The operator
-// derives the phase from the conditions on every pass, and never
-// stores it, so it can never disagree with them.
-//
-// One phase is deliberately missing from this table: Lost. A
-// machine cannot derive its own death from its own conditions,
-// because if this code is running, the machine is not lost. The
-// cluster operator writes Lost on a silent machine's behalf, and
-// the machine's own operator overwrites it the moment the machine
-// reports again.
+// This operator never reports Lost, because a machine whose operator
+// runs is not lost. The cluster operator writes Lost for a machine
+// that stops reporting, and this operator overwrites it when the
+// machine reports again.
 
-// phasePrecedence orders the phases from most severe to least
-// severe. When several conditions point at different phases, the
-// machine reports the most severe one. A machine that is both
-// waiting on a Manual reboot and failing a sysctl is UpdatePending
-// and Degraded at the same time. The listing should show the one
-// that needs a person soonest. Downloading comes last because a
-// download finishes on its own: a machine that downloads a release
-// while a change waits on a reboot, or while something fails, shows
-// that instead.
+// phasePrecedence lists the phases from most severe to least severe.
+// When conditions indicate different phases, the machine reports the
+// first one in this order. Downloading is last because a download
+// finishes without help.
 var phasePrecedence = []api.Phase{
 	api.PhaseUnknown,
 	api.PhaseBooting,
@@ -44,113 +28,79 @@ var phasePrecedence = []api.Phase{
 	api.PhaseDownloading,
 }
 
-// conditionPhase maps one condition to the phase it indicates. It
-// returns "" when the condition indicates nothing: when it is True,
-// or when it is the Ready roll-up, which summarizes the others and
-// would double-count. The mapping works by reason, because the
-// reasons already distinguish what the boolean status cannot.
-// RebootPending and RejectedLastBoot are both "not converged," but
-// one resolves with a reboot and the other never will without a
-// different edit.
-//
-// The conditions in reportsOnly indicate nothing either (reportsOnly
-// gives the reasons).
+// conditionPhase returns the phase that one condition indicates, or ""
+// when the condition is True, is Ready itself, or is one that
+// reportsOnly accepts. It switches on the reason because a False
+// status alone does not tell RebootPending, which a reboot clears,
+// from RejectedLastBoot, which stays until someone edits the spec.
 func conditionPhase(c api.Condition) api.Phase {
 	if c.Type == "Ready" || reportsOnly(c.Type) || c.Status == api.ConditionTrue {
 		return ""
 	}
 	switch c.Reason {
 	case "Joining":
-		// A radio the boot handed to the background is still
-		// associating. The condition stays False, because it reports
-		// what the boot actuated and the join has not finished, but
-		// the machine is not degraded: the boot went on without the
-		// radio on purpose, and a join takes seconds. The fleet
-		// listing must not show a fault for that window: a Degraded
-		// that appears on every boot and clears itself teaches
-		// people to ignore Degraded.
+		// WirelessJoined is False with this reason while a radio is
+		// still associating: init joins it in the background when a
+		// wired interface reaches the cluster, and the supplicant
+		// joins again after it loses an access point. So it is not a
+		// fault, and Degraded on every boot would teach people to
+		// ignore Degraded.
 		return ""
 	case "FactsUnreadable":
-		// The operator is running but cannot read the facts, so it
-		// has no information about the machine it runs on.
 		return api.PhaseUnknown
 	case "FactsIncomplete":
-		// Facts exist but carry no boot record yet. init is still
-		// starting up.
+		// The facts file has no boot record yet while init starts.
 		return api.PhaseBooting
 	case "RejectedLastBoot", "StagingRejected", "BootMismatch", "MachineStateEphemeral",
 		"NoSystemSlots", "NotInstalled", "NoReleaseSource", "VersionNotInCatalog", "DigestMismatch",
 		"CredentialsInvalid", "RetractionBlocked":
-		// Drift exists, but liken refuses to stage it, or cannot.
-		// Time will not fix these; a different edit will. A blocked
-		// retraction takes an edit to the cluster's objects rather
-		// than to a document: a feature stays enabled while objects
-		// only its controller can remove still exist. The
-		// version target can get stuck in several ways: no slots to
-		// hold a release, a boot that did not come from a slot (so
-		// no boot entry could ever run the download), a catalog with
-		// no source or without the target, or a download whose bytes
-		// do not match the catalog's digest. That last case is
-		// corrupt at the source, where refetching cannot change what
-		// the server publishes. A malformed credentials Secret has
-		// the same shape: only a corrected Secret fixes it.
+		// The machine differs from its spec and cannot stage the
+		// change, and waiting does not fix it. A person has to change
+		// the spec, the catalog, the credentials Secret, or the
+		// machine. RetractionBlocked means a feature is being turned
+		// off while objects that only its controller can delete still
+		// exist. DigestMismatch stays until the catalog names other
+		// bytes, because fetching again returns the same bytes.
 		return api.PhaseBlocked
 	case "Downloading", "DownloadRetrying":
-		// A release downloads to the inactive slot in the background,
-		// and the machine serves its workloads until the reboot that
-		// proves the release. The cluster operator counts a machine
-		// that downloads as available, so a download takes no slot
-		// of the disruption budget, and a download that never ends
-		// holds no other machine's turn. A download that failed and
-		// waits to retry is still a download in this phase.
+		// A release downloads to the inactive slot while the workloads
+		// keep running. The cluster operator counts a Downloading
+		// machine as available (cluster-operator/rollout.go), so a
+		// download uses none of the disruption budget.
 		return api.PhaseDownloading
 	case "RebootRequested", "RestartRequested", "DemotionRebooting", "Draining",
 		"Proving", "LoadRequested":
-		// A disruption is in progress; the machine is in the middle
-		// of a change. Draining is the first step of a reboot: the
-		// node is cordoned and its workloads are being evicted
-		// before the machine goes down (a k3s restart skips this
-		// step, and pods survive). So is Proving: a boot's imports
-		// stay on trial until the OS pods prove them, which
-		// ordinarily takes seconds. LoadRequested is the live load's
-		// moment in flight, usually under a second, and a machine
-		// applying its spec in place is updating, not degraded.
+		// A change is in progress. Draining happens only before a
+		// reboot, and a k3s restart keeps the pods running. Proving
+		// lasts from a proving boot until the node's OS containers are
+		// Ready. LoadRequested applies the spec without a reboot.
 		return api.PhaseUpdating
 	case "RebootPending", "RestartPending", "DemotionPending", "AwaitingTurn",
 		"StagedForNextBoot", "AwaitingPodRefresh":
-		// A change is staged and waiting, either on a Manual reboot
-		// or on the cluster granting this machine its turn. A
-		// verified release waiting for its proving reboot reads the
-		// same way, because it is waiting on exactly the same things.
-		// A change staged for the next boot needs no disruption of its
-		// own, so nothing is scheduled to apply it and any later boot
-		// does. The listing still shows the machine as pending,
-		// because it does not yet run the document the deployment
-		// wrote. AwaitingPodRefresh waits the same way: the machine
-		// already runs the new release, and only the pod steward's
-		// refresh, after a leader boots that release, is left.
+		// A change is staged and waits for a Manual reboot or for the
+		// cluster operator to grant this machine its turn.
+		// StagedForNextBoot needs no reboot of its own, because any
+		// later boot applies it, but the machine does not run the new
+		// document yet. AwaitingPodRefresh means the machine runs the
+		// new release and this operator's pod still has the old
+		// template, until a leader boots the release.
 		return api.PhaseUpdatePending
 	}
-	// Anything unrecognized reads as Degraded, deliberately. A
-	// reason missing from this table fails visibly in the fleet
-	// listing, instead of passing silently as Ready.
+	// An unlisted reason is Degraded, so a new reason that someone
+	// forgets to add here shows as a fault in the listing and does not
+	// pass as Ready.
 	return api.PhaseDegraded
 }
 
-// readyCondition is the Ready roll-up: True exactly when every other
-// condition is True. The scan skips any prior Ready, so the previous
-// pass's value cannot affect this one. It also skips the conductor's
-// grant, because the grant is a permission, not an observation about
-// this machine's health, and SerioAttached, for the reason
-// conditionPhase gives.
+// readyCondition returns the Ready condition: True when every other
+// condition is True, and otherwise False with the phase as its reason
+// and the last condition that is not True in its message. So a machine
+// that waits for its reboot turn reads Ready=False with reason
+// UpdatePending, not Degraded.
 //
-// When something is False, the reason is the phase word the
-// conditions argue for (decidePhase), so the roll-up and the phase
-// can never disagree about how bad things are. A machine waiting on
-// its reboot turn reads Ready=False with reason UpdatePending, and
-// Degraded appears on the roll-up exactly when the phase says
-// Degraded. The message still names a failing condition, which is
-// where the detail lives.
+// It skips the previous Ready, RebootApproved, which grants a reboot
+// turn and reports nothing about health, and the conditions that
+// reportsOnly accepts.
 func readyCondition(conditions []api.Condition) api.Condition {
 	ready := api.Condition{Type: "Ready", Status: api.ConditionTrue, Reason: "Reconciled"}
 	for _, condition := range conditions {
@@ -169,31 +119,28 @@ func readyCondition(conditions []api.Condition) api.Condition {
 	return ready
 }
 
-// decidePhase reduces the conditions to the single most severe
-// phase, or Ready when nothing indicates otherwise.
+// decidePhase returns the most severe phase that any condition
+// indicates, or Ready when none indicates a phase.
 func decidePhase(conditions []api.Condition) api.Phase {
-	argued := map[api.Phase]bool{}
+	indicated := map[api.Phase]bool{}
 	for _, c := range conditions {
 		if phase := conditionPhase(c); phase != "" {
-			argued[phase] = true
+			indicated[phase] = true
 		}
 	}
 	for _, phase := range phasePrecedence {
-		if argued[phase] {
+		if indicated[phase] {
 			return phase
 		}
 	}
 	return api.PhaseReady
 }
 
-// reportsOnly answers whether a condition reports one part of the
-// machine and leaves the machine's health to the others, so neither
-// the phase nor the Ready roll-up reads it. SerioAttached is one: an
-// adapter that is unplugged or refused leaves the machine working, and
-// its workloads that do not use the adapter run as before.
-// ClockSynchronized is the other: an upstream outage makes every
-// leader Unsynchronized at once, and a fleet that turns Degraded
-// together stalls every reboot turn.
+// reportsOnly reports whether the phase and Ready ignore a condition
+// type. A machine with an unplugged or refused serio adapter keeps
+// working. An outage of the upstream time servers makes every leader
+// report ClockSynchronized False at once, and a fleet that turns
+// Degraded together gets no reboot turns.
 func reportsOnly(conditionType string) bool {
 	return conditionType == serioAttachedCondition || conditionType == clockSynchronizedCondition
 }

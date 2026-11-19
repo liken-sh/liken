@@ -7,7 +7,8 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// observedGenerations maps each condition to the generation it carries.
+// observedGenerations maps each condition type to its
+// observedGeneration.
 func observedGenerations(conditions []api.Condition) map[string]int64 {
 	stamps := map[string]int64{}
 	for _, condition := range conditions {
@@ -16,11 +17,9 @@ func observedGenerations(conditions []api.Condition) map[string]int64 {
 	return stamps
 }
 
-// A pass stamps the generation it judged on the conditions it set. A
-// pass that could not read the Node set none of the conditions that
-// depend on the Node, so each of those keeps the generation of the pass
-// that set it, and a reader does not take an old verdict for a verdict
-// on the spec as it is now.
+// A pass sets the current generation on the conditions it set, and a
+// pass that could not read the Node leaves the generation of the Node
+// conditions as it was.
 func TestAPassStampsOnlyTheConditionsItSet(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -52,7 +51,7 @@ func TestAPassStampsOnlyTheConditionsItSet(t *testing.T) {
 			got := observedGenerations(conditions)
 			for name, want := range each.want {
 				if got[name] != want {
-					t.Errorf("%s carries generation %d, want %d", name, got[name], want)
+					t.Errorf("%s has observedGeneration %d, want %d", name, got[name], want)
 				}
 			}
 		})

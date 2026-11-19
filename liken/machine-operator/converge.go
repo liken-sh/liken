@@ -1,31 +1,24 @@
 package main
 
-// Convergence: keeping the cluster's spec and the machine's boot in
-// agreement.
+// This file decides how a machine moves to its Machine spec. Sysctls
+// apply while the system runs. Storage, network, resource limits, and
+// a removed module apply only at boot:
 //
-// Sysctls reconcile live. Storage cannot, because the system cannot
-// swap a filesystem under a running cluster. The network cannot
-// either, because the cluster reaches this machine over the very
-// addresses an edit changes: re-addressing a running machine would
-// cut the connection that carries the next instruction, on the one
-// kind of machine that has no shell to repair it from. The declared
-// module list cannot reconcile live either, because loading a module
-// is one-way: the kernel offers no safe way to remove a driver while
-// something is using it. Storage, network, and modules therefore
-// converge through a reboot. The operator stages the desired
-// manifest onto the machineState filesystem, where the next boot
-// finds it, tries it, and promotes or rejects it (machine/staging.go
-// covers that side).
-// This file covers the operator's half of that work: notice drift,
-// refuse what the machine cannot satisfy, stage what it can, and
-// either request the reboot (rebootPolicy: Auto) or report that a
-// reboot is pending (Manual, the default policy).
+//   - A filesystem cannot be replaced under a running cluster.
+//   - A new address on a running machine would cut its connection to
+//     the cluster, and a liken machine has no shell to fix it from.
+//   - The kernel has no safe way to unload a driver that is in use.
 //
-// Every decision in this file is a pure function over the cluster's
-// Machine and the boot's facts. reconcile() supplies the few lines of
-// I/O. init's storage code uses the same split between decisions and
-// actions, and this split makes the whole feature testable with
-// tables, without a cluster or a disk.
+// The operator writes the new manifest to the machineState
+// filesystem. At the next boot, init tries it, then promotes or
+// rejects it (machine/staging.go). The code here detects drift,
+// refuses a spec the machine cannot satisfy, stages the rest, and
+// then requests a reboot (rebootPolicy: Auto) or reports that one is
+// pending (rebootPolicy: Manual, the default).
+//
+// The decisions are pure functions of the Machine and the boot's
+// facts, and reconcile() does the I/O, so the tests cover the decision
+// table without a cluster or a disk.
 
 import (
 	"fmt"
@@ -38,11 +31,9 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// validateStaging checks everything that admission cannot check,
-// because these checks need the actual machine. CEL rules in the CRD
-// compare the spec against the last boot's published status, but
-// only the facts record what partitions exist and what disks are
-// attached.
+// validateStaging checks a storage spec against this machine's actual
+// partitions and disks. The CRD's CEL rules cannot do that, because
+// they only compare the spec with the last boot's published status.
 func validateStaging(spec machine.StorageSpec, facts *machine.MachineStatus) error {
 	if err := spec.Validate(); err != nil {
 		return err
@@ -50,10 +41,9 @@ func validateStaging(spec machine.StorageSpec, facts *machine.MachineStatus) err
 	for _, role := range spec.Roles() {
 		placed := facts.Storage.Role(role.Name)
 		if placed != nil && placed.Backing == machine.BackingPartition {
-			// The role has a partition, so its declared size may only
-			// grow. This also catches the case of a remainder role
-			// given a fixed size smaller than the space it already
-			// occupies.
+			// A partition can only grow. A role with no size takes the
+			// rest of the disk, so giving it a size smaller than its
+			// partition is a shrink too.
 			if role.Size == "" {
 				continue
 			}
@@ -62,23 +52,19 @@ func validateStaging(spec machine.StorageSpec, facts *machine.MachineStatus) err
 				return err
 			}
 			if declared < placed.CapacityBytes {
-				// The message carries the remedy, because the person who
-				// reads it is usually meeting this for the first time,
-				// after a reinstall laid the disk out differently from
-				// the Machine document that outlived it. The document is
-				// authoritative, so the fix is always to edit the
-				// document, and the size it must name is a size they can
-				// paste.
-				return fmt.Errorf("%s: the spec declares %s, and this machine's partition holds %s; storage roles are grow-only, so declare %s or more. A machine reinstalled with a different layout needs its Machine document edited to the layout it now carries",
+				// The usual cause is a reinstall that laid out the disk
+				// differently from the Machine document, which survives a
+				// reinstall. So the message says to edit the document and
+				// gives a size that passes.
+				return fmt.Errorf("storage role %s: the spec declares %s and the partition is %s, but a storage role can only grow. Declare %s or more. If the machine was reinstalled with a different layout, edit its Machine document to the layout it has now",
 					role.Name, role.Size, machine.SizeText(placed.CapacityBytes), machine.SizeText(placed.CapacityBytes))
 			}
 			continue
 		}
-		// A new role must name a disk this machine actually has. The
-		// device path only matters at claim time, which is the boot
-		// that this staging prepares for.
+		// A role with no partition yet gets one at the next boot, on a
+		// disk that must be attached.
 		if !deviceAttached(role.Device, facts.Hardware.BlockDevices) {
-			return fmt.Errorf("%s: device %s is not among this machine's block devices (%s)",
+			return fmt.Errorf("storage role %s: device %s is not one of the block devices of this machine (%s)",
 				role.Name, role.Device, deviceNames(facts.Hardware.BlockDevices))
 		}
 	}
@@ -105,14 +91,12 @@ func deviceNames(disks []machine.BlockDevice) string {
 	return strings.Join(names, ", ")
 }
 
-// renderManifest produces the canonical bytes to stage: a complete
-// Machine document with no status. The document carries the whole
-// spec, including the sysctls that need no reboot at all, so the
-// reboot converges everything at once. The rendering is
-// deterministic: sigs.k8s.io/yaml marshals through JSON with sorted
-// keys, so the same spec always produces the same bytes. The hash of
-// those bytes is the spec's identity everywhere: in staging
-// idempotence, in rejections, and in the facts.
+// renderManifest returns the bytes to stage and their hash: a Machine
+// document with the whole spec, sysctls included, and no status.
+// sigs.k8s.io/yaml marshals through JSON with sorted keys, so the same
+// spec always gives the same bytes and the same hash. The hash
+// identifies the spec in staging, in rejection records, and in the
+// boot's facts.
 func renderManifest(name string, spec machine.MachineSpec) ([]byte, string, error) {
 	doc := machine.Machine{
 		APIVersion: api.APIVersion,
@@ -127,44 +111,37 @@ func renderManifest(name string, spec machine.MachineSpec) ([]byte, string, erro
 	return body, machine.ManifestHash(body), nil
 }
 
-// A turn is the machine's standing with the rollout conductor
-// (rollout.go): whether the machine may reboot right now. A machine
-// with no cluster document has no conductor, so it reboots whenever
-// it needs to. A cluster member waits until the conductor records its
-// turn in the Cluster's ledger (turn.go). rebootPolicy: Auto checks
-// this, and so does a Manual machine whose request a person approved
-// through its Disruption: the approval moves the machine onto the
-// same turn-taking path.
+// A turn records whether the machine may reboot or restart k3s now. A
+// machine with no Cluster does so whenever it needs to. A cluster
+// member waits until cluster-operator gives it an entry in the
+// Cluster's status.rebootTurns (turn.go).
 type turn int
 
 const (
-	turnStandalone turn = iota // no cluster: reboots whenever it needs to
-	turnAwaiting               // cluster member, waiting for a grant
-	turnGranted                // cluster member, already granted
+	turnStandalone turn = iota // no Cluster
+	turnAwaiting               // cluster member with no entry in status.rebootTurns
+	turnGranted                // cluster member with an entry in status.rebootTurns
 )
 
-// A convergence is one reconcile pass's decision: the condition to
-// publish and which side effects to perform. decideConvergence
-// makes the decision; reconcile() acts.
+// A convergence is the result of one decision: the condition to
+// publish and the side effects that reconcile() performs.
 type convergence struct {
 	condition      api.Condition
-	stage          bool                       // write the manifest to the machineState filesystem
-	requestReboot  bool                       // write the reboot intent for init
-	requestRestart bool                       // write the restart intent; a k3s restart applies it
-	requestLoad    bool                       // write the modules intent; init loads the staged additions while the system runs
-	withdraw       bool                       // remove the staged manifest; the spec no longer names it
-	clearRejection bool                       // remove the rejection record; the spec it blocks is gone
+	stage          bool                       // write manifest to the machineState filesystem
+	requestReboot  bool                       // ask init to reboot
+	requestRestart bool                       // ask init to restart k3s
+	requestLoad    bool                       // ask init to load the added modules and serio entries into the running kernel
+	withdraw       bool                       // delete the staged manifest
+	clearRejection bool                       // delete the rejection record
 	manifest       []byte                     // the bytes to stage
-	hash           string                     // the bytes' identity
-	pending        *machine.PendingDisruption // the status.pending entry for this document, when one waits
+	hash           string                     // the hash of manifest
+	pending        *machine.PendingDisruption // the status.pending entry, while the document waits for a reboot or restart
 	keepBootNext   string                     // the request whose BootNext the reboot keeps (hold.go)
 }
 
-// The condition constructors for every convergence verdict. Three
-// documents converge through this machinery, each under its own
-// condition type (SpecConverged, ClusterConverged, VersionConverged).
-// All three share one set of reasons, so the constructors take the
-// type as a parameter instead of hard-coding it.
+// converged, notConverged, and convergenceUnknown build a condition.
+// Each staged document reports under its own condition type, such as
+// SpecConverged or ClusterConverged, so the type is a parameter.
 func converged(condType, reason, message string) api.Condition {
 	return api.Condition{Type: condType, Status: api.ConditionTrue, Reason: reason, Message: message}
 }
@@ -177,39 +154,28 @@ func convergenceUnknown(condType, reason, message string) api.Condition {
 	return api.Condition{Type: condType, Status: api.ConditionUnknown, Reason: reason, Message: message}
 }
 
-// The convergence constructors for the verdicts that every document's
-// decision table shares. The decision tables mirror one another by
-// design: they use the same guards in the same order, so a reader
-// who has followed one document's convergence can follow them all.
-// These constructors keep that mirroring exact, rather than
-// accidental.
-
-// factsIncomplete is the guard every decision starts with. With no
-// facts, or with facts that carry no boot record (an older init, or
-// a machine in the middle of an upgrade), the verdict is Unknown.
-// Guessing here could reboot a machine because of a misreading.
+// factsIncomplete is the result when there are no facts, or the facts
+// have no boot record, as from an older init. The condition is
+// Unknown and nothing happens, because a decision made from missing
+// facts could reboot a machine by mistake.
 func factsIncomplete(condType string) convergence {
 	return convergence{condition: convergenceUnknown(condType, "FactsIncomplete",
-		"the machine's facts carry no boot record yet")}
+		"The machine's facts have no boot record yet")}
 }
 
-// machineStateEphemeral is the verdict for when there is nowhere
-// durable to stage a document. The machineState role is backed by
-// memory, so anything staged would disappear at the next reboot,
-// which is exactly when it would be needed. what names the document
-// that has nowhere to go.
+// machineStateEphemeral is the result when the machineState role is
+// backed by memory, because a document staged there is lost at the
+// reboot that would apply it.
 func machineStateEphemeral(condType, what string) convergence {
 	return convergence{condition: notConverged(condType, "MachineStateEphemeral",
-		fmt.Sprintf("machineState is backed by memory; there is no durable filesystem to stage %s into; declare machineState in the machine's manifest", what))}
+		fmt.Sprintf("machineState is backed by memory, so there is no durable filesystem to stage %s into. Declare machineState in the machine's manifest", what))}
 }
 
-// convergedWithCleanup wraps a True verdict with the cleanup that
-// every document performs on convergence. When a manifest is still
-// staged for a spec the cluster no longer requests, this function
-// withdraws it, because the next boot would otherwise apply it. This
-// function also clears a standing rejection for the same reason: the
-// spec it blocks is no longer requested, so the record no longer
-// blocks anything.
+// convergedWithCleanup returns cond with a request to delete any
+// staged document and any rejection record. When the boot already
+// runs the spec, a staged document is from an edit that was reverted,
+// and the next boot would apply it. A rejection record blocks a spec
+// that is no longer requested.
 func convergedWithCleanup(cond api.Condition, stagedHash string, rejection *machine.Rejection) convergence {
 	return convergence{
 		condition:      cond,
@@ -218,34 +184,25 @@ func convergedWithCleanup(cond api.Condition, stagedHash string, rejection *mach
 	}
 }
 
-// gateDisruption finishes a staged document's convergence. The
-// staged bytes are already in the convergence, and what remains is
-// whether this machine may take its disruption right now. The
-// decision table is the same for every staged document, and it is
-// the safety core of the rollout design, so this function holds it
-// in one place. Manual policy waits for a person, and the
-// approvedHash of the machine's Disruption is how the person answers
-// (requests.go): an approval that covers the staged hash moves the
-// machine onto the same path Auto takes, through the conductor's turn
-// and the drain, which is safer than the state it replaces, where an
-// operator following the machine's own advice cuts power and no
-// budget applies at all. The approval arrives as the comma-separated
-// hashes that the approved request covers. A cluster
-// member on Auto (or approved Manual) waits for the conductor's
-// turn (AwaitingTurn is the same reason for both kinds of
-// disruption, which lets the conductor sequence them without
-// knowing the difference between them). Only a standalone machine,
-// or a machine that has been granted a turn, asks init to act. The
-// restart flag picks the kind of disruption: a k3s restart for
-// changes that k3s reads only when its process starts, and a
-// machine reboot for everything else. A leader's restart still
-// restarts the embedded datastore. This is the same exposure to a
-// lost quorum that a reboot has, so restarts wait for the same
-// turns as reboots do. Every branch also records the document in
-// status.pending, because a staged document waits for its
-// disruption until the disruption runs, whatever it waits on. The
-// messages differ for each document, but the reasons and their
-// order of precedence must not.
+// gateDisruption sets c's condition and requests for a staged
+// document that needs a reboot, or a k3s restart when restart is set.
+// It always records the document in status.pending. Every document
+// passes its own messages, but the reasons and their order are the
+// same for all of them:
+//
+//   - With rebootPolicy: Manual, the condition stays RebootPending or
+//     RestartPending until a person approves the operator's
+//     Disruption. approval is the comma-separated list of document
+//     hashes that the approved Disruption covers, which
+//     withRequestApprovals (requests.go) writes. When it has c.hash,
+//     the machine continues as under Auto, with a turn and a drain,
+//     so the disruption budgets apply.
+//   - A cluster member without a turn gets AwaitingTurn, for a reboot
+//     and a restart alike, so cluster-operator orders both in one
+//     queue. A restart waits for a turn too, because on a leader it
+//     restarts the embedded datastore, which can lose quorum as a
+//     reboot can.
+//   - Otherwise the result asks init to reboot or to restart k3s.
 func gateDisruption(c *convergence, condType string, policy machine.RebootPolicy, t turn, restart bool, approval, summary, pending, awaiting, requested string) {
 	kind := machine.DisruptionReboot
 	pendingReason, requestedReason := "RebootPending", "RebootRequested"
@@ -268,46 +225,28 @@ func gateDisruption(c *convergence, condType string, policy machine.RebootPolicy
 	}
 }
 
-// decideConvergence makes the whole convergence decision in one pure
-// function. The cases run in this order, and each one stops the
-// function as soon as it applies:
+// decideConvergence compares the Machine's spec with what this boot
+// applied, and decides what to stage and whether to request a reboot.
+// It returns at the first case that applies:
 //
-//  1. No facts, or facts with no boot record (an older init, or a
-//     machine in the middle of an upgrade): the verdict is Unknown.
-//     Guessing here could reboot a machine because of a misreading.
-//  2. No drift: the verdict is converged. This case also cleans up
-//     after an edit that was reverted. When a manifest is still
-//     staged for a spec the cluster no longer requests, this case
-//     withdraws it, because the next boot would otherwise apply it.
-//     This case also clears a standing rejection for the same
-//     reason: the spec it blocks is no longer requested, so the
-//     record no longer blocks anything.
-//  3. The desired spec is the one init rejected: the function
-//     refuses to stage it again. The rejection parameter comes from
-//     the durable quarantine record on machineState, not from
-//     facts. Facts are a snapshot taken at boot, and they do not
-//     change while the machine runs. But when an edit is reverted
-//     and then retried within one boot, the clearing of the
-//     rejection must take effect right away, not at the next
-//     reboot. Only a genuinely different edit, or clearing the
-//     record through convergence, unblocks the hash.
-//  4. The facts claim this exact manifest was actuated, yet drift
-//     still computes: this is a contradiction, and it can only mean
-//     a liken bug, with one exception. Parameter-only drift under a
-//     matching hash is a state a live load produces by design: it
-//     promotes the manifest and records only the parameters it
-//     delivered, so an undelivered one drifts toward the reboot
-//     that can deliver it (init/liveload.go). That shape takes the
-//     staged path below. Every other drift shape under a matching
-//     hash holds in the stuck condition, because holding is better
-//     than rebooting the machine on every reconcile pass.
-//  5. machineState is backed by memory: there is nowhere durable to
-//     stage a document.
-//  6. The spec fails validation against the machine's reality.
-//  7. Valid drift: the function stages the manifest, unless these
-//     exact bytes are already staged. Then, following rebootPolicy
-//     and the machine's turn, it requests the reboot, waits for the
-//     cluster's grant, or reports that a reboot is pending.
+//  1. There are no facts, or they have no boot record: Unknown.
+//  2. There is no drift: True, with cleanup (convergedWithCleanup).
+//  3. Init rejected this exact spec at boot: refuse to stage it
+//     again. rejection comes from the record on machineState and not
+//     from the facts, which are a snapshot from boot, so a reverted
+//     edit clears its rejection at once. A different edit has a
+//     different hash and is not blocked.
+//  4. The boot reports this exact manifest's hash, but drift remains:
+//     BootMismatch, which is a bug in liken. Without this case the
+//     operator would request a reboot on every pass. The exception is
+//     drift in module parameters only, because a live load promotes
+//     the manifest and applies only the parameters it can
+//     (init/liveload.go). That drift continues to case 7.
+//  5. machineState is backed by memory, so nothing can be staged.
+//  6. The spec fails validation against this machine.
+//  7. Stage the manifest, unless these exact bytes are staged already.
+//     Then request a live load, or let gateDisruption decide the
+//     reboot.
 func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
 		return factsIncomplete("SpecConverged")
@@ -324,144 +263,107 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 			m.Spec.ModuleParameters, facts.Boot.ModuleParameters),
 		machine.SerioDrift(m.Spec.Serio, facts.Boot.Serio),
 		machine.RlimitDrift(m.Spec.Rlimits, facts.Boot.Rlimits))
-	// The order difference stays apart from drift and never joins it.
-	// The lines in drift are the count that decides the live-load
-	// tier below, and every line there names something a load or a
-	// reboot can actuate. Only a boot actuates a reorder, and a
-	// reorder is worth no boot of its own, so it takes neither tier.
-	// It stages, and any later boot loads the list in the order the
-	// spec now gives.
+	// A change of module order is kept out of drift, because the checks
+	// below count drift lines, and a reorder is handled apart from them.
 	orderDiffs := machine.ModuleOrderDrift(m.Spec.Modules, facts.Boot.Modules)
 	if len(drift) == 0 && len(orderDiffs) == 0 {
 		return convergedWithCleanup(
-			converged("SpecConverged", "Converged", "this boot actuated the current spec"),
+			converged("SpecConverged", "Converged", "This boot applied the current spec"),
 			stagedHash, rejection)
 	}
 	diffs := strings.Join(slices.Concat(drift, orderDiffs), "; ")
 
 	manifest, hash, err := renderManifest(m.Metadata.Name, m.Spec)
 	if err != nil {
-		return convergence{condition: notConverged("SpecConverged", "StagingFailed", err.Error())}
+		return convergence{condition: notConverged("SpecConverged", "StagingFailed", "The spec is not staged: "+err.Error())}
 	}
 
 	if rejection != nil && rejection.Hash == hash {
 		return convergence{condition: notConverged("SpecConverged", "RejectedLastBoot",
-			fmt.Sprintf("init rejected this exact spec at boot: %s; edit the spec to something different", rejection.Reason))}
+			fmt.Sprintf("init rejected this spec at boot: %s. The operator does not stage a rejected spec again, so change the spec", rejection.Reason))}
 	}
-	// A matching hash may legitimately carry two shapes, and both are
-	// what a live load leaves behind. The first is a parameter the
-	// load could not deliver (list item 4 above): every drift line is
-	// a module parameter on an unchanged module set. The second is an
-	// order the load could not change, because the modules the boot
-	// loaded keep their places in the running kernel. An order
-	// difference lives outside drift, so it passes this test with no
-	// term of its own. The test is structural, a count over the
-	// drift's parts, so no drift text is ever matched and any other
-	// shape stays a contradiction.
+	// After a live load, the boot reports the manifest's hash while
+	// drift remains in module parameters the load could not apply, or
+	// in module order. Order is not in drift. parametersOnly compares
+	// counts, so any other drift line still makes a BootMismatch.
 	parametersOnly := len(storageDiffs) == 0 && len(networkDiffs) == 0 &&
 		len(added) == 0 && len(retracted) == 0 && len(parameterDiffs) == len(drift)
 	if facts.Boot.ManifestHash == hash && !parametersOnly {
 		return convergence{condition: notConverged("SpecConverged", "BootMismatch",
-			fmt.Sprintf("facts claim this spec was actuated, yet it differs from the boot's record (%s); refusing to reboot over a contradiction; this is a liken bug", diffs))}
+			fmt.Sprintf("The facts report that this boot applied the spec, but the spec differs from the boot's record (%s). The operator does not reboot while the two disagree. This is a defect in liken", diffs))}
 	}
 	if facts.Storage.MachineState.Backing != machine.BackingPartition {
 		return machineStateEphemeral("SpecConverged", "a manifest")
 	}
-	// The network spec is checked here as well as at boot. A spec
-	// that init would refuse is a spec that costs a reboot to find
-	// out about, and the machine would come back on its proven
-	// manifest with a rejection record instead of the network the
-	// person asked for. The check is the manifest's own consistency
-	// only: whether this machine really has a port with a declared
-	// name is a question only the boot can settle.
+	// Init validates the network spec at boot too. Checking here saves
+	// a reboot that ends on the proven manifest with a rejection
+	// record. Whether the machine has a port with each declared name
+	// is known only at boot.
 	if err := m.Spec.Network.Validate(); err != nil {
-		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
+		return convergence{condition: notConverged("SpecConverged", "StagingRejected", "The spec is not staged: "+err.Error())}
 	}
-	// Resource limits are checked for the same reason. Init would skip
-	// a limit it cannot apply rather than refuse the boot, so a typo
-	// here costs a reboot and then applies nothing at all, with only a
-	// console line to say why. Refusing to stage it says so in a
-	// condition instead.
+	// Init skips a resource limit it cannot apply and boots anyway, so
+	// a typo would cost a reboot, apply nothing, and show only on the
+	// console. Refusing here reports it in the condition.
 	if err := machine.ValidateRlimits(m.Spec.Rlimits); err != nil {
-		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
+		return convergence{condition: notConverged("SpecConverged", "StagingRejected", "The spec is not staged: "+err.Error())}
 	}
-	// A serio entry that fails here could never match a device, and
-	// the API server refuses the same entries, so only a manifest
-	// that no API server admitted reaches this check.
+	// The API server refuses the same serio entries, so this check
+	// fails only for a spec that the API server did not validate.
 	if err := machine.ValidateSerio(m.Spec.Serio); err != nil {
-		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
+		return convergence{condition: notConverged("SpecConverged", "StagingRejected", "The spec is not staged: "+err.Error())}
 	}
 	if err := validateStaging(m.Spec.Storage, facts); err != nil {
-		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
+		return convergence{condition: notConverged("SpecConverged", "StagingRejected", "The spec is not staged: "+err.Error())}
 	}
 
 	c := convergence{
 		manifest: manifest,
 		hash:     hash,
-		stage:    stagedHash != hash, // idempotence: skip the write when these exact bytes are already staged
+		stage:    stagedHash != hash, // skip the write when these exact bytes are staged already
 	}
 
-	// The next-boot tier comes first, because a difference in nothing
-	// but the declared order is the lightest answer here. Nothing can
-	// load a resident module again in a new place, so no load applies
-	// a reorder. Nothing on the machine is wrong while the reorder
-	// waits, so no reboot is worth asking for. Staging is the whole of
-	// the work, and the next boot, whatever its cause, loads the list
-	// in the new order. The cluster document has the same tier for the
-	// same reason (cluster.go).
+	// When only the module order changed, the manifest is staged and
+	// nothing is requested. A live load cannot reorder loaded modules,
+	// and a reorder alone does not justify a reboot, so the next boot,
+	// whatever its cause, loads the new order. cluster.go treats a
+	// change that only a boot reads the same way.
 	if len(drift) == 0 {
 		c.condition = notConverged("SpecConverged", "StagedForNextBoot",
-			fmt.Sprintf("spec staged for the next boot (%.12s); the machine loads the modules in the new order at its next boot and asks for no turn: %s", hash, diffs))
+			fmt.Sprintf("The spec (%.12s) is staged for the next boot. The machine loads the modules in the new order at its next boot, without a reboot turn: %s", hash, diffs))
 		return c
 	}
 
-	// Adding modules is the one machine-spec change that needs no
-	// disruption. Loading can happen while the system runs: the
-	// kernel binds a resident driver to hardware that is already
-	// plugged in, on its own. So when every difference is an added
-	// module, the manifest stages for durability, and init loads the
-	// additions into the running kernel. This case needs no policy
-	// gate and no reboot turn, the same as the sysctls the operator
-	// reconciles live: the gates exist for disruptions, and this is
-	// not one. (Removing a module still needs a reboot, because
-	// loading is one-way. The kernel offers no safe way to remove a
-	// driver while something is using it.)
+	// When every drift line is an added module or an added serio
+	// entry, init can apply the change to the running kernel, which
+	// binds a newly loaded driver to hardware already plugged in. The
+	// operator requests a load with no rebootPolicy check and no turn.
+	// A removed module or serio entry still needs a reboot, because
+	// pods can hold the devices it created.
 	//
-	// The test counts rather than naming the fields that must be
-	// unchanged. ModulesDrift writes exactly one line for each added
-	// module, so the counts match only when the added modules are the
-	// whole of the drift. This makes the safety property structural,
-	// the same way RestartApplies does it for the cluster document: a
-	// new spec field is reboot-class from the day it is added,
-	// because its diffs land in drift and never in added. Naming the
-	// fields instead would make a forgotten field silently live-class,
-	// and init's live loader promotes the staged manifest to proven
-	// whether or not it applied anything. A machine would then report
-	// itself converged on a spec it never actuated.
+	// The check compares counts and does not list the spec fields that
+	// must be unchanged. ModulesDrift and SerioDrift write one line for
+	// each addition, so the counts are equal only when additions are
+	// all of the drift, and a spec field added later needs a reboot by
+	// default. A list of fields would let a forgotten field take this
+	// path. Init's live loader promotes the staged manifest whether or
+	// not it applied everything, so the machine would report a spec
+	// that it never applied. cluster.RestartApplies protects the
+	// cluster document the same way.
 	//
-	// A declared reorder rides along with the additions. The load
-	// applies the additions in the order the manifest lists them, and
-	// the reorder of what the boot already loaded stays staged for the
-	// next boot.
-	//
-	// An added serio entry is live-class on the same terms. Init
-	// attaches it the moment the load declares it, and SerioDrift
-	// writes exactly one line for each added entry, so the count
-	// extends without naming a field. A retracted entry is
-	// reboot-class, like a retracted module: its holder keeps the port
-	// for the pods that hold the devices the port created.
+	// A reorder in the same edit applies at the next boot.
 	if len(retracted) == 0 && len(serioRetracted) == 0 && len(drift) == len(added)+len(serioAdded) {
 		c.requestLoad = true
 		c.condition = notConverged("SpecConverged", "LoadRequested",
-			fmt.Sprintf("module load requested to apply the staged spec (%.12s) in place: %s", hash, diffs))
+			fmt.Sprintf("A module load is requested to apply the staged spec (%.12s) in place: %s", hash, diffs))
 		return c
 	}
 
 	gateDisruption(&c, "SpecConverged", m.Spec.RebootPolicyOrDefault(), t, false,
 		m.Metadata.Annotations[requestApprovalKey],
 		"the machine spec: "+diffs,
-		fmt.Sprintf("spec staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply: %s", hash, diffs),
-		fmt.Sprintf("spec staged for the next boot (%.12s); waiting for the cluster to grant a reboot turn: %s", hash, diffs),
-		fmt.Sprintf("reboot requested to apply the staged spec (%.12s): %s", hash, diffs))
+		fmt.Sprintf("The spec (%.12s) is staged for the next boot. rebootPolicy is Manual, so reboot the machine or set rebootPolicy to Auto to apply it: %s", hash, diffs),
+		fmt.Sprintf("The spec (%.12s) is staged for the next boot and waits for a reboot turn from the cluster: %s", hash, diffs),
+		fmt.Sprintf("A reboot is requested to apply the staged spec (%.12s): %s", hash, diffs))
 	return c
 }

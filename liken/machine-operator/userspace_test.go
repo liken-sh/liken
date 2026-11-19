@@ -9,15 +9,13 @@ import (
 	"github.com/liken-sh/liken/liken/hardware"
 )
 
-// usbfsOnly is the delivery of a whole USB device: its own usbfs
-// node, which the walk reports from the device's directory.
+// usbfsOnly is the delivery of a whole USB device: its usbfs node.
 var usbfsOnly = delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
 	{Path: "/dev/bus/usb/001/002", Subsystem: "usb"},
 }})
 
-// A smart card reader has no kernel driver: pcscd reaches it through
-// libusb. The inventory publishes the device whole, named by its port
-// path, with the class its interface states.
+// A smart card reader has no kernel driver. The inventory publishes the
+// whole device, named by its port path, with its interface's class.
 func TestInventoryPublishesAUSBDeviceThatNoDriverBinds(t *testing.T) {
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "usb", Address: "1-2", Driver: "usb", Name: "QEMU QEMU USB CCID", Vendor: "08e6", Product: "4433"},
@@ -35,15 +33,12 @@ func TestInventoryPublishesAUSBDeviceThatNoDriverBinds(t *testing.T) {
 		t.Errorf("classCode = %v, want the interface's 0b", got)
 	}
 	if reader.AllowMultipleAllocations != nil {
-		t.Error("usbfs carries raw transfers with no arbitration, so the device is exclusive")
+		t.Error("the device is shareable, want exclusive because usbfs does not arbitrate raw transfers")
 	}
 }
 
-// The whole device publishes only while no interface has a driver.
-// A driver on one interface means that interface publishes, with the
-// usbfs node beside it, and a second claim on the whole device would
-// hand the same hardware to a second workload. usbfs on an interface
-// means a program holds the device now.
+// The whole device is not published when one interface has a kernel
+// driver, or has the usbfs driver because a program is using it.
 func TestInventoryLeavesAUSBDeviceThatADriverServes(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -62,7 +57,7 @@ func TestInventoryLeavesAUSBDeviceThatADriverServes(t *testing.T) {
 
 			for _, d := range devices {
 				if d.Name == "usb-1-6" {
-					t.Errorf("published the whole device beside %s", tc.name)
+					t.Errorf("the slice has the whole device beside %s, want it left out", tc.name)
 				}
 			}
 		})
@@ -89,7 +84,7 @@ func TestUserspaceDeviceNeedsAnInterface(t *testing.T) {
 
 // plugInCardReader writes a smart card reader into a fake sysfs the
 // way the kernel lays it out: the device, with its usbfs node and no
-// modalias, and its one interface, with a modalias and no driver.
+// modalias, and its interface, with a modalias and no driver.
 func plugInCardReader(t *testing.T, sysRoot string) {
 	t.Helper()
 	devices := filepath.Join(sysRoot, "bus", "usb", "devices")
@@ -97,7 +92,7 @@ func plugInCardReader(t *testing.T, sysRoot string) {
 	usbcore := filepath.Join(sysRoot, "bus", "usb", "drivers", "usb")
 	for _, dir := range []string{reader, iface, usbcore} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating %s: %v", dir, err)
 		}
 	}
 	files := map[string]string{
@@ -111,21 +106,21 @@ func plugInCardReader(t *testing.T, sysRoot string) {
 	}
 	for path, content := range files {
 		if err := os.WriteFile(path, []byte(content+"\n"), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing %s: %v", path, err)
 		}
 	}
 	for _, link := range []string{filepath.Join(reader, "subsystem"), filepath.Join(iface, "subsystem")} {
 		if err := os.Symlink(filepath.Join(sysRoot, "bus", "usb"), link); err != nil {
-			t.Fatal(err)
+			t.Fatalf("linking %s: %v", link, err)
 		}
 	}
 	if err := os.Symlink(usbcore, filepath.Join(reader, "driver")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("linking the driver of %s: %v", reader, err)
 	}
 }
 
-// The reader reaches the slice from sysfs as the kernel lays it out,
-// and a claim on it resolves to the reader's usbfs node.
+// A card reader read from sysfs is published whole, and a claim on it
+// resolves to its usbfs node.
 func TestACardReaderInSysfsPublishesWholeAndResolvesToItsUsbfsNode(t *testing.T) {
 	sysRoot := t.TempDir()
 	plugInCardReader(t, sysRoot)

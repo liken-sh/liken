@@ -1,8 +1,8 @@
 package main
 
-// The kernel stores some values in another form than the one written,
-// and two names can write one kernel variable. These tests play such a
-// kernel through applySysctl, over a fake /proc/sys.
+// The kernel can store a value in a different form than the one
+// written, and two sysctl names can write the same kernel variable.
+// These tests fake such a kernel by replacing applySysctl.
 
 import (
 	"os"
@@ -12,9 +12,10 @@ import (
 	"testing"
 )
 
-// kernelThat replaces applySysctl for one test with a writer that stores
-// what store answers for each write, and writes each of also too.
-func kernelThat(t *testing.T, store func(name, value string) string, also map[string]string) {
+// fakeKernel replaces applySysctl for one test. Each write stores the
+// value that store returns. When also maps the written name to another
+// name, the write stores the value under that name too.
+func fakeKernel(t *testing.T, store func(name, value string) string, also map[string]string) {
 	t.Helper()
 	saved := applySysctl
 	t.Cleanup(func() { applySysctl = saved })
@@ -40,19 +41,18 @@ func fakeSysctls(t *testing.T, values map[string]string) string {
 	for name, value := range values {
 		path := sysctlFilePath(dir, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the fake parameter directory: %v", err)
 		}
 		if err := os.WriteFile(path, []byte(value+"\n"), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the fake parameter %s: %v", name, err)
 		}
 	}
 	return dir
 }
 
-// A value the kernel stores in another form is written once. The next
-// pass finds it as the last write left it, writes nothing, and so a
-// backstop pass reports no repair. A pass with no memory writes it
-// every time.
+// sysctlMemory records the value that the kernel stored after the
+// last write, so the next pass writes nothing and a backstop pass
+// reports no repair. Without it, each pass writes the value again.
 func TestAValueTheKernelStoresInAnotherFormIsWrittenOnce(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -65,7 +65,7 @@ func TestAValueTheKernelStoresInAnotherFormIsWrittenOnce(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dir := fakeSysctls(t, map[string]string{"kernel.test_value": "0"})
-			kernelThat(t, func(_, value string) string { return strings.ReplaceAll(value, "0x10", "16") }, nil)
+			fakeKernel(t, func(_, value string) string { return strings.ReplaceAll(value, "0x10", "16") }, nil)
 			desired := map[string]string{"kernel.test_value": "0x10"}
 			applySysctls(dir, nil, desired, &passOutcome{}, c.mem)
 
@@ -79,14 +79,13 @@ func TestAValueTheKernelStoresInAnotherFormIsWrittenOnce(t *testing.T) {
 	}
 }
 
-// When a spec's parameter writes the same kernel variable as a default,
-// such as net.ipv4.conf.all.forwarding and net.ipv4.ip_forward, both
-// names report the value the kernel holds after both writes. The check
-// of the sysctls then finds nothing drifted, and the next pass writes
+// A parameter in the spec can write the same kernel variable as a
+// default, as net.ipv4.conf.all.forwarding and net.ipv4.ip_forward do.
+// After one pass, the check finds no drift and the next pass writes
 // nothing, so the two writes do not repeat on every check.
 func TestTwoNamesForOneSwitchSettleAfterOnePass(t *testing.T) {
 	dir := fakeSysctls(t, map[string]string{"net.ipv4.ip_forward": "0", "net.ipv4.conf.all.forwarding": "1"})
-	kernelThat(t, func(_, value string) string { return value }, map[string]string{"net.ipv4.conf.all.forwarding": "net.ipv4.ip_forward"})
+	fakeKernel(t, func(_, value string) string { return value }, map[string]string{"net.ipv4.conf.all.forwarding": "net.ipv4.ip_forward"})
 	defaults := map[string]string{"net.ipv4.ip_forward": "1"}
 	desired := map[string]string{"net.ipv4.conf.all.forwarding": "0"}
 	mem := newSysctlMemory()
@@ -102,15 +101,13 @@ func TestTwoNamesForOneSwitchSettleAfterOnePass(t *testing.T) {
 	}
 }
 
-// A write-only parameter refuses every read, so it is written once for
-// each value, not on every pass.
 func TestAWriteOnlyParameterIsWrittenOncePerValue(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads a file of mode 0200")
 	}
 	dir := fakeSysctls(t, map[string]string{"vm.drop_caches": "0"})
 	if err := os.Chmod(sysctlFilePath(dir, "vm.drop_caches"), 0o200); err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting the mode of vm.drop_caches: %v", err)
 	}
 	mem := newSysctlMemory()
 	first, second, third := &passOutcome{}, &passOutcome{}, &passOutcome{}
@@ -124,8 +121,8 @@ func TestAWriteOnlyParameterIsWrittenOncePerValue(t *testing.T) {
 	}
 }
 
-// A spec's name in the slash spelling overrides the default in the dot
-// spelling, because both name one file.
+// A spec name with slashes overrides the default with dots, because
+// both name the same file.
 func TestASlashSpellingOverridesTheDottedDefault(t *testing.T) {
 	kept := withoutKeys(map[string]string{"net.ipv4.ip_forward": "1", "vm.swappiness": "10"},
 		map[string]string{"net/ipv4/ip_forward": "0"})
@@ -141,9 +138,9 @@ func TestASlashSpellingOverridesTheDottedDefault(t *testing.T) {
 	}
 }
 
-// A parameter whose file did not exist, such as one under an interface
-// that has not appeared, makes the check run a pass once the file
-// exists.
+// A parameter whose file does not exist yet, such as one under a
+// network interface that has not appeared, makes the check report
+// drift when the file appears.
 func TestTheCheckRunsAPassWhenAMissingParameterAppears(t *testing.T) {
 	dir := fakeSysctls(t, nil)
 	_, missing, _, _ := applySysctls(dir, nil, map[string]string{"net.ipv4.conf.wg0.forwarding": "1"}, &passOutcome{}, newSysctlMemory())
@@ -162,10 +159,10 @@ func fakeSysctlsAt(t *testing.T, dir string, values map[string]string) {
 	for name, value := range values {
 		path := sysctlFilePath(dir, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the fake parameter directory: %v", err)
 		}
 		if err := os.WriteFile(path, []byte(value+"\n"), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the fake parameter %s: %v", name, err)
 		}
 	}
 }

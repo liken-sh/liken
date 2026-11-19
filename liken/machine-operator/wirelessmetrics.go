@@ -1,17 +1,5 @@
 package main
 
-// The radios' signal metrics, read at scrape time.
-//
-// A radio's signal level and transmit bitrate change all the time, so
-// they stay out of status: a status write for each change would cost a
-// raft round on every leader. The supplicant reads both from the
-// driver when it answers SIGNAL_POLL, and the driver measures them on
-// the frames the radio already receives, so a request sends nothing
-// over the air. This collector asks each radio's supplicant only when
-// Prometheus scrapes, the same way the clock's collector reads its
-// reading (clockmetrics.go). A machine that nobody scrapes sends no
-// request, and no timer reads the signal.
-
 import (
 	"fmt"
 	"os"
@@ -34,11 +22,18 @@ var (
 		[]string{"interface", "bssid"}, nil)
 )
 
-// wirelessAskPatience bounds each request to a supplicant, so a
-// supplicant that is restarting delays a scrape by at most this long.
-const wirelessAskPatience = time.Second
+// supplicantTimeout bounds each request to a supplicant, so a
+// supplicant that is restarting delays a scrape by at most this long
+// for each request.
+const supplicantTimeout = time.Second
 
-// wirelessCollector asks every supplicant under dir at each scrape.
+// wirelessCollector publishes each radio's signal level and transmit
+// bitrate on each scrape. Both change constantly, so they are not in
+// status, where each change would be a datastore write. Collect queries
+// wpa_supplicant through each control socket in dir only during a
+// scrape. The supplicant answers SIGNAL_POLL with what the driver
+// measured on frames the radio already received, so a query sends
+// nothing over the air.
 type wirelessCollector struct {
 	dir string
 }
@@ -48,25 +43,24 @@ func (c wirelessCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- wirelessBitrateDesc
 }
 
-// Collect finds the radios by their control sockets, so a machine with
-// no radio has no socket and publishes nothing. A radio that is not
-// associated, or a supplicant that does not answer, publishes nothing
-// for that radio, because a zero would read as a measurement.
+// Collect publishes nothing for a radio that is not associated, or
+// whose supplicant does not answer, because a zero would look like a
+// measurement.
 func (c wirelessCollector) Collect(ch chan<- prometheus.Metric) {
 	sockets, _ := filepath.Glob(machine.SupplicantSocket(c.dir, "*"))
 	for _, socket := range sockets {
 		ifname := filepath.Base(socket)
-		association, err := machine.AskSupplicantAssociation(socket, wirelessAskPatience)
+		association, err := machine.AskSupplicantAssociation(socket, supplicantTimeout)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "reading the signal of %s: %v\n", ifname, err)
+			fmt.Fprintf(os.Stderr, "reading the association of wireless interface %s: %v\n", ifname, err)
 			continue
 		}
 		if association.BSSID == "" {
 			continue
 		}
-		poll, err := machine.AskSupplicant(socket, "SIGNAL_POLL", wirelessAskPatience)
+		poll, err := machine.AskSupplicant(socket, "SIGNAL_POLL", supplicantTimeout)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "reading the signal of %s: %v\n", ifname, err)
+			fmt.Fprintf(os.Stderr, "polling the signal of wireless interface %s: %v\n", ifname, err)
 			continue
 		}
 		if rssi, err := strconv.Atoi(poll["RSSI"]); err == nil {

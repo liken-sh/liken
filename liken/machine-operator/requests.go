@@ -1,28 +1,27 @@
 package main
 
-// The machine's Disruptions: the request this operator keeps for its
-// own staged documents, and the reboots that people ask for.
+// The machine's Disruptions are this operator's own request for its
+// staged documents and the requests that people file to reboot the
+// machine.
 //
-// Every reboot and restart this operator makes waits for a turn that
-// the rollout conductor grants (cluster-operator/rollout.go), and the
-// conductor grants a turn to a machine with an approved Disruption
-// that is not done. The turn is the machine's entry in the Cluster's
-// ledger (turn.go). The operator still reports the reason AwaitingTurn,
-// which a conductor of the release before grants on.
+// Every reboot and restart that this operator makes waits for a turn
+// from cluster-operator (cluster-operator/rollout.go). cluster-operator
+// grants a turn to a machine that has an approved Disruption that is
+// not done, and records the turn in the Cluster's status.rebootTurns.
+// While the machine waits, the operator reports the reason
+// AwaitingTurn so that a person can see the wait. cluster-operator
+// grants on the Disruption and not on the reason.
 //
-//   - The operator keeps one request, <machine>.machine-operator, for
+//   - The operator's own request, <machine>.machine-operator, covers
 //     every staged document that waits for a reboot or a restart, and
-//     for a demotion. It updates the request when more is staged, and
-//     deletes it when nothing is. A deleted request takes its approval
-//     with it, so a later return to the same bytes asks again.
+//     a demotion. The operator updates the request when more is staged
+//     and deletes it when nothing is. A deleted request takes its
+//     approval with it, so the same bytes staged again need a new
+//     approval.
 //   - A person's request, <machine>.reboot-<boot>, asks for one reboot
-//     of the boot it names (rebootrequest.go). The operator writes the
-//     running boot into a request that names none, and marks a request
-//     Complete when the machine runs another boot.
-//
-// A cluster that does not serve the kind, or an RBAC from the release
-// before it, reads as no requests at all, and the operator asks for no
-// turn.
+//     of the boot that it names (rebootrequest.go). The operator
+//     writes the running boot into a request that names no boot, and
+//     marks a request Complete when the machine runs a different boot.
 
 import (
 	"crypto/sha256"
@@ -47,9 +46,10 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// requests reads the Disruptions that name this machine. A kind the
-// cluster does not serve or does not let this operator read answers
-// none, with no error.
+// requests returns the Disruptions for this machine. When the cluster
+// does not serve the kind, or the operator's RBAC from an earlier
+// release does not let it read them, it returns no requests and no
+// error, so the operator asks for no turn.
 func (r *reader) requests(name string) ([]disruption.Disruption, error) {
 	view := r.view(r.disruptions)
 	if view.Ready() && view.Absent {
@@ -65,16 +65,16 @@ func (r *reader) requests(name string) ([]disruption.Disruption, error) {
 	return listed, err
 }
 
-// requestsPath lists the Disruptions of one machine, with the field
-// selector the CRD declares.
+// requestsPath is the path that lists one machine's Disruptions, using
+// the field selector that the CRD declares.
 func requestsPath(name string) string {
 	return kubernetes.DisruptionsPath + "?fieldSelector=" + url.QueryEscape("spec.machine="+name)
 }
 
 func requestPath(name string) string { return kubernetes.DisruptionsPath + "/" + name }
 
-// peopleRequests answers the requests that a person filed, not this
-// operator, in name order.
+// peopleRequests returns the requests that people filed, not the one
+// this operator keeps, sorted by name.
 func peopleRequests(requests []disruption.Disruption) []disruption.Disruption {
 	var people []disruption.Disruption
 	for _, d := range requests {
@@ -86,8 +86,8 @@ func peopleRequests(requests []disruption.Disruption) []disruption.Disruption {
 	return people
 }
 
-// requestForBoot answers a person's request that asks to reboot the
-// running boot and is not complete, or nil.
+// requestForBoot returns a person's request that is not complete and
+// asks to reboot the running boot, or nil when there is none.
 func requestForBoot(requests []disruption.Disruption, bootID string) *disruption.Disruption {
 	for _, d := range peopleRequests(requests) {
 		if d.Spec.Kind == disruption.KindReboot && !d.Complete() && machine.RebootRequestNames(d.Spec.Hash, bootID) {
@@ -97,13 +97,13 @@ func requestForBoot(requests []disruption.Disruption, bootID string) *disruption
 	return nil
 }
 
-// settlePeopleRequests keeps each person's request current with the
-// boot: a request that names no boot gets the running one, so a request
-// written with kubectl alone names the boot it asks to end, and a
-// request for an earlier boot is marked Complete. A request with no
-// owner gets the Machine as its owner in the same write, so the
-// garbage collector deletes it with the Machine, the same as a request
-// the CLI files.
+// settlePeopleRequests updates each person's request to match the
+// running boot. A request that names no boot gets the running boot,
+// so a request written with kubectl alone still names the boot it
+// asks to end. A request for an earlier boot is marked Complete. A
+// request with no owner gets the Machine as its owner in the same
+// write, so the garbage collector deletes it with the Machine, as it
+// does a request that the CLI files.
 func settlePeopleRequests(r *reader, m *machine.Machine, requests []disruption.Disruption, bootID string, now time.Time) {
 	if bootID == "" {
 		return
@@ -119,23 +119,23 @@ func settlePeopleRequests(r *reader, m *machine.Machine, requests []disruption.D
 			if len(named.Metadata.OwnerReferences) == 0 && m.Metadata.UID != "" {
 				named.Metadata.OwnerReferences = disruption.New(d.Metadata.Name, m, d.Spec).Metadata.OwnerReferences
 			}
-			// A copy older than this operator's last write gets a 409,
-			// and the next pass writes from a fresh one.
+			// A copy older than this operator's last write gets a
+			// 409, and the next pass writes from a newer copy.
 			if err := writeRequest(r.client, http.MethodPut, requestPath(d.Metadata.Name), &named); err != nil && !apiclient.Stale(err) {
-				fmt.Printf("naming the boot and the owner in the Disruption %s: %v\n", d.Metadata.Name, err)
+				fmt.Printf("writing the boot hash and owner of Disruption %s: %v\n", d.Metadata.Name, err)
 			}
 		case d.Spent(bootID):
 			complete := api.Condition{
 				Type: disruption.CompleteCondition, Status: api.ConditionTrue, Reason: "BootChanged",
 				ObservedGeneration: d.Metadata.Generation,
-				Message: fmt.Sprintf("the request names boot %.12s, and the machine runs boot %.12s",
+				Message: fmt.Sprintf("The request names boot %.12s, and the machine runs boot %.12s",
 					d.Spec.Hash, bootID),
 			}
 			done := d
 			done.Status.Conditions = api.SetCondition(slices.Clone(d.Status.Conditions), complete, now)
 			if err := writeRequest(r.client, http.MethodPut, requestPath(d.Metadata.Name)+"/status", &done); err != nil {
 				if !apiclient.Stale(err) {
-					fmt.Printf("completing the Disruption %s: %v\n", d.Metadata.Name, err)
+					fmt.Printf("writing the Complete condition of Disruption %s: %v\n", d.Metadata.Name, err)
 				}
 				continue
 			}
@@ -148,15 +148,16 @@ func requestReference(d *disruption.Disruption) events.ObjectReference {
 	return events.ObjectReference{APIVersion: api.APIVersion, Kind: "Disruption", Name: d.Metadata.Name, UID: d.Metadata.UID}
 }
 
-// ownRequest answers the spec of this operator's own request: one
-// entry for each staged document in status.pending that waits for a
-// disruption, and one for a demotion that waits for its reboot. A
-// person's reboot request is in status.pending too, and it has its own
-// Disruption, so it is left out. It answers nil when nothing waits.
+// ownRequest returns the spec of this operator's own request, or nil
+// when nothing waits. The request covers each staged document in
+// status.pending that waits for a disruption, and a demotion that
+// waits for its reboot. A person's reboot request also appears in
+// status.pending, but it has its own Disruption, so ownRequest leaves
+// it out.
 //
-// The hash covers the condition and the hash of each entry, so the
-// request's hash changes whenever what it applies changes, and an
-// approval of the old hash no longer matches.
+// The request's hash is over the condition and hash of each covered
+// entry, so an approval of an earlier hash stops matching when the
+// request covers something different.
 func ownRequest(name string, pending []machine.PendingDisruption, demotion api.Condition) *disruption.Spec {
 	var lines, reasons []string
 	kind := disruption.KindRestart
@@ -190,25 +191,22 @@ func ownRequest(name string, pending []machine.PendingDisruption, demotion api.C
 	}
 }
 
-// requestApprovalKey carries the approval of this operator's own
-// request to the convergence decisions, on the decisions' own copy of
-// the Machine: the hashes of the staged documents that the approved
-// request covers, separated by commas. The operator writes only the
-// Machine's status subresource, so the key never reaches the API
-// server, and nothing outside this operator reads it.
+// requestApprovalKey is the annotation that passes the approval of
+// this operator's own request to the convergence decisions. It is set
+// on the copy of the Machine that the decisions read, and its value is
+// the comma-separated hashes of the staged documents that the approved
+// request covers. The operator writes only the Machine's status
+// subresource, so the annotation is never sent to the API server.
 const requestApprovalKey = "machine-operator.liken.sh/request-approves"
 
-// withRequestApprovals answers the copy of the Machine that the
-// convergence decisions read. A request whose spec.approvedHash names
-// its hash approves every staged document it covers, so one approval
-// releases one Disruption, whatever it applies.
+// withRequestApprovals returns the copy of the Machine that the
+// convergence decisions read. When a person approved the current hash
+// of the operator's own request, requestApprovalKey lists the hashes
+// of every staged document that the request covers.
 //
-// The approval counts only while the request covers what this
-// operator found waiting on its last pass, which status.pending holds.
-// A document staged since then changes the request's hash on this
-// pass, and the approval no longer matches. A request deleted when
-// nothing waited took its approval with it, so a later return to the
-// same bytes asks again.
+// The approval counts only while the request covers what the last
+// pass recorded in status.pending. A document staged since then
+// changes the request's hash, so the approval no longer matches.
 func withRequestApprovals(m *machine.Machine, requests []disruption.Disruption) *machine.Machine {
 	decided := *m
 	decided.Metadata.Annotations = maps.Clone(m.Metadata.Annotations)
@@ -238,17 +236,15 @@ func withRequestApprovals(m *machine.Machine, requests []disruption.Disruption) 
 	return &decided
 }
 
-// approvedByRequest reports whether a decision's approval names the
-// staged document's hash.
+// approvedByRequest reports whether the approval from
+// withRequestApprovals includes the staged document's hash.
 func approvedByRequest(approval, hash string) bool {
 	return hash != "" && slices.Contains(strings.Split(approval, ","), hash)
 }
 
-// syncOwnRequest makes this operator's request match what waits:
-// it creates the request, updates its kind, reason, and hash, or
-// deletes it when nothing waits. An update keeps spec.approvedHash, so
-// a person's approval of the current hash stands and an approval of an
-// earlier one no longer matches.
+// syncOwnRequest creates, updates, or deletes this operator's request
+// to match what waits. An update keeps spec.approvedHash, so an
+// approval still applies when the hash is unchanged.
 func syncOwnRequest(r *reader, m *machine.Machine, requests []disruption.Disruption, want *disruption.Spec) {
 	name := disruption.OwnName(m.Metadata.Name)
 	at := slices.IndexFunc(requests, func(d disruption.Disruption) bool { return d.Metadata.Name == name })
@@ -259,12 +255,12 @@ func syncOwnRequest(r *reader, m *machine.Machine, requests []disruption.Disrupt
 	case want == nil:
 		err = r.client.RequestJSON(http.MethodDelete, requestPath(name), nil, nil)
 		if err == nil {
-			fmt.Printf("deleted the Disruption %s; nothing waits for a disruption\n", name)
+			fmt.Printf("deleted Disruption %s because the machine needs no disruption\n", name)
 		}
 	case at < 0:
 		err = writeRequest(r.client, http.MethodPost, kubernetes.DisruptionsPath, disruption.New(name, m, *want))
 		if err == nil {
-			fmt.Printf("created the Disruption %s: %s\n", name, want.Reason)
+			fmt.Printf("created Disruption %s: %s\n", name, want.Reason)
 		}
 	default:
 		held := requests[at]
@@ -277,16 +273,17 @@ func syncOwnRequest(r *reader, m *machine.Machine, requests []disruption.Disrupt
 		updated.Spec = next
 		err = writeRequest(r.client, http.MethodPut, requestPath(name), &updated)
 		if err == nil {
-			fmt.Printf("updated the Disruption %s: %s\n", name, want.Reason)
+			fmt.Printf("updated Disruption %s: %s\n", name, want.Reason)
 		}
 	}
 	switch {
 	case err == nil, errors.Is(err, apiclient.ErrNotFound), errors.Is(err, apiclient.ErrForbidden):
 	case errors.Is(err, apiclient.ErrConflict):
-		// A copy older than this operator's last write, or a create
-		// that crossed one, settles on the next pass.
+		// The copy was older than this operator's last write, or a
+		// create raced another one. The next pass starts from the
+		// current state.
 	default:
-		fmt.Printf("keeping the Disruption %s: %v\n", name, err)
+		fmt.Printf("changing Disruption %s: %v\n", name, err)
 	}
 }
 
@@ -298,9 +295,10 @@ func writeRequest(c *apiclient.Client, method, path string, d *disruption.Disrup
 	return c.RequestJSON(method, path, body, nil)
 }
 
-// requestsSource is the watch of this machine's Disruptions. Each one
-// names its machine in spec.machine, which the CRD declares as a
-// selectable field, so no other machine's request reaches this pod.
+// requestsSource is the informer source for this machine's
+// Disruptions. The CRD declares spec.machine as a selectable field, so
+// the field selector keeps other machines' requests from reaching this
+// pod.
 func requestsSource(name string) informer.Source {
 	return informer.Source{Resource: disruptionResource, FieldSelector: "spec.machine=" + name}
 }

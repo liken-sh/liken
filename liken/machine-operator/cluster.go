@@ -1,44 +1,37 @@
 package main
 
-// The operator's half of the cluster document lifecycle: promotion
-// and convergence.
+// This file promotes and converges the cluster document, the Cluster
+// spec that init reads at boot.
 //
-// Init boots a staged cluster document without proof that the
-// document works. Init cannot prove it, because problems with the
-// document show up only after the boot. For example, a bad endpoint
-// only means the machine never joins its cluster, and init sees only
-// that k3s never settles. The operator provides the proof. It runs
-// as a pod, so if this code executes, then containerd, the kubelet,
-// and the machine's registration with its cluster all work under the
-// document this boot ran. At that point the staged document is
-// proven, and the operator is the right component to record this,
-// because it already has the read-write machineState mount it uses
-// to stage documents.
+// Init cannot tell at boot whether a cluster document works. A wrong
+// endpoint, for example, shows only as a machine that never joins its
+// cluster. When this operator's pod runs, containerd, the kubelet, and
+// the node's registration all worked under the document this boot
+// ran, so the operator promotes a staged document to proven. The
+// operator does the promotion because it already mounts machineState
+// read-write to stage documents.
 //
-// The same authority records a first boot's seed as the first proven
-// copy. This closes the loop for a machine that has never had a
-// staged document: from that point on, the durable store carries the
-// cluster document forward, not the image.
+// A first boot runs the seed, the copy in the image at
+// cluster.ClusterManifestPath. The operator records the seed as the
+// first proven copy, so later boots read the cluster document from
+// machineState and not from the image.
 //
-// Convergence applies the Machine's decision table to a different
-// document. The operator reads the in-cluster Cluster resource,
-// renders it in its canonical form, compares the result against what
-// this boot ran, and stages the difference for the next boot. The
-// one structural difference is scope. The Cluster is one document,
-// but the convergence machinery runs per machine. Each machine
-// stages its own copy on its own schedule, so machines can run
-// different cluster documents for a time. Each Machine's
-// ClusterConverged condition shows this disagreement when it
-// happens. This file contains no fleet orchestration by design. A
-// Cluster edit causes drift on every machine at once, and this code
-// only stages the change and asks for whatever disruption the change
-// needs, which for some edits is none at all. On a cluster member
-// with rebootPolicy Auto, asking means waiting for a turn from the
-// cluster operator's rollout conductor. The conductor grants
-// reboots to one machine at a time, so a fleet-wide edit rolls
-// through the fleet instead of rebooting every machine together.
-// Manual, the default policy, leaves each machine's pending reboot
-// visible and waiting for a person to act.
+// Convergence takes the same steps as decideConvergence for the
+// Machine. The operator reads the Cluster resource, renders it in
+// canonical form, compares it with the document this boot ran, and
+// stages it for the next boot when they differ. Each machine converges
+// on its own schedule, so machines can run different cluster documents
+// for a while, and each Machine's `ClusterConverged` condition shows
+// whether it runs the current one.
+//
+// This file does not order the rollout across the fleet. After a
+// Cluster edit, every machine stages the change and requests the
+// disruption it needs, if any. With rebootPolicy Auto, a cluster
+// member then waits for cluster-operator to give it an entry in the
+// Cluster's status.rebootTurns, and cluster-operator gives turns within
+// the Cluster's disruption budget. With rebootPolicy Manual, the
+// default, the condition reports the pending disruption until a person
+// acts on it.
 
 import (
 	"fmt"
@@ -51,23 +44,16 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// renderCluster produces the canonical bytes to stage: a Cluster
-// document with no status. The rendering is deterministic for the
-// same reason renderManifest's rendering is deterministic: yaml
-// marshals through JSON with sorted keys. So the hash of these bytes
-// is the document's identity everywhere.
+// renderCluster returns the canonical bytes of a Cluster document with
+// no status, and their hash. yaml.Marshal goes through JSON, which
+// sorts the keys, so the same spec always gives the same hash.
 //
-// The rendering excludes the release feed (spec.version and
-// spec.releases) before it runs. The operator reads those fields
-// live: it rereads them from the in-cluster resource on every pass,
-// so they take effect without a reboot. The drift comparison here
-// hashes the whole document. If the rendering included those
-// fields, every catalog append and every retargeting would change
-// the hash. Each change would then read as drift on every machine at
-// once and stage a fleet-wide reboot, even though the only work
-// needed is a download. (The Machine can carry sysctls in its
-// staged manifest, because its drift check, storageDrift, checks
-// individual fields rather than hashing the whole document.)
+// The rendering clears spec.version and spec.releases, because the
+// operator reads them from the Cluster resource on every pass and
+// applies them without a reboot. The drift check compares hashes of the
+// whole document, so with those fields in the hash, every new catalog
+// entry and every change of target version would stage a reboot on
+// every machine.
 func renderCluster(name string, spec cluster.ClusterSpec) ([]byte, string, error) {
 	spec.Version = ""
 	spec.Releases = cluster.ClusterReleasesSpec{}
@@ -84,70 +70,58 @@ func renderCluster(name string, spec cluster.ClusterSpec) ([]byte, string, error
 	return body, machine.ManifestHash(body), nil
 }
 
-// decideClusterConvergence follows the same order of checks as
-// decideConvergence, applied to the cluster document. With no facts,
-// the verdict is Unknown. When the boot ran the current document,
-// the machine is converged. This case also withdraws a stale staged
-// copy and clears a spent rejection. When init rejected a document
-// at the last boot, this function holds rather than staging it
-// again. When there is nowhere durable to stage, the condition
-// states this. Otherwise the code stages the drift. The disruption
-// then follows the Machine's rebootPolicy, the one setting that
-// governs both kinds of staging, and the machine's turn with the
-// rollout conductor. A cluster document edit causes drift on every
-// machine at once, which is the case the conductor is built to
-// sequence.
+// decideClusterConvergence decides what to stage and which disruption
+// to request for the cluster document. It checks the cases in the same
+// order as decideConvergence:
 //
-// The classifier in cluster/changes.go determines the kind of
-// disruption, and whether the document needs one at all. When the
-// only difference is the origin or the endpoint, nothing running
-// reads the change, so the document is staged and the next boot
-// applies it. When every differing domain is read only when k3s
-// starts its process (features, registries, the runtime
-// environment), a k3s restart applies the document, and the machine
-// and its pods stay up. Any other difference requires a reboot. An
-// unreadable boot document also requires a reboot, because a reboot
-// is the one action that always works.
+//   - With no facts, the condition is Unknown.
+//   - When this boot ran the document, the condition is True. The result
+//     also withdraws any staged copy and clears any rejection.
+//   - When init rejected this document at the last boot, it is not
+//     staged again.
+//   - When machineState is in memory, nothing can be staged.
+//   - Otherwise the document is staged, and gateDisruption sets the
+//     condition and the disruption from the Machine's rebootPolicy and
+//     the machine's turn.
 //
-// bootDoc and bootHash describe the document this boot ran (see
-// bootClusterDocument below). The hash is always the canonical
-// hash, never facts.Boot.ClusterManifestHash. The facts field
-// hashes raw bytes, and a hand-written seed and the operator's
-// rendering of the same spec produce different bytes with the same
-// meaning. Drift is a difference in meaning. A difference in
-// formatting alone must never disrupt a fleet.
+// The functions in cluster/changes.go choose the disruption. When only
+// spec.origin or spec.endpoint differs, the next boot applies the change
+// and the machine requests nothing. When every difference is in fields
+// that k3s reads only at process start, a k3s restart applies it. Any
+// other difference needs a reboot, and so does a change when the boot
+// document could not be read, because a reboot applies every kind of
+// change.
 //
-// reduced is the document this machine stages, which is not always
-// the document the deployment wrote: the retraction barrier
-// (retraction.go) puts back every feature whose precondition the
-// cluster does not satisfy, and held names those features. The whole
-// decision below runs on the reduced document, so a held feature
-// keeps running through the disruption this pass asks for. When the
-// reduction produces exactly the document this boot ran, no
-// disruption can advance the edit, and the verdict names the feature
-// that stays and the objects that keep it.
+// bootDoc and bootHash are the document this boot ran and its canonical
+// hash, from bootClusterDocument. facts.Boot.ClusterManifestHash hashes
+// the raw bytes instead, and a hand-written seed and the operator's
+// rendering of the same spec have different bytes. A formatting
+// difference must not reboot the fleet.
+//
+// reduced is the Cluster's document after reduceRetraction
+// (retraction.go). It adds back each removed feature while the cluster
+// still has objects that only that feature's controller can delete, and
+// held lists those features. The decision runs on reduced, so each of
+// those features keeps running through any disruption this pass
+// requests.
 func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootDoc *cluster.Cluster, bootHash, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
 		return factsIncomplete("ClusterConverged")
 	}
 	if facts.Boot.ClusterManifestSource != "" && bootHash == "" {
 		return convergence{condition: convergenceUnknown("ClusterConverged", "FactsIncomplete",
-			"the boot ran a cluster document but its publication is unreadable")}
+			"The boot ran a cluster document, but the file that init published for it cannot be read")}
 	}
 
 	manifest, hash, err := renderCluster(reduced.Metadata.Name, reduced.Spec)
 	if err != nil {
-		return convergence{condition: notConverged("ClusterConverged", "StagingFailed", err.Error())}
+		return convergence{condition: notConverged("ClusterConverged", "StagingFailed", "The cluster document is not staged: "+err.Error())}
 	}
 
 	if hash == bootHash {
-		// This boot already runs the reduced document, so no staging
-		// and no disruption moves the machine closer to the
-		// deployment's document. Only a change to the cluster's
-		// objects satisfies the precondition, and until that happens
-		// every pass reaches this same verdict. A stale staged copy
-		// still goes, because those bytes are not the document the
-		// next boot must run.
+		// While held lists a feature, no disruption can make progress
+		// until the objects that block its removal are gone. A staged
+		// copy is still withdrawn, so the next boot does not run it.
 		if len(held) > 0 {
 			return convergence{
 				condition: notConverged("ClusterConverged", "RetractionBlocked", holdMessage(held)),
@@ -155,39 +129,34 @@ func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *m
 			}
 		}
 		return convergedWithCleanup(
-			converged("ClusterConverged", "Converged", "this boot ran the current cluster document"),
+			converged("ClusterConverged", "Converged", "This boot ran the current cluster document"),
 			stagedHash, rejection)
 	}
 
-	// The rejection comes from the durable record, not from facts.
-	// Facts are a snapshot taken at boot, and they do not change
-	// while the machine runs. But when a revert clears a rejection,
-	// a retry must work again within the same boot.
+	// rejection is read from machineState and not from facts, which do
+	// not change until the next boot. So after a revert clears the
+	// record, the same document can be staged again during this boot.
 	if rejection != nil && rejection.Hash == hash {
 		return convergence{condition: notConverged("ClusterConverged", "RejectedLastBoot",
-			fmt.Sprintf("init rejected this exact cluster document at boot: %s; edit the cluster to something different", rejection.Reason))}
+			fmt.Sprintf("init rejected this cluster document at boot: %s. The operator does not stage a rejected document again, so change the Cluster", rejection.Reason))}
 	}
 	if facts.Storage.MachineState.Backing != machine.BackingPartition {
 		return machineStateEphemeral("ClusterConverged", "the cluster document")
 	}
 
-	// The next-boot tier comes before the restart and reboot gate,
-	// because it is the lightest answer the classifier can give. Only
-	// a boot reads the fields this edit touches, so staging the
-	// document is the whole of the work, and the machine adopts it at
-	// its next boot. No turn is requested, so a fleet-wide edit of
-	// these fields never enters the rollout conductor's queue.
-	// cluster/changes.go carries the reasoning, down to the one value
-	// a running follower still holds: the endpoint's host, in its time
-	// sources. The message states what happens, and leaves that
-	// argument to the classifier and to the CRD's field descriptions.
+	// The next-boot case comes before gateDisruption because it needs no
+	// turn, so a fleet-wide edit of spec.origin or spec.endpoint requests
+	// nothing from cluster-operator. Until its next boot, a running
+	// machine misses only this part of such an edit: a follower keeps
+	// the old endpoint's host in its time sources (NextBootApplies in
+	// cluster/changes.go).
 	if bootDoc != nil && cluster.NextBootApplies(bootDoc.Spec, reduced.Spec) {
 		return convergence{
 			manifest: manifest,
 			hash:     hash,
 			stage:    stagedHash != hash,
 			condition: notConverged("ClusterConverged", "StagedForNextBoot",
-				fmt.Sprintf("cluster document staged (%.12s); this machine applies it at its next boot, and asks for no turn", hash)),
+				fmt.Sprintf("The cluster document (%.12s) is staged, and this machine applies it at its next boot without a reboot turn", hash)),
 		}
 	}
 
@@ -198,15 +167,13 @@ func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *m
 		hash:     hash,
 		stage:    stagedHash != hash,
 	}
-	// On Manual, a person applies the change with a reboot or with
-	// an approval on the machine's Disruption. The boot path applies staged
-	// documents too, and nobody can restart k3s by hand on a machine
-	// with no shell, but an approved restart-class change converges
-	// through a granted k3s restart in place. The messages used
-	// after a grant name what init will actually do.
-	pending := fmt.Sprintf("cluster document staged (%.12s); rebootPolicy is Manual, so reboot the machine to apply (or set rebootPolicy: Auto)", hash)
+	// On Manual, the messages tell a person to reboot, because a machine
+	// has no shell from which to restart k3s by hand. Approving the
+	// operator's Disruption request also applies the document, by the
+	// restart or the reboot that gateDisruption chooses.
+	pending := fmt.Sprintf("The cluster document (%.12s) is staged. rebootPolicy is Manual, so reboot the machine or set rebootPolicy to Auto to apply it", hash)
 	if restart {
-		pending = fmt.Sprintf("cluster document staged (%.12s); rebootPolicy is Manual, so reboot the machine to apply (or set rebootPolicy: Auto, which would apply it with just a k3s restart)", hash)
+		pending = fmt.Sprintf("The cluster document (%.12s) is staged. rebootPolicy is Manual, so reboot the machine to apply it, or set rebootPolicy to Auto, which applies it with a k3s restart", hash)
 	}
 	apply := "a reboot"
 	if restart {
@@ -216,37 +183,26 @@ func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *m
 		m.Metadata.Annotations[requestApprovalKey],
 		"the cluster document",
 		pending,
-		fmt.Sprintf("cluster document staged (%.12s); waiting for the cluster to grant a turn to apply it by %s", hash, apply),
-		fmt.Sprintf("%s requested to apply the staged cluster document (%.12s)", apply, hash))
+		fmt.Sprintf("The cluster document (%.12s) is staged and waits for a turn from the cluster to apply it with %s", hash, apply),
+		fmt.Sprintf("The operator requests %s to apply the staged cluster document (%.12s)", apply, hash))
 	return c
 }
 
-// convergeClusterDocument runs the cluster document's part of one
-// reconcile pass. It reads the live Cluster resource, loads this
-// machine's durable rejection and staged copy from the store, and
-// makes the convergence decision. The decision is where the fleet's
-// temporary disagreement about the Cluster becomes visible: each
-// machine stages its own copy and reboots on its own policy, and
-// this condition reports where this one machine stands. The
-// function returns the live Cluster alongside the decision, because
-// version convergence (release.go) reads its release feed live. A
-// nil Cluster means the read failed, and the verdict already
-// reports that.
+// convergeClusterDocument runs the cluster document's part of a
+// reconcile pass. It also returns the Cluster, because version
+// convergence (release.go) reads spec.version and spec.releases from
+// it. A nil Cluster means the read failed, and the condition reports
+// the error.
 //
-// This is also where the retraction barrier reaches the live cluster.
-// A precondition is a statement about objects that no document
-// describes, such as the HelmCharts that still exist, so the
-// reduction needs the API client that the reader holds. It reads
-// nothing unless the edit stops a feature, so an ordinary pass reads
-// only the Cluster's copy. The HelmCharts and the LoadBalancer
-// Services are watched only while a retraction waits on them
-// (waits.go), and the copy of the Services keeps each one's name and
-// type alone.
+// reduceRetraction reads the live cluster only when the edit removes a
+// feature, to check whether objects such as HelmCharts still exist.
+// waits.go watches the HelmCharts and the LoadBalancer Services only
+// while a removal waits on them.
 func convergeClusterDocument(r *reader, store machine.ManifestStore, clusterName string, m *machine.Machine, facts *machine.MachineStatus, t turn) (convergence, *cluster.Cluster) {
 	liveCluster, err := r.cluster(clusterName)
 	if err != nil {
 		return convergence{condition: convergenceUnknown("ClusterConverged", "ClusterUnavailable",
-			fmt.Sprintf("reading cluster %s: %v", clusterName, err))}, nil
+			fmt.Sprintf("The Cluster %s cannot be read: %v", clusterName, err))}, nil
 	}
 	rejection, _ := store.LoadRejection()
 	bootDoc, bootHash := bootClusterDocument(cluster.BootClusterManifestPath)
@@ -257,15 +213,11 @@ func convergeClusterDocument(r *reader, store machine.ManifestStore, clusterName
 		bootDoc, bootHash, readStagedHash(store), t), liveCluster
 }
 
-// bootClusterDocument describes the document this boot ran. It
-// returns the parsed document, so the classifier can compare it
-// against the desired spec, and the document's canonical hash.
-// Canonical means the function parses the bytes init published and
-// re-renders them the way the operator renders every document. Both
-// sides of the drift comparison then pass through the same
-// rendering, so any remaining difference is a difference in
-// content, not formatting. A nil document and an empty hash mean the
-// published document is missing or unreadable.
+// bootClusterDocument reads the cluster document that init published
+// for this boot, and returns it parsed, with its canonical hash. It
+// renders the document the same way as the Cluster resource, so the
+// drift check compares content and not formatting. It returns nil and
+// "" when the file is missing or cannot be parsed.
 func bootClusterDocument(path string) (*cluster.Cluster, string) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -282,12 +234,10 @@ func bootClusterDocument(path string) (*cluster.Cluster, string) {
 	return c, hash
 }
 
-// settleClusterLifecycle promotes whatever this boot proved. It runs
-// on every reconcile pass and is idempotent. Once the operator
-// promotes a document, or once a newer document is staged for its
-// own proving boot, there is nothing left to do. The facts identify
-// exactly which bytes this boot ran, and the operator promotes only
-// those bytes.
+// settleClusterLifecycle records the cluster document that this boot
+// ran as proven. It runs on every pass and does nothing once the
+// document is proven. It promotes only bytes whose hash matches the one
+// in facts.
 func settleClusterLifecycle(root, seedPath string, facts *machine.MachineStatus, out *passOutcome) {
 	if facts == nil || facts.Storage.MachineState.Backing != machine.BackingPartition {
 		return // nothing durable to settle
@@ -301,9 +251,8 @@ func settleClusterLifecycle(root, seedPath string, facts *machine.MachineStatus,
 			return // already promoted, or nothing staged
 		}
 		if machine.ManifestHash(raw) != facts.Boot.ClusterManifestHash {
-			// A newer document arrived after this boot started. It
-			// has not had its own proving boot yet, and promoting it
-			// now would skip that trial.
+			// A document staged after this boot started must prove
+			// itself at its own boot.
 			return
 		}
 		if err := store.Promote(); err != nil {
@@ -312,7 +261,7 @@ func settleClusterLifecycle(root, seedPath string, facts *machine.MachineStatus,
 			return
 		}
 		out.wrote("promoting the cluster document")
-		fmt.Printf("the cluster document proved out; %.12s is now proven\n", facts.Boot.ClusterManifestHash)
+		fmt.Printf("the staged cluster document is now proven (%.12s)\n", facts.Boot.ClusterManifestHash)
 
 	case machine.ManifestSourceSeed:
 		if proven, err := store.LoadProven(); proven != nil || err != nil {
@@ -323,9 +272,8 @@ func settleClusterLifecycle(root, seedPath string, facts *machine.MachineStatus,
 			return
 		}
 		if machine.ManifestHash(raw) != facts.Boot.ClusterManifestHash {
-			// The seed file changed after this machine booted.
-			// Recording it now would mark as proven bytes that
-			// nobody ran.
+			// The seed differs from the bytes this boot ran, and only
+			// bytes that a boot ran are recorded as proven.
 			return
 		}
 		if err := store.WriteProven(raw); err != nil {

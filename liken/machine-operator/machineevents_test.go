@@ -1,8 +1,8 @@
 package main
 
-// These tests run the reconcile loop in a synctest bubble with no
-// ticker, and hand it the machine's readers as channels the test
-// sends on, because a test cannot make the kernel send a uevent.
+// Tests of how the machine's readers wake the reconcile loop. A test
+// gives the loop channels in place of the readers and sends the events
+// itself, because it cannot make the kernel send a uevent.
 
 import (
 	"context"
@@ -27,22 +27,20 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// plugInSoundCard writes an audio controller into the fake sysfs: a
-// driven pci device with one ALSA control node beneath it.
+// plugInSoundCard writes an audio controller into the fake sysfs: a pci
+// device bound to a driver, with one ALSA control node under it.
 func plugInSoundCard(t *testing.T, sysRoot string) {
 	t.Helper()
 	plugInSoundCardAt(t, sysRoot, "0000:00:1f.3", 0)
 }
 
-// plugInSoundCardAt writes one audio controller at a pci address, with
-// the control node of card number index.
 func plugInSoundCardAt(t *testing.T, sysRoot, address string, index int) {
 	t.Helper()
 	card := filepath.Join(sysRoot, "bus", "pci", "devices", address)
 	node := filepath.Join(card, "sound", fmt.Sprintf("card%d", index), fmt.Sprintf("controlC%d", index))
 	for _, dir := range []string{node, filepath.Join(sysRoot, "bus", "pci", "drivers", "snd_hda_intel"), filepath.Join(sysRoot, "class", "sound")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the sound card directories: %v", err)
 		}
 	}
 	files := map[string]string{
@@ -52,7 +50,7 @@ func plugInSoundCardAt(t *testing.T, sysRoot, address string, index int) {
 	}
 	for path, content := range files {
 		if err := os.WriteFile(path, []byte(content+"\n"), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the sound card files: %v", err)
 		}
 	}
 	links := map[string]string{
@@ -61,13 +59,13 @@ func plugInSoundCardAt(t *testing.T, sysRoot, address string, index int) {
 	}
 	for link, target := range links {
 		if err := os.Symlink(target, link); err != nil {
-			t.Fatal(err)
+			t.Fatalf("linking the sound card: %v", err)
 		}
 	}
 }
 
-// sliceDevices reads the names in node-1's ResourceSlice. A machine
-// with nothing to publish has no slice.
+// sliceDevices returns the device names in node-1's ResourceSlice, or
+// nil when there is no slice.
 func sliceDevices(t *testing.T, l *loop) []string {
 	t.Helper()
 	slice := &kubernetes.ResourceSlice{}
@@ -76,7 +74,7 @@ func sliceDevices(t *testing.T, l *loop) []string {
 		return nil
 	}
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the resource slice: %v", err)
 	}
 	var names []string
 	for _, d := range slice.Spec.Devices {
@@ -85,13 +83,13 @@ func sliceDevices(t *testing.T, l *loop) []string {
 	return names
 }
 
-// startLoop runs the loop until the test ends, and answers a channel
-// that carries what run returned.
+// startLoop runs the loop until the test ends, and returns a channel
+// that receives the error from run.
 func startLoop(t *testing.T, l *loop) <-chan error {
 	t.Helper()
 	current, err := l.objects.machine("node-1")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Machine: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done, finished := make(chan error, 1), make(chan struct{})
@@ -102,13 +100,12 @@ func startLoop(t *testing.T, l *loop) <-chan error {
 	return done
 }
 
-// A device that arrives after the first pass reaches the slice on the
-// uevent the kernel sends for it, one quiet second later, with no
-// ticker.
+// A device that arrives after the first pass appears in the slice one
+// second after its uevent.
 func TestAUeventWakesAPassThatPublishesTheNewDevice(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		watch := &fakeFactsWatch{wake: make(chan struct{}, 1)}
 		l, _ := testLoop(t, newPassAPI(), watch)
 		uevents := make(chan struct{}, 1)
@@ -128,12 +125,10 @@ func TestAUeventWakesAPassThatPublishesTheNewDevice(t *testing.T) {
 	})
 }
 
-// A device that enumerates sends a burst of uevents, and the burst
-// makes one pass, not one pass for each event.
 func TestABurstOfUeventsSettlesIntoOnePass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		watch := &fakeFactsWatch{wake: make(chan struct{}, 1)}
 		l, _ := testLoop(t, newPassAPI(), watch)
 		uevents := make(chan struct{}, 1)
@@ -154,12 +149,12 @@ func TestABurstOfUeventsSettlesIntoOnePass(t *testing.T) {
 	})
 }
 
-// Another process that rewrites /etc/hosts sends an inotify event, and
-// the pass it wakes writes the declared file back.
+// When another process rewrites /etc/hosts, the pass that the inotify
+// event wakes writes the declared file back.
 func TestAHostsEventWakesAPassThatWritesTheFileBack(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		l, _ := testLoop(t, newPassAPI(), &fakeFactsWatch{wake: make(chan struct{}, 1)})
 		hosts := make(chan struct{}, 1)
 		l.hosts = hosts
@@ -167,11 +162,11 @@ func TestAHostsEventWakesAPassThatWritesTheFileBack(t *testing.T) {
 		synctest.Wait()
 		written, err := os.ReadFile(hostsPath)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the hosts file: %v", err)
 		}
 
 		if err := os.WriteFile(hostsPath, []byte("127.0.0.1 localhost\n"), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the hosts file: %v", err)
 		}
 		hosts <- struct{}{}
 		time.Sleep(time.Second)
@@ -183,8 +178,7 @@ func TestAHostsEventWakesAPassThatWritesTheFileBack(t *testing.T) {
 	})
 }
 
-// A reader that stops ends the loop with an error that names it, and
-// main ends the process on that error.
+// main exits the process on the error that run returns.
 func TestALoopEndsWhenAReaderStops(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -198,7 +192,7 @@ func TestALoopEndsWhenAReaderStops(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				isolatePass(t)
-				seedSysctls(t)
+				writeAppliedSysctls(t)
 				l, _ := testLoop(t, newPassAPI(), &fakeFactsWatch{wake: make(chan struct{}, 1)})
 				reader := make(chan struct{})
 				tc.reader(l, reader)
@@ -211,7 +205,7 @@ func TestALoopEndsWhenAReaderStops(t *testing.T) {
 				select {
 				case err := <-done:
 					if err == nil || err.Error() != tc.want {
-						t.Errorf("run answered %v, want %q", err, tc.want)
+						t.Errorf("run returned %v, want %q", err, tc.want)
 					}
 				default:
 					t.Error("the loop kept running after its reader stopped")
@@ -221,11 +215,10 @@ func TestALoopEndsWhenAReaderStops(t *testing.T) {
 	}
 }
 
-// A facts watch that dies ends the loop, the same as a reader.
 func TestALoopEndsWhenTheFactsWatchDies(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		dying := &fakeFactsWatch{wake: make(chan struct{})}
 		l, _ := testLoop(t, newPassAPI(), dying)
 		done := startLoop(t, l)
@@ -237,7 +230,7 @@ func TestALoopEndsWhenTheFactsWatchDies(t *testing.T) {
 		select {
 		case err := <-done:
 			if !errors.Is(err, errFactsStopped) {
-				t.Errorf("run answered %v, want %v", err, errFactsStopped)
+				t.Errorf("run returned %v, want %v", err, errFactsStopped)
 			}
 		default:
 			t.Error("the loop kept running after the facts watch died")
@@ -245,9 +238,8 @@ func TestALoopEndsWhenTheFactsWatchDies(t *testing.T) {
 	})
 }
 
-// A facts watch that cannot open ends the loop before its first pass.
-// init publishes the facts before the operator can start, so the
-// error means something is wrong with the machine.
+// init publishes the facts before the operator starts, so a facts
+// watch that cannot open means the machine is broken.
 func TestALoopEndsWhenTheFactsWatchCannotOpen(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
@@ -258,13 +250,11 @@ func TestALoopEndsWhenTheFactsWatchCannotOpen(t *testing.T) {
 		err := <-startLoop(t, l)
 
 		if !errors.Is(err, os.ErrPermission) || api.reads.Load() != 1 {
-			t.Errorf("run answered %v after %d passes, want %v and none", err, api.reads.Load()-1, os.ErrPermission)
+			t.Errorf("run returned %v after %d passes, want %v and none", err, api.reads.Load()-1, os.ErrPermission)
 		}
 	})
 }
 
-// The relay answers nil when its context ends, so a loop that stops
-// for any other reason reads no error from it.
 func TestARelayEndsQuietlyWithItsContext(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
@@ -274,31 +264,31 @@ func TestARelayEndsQuietlyWithItsContext(t *testing.T) {
 		cancel()
 
 		if err := <-done; err != nil {
-			t.Errorf("relay answered %v, want nil", err)
+			t.Errorf("relay returned %v, want nil", err)
 		}
 	})
 }
 
-// The seams open the real readers. The uevent listener opens as any
-// user, and the hosts watch opens on the directory of hostsPath.
+// The uevent listener opens as any user, and isolatePass points
+// hostsPath at a directory that exists, so both real readers open in a
+// test.
 func TestTheSeamsOpenTheRealReaders(t *testing.T) {
 	isolatePass(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	if _, err := watchHostsFile(ctx); err != nil {
-		t.Errorf("watchHostsFile: %v", err)
+		t.Errorf("opening the hosts watch: %v", err)
 	}
 	if _, err := listenForUevents(ctx); err != nil {
-		t.Errorf("listenForUevents: %v", err)
+		t.Errorf("opening the uevent listener: %v", err)
 	}
 }
 
-// The slice watch wakes the loop for a change this operator did not
-// make: another writer's update, and a delete. The operator's own write
-// reaches the watch as an update at the version the write answered, and
-// wakes nothing, so a write that the API server stores in another form
-// cannot wake one pass after another.
+// The operator's own slice write comes back through the watch at the
+// version that the write returned, and wakes nothing. Otherwise a write
+// that the API server stores in a different form would wake one pass
+// after another.
 func TestTheSliceWatchWakesOnlyForAnotherWritersChange(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
@@ -322,7 +312,7 @@ func TestTheSliceWatchWakesOnlyForAnotherWritersChange(t *testing.T) {
 		}
 
 		if err := r.sliceWriter().Write(client, "node-1", nil, owner, []kubernetes.SliceDevice{{Name: "usb-1-2"}}); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the first resource slice: %v", err)
 		}
 		ownCreate := woke()
 		current, err := r.resourceSlice("node-1")
@@ -330,16 +320,16 @@ func TestTheSliceWatchWakesOnlyForAnotherWritersChange(t *testing.T) {
 			t.Fatalf("reading the slice: %v", err)
 		}
 		if err := r.sliceWriter().Write(client, "node-1", current, owner, []kubernetes.SliceDevice{{Name: "usb-1-3"}}); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the second resource slice: %v", err)
 		}
 		ownUpdate := woke()
 		foreign, _ := json.Marshal(fakeapi.Object("resource.k8s.io/v1", "ResourceSlice", "", "node-1-liken.sh", nil))
 		if err := client.RequestJSON(http.MethodPut, kubernetes.ResourceSlicesPath+"/node-1-liken.sh", foreign, nil); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the foreign resource slice: %v", err)
 		}
 		foreignUpdate := woke()
 		if err := client.RequestJSON(http.MethodDelete, kubernetes.ResourceSlicesPath+"/node-1-liken.sh", nil, nil); err != nil {
-			t.Fatal(err)
+			t.Fatalf("deleting the resource slice: %v", err)
 		}
 		deleted := woke()
 
@@ -350,8 +340,8 @@ func TestTheSliceWatchWakesOnlyForAnotherWritersChange(t *testing.T) {
 	})
 }
 
-// refusingSlices answers every write of a ResourceSlice with a 503 and
-// counts them.
+// refusingSlices responds to every write of a ResourceSlice with a 503
+// and counts the writes.
 type refusingSlices struct {
 	next   http.Handler
 	writes atomic.Int64
@@ -366,12 +356,12 @@ func (h *refusingSlices) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.next.ServeHTTP(w, r)
 }
 
-// A slice write that failed is written again on the retry timer, with
-// no other wake, until a write lands.
+// A failed slice write is retried on the retry timer, with no other
+// wake.
 func TestAFailedSliceWriteIsWrittenAgainOnTheRetry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		plugInSoundCard(t, draSysfsRoot)
 		api := &refusingSlices{next: newPassAPI()}
 		l, _ := testLoop(t, api, &fakeFactsWatch{wake: make(chan struct{}, 1)})
@@ -388,11 +378,10 @@ func TestAFailedSliceWriteIsWrittenAgainOnTheRetry(t *testing.T) {
 	})
 }
 
-// A facts watch whose Sync fails logs it and still runs the pass.
 func TestAPassRunsWhenTheFactsWatchCannotSync(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		api := &countingMachineReads{next: newPassAPI()}
 		l, _ := testLoop(t, api)
 		l.watchFactsTree = func(context.Context) (*factsWatch, error) {
@@ -407,9 +396,8 @@ func TestAPassRunsWhenTheFactsWatchCannotSync(t *testing.T) {
 	})
 }
 
-// A facts watch that is already dead when the loop starts ends the
-// loop before its first pass, because the pass would read a tree that
-// nothing watches.
+// A facts watch that is closed before the first pass ends the loop,
+// because the pass would read a tree that nothing watches.
 func TestALoopEndsBeforeItsFirstPassOnADeadFactsWatch(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
@@ -421,17 +409,15 @@ func TestALoopEndsBeforeItsFirstPassOnADeadFactsWatch(t *testing.T) {
 		err := <-startLoop(t, l)
 
 		if !errors.Is(err, errFactsStopped) || api.reads.Load() != 1 {
-			t.Errorf("run answered %v after %d passes, want %v and none", err, api.reads.Load()-1, errFactsStopped)
+			t.Errorf("run returned %v after %d passes, want %v and none", err, api.reads.Load()-1, errFactsStopped)
 		}
 	})
 }
 
-// A process that keeps writing another value to a file the pass owns
-// makes a pass every five seconds at most, not one for each write.
 func TestAFightOverAFileMakesAPassEveryFiveSecondsAtMost(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
-		seedSysctls(t)
+		writeAppliedSysctls(t)
 		watch := &fakeFactsWatch{wake: make(chan struct{}, 1)}
 		l, _ := testLoop(t, newPassAPI(), watch)
 		hosts := make(chan struct{}, 1)
@@ -454,10 +440,10 @@ func TestAFightOverAFileMakesAPassEveryFiveSecondsAtMost(t *testing.T) {
 	})
 }
 
-// A watch that recovers from a failure makes the next pass read every
-// kind from the API server, because the copy answers again before the
-// events missed during the outage arrive. The pass after that reads
-// the copies again.
+// A watch's cached copy is ready again as soon as the API server
+// accepts the watch, before the events missed during the failure
+// arrive. So the next pass reads every kind from the API server, and
+// the pass after it reads the cache again.
 func TestAPassAfterARecoveryReadsTheAPIServerOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
@@ -478,7 +464,7 @@ func TestAPassAfterARecoveryReadsTheAPIServerOnce(t *testing.T) {
 				func() error { _, err := pass.resourceSlice("node-1"); return err },
 			} {
 				if err := read(); err != nil && !errors.Is(err, apiclient.ErrNotFound) {
-					t.Fatal(err)
+					t.Fatalf("reading before the pass: %v", err)
 				}
 			}
 			return fake.Requests()
@@ -495,9 +481,8 @@ func TestAPassAfterARecoveryReadsTheAPIServerOnce(t *testing.T) {
 	})
 }
 
-// A hosts watch whose directory does not exist is the pod template
-// older than the mount, and the operator runs without it. Any other
-// failure to open ends the process.
+// A missing directory means a pod template older than the /host/etc
+// mount.
 func TestOnlyAMissingDirectoryLetsTheOperatorRunWithoutTheHostsWatch(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -511,16 +496,16 @@ func TestOnlyAMissingDirectoryLetsTheOperatorRunWithoutTheHostsWatch(t *testing.
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := hostsWatchFailure(c.err) != nil; got != c.fatal {
-				t.Errorf("fatal = %v, want %v", got, c.fatal)
+				t.Errorf("hostsWatchFailure(%v) is fatal = %v, want %v", c.err, got, c.fatal)
 			}
 		})
 	}
 }
 
 // The Machine watch wakes the loop for another writer's change, such as
-// the conductor's grant of a reboot turn, and not for the echo of this
-// operator's own status write. Each status write would otherwise cost a
-// second pass that finds nothing to do.
+// cluster-operator's grant of a reboot turn, and not for this operator's
+// own status write. Otherwise each status write would cost a second
+// pass that finds nothing to do.
 func TestTheMachineWatchWakesOnlyForAnotherWritersChange(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
@@ -544,23 +529,23 @@ func TestTheMachineWatchWakesOnlyForAnotherWritersChange(t *testing.T) {
 
 		current, err := r.machine("node-1")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the Machine: %v", err)
 		}
 		status := current.Status
 		status.Phase = "Ready"
 		if err := r.publishStatus(current, &status); err != nil {
-			t.Fatal(err)
+			t.Fatalf("publishing the Machine status: %v", err)
 		}
 		ownWrite := woke()
 		current, err = r.machine("node-1")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the Machine again: %v", err)
 		}
 		granted := *current
 		granted.Status.Phase = "Draining"
 		body, _ := json.Marshal(&granted)
 		if err := client.RequestJSON(http.MethodPut, kubernetes.MachinesPath+"/node-1/status", body, nil); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the Machine status as another writer: %v", err)
 		}
 		anotherWrite := woke()
 

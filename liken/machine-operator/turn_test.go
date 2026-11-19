@@ -1,8 +1,5 @@
 package main
 
-// The turn is the machine's entry in the Cluster's ledger, confirmed
-// with a read of the API server.
-
 import (
 	"encoding/json"
 	"testing"
@@ -13,8 +10,9 @@ import (
 	"github.com/liken-sh/liken/liken/kubernetes/fakeapi"
 )
 
-// ledgerAPI serves a Cluster whose ledger names the given machines.
-func ledgerAPI(t *testing.T, machines ...string) *fakeapi.Server {
+// rebootTurnsAPI serves a Cluster whose status.rebootTurns has an entry
+// for each of the machines.
+func rebootTurnsAPI(t *testing.T, machines ...string) *fakeapi.Server {
 	t.Helper()
 	c := cluster.Cluster{APIVersion: api.APIVersion, Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
 	for _, name := range machines {
@@ -25,19 +23,19 @@ func ledgerAPI(t *testing.T, machines ...string) *fakeapi.Server {
 	})
 }
 
-func TestTheTurnIsTheMachinesEntryInTheLedger(t *testing.T) {
+func TestTheMachineHasATurnWhenTheClusterHasAnEntryForIt(t *testing.T) {
 	cases := []struct {
-		name   string
-		ledger []string
-		holds  bool
+		name    string
+		entries []string
+		holds   bool
 	}{
 		{"an entry for the machine", []string{"node-3", "node-4"}, true},
 		{"entries for other machines", []string{"node-3"}, false},
-		{"an empty ledger", nil, false},
+		{"no entries", nil, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			r := &reader{client: testClient(t, ledgerAPI(t, c.ledger...))}
+			r := &reader{client: testClient(t, rebootTurnsAPI(t, c.entries...))}
 
 			if got := holdsTurn(r, "lab", "node-4"); got != c.holds {
 				t.Errorf("holdsTurn = %v, want %v", got, c.holds)
@@ -46,25 +44,25 @@ func TestTheTurnIsTheMachinesEntryInTheLedger(t *testing.T) {
 	}
 }
 
-// A Cluster that does not read grants no turn.
 func TestAnUnreadableClusterGrantsNoTurn(t *testing.T) {
 	r := &reader{client: testClient(t, fakeapi.New(map[string]*fakeapi.Collection{}))}
 
 	if holdsTurn(r, "lab", "node-4") {
-		t.Error("holdsTurn = true for a Cluster the API server does not hold")
+		t.Error("holdsTurn = true for a Cluster that the API server does not have, want false")
 	}
 }
 
-// toObject is a value as the fake stores it.
+// toObject converts v to the generic form that the fake server
+// stores.
 func toObject(t *testing.T, v any) map[string]any {
 	t.Helper()
 	raw, err := json.Marshal(v)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("marshaling the object: %v", err)
 	}
 	var object map[string]any
 	if err := json.Unmarshal(raw, &object); err != nil {
-		t.Fatal(err)
+		t.Fatalf("unmarshaling the object: %v", err)
 	}
 	return object
 }

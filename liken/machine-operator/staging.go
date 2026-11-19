@@ -1,10 +1,9 @@
 package main
 
-// Staging: the side effects of one convergence decision. The decisions
-// themselves are pure (converge.go), so a test can judge them without
-// a disk. This file is where a decision touches the machine: the
-// staged document, the rejection record, and the intent files that
-// init acts on.
+// converge.go makes each convergence decision in a pure function, so a
+// test can check it without files. This file carries out a decision: it
+// writes the staged document, the rejection record, and the intent files
+// that init reads.
 
 import (
 	"fmt"
@@ -14,23 +13,26 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// carryOutConvergence performs one convergence decision's side
-// effects against one document's store and init's intent directory,
-// runDir, and returns the condition to publish. An I/O failure
-// downgrades the condition to StagingFailed on the same condition
-// type, so the report stays attached to the right document.
+// carryOutConvergence writes the files that a convergence decision
+// requires, to the document's store and to init's intent directory
+// runDir, and returns the condition to publish. When staging or an
+// intent fails to write, it returns a StagingFailed condition of the
+// decision's type, so the condition never reports a disruption that
+// will not happen. When the staged document cannot be deleted or the
+// rejection record cannot be cleared, it returns the decided condition.
+// Every failure goes to out, so the loop retries it.
 func carryOutConvergence(conv convergence, store machine.ManifestStore, runDir, what string, now time.Time, out *passOutcome) api.Condition {
 	step := "carrying out the " + what + "'s convergence"
 	failed := func(err error) api.Condition {
 		out.fail(step, err)
-		return api.Condition{Type: conv.condition.Type, Status: api.ConditionFalse, Reason: "StagingFailed", Message: err.Error()}
+		return api.Condition{Type: conv.condition.Type, Status: api.ConditionFalse, Reason: "StagingFailed", Message: "The convergence of the " + what + " is not carried out: " + err.Error()}
 	}
 	if conv.withdraw {
 		if err := store.WithdrawStaged(); err != nil {
 			fmt.Printf("withdrawing the staged %s: %v\n", what, err)
 			out.fail("withdrawing the staged "+what, err)
 		} else {
-			fmt.Printf("withdrew the staged %s; the cluster's copy matches this boot again\n", what)
+			fmt.Printf("withdrew the staged %s, because this boot already runs the document that the pass would stage\n", what)
 			out.wrote("withdrawing the staged " + what)
 		}
 	}
@@ -88,10 +90,11 @@ func carryOutConvergence(conv convergence, store machine.ManifestStore, runDir, 
 	return conv.condition
 }
 
-// readStagedHash returns the hash of the document currently staged
-// in the store, or "" when nothing is staged. The function hashes
-// staged bytes even when they fail to parse, because the idempotence
-// check compares bytes, not parsed meaning.
+// readStagedHash returns the hash of the staged document, or "" when
+// nothing is staged. It hashes the bytes even when they do not parse,
+// because the deciders compare this hash with the hash of the rendered
+// bytes (stagedHash != hash in converge.go) to skip writing a document
+// that is staged already.
 func readStagedHash(store machine.ManifestStore) string {
 	raw, _ := store.LoadStaged()
 	if raw == nil {

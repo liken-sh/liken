@@ -1,23 +1,18 @@
 package main
 
-// Node taints, reconciled live from the Machine spec.
+// Reconciles the Node's taints with spec.nodeTaints in the Machine, in
+// the same pass that reconciles labels (labels.go).
 //
-// A label attracts a workload and a taint repels one, so
-// spec.nodeTaints is the other half of the scheduling identity that
-// labels.go applies. It reaches the Node the same two ways. Init
-// renders the taints into the k3s boot drop-in, so a node registers
-// already repelling, which is what keeps a fresh node from accepting,
-// in its first minutes, the pods the taint exists to keep out. But
-// the kubelet applies registration taints only when it creates the
+// Init writes the taints into the k3s boot drop-in, so a new node has
+// them from the moment it registers.
+// The kubelet applies registration taints only when it creates the
 // Node object, on a first boot or after a reinstall. On every later
-// boot the Node already exists and the setting does nothing, so live
-// reconciliation is the only mechanism from then on. It runs here, in
-// the same pass that reconciles labels.
+// boot the Node already exists, so only this reconciliation changes its
+// taints.
 //
-// Removing a taint needs a record, for the reason labels.go gives:
-// nothing about a taint on a Node says who applied it, and the
-// operator must never remove one that a person or another controller
-// applied.
+// A taint on a Node does not record who applied it, so the operator
+// records the taints that it applied in ownedTaintsAnnotation, and
+// never removes one that a person or another controller applied.
 
 import (
 	"encoding/json"
@@ -32,43 +27,39 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// ownedTaintsAnnotation records, on the Node itself, which taints
-// liken manages. Its value is the pairs it owns, each written
-// key:Effect, sorted and joined with commas. It lives on the Node
-// rather than in the Machine's status, so the record and the taints
-// it describes can never drift apart across operator restarts or
-// Machine rewrites.
+// ownedTaintsAnnotation is the annotation on the Node that lists the
+// taints the operator applied, as a comma-separated, sorted list of
+// key:Effect pairs. The record is on the Node, not in the Machine's
+// status, so it stays consistent with the taints it describes when the
+// operator restarts or the Machine is rewritten.
 //
-// The pair is the unit of ownership, where labels own a bare key. A
-// taint's identity is its key together with its effect: one key can
-// carry NoSchedule and NoExecute at the same time, and those are two
-// separate taints that a pod tolerates separately. A record keyed on
-// the key alone would give the operator permission to remove a taint
-// it never applied, whenever someone added a second effect under a
-// declared key.
+// A taint is owned by its key and effect, where a label is owned by its
+// key alone. One key can have both a NoSchedule and a NoExecute taint,
+// and a pod tolerates each one separately. If the record held only the
+// key, the operator would remove a taint it never applied whenever
+// someone added a second effect under a declared key.
 const ownedTaintsAnnotation = "liken.sh/node-taints"
 
-// A taintStep is one pass's worth of taint reconciliation: the Node
-// patch to apply (nil when the Node already matches the spec) and the
-// condition to publish once the patch lands.
+// A taintStep is what decideNodeTaints returns: the Node patch, nil
+// when the Node already matches the spec, and the condition to publish
+// once the patch succeeds.
 type taintStep struct {
 	patch     []byte
 	condition api.Condition
 }
 
-// taintPair renders a taint's identity, its key and its effect, in
-// the form the ownership annotation stores.
+// taintPair returns the key:Effect form that ownedTaintsAnnotation
+// stores.
 func taintPair(key, effect string) string {
 	return key + ":" + effect
 }
 
-// decideNodeTaints compares the spec's taints against the Node and
-// produces the merge patch that closes the gap. It upserts every
-// declared taint, drops every pair the annotation owns that the spec
-// no longer declares, and keeps every other taint exactly as it
-// found it. A taint whose pair is in neither the spec nor the
-// annotation belongs to someone else, and this function never
-// changes it.
+// decideNodeTaints compares the spec's taints with the Node's and
+// returns the merge patch that makes them match. It adds or updates
+// each declared taint and removes each taint that the annotation lists
+// but the spec no longer declares. A taint whose pair is in neither
+// the spec nor the annotation belongs to someone else, and the
+// function leaves it unchanged.
 func decideNodeTaints(desired []machine.NodeTaint, node *nodeObject) taintStep {
 	wanted := map[string]nodeTaint{}
 	for _, taint := range desired {
@@ -82,12 +73,11 @@ func decideNodeTaints(desired []machine.NodeTaint, node *nodeObject) taintStep {
 		}
 	}
 
-	// The merged list is what the Node must hold after the patch. A
-	// taint the Node already carries keeps the position it has, and a
-	// newly declared one goes on the end in sorted order. Position
-	// means nothing to the scheduler, so the only requirement is that
-	// the same inputs always produce the same list. A list whose
-	// order moved from pass to pass would patch the Node forever.
+	// merged is the taint list the Node must have after the patch.
+	// Taints already on the Node keep their positions and new ones go
+	// on the end in sorted order. The scheduler ignores order, but if
+	// the order changed from pass to pass, each pass would patch the
+	// Node again.
 	merged := []nodeTaint{}
 	placed := map[string]bool{}
 	for _, on := range node.Spec.Taints {
@@ -119,10 +109,10 @@ func decideNodeTaints(desired []machine.NodeTaint, node *nodeObject) taintStep {
 	}
 
 	condition := api.Condition{Type: "NodeTaintsApplied", Status: api.ConditionTrue, Reason: "Applied",
-		Message: fmt.Sprintf("the Node carries all %d declared taints", len(desired))}
+		Message: fmt.Sprintf("The Node has all %d declared taints", len(desired))}
 	if len(desired) == 0 {
 		condition = api.Condition{Type: "NodeTaintsApplied", Status: api.ConditionTrue, Reason: "NothingDeclared",
-			Message: "no node taints declared"}
+			Message: "No node taints are declared"}
 	}
 
 	rewrite := !slices.Equal(merged, node.Spec.Taints)
@@ -136,22 +126,20 @@ func decideNodeTaints(desired []machine.NodeTaint, node *nodeObject) taintStep {
 		metadata["annotations"] = annotations
 	}
 	if rewrite {
-		// A JSON merge patch replaces an array whole, where it merges
-		// a map key by key. So the taints write must carry the full
-		// list, foreign entries included, and a write that starts
-		// from a stale read erases whatever landed in between. The
-		// node lifecycle controller writes this same array: it adds
+		// A JSON merge patch replaces an array whole, but merges a map
+		// key by key. So this patch must contain the full taint list,
+		// including taints that other writers own, and a patch built
+		// from a stale read would erase their changes. The node
+		// lifecycle controller writes the same array: it adds
 		// node.kubernetes.io/not-ready and unreachable when a node
-		// stops reporting, and removes them when it recovers. Naming
-		// the resourceVersion this pass read turns that race into a
-		// 409 conflict, so the API server refuses the write instead
-		// of dropping the controller's taint. The watch of the Node
-		// delivers the write that won and wakes the next pass, which
-		// patches again against the new version.
+		// stops reporting and removes them when it recovers. With the
+		// resourceVersion that this pass read, the API server rejects a
+		// stale patch with 409 Conflict. The Node watch then starts the
+		// next pass, which patches again from the new version.
 		//
-		// The labels patch needs no such precondition, because a
-		// merge patch on a map touches only the keys it names, and a
-		// concurrent writer's key is not one of them.
+		// The labels patch needs no such precondition, because it
+		// changes only the map keys that it names, and no other writer
+		// owns those keys.
 		metadata["resourceVersion"] = node.Metadata.ResourceVersion
 		patch["spec"] = map[string]any{"taints": merged}
 	}
@@ -160,18 +148,17 @@ func decideNodeTaints(desired []machine.NodeTaint, node *nodeObject) taintStep {
 	return taintStep{patch: encoded, condition: condition}
 }
 
-// carryOutNodeTaints applies the step's patch. It downgrades the
-// condition when the API server refuses the patch. A refusal here is
-// often the resourceVersion conflict, and the recovery is the same as
-// for any other failure: the next pass reads the Node's copy again,
-// builds the step again, and patches again.
+// carryOutNodeTaints applies the step's patch and returns the
+// condition to publish. When the patch fails, for example on a
+// resourceVersion conflict, it returns a False condition, and the next
+// pass reads the Node and patches again.
 func carryOutNodeTaints(c *apiclient.Client, name string, step taintStep) api.Condition {
 	if step.patch == nil {
 		return step.condition
 	}
 	if err := kubernetes.PatchJSON(c, nodesPath+"/"+name, step.patch); err != nil {
 		return api.Condition{Type: "NodeTaintsApplied", Status: api.ConditionFalse, Reason: "ApplyFailed",
-			Message: fmt.Sprintf("patching the Node's taints: %v", err)}
+			Message: fmt.Sprintf("The Node does not have the declared taints: %v", err)}
 	}
 	return step.condition
 }

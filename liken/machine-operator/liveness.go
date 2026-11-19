@@ -1,34 +1,37 @@
 package main
 
-// The heartbeat's clock, and how a stuck loop stops it.
+// The heartbeat lease shows that this operator does its work, so a
+// stuck reconcile loop must stop renewing it.
 //
-// cluster-operator marks a machine Lost when its heartbeat lease goes
-// unrenewed for 40 seconds (kubernetes/heartbeat.go). The lease must
-// prove that this operator does its job, not only that the process
-// runs, so a renewal must stop when the reconcile loop is stuck: a call
-// that never answers, or a lock that never releases. A loop that waits
-// in its select for a wake is healthy, because it acts the moment a
-// wake comes. So the loop marks itself busy from the moment its select
-// returns until it enters the select again, and a timer of its own
-// renews the lease every few seconds unless the loop has been busy for
-// longer than stuckAfter.
+// cluster-operator marks a machine Lost when its heartbeat lease is
+// older than HeartbeatStaleAfter (kubernetes/heartbeat.go). A loop
+// blocked on a request that never returns, or on a lock that is never
+// released, must not leave the machine looking healthy. So the loop
+// marks itself busy when its select returns and idle when it enters the
+// select again. A loop that waits in its select is healthy, because it
+// acts on the next wake. A separate renewal timer renews the lease
+// every renewEvery, unless the loop has been busy for longer than
+// stuckAfter.
 //
-// stuckAfter must be longer than any pass that is not stuck, so the
-// pass's requests run under passDeadline (loop.go), and the margin
-// covers the work that sends no request, such as a walk of sysfs or a
-// syncfs. The gauge of the longest pass shows how close a machine comes
-// to the limit.
+// stuckAfter must be longer than any pass that is not stuck. The
+// requests of a pass end at passDeadline (loop.go), and the rest of the
+// margin covers work that sends no request, such as a walk of sysfs or
+// a syncfs. The metric liken_machine_longest_pass_seconds shows how
+// close a machine comes to the limit.
 //
-// A loop that is stuck stops the renewals, and the same timer ends the
-// process, the crash-only rule at the head of main.go: the kubelet
-// starts the container again, and its first pass reads the state as it
-// is. A process that cannot restart its loop keeps restarting, and the
-// kubelet's growing backoff lets the lease age past 40 seconds, so
-// cluster-operator marks the machine Lost. The timer is in the process,
-// not a kubelet liveness probe, because a probe also fails while the
-// listener is not open: during the setup before the loop, when port
-// 9200 is taken or moved, and for a binary older than its pod
-// template. /healthz answers the same check, for a person.
+// When the loop is stuck, the renewal timer also exits the process. The
+// kubelet starts the container again, and its first pass reads the
+// current state. When the loop gets stuck after every restart, the
+// kubelet's restart backoff grows, the lease ages past
+// HeartbeatStaleAfter, and cluster-operator marks the machine Lost.
+//
+// The process checks itself, and the pod has no kubelet liveness
+// probe, because a probe of /healthz also fails when the listener is
+// not open: during setup before the loop starts, when
+// --metrics-address moves the listener or turns it off, when another
+// process has the port, and when the node's imported binary is older
+// than the pod template and serves no /healthz. /healthz serves the
+// same check for a person.
 
 import (
 	"context"
@@ -45,40 +48,41 @@ import (
 )
 
 const (
-	// passDeadline ends every request a pass sends that is still open
-	// this long after the pass began.
+	// passDeadline is the time after a pass begins at which any of its
+	// requests that is still open is cancelled.
 	passDeadline = 45 * time.Second
 
-	// stuckAfter is how long the loop may stay busy before the
-	// renewals stop and /healthz fails.
+	// stuckAfter is how long the loop may stay busy before the lease
+	// stops renewing and /healthz fails.
 	stuckAfter = 60 * time.Second
 
-	// renewEvery is half of HeartbeatRenewAfter, so a timer that fires
-	// a moment early, and finds the last renewal a moment short of the
-	// age that Renew wants, renews on its next firing.
+	// renewEvery is half of HeartbeatRenewAfter. Renew skips a write
+	// until the lease is that old, so a tick that comes slightly early
+	// and is skipped is followed by a tick that renews.
 	renewEvery = kubernetes.HeartbeatRenewAfter / 2
 )
 
-// liveness is what the loop and the renewal timer share. Each value is
-// atomic, because the timer runs on its own goroutine.
+// liveness is the state that the reconcile loop and the renewal timer
+// share. The fields are atomic because the timer runs on its own
+// goroutine.
 type liveness struct {
-	// start is the reference for busySince. A duration since start
-	// reads the monotonic clock, so a step of the wall clock does not
-	// make the loop look busy or idle.
+	// start is the reference time for busySince. A duration measured
+	// from start uses the monotonic clock, so a change of the wall
+	// clock does not make the loop look busy or idle.
 	start time.Time
 
-	// busySince is the time since start at which the loop's select
-	// returned, plus one, or zero while the loop waits in its select.
+	// busySince is the offset from start at which the loop's select
+	// returned, plus one so that zero can mean idle.
 	busySince atomic.Int64
 
-	// owner is this machine's Machine, the owner of the lease. gone is
-	// true while the Machine does not exist: a renewal would create
-	// the lease again, owned by a Machine that does not exist, for the
-	// garbage collector to delete again.
+	// owner is this machine's Machine, which owns the lease. gone is
+	// true while the Machine does not exist, because a renewal would
+	// then create a lease owned by a Machine that is absent, and the
+	// garbage collector would delete it.
 	owner atomic.Pointer[kubernetes.OwnerReference]
 	gone  atomic.Bool
 
-	// exit ends the process. main passes os.Exit, and a test passes a
+	// exit stops the process. main uses os.Exit, and tests use a
 	// function that records the call.
 	exit func(code int)
 }
@@ -87,22 +91,22 @@ func newLiveness() *liveness {
 	return &liveness{start: time.Now(), exit: os.Exit}
 }
 
-// markBusy marks the loop busy from now, unless it is busy already. A
-// nil liveness marks nothing.
+// markBusy records that the loop became busy now. It keeps the earlier
+// time when the loop is already busy. A nil liveness does nothing.
 func (l *liveness) markBusy() {
 	if l != nil {
 		l.busySince.CompareAndSwap(0, int64(time.Since(l.start))+1)
 	}
 }
 
-// markIdle marks the loop as waiting for a wake.
+// markIdle records that the loop is waiting for a wake signal.
 func (l *liveness) markIdle() {
 	if l != nil {
 		l.busySince.Store(0)
 	}
 }
 
-// busyFor answers how long the loop has been busy, or zero while it
+// busyFor returns how long the loop has been busy, or zero while it
 // waits.
 func (l *liveness) busyFor() time.Duration {
 	since := l.busySince.Load()
@@ -112,11 +116,10 @@ func (l *liveness) busyFor() time.Duration {
 	return time.Since(l.start) - time.Duration(since-1)
 }
 
-// errStuck is the answer of a check of a loop that is stuck.
 var errStuck = errors.New("the reconcile loop is stuck")
 
-// check answers an error when the loop has been busy past stuckAfter.
-// It is /healthz.
+// check returns an error when the loop has been busy for longer than
+// stuckAfter. /healthz serves it.
 func (l *liveness) check() error {
 	if busy := l.busyFor(); busy > stuckAfter {
 		return fmt.Errorf("%w: busy for %s", errStuck, busy.Round(time.Second))
@@ -124,8 +127,8 @@ func (l *liveness) check() error {
 	return nil
 }
 
-// sawMachineOf records the Machine a pass read, and sawNoMachine a
-// Machine that is gone.
+// sawMachineOf records the Machine that a pass read, as the owner of
+// the lease. sawNoMachine records that the Machine does not exist.
 func (l *liveness) sawMachineOf(m *machine.Machine) {
 	if l == nil {
 		return
@@ -141,8 +144,8 @@ func (l *liveness) sawNoMachine() {
 }
 
 // renew renews the lease once, unless the Machine is gone or the loop
-// is stuck. Only the renewal timer calls it after the loop starts,
-// because a Heartbeat has no lock.
+// is stuck. After the loop starts, only the renewal timer calls it,
+// because Heartbeat has no lock.
 func (l *liveness) renew(hb *kubernetes.Heartbeat, c *apiclient.Client) {
 	owner := l.owner.Load()
 	if owner == nil || l.gone.Load() || l.check() != nil {
@@ -152,10 +155,10 @@ func (l *liveness) renew(hb *kubernetes.Heartbeat, c *apiclient.Client) {
 }
 
 // renewUntil renews the lease every renewEvery until ctx ends, and
-// ends the process once the loop is stuck. The caller renews once
-// before it starts the loop's first pass, so a machine that boots into
-// a fleet that already declared it Lost announces itself before its
-// first status write.
+// exits the process when the loop is stuck. The caller renews once
+// before the first pass, so a machine that boots after the fleet has
+// already marked it Lost renews the lease before its first status
+// write.
 func (l *liveness) renewUntil(ctx context.Context, hb *kubernetes.Heartbeat, c *apiclient.Client) {
 	ticker := time.NewTicker(renewEvery)
 	defer ticker.Stop()
@@ -165,7 +168,7 @@ func (l *liveness) renewUntil(ctx context.Context, hb *kubernetes.Heartbeat, c *
 			return
 		case <-ticker.C:
 			if err := l.check(); err != nil {
-				fmt.Fprintf(os.Stderr, "%v; ending the process so the kubelet starts it again\n", err)
+				fmt.Fprintf(os.Stderr, "%v, so the process exits and the kubelet starts it again\n", err)
 				l.exit(1)
 				return
 			}

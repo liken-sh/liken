@@ -1,7 +1,7 @@
 package main
 
-// The pod-freshness guard's pure judgment: whether this operator's
-// own pod predates the release it is running.
+// Tests for decidePodStale and ownPodIsStale, which tell whether this
+// operator's pod is older than the release that is running.
 
 import (
 	"net/http"
@@ -16,45 +16,45 @@ func withOSVersion(version string) func(*kubernetes.Pod) {
 	}
 }
 
-func TestDecidePodStaleWhenTheAnnotationPredatesTheRelease(t *testing.T) {
+func TestDecidePodStaleWhenTheAnnotationIsOlderThanTheRelease(t *testing.T) {
 	pods := []kubernetes.Pod{pod("op-1", "liken-system", withOSVersion("2026.08.01-001"))}
 	if !decidePodStale(pods, "2026.08.12-002") {
-		t.Error("a pod whose annotation names an older release is stale")
+		t.Error("a pod whose annotation is an older release is stale")
 	}
 }
 
 func TestDecidePodStaleWhenTheAnnotationMatches(t *testing.T) {
 	pods := []kubernetes.Pod{pod("op-1", "liken-system", withOSVersion("2026.08.12-002"))}
 	if decidePodStale(pods, "2026.08.12-002") {
-		t.Error("a matching annotation is a current pod")
+		t.Error("a pod whose annotation matches the release is current")
 	}
 }
 
 func TestDecidePodStaleWithNoMatchingPod(t *testing.T) {
 	if decidePodStale(nil, "2026.08.12-002") {
-		t.Error("no pod to judge reads as current; a real fault must not hide behind a missing pod")
+		t.Error("with no pod, the result is current, so a real fault is not hidden behind AwaitingPodRefresh")
 	}
 }
 
 func TestDecidePodStaleWithNoRunningVersion(t *testing.T) {
 	pods := []kubernetes.Pod{pod("op-1", "liken-system", withOSVersion("2026.08.12-002"))}
 	if decidePodStale(pods, "") {
-		t.Error("facts with no version cannot support a stale verdict")
+		t.Error("with no running version, the result is current")
 	}
 }
 
 func TestDecidePodStaleWithNoAnnotation(t *testing.T) {
 	pods := []kubernetes.Pod{pod("op-1", "liken-system")}
 	if decidePodStale(pods, "2026.08.12-002") {
-		t.Error("a pod with no annotation reads as current")
+		t.Error("a pod with no annotation is current")
 	}
 }
 
-func TestOwnPodIsStaleReadsCurrentWhenTheListFails(t *testing.T) {
+func TestOwnPodIsStaleIsFalseWhenTheListFails(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	if ownPodIsStale(&reader{client: client}, "node-1", "2026.08.12-002") {
-		t.Error("a failed list must never manufacture a fault; it reads as current")
+		t.Error("ownPodIsStale is true after a failed list, want false so that no fault is reported without evidence")
 	}
 }

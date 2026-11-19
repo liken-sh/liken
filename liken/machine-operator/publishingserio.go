@@ -1,8 +1,9 @@
 package main
 
-// The fourth examined shape of the publish policy: a serial line that
-// init holds a serio attachment for (publishing.go describes the
-// policy, and init/serio.go the attachment).
+// Publishing for a USB serial line that init attaches to the kernel's
+// serio layer, such as a Pulse-Eight CEC adapter. publishing.go
+// describes the general publish policy and init/serio.go the
+// attachment.
 
 import (
 	"slices"
@@ -12,16 +13,15 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// publishFor is the policy's entry point. A device that carries a
-// serial line a spec.serio entry matches takes the serio shape, and
-// every other device takes publishDevices. serio is the list the
-// machine holds attachments for (serioInEffect, dra.go).
+// publishFor returns the devices to publish for one hardware device.
+// The tty interface of an adapter that a spec.serio entry matches goes
+// through publishSerio, and every other device goes through
+// publishDevices. serio is the list that serioInEffect returns.
 //
-// Every other interface of a matched adapter keeps its own devices,
-// but loses the usbfs node. That node opens the whole USB device, so
-// a claimant of the Pulse-Eight's HID interface could reset the
-// adapter through it with USBDEVFS_RESET, and the reset ends the
-// attachment under every CEC claim.
+// The other interfaces of a matched adapter keep their own devices but
+// lose the usbfs node. That node opens the whole USB device, so a pod
+// that claimed the adapter's HID interface could send USBDEVFS_RESET
+// through it, and the reset ends the attachment under every CEC claim.
 func publishFor(d hardware.Device, delivery hardware.Delivery, serio []machine.SerioAttachment) []publishedDevice {
 	if !serioAdapter(d, serio) {
 		return publishDevices(d, delivery)
@@ -34,9 +34,9 @@ func publishFor(d hardware.Device, delivery hardware.Delivery, serio []machine.S
 }
 
 // serioAdapter reports whether a device is an interface of a USB
-// device that a spec.serio entry matches. An interface carries its
-// USB device's identity, so every interface of the adapter matches:
-// the one with the serial line, and the others beside it.
+// device that a spec.serio entry matches. An interface has the vendor,
+// product, and serial number of its USB device, so every interface of
+// the adapter matches, not only the one with the serial line.
 func serioAdapter(d hardware.Device, serio []machine.SerioAttachment) bool {
 	if d.Bus != "usb" {
 		return false
@@ -46,34 +46,33 @@ func serioAdapter(d hardware.Device, serio []machine.SerioAttachment) bool {
 	})
 }
 
-// The suffixes of the two devices an attached CEC adapter publishes.
-// Neither device keeps the interface's bare name. Before spec.serio
-// declared the adapter, the bare name was the tty's device, and a
-// claim allocated to it then must resolve to nothing now, not to the
-// CEC node.
+// The name suffixes of the devices that an attached CEC adapter
+// publishes. Without a spec.serio entry, the interface's bare name is
+// the tty's device. A claim allocated to that name before the entry was
+// added must resolve to nothing, not to the CEC node, so neither device
+// uses the bare name.
 const (
 	serioCECSuffix   = "-cec"
 	serioInputSuffix = "-input"
 )
 
-// serioAbsentNode is the node a claim's spec names while its serio
-// device is absent: unplugged, not yet attached, or unbound. No such
-// node exists, so the runtime fails to create the container, and the
-// kubelet retries it under its restart backoff. The old nodes would be
-// worse. An event node carries a fixed device number, and in the
-// meantime another input device can take that number, so a restarted
-// container would open that device instead.
+// serioAbsentNode is the device node that a claim's CDI spec names
+// while its serio device is absent, because the adapter is unplugged,
+// not yet attached, or unbound. The path does not exist, so the
+// container runtime fails to create the container and the kubelet
+// retries with its restart backoff. The spec does not keep the old
+// nodes, because another input device can take an event node's device
+// number, and a restarted container would then open the wrong device.
 const serioAbsentNode = "/dev/liken.sh/serio-device-absent"
 
 // serioFailsClosed reports whether a claim's device that no longer
-// resolves must name serioAbsentNode instead of keeping its old nodes.
-// It must when the name is one of the two a CEC adapter publishes, and
-// when the name is an interface of a matched adapter. The second is a
-// claim allocated before spec.serio declared the adapter, to the tty's
-// device or to another interface that delivered the usbfs node. Its
-// old nodes are the tty and the usbfs node, and a restarted container
-// that received them could set another line discipline or reset the
-// adapter, and either one ends the attachment under every CEC claim.
+// resolves gets serioAbsentNode in place of its old nodes. It does when
+// the name ends in -cec or -input, and when the name is an interface of
+// a matched adapter. The second case is a claim allocated before the
+// spec.serio entry existed, whose old nodes are the tty or the usbfs
+// node. A restarted container with those nodes could set another line
+// discipline or reset the adapter, and either one ends the attachment
+// under every CEC claim.
 func serioFailsClosed(name string, byName map[string]hardware.Device, serio []machine.SerioAttachment) bool {
 	if strings.HasSuffix(name, serioCECSuffix) || strings.HasSuffix(name, serioInputSuffix) {
 		return true
@@ -82,37 +81,31 @@ func serioFailsClosed(name string, byName map[string]hardware.Device, serio []ma
 	return ok && serioAdapter(device, serio)
 }
 
-// publishSerio publishes one attached serial line as the devices its
-// driver created.
+// publishSerio returns the devices for one attached serial line: an
+// exclusive CEC device and, when the CEC adapter has one, an exclusive
+// input device. It returns nothing until the attachment has created
+// the CEC node.
 //
-// The tty is never published, before or after the attachment. A pod
-// that received it could set another line discipline or write to the
-// line, and either one takes the port down under every other claim.
-// This is the same rule the inventory applies to a disk that holds a
-// storage role. So before the attachment, the line publishes nothing.
+// It never publishes the tty, because a pod with the tty could change
+// the line discipline or write to the line, and either one ends the
+// attachment under every CEC claim. It never publishes the usbfs node,
+// because a pod with it could detach cdc_acm from the interface, which
+// hangs up the tty. It also leaves out any other kind of node under the
+// line, because no such hardware has been tested. The delivery has no
+// LIRC node to leave out, because the CEC core registers none for the
+// input device.
 //
-// The CEC node is one device, with the -cec suffix. It is the bus: a
-// claimant sends and receives CEC messages through it. The CEC
-// core lets several processes open one adapter, but only one can be
-// the exclusive initiator or follower, and two programs that configure
-// logical addresses on one adapter undo each other, so it is
-// exclusive.
+// The -cec device has the CEC node. The CEC core lets several processes
+// open one adapter, but only one can be the exclusive initiator or
+// follower, and two programs that configure logical addresses on one
+// adapter undo each other's work. So the device is exclusive.
 //
-// The input node is a second device with the -input suffix. It is the
-// TV remote's key presses, which one reader must own, so it is
-// exclusive too. It is a device of its own, not part of the CEC
-// device, because it answers a different claim: a remote control claims it
-// the way it claims a Bluetooth remote. This is the opposite of the
-// audio shape, where a jack reports on the output the same claim
-// plays through. Both devices carry the adapter's attributes, so a
-// claim can pair them with matchAttribute on address.
-//
-// The usbfs node is delivered nowhere. Through it, a claimant could
-// detach cdc_acm from the interface, which hangs up the tty and ends
-// the port under the other claim. Any other kind of node under the
-// line is hardware nobody has examined, and it is withheld with the
-// tty. The CEC core registers no LIRC node for the input device, so
-// the delivery holds none to withhold.
+// The -input device has the event node of the TV remote's key presses.
+// That node must have one reader, so this device is exclusive too. It
+// is a separate device because a different pod claims it: a
+// remote-control program claims it the way it claims a Bluetooth
+// remote. Both devices have the adapter's attributes, so a claim can
+// pair them with matchAttribute on address.
 func publishSerio(delivery hardware.Delivery) []publishedDevice {
 	var cec, input []string
 	for _, node := range delivery.Nodes {

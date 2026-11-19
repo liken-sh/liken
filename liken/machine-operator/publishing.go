@@ -1,55 +1,30 @@
 package main
 
-// The publish policy: how one physical device becomes the devices a
-// ResourceSlice offers.
+// The policy that turns one physical device into the devices a
+// ResourceSlice publishes.
 //
-// A device's sysfs subtree can deliver nodes of more than one kernel
-// subsystem. i915 is the case that forced the question: beside its
-// drm nodes, the driver registers an i2c bus for every display
-// output, the wire that carries DDC and monitor control. A claim
-// must not receive both, because a transcoder holds no business on a
-// monitor's wire, and the sharing rule must not judge both, because
-// the drm nodes share and the raw wires do not.
+// A device's sysfs subtree can contain nodes of several kernel
+// subsystems. An i915 GPU registers an i2c bus for each display output
+// beside its drm nodes, for DDC and monitor control. A transcoder that
+// claims the GPU has no use for that bus, and the render node can be
+// shared while the raw bus cannot. So the policy publishes a separate
+// device for each subsystem, and the name of the allocated device tells
+// which nodes the claim receives. The drm nodes split further, because
+// one process at a time holds modesetting authority on the card node,
+// and many processes can share the render node.
 //
-// So the policy publishes one device per subsystem the delivery
-// holds, and the allocated device's own name states which nodes a
-// claim receives. One subsystem splits further: drm registers the
-// card node and the render node for the same silicon, and the two
-// carry different authority. Modesetting on the card node belongs to
-// one process, and work on the render node divides between many, so
-// each publishes as its own device with its own sharing rule.
+// An audio controller keeps its jack nodes, which belong to the input
+// subsystem, because a jack reports the state of an output that the
+// same claim plays through. A Bluetooth adapter has no device node of
+// its own, so the policy recognizes it by its driver
+// (publishBluetooth). The serial line of a USB-CEC adapter needs the
+// Machine's spec, and publishingserio.go has the policy for it.
 //
-// An audio controller goes the other way. Its jack nodes belong to
-// the input subsystem, and they stay with the card, because a jack
-// reports the state of an output the same claim plays through. The
-// question each time is what a claim on this hardware is, and the
-// answer is a device, not a subsystem.
-//
-// A Bluetooth adapter is the third examined shape. It delivers no
-// node of its own, because a program reaches a radio through a
-// socket, so the policy names this shape by its driver rather than by
-// the kinds it delivers. The device it publishes carries the usbfs
-// node.
-// On a machine that has /dev/uhid, the device also carries that node,
-// because a Bluetooth stack is what it exists for. A machine that has
-// /dev/uinput adds that node and the legacy evdev range beside it.
-// claimDelivery states the reasoning.
-//
-// A serio attachment is the fourth examined shape, and the one that
-// needs the Machine's own spec. A USB-CEC adapter's serial line
-// delivers a tty node alone until init attaches the line
-// (init/serio.go). Then the kernel registers the serio port under the
-// tty, the CEC adapter under the port, and the remote-control input
-// device under the adapter, and the same interface delivers tty, cec,
-// and input nodes. publishingserio.go states the policy for them.
-//
-// The mechanism is generic; the tables below are deliberately not.
-// Only a shape somebody examined splits. Everything else publishes
-// whole and exclusive, so hardware liken has not met keeps the
-// default that milestone 38 set: a device wrongly published as
-// shareable hands the same hardware to two workloads and nothing can
-// take that back, while a device wrongly published as exclusive costs
-// a claim that waits, where a person can see it waiting.
+// Any other hardware publishes as one exclusive device with all its
+// nodes. A device wrongly published as shareable gives the same
+// hardware to two workloads, and nothing can undo that. A device
+// wrongly published as exclusive only makes a second claim wait in the
+// scheduler, where a person can see it.
 
 import (
 	"slices"
@@ -59,10 +34,9 @@ import (
 )
 
 // publishedDevice is one slice device derived from one physical
-// device: the nodes it delivers, the one kind they are, and the facts
-// the slice publishes about them. The suffix joins the physical
-// device's name to make the published name; the primary keeps the
-// bare name, so an allocation that predates a split stays valid.
+// device. Suffix is appended to the physical device's name to make
+// the published name. The primary has no suffix, so an allocation made
+// before a split still resolves.
 type publishedDevice struct {
 	Suffix      string
 	Subsystem   string
@@ -72,66 +46,45 @@ type publishedDevice struct {
 	Shareable   bool
 }
 
-// graphicsSubsystems are the kernel subsystems a graphics device
-// delivers nodes through. drm is the modern interface, and graphics
-// is the legacy framebuffer that the kernel's fbdev emulation creates
-// for the same hardware. A GPU delivers both, so a rule that accepted
-// drm alone would never fire on a real machine.
+// graphicsSubsystems are the subsystems of a GPU's own nodes: drm, and
+// graphics for the /dev/fb node that the kernel's fbdev emulation
+// creates for the same GPU.
 var graphicsSubsystems = map[string]bool{"drm": true, "graphics": true}
 
-// companionSubsystems are the non-graphics kinds a graphics device is
-// known to deliver, each published as its own exclusive device. i2c-dev
-// is the monitor-control bus i915 registers per display output: raw
-// wire access, one writer, no arbitration contract. drm_dp_aux_dev is
-// the DisplayPort AUX channel, the wire that carries DPCD register
-// access and EDID reads to a monitor over a DisplayPort output. The
-// kernel registers it only while a display is connected, and like the
-// i2c buses it is raw wire access with one writer, so it publishes as
-// its own exclusive companion, never shared, and never delivered with
-// the GPU's own claim.
+// companionSubsystems are the other subsystems of a GPU's nodes, and
+// each one publishes as its own exclusive device. i2c-dev is the
+// monitor-control bus that i915 registers for each display output.
+// drm_dp_aux_dev is the DisplayPort AUX channel, for DPCD registers and
+// EDID reads, and the kernel registers it only while a display is
+// connected. Both give raw access to a wire that one writer must own.
 var companionSubsystems = map[string]bool{"i2c-dev": true, "drm_dp_aux_dev": true}
 
-// audioSubsystems are the kinds an audio controller delivers. sound
-// is ALSA's own nodes: the control node, the hardware-dependent
-// nodes, and one node for each PCM subdevice. input is jack
-// detection: ALSA registers an input device for every jack it can
-// sense, the kernel puts that device under the card, and each one
-// carries an event node. An HDA controller with an HDMI output has
-// one jack for each display pin, so a real machine delivers both
-// kinds, and a rule that accepted sound alone would fire only on a
-// USB audio interface.
+// audioSubsystems are the subsystems of an audio controller's nodes:
+// sound for ALSA's nodes, and input for each jack that ALSA can sense,
+// because the kernel registers jack input devices under the card. An
+// HDA controller with HDMI outputs has a jack for each display pin.
 var audioSubsystems = map[string]bool{"sound": true, "input": true}
 
-// displaySuffix names the published device that carries a graphics
-// device's card node.
 const displaySuffix = "-display"
 
-// claimDelivery is the delivery walk plus the nodes a claim receives
-// from outside the device's own subtree. A Bluetooth adapter's claim
-// also receives /dev/uhid when the machine has that node. /dev/uhid
-// is the kernel's inlet for a HID stack that runs in userspace:
-// BlueZ carries HID over GATT there and writes this node to present
-// a BLE peripheral as an input device, while classic HID rides hidp
-// inside the kernel and needs no node. So the node exists for a
-// Bluetooth stack's use, and the adapter's claim is what a Bluetooth
-// stack holds. The node exists only while the machine declares the
-// uhid module, and a machine that declares none delivers what it
-// delivered before.
+// claimDelivery returns the nodes a claim on d receives: the nodes in
+// d's sysfs subtree, except the nodes that the machine keeps for itself
+// (reserved.go). A Bluetooth adapter's claim also receives nodes from
+// outside its subtree, for the Bluetooth stack in the claiming
+// container:
 //
-// The adapter's claim also receives /dev/uinput and the 32 legacy
-// evdev nodes. A Bluetooth stack relays a controller's events from
-// the evdev node the radio link creates, which appears and vanishes
-// with the link, into a uinput virtual device whose minor stays fixed
-// while the stack holds it. The relay needs both ends, and its
-// container is unprivileged, so both come through the adapter claim it
-// already holds. The evdev nodes are stated by number, because the
-// kernel registers each one only while a controller is connected, and
-// the container must already hold the node a controller registers
-// later. uinput is built into the liken kernel, so every machine has
-// the node, and a sysfs root without it delivers what it delivered
-// before.
+//   - /dev/uhid, which BlueZ writes to present a BLE HID-over-GATT
+//     peripheral as an input device. It exists only when the machine
+//     loads the uhid module.
+//   - /dev/uinput and the legacy evdev nodes /dev/input/event0 through
+//     event31. The stack reads a controller's events from its evdev
+//     node and writes them to a uinput virtual device. The kernel
+//     registers a controller's evdev node only while the controller is
+//     connected, and the container runtime adds a node only when the
+//     container starts, so the claim lists every evdev node by number
+//     in advance.
 func claimDelivery(sysRoot string, d hardware.Device) hardware.Delivery {
-	delivery := withoutHeld(hardware.InspectDelivery(sysRoot, d), heldNodes(sysRoot))
+	delivery := withoutReserved(hardware.InspectDelivery(sysRoot, d), reservedNodes(sysRoot))
 	if !bluetoothAdapter(d) {
 		return delivery
 	}
@@ -145,34 +98,23 @@ func claimDelivery(sysRoot string, d hardware.Device) hardware.Delivery {
 	return delivery
 }
 
-// publishDevices applies the policy to one device and what it
-// delivers. Most of the policy reads the delivery alone, because the
-// nodes state what the hardware is. A Bluetooth adapter is the shape
-// that needs the device itself: its driver is the only fact that
-// distinguishes it, because it delivers no node of its own.
+// publishDevices applies the policy to one device and its delivery.
+// The primary device comes first, then the display companion, then the
+// other companions in subsystem order, so the same hardware always
+// publishes the same devices.
 //
-// The primary device is always first, the display companion follows
-// it, and the wire companions follow in sorted subsystem order, so
-// the same hardware always publishes the same devices.
+// Only the primary receives the delivery's usbfs bus node. A userspace
+// driver needs that node to open the device, and the node opens every
+// interface of the device, so a companion with it would reach more
+// than its own nodes.
 //
-// The primary alone carries the delivery's bus node. A claim on the
-// primary is a claim on the hardware, and a userspace driver needs
-// that node to reach the device at all. A companion is one wire
-// beside the primary. The bus node opens the whole device, so a
-// companion must not carry it.
-//
-// A delivery with a bus node and nothing else publishes the bus node
-// alone. This is the state a userspace driver leaves an interface in
-// while it runs: libusb detaches the kernel driver to claim the
-// interface, and the kernel driver's nodes leave with it. The bus
-// node is the one node such a program opens, and the one node it
-// cannot destroy, so a spec refreshed to this shape survives a
-// container restart under the same prepared claim. For a device with
-// a driver, publishing here does not add it to any slice: the
-// inventory gates on the subtree's nodes before it applies this
-// policy, so only resolution for a claim that already holds the
-// hardware sees this shape. A Bluetooth adapter is the exception the
-// inventory makes to that gate.
+// A delivery with only a bus node publishes that node alone. This
+// happens when a libusb program detaches the kernel driver to claim the
+// interface, which removes the driver's nodes. The bus node stays, so a
+// CDI spec written in that state still has a node to inject when the
+// container restarts. The inventory skips a device with no nodes in its
+// subtree, so for a device with a driver only resolveAllocated, for a
+// claim that is already allocated, reaches this case.
 func publishDevices(d hardware.Device, delivery hardware.Delivery) []publishedDevice {
 	if bluetoothAdapter(d) {
 		return publishBluetooth(delivery)
@@ -188,8 +130,6 @@ func publishDevices(d hardware.Device, delivery hardware.Delivery) []publishedDe
 	return published
 }
 
-// splitBySubsystem sorts one delivery's nodes into the devices the
-// policy publishes for them.
 func splitBySubsystem(delivery hardware.Delivery) []publishedDevice {
 	if len(delivery.Nodes) == 0 {
 		return nil
@@ -201,11 +141,8 @@ func splitBySubsystem(delivery hardware.Delivery) []publishedDevice {
 	kinds := delivery.Subsystems()
 	render := hasRenderNode(delivery)
 
-	// A node the kernel did not categorize (sysfs's subsystem readlink
-	// failed) is hardware nobody has examined. Route the whole delivery
-	// to the unknown branch, which publishes it whole and exclusive,
-	// applying the milestone 38 default to any hardware liken has not
-	// met.
+	// A node has no subsystem when its sysfs subsystem link could not
+	// be read. The policy cannot recognize that hardware.
 	if slices.ContainsFunc(delivery.Nodes, func(n hardware.DeliveredNode) bool {
 		return n.Subsystem == ""
 	}) {
@@ -215,14 +152,9 @@ func splitBySubsystem(delivery hardware.Delivery) []publishedDevice {
 		}}
 	}
 
-	// The two examined shapes that sort nodes come before the
-	// single-kind branch. The third, a Bluetooth adapter, delivers no
-	// node to sort, so publishDevices answers it before this. A
-	// delivery of drm nodes alone, or of sound nodes alone, answers
-	// that branch too, and the examined answer is the specific one: it
-	// separates the card node from the render node, and it states what
-	// the kernel arbitrates. The single-kind branch below is what is
-	// left, and it says nothing about sharing.
+	// A delivery of only drm nodes or only sound nodes has one
+	// subsystem too, so the graphics and audio checks come first to
+	// give it the split and the sharing rule of its kind.
 	if render && graphicsDevice(kinds) {
 		return publishGraphics(byKind, kinds)
 	}
@@ -245,31 +177,23 @@ func splitBySubsystem(delivery hardware.Delivery) []publishedDevice {
 	}}
 }
 
-// publishGraphics splits one graphics device into the devices the
-// policy publishes for it: the render node, the card node, and each
-// companion wire.
+// publishGraphics divides a GPU's delivery into the render node, the
+// card node, and one device for each companion subsystem.
 //
-// The render node is the primary. It keeps the bare name, and it is
-// the half that shares, because the driver arbitrates concurrent
-// clients on it.
+// The render node is the primary and keeps the bare name. It is
+// shareable, because the driver arbitrates between concurrent clients
+// on it.
 //
-// The card node publishes as an exclusive companion, because DRM
-// master is one per card. The kernel gives modesetting authority to
-// one open card node, and a second display program on the same card
-// fails when it starts, after the scheduler has already placed its
-// pod. An exclusive companion moves that refusal to the scheduler,
-// where the second claim waits and a person can see it waiting.
+// The card node is an exclusive companion, because the kernel gives DRM
+// master to one open card node at a time. A second display program on
+// the same card fails at startup, after the scheduler has placed its
+// pod, and an exclusive device makes its claim wait in the scheduler
+// instead. A workload that both modesets and renders requests both
+// devices in one claim.
 //
-// The companion delivers the card node alone. Every device this
-// policy publishes carries a disjoint part of the delivery, so the
-// allocated name states exactly which nodes the claim receives, and
-// the render node keeps one sharing rule rather than one rule per
-// device that carries it. A workload that modesets and renders asks
-// for both devices, in two requests of one claim.
-//
-// The framebuffer node is delivered nowhere. It is the kernel's
-// legacy console interface, holding it grants display takeover, and
-// no workload claims a bare framebuffer.
+// The framebuffer node goes to no device. It is the kernel's legacy
+// console interface, a process that writes to it can take over the
+// display, and no workload needs it.
 func publishGraphics(byKind map[string][]string, kinds []string) []publishedDevice {
 	var render, cards []string
 	for _, node := range byKind["drm"] {
@@ -307,29 +231,19 @@ func publishGraphics(byKind map[string][]string, kinds []string) []publishedDevi
 	return published
 }
 
-// publishAudio publishes one audio controller as one exclusive
-// device that delivers its whole subtree.
+// publishAudio publishes one audio controller as one exclusive device
+// with its whole subtree.
 //
-// The card is exclusive for the same reason the display node is: in
-// practice one program owns it. A sound server such as PipeWire opens
-// the card's PCMs and mixes every stream through them, and an
-// exclusive device makes a second claimant wait in the scheduler,
-// where a person can see it wait. ALSA itself would tolerate sharing,
-// because the core gives each PCM subdevice to one opener and refuses
-// a second open with EBUSY. But two claims sharing a card have no
-// contract over which claim gets which output, so the EBUSY arrives
-// at play time instead of at scheduling time, on whichever pod opened
-// second.
+// A sound server such as PipeWire opens every PCM of the card and
+// mixes all streams through them. ALSA gives each PCM subdevice to one
+// opener and returns EBUSY to the next, so a second claim on the card
+// would fail at play time in whichever pod opened second. An exclusive
+// device makes that claim wait in the scheduler instead.
 //
-// The jack nodes are delivered with the card, not split off. An i2c
-// bus is a wire to separate hardware, and the split withholds it. A
-// jack belongs to the outputs the same claim already plays through,
-// and reading its state tells a player whether a display is
-// connected.
-//
-// The device names sound as its subsystem, because that is the kind a
-// deployment selects an audio controller by. The jack nodes ride
-// along under that name.
+// The jack nodes stay with the card, because a jack's state tells a
+// player whether a display is connected to an output it plays through.
+// The device's subsystem is sound, because a workload selects an audio
+// controller by that subsystem.
 func publishAudio(delivery hardware.Delivery) []publishedDevice {
 	return []publishedDevice{{
 		Subsystem: "sound",
@@ -337,38 +251,24 @@ func publishAudio(delivery hardware.Delivery) []publishedDevice {
 	}}
 }
 
-// publishBluetooth publishes one Bluetooth adapter as one exclusive
-// device that delivers the adapter's usbfs node.
+// publishBluetooth publishes a Bluetooth adapter as one exclusive
+// device with its usbfs node, and publishes nothing for an adapter
+// without one.
 //
-// An adapter has no device node of its own. hci is a socket
-// interface: a Bluetooth stack opens an AF_BLUETOOTH socket and binds
-// it to an adapter by index, and sysfs registers no `dev` file
-// anywhere the adapter owns. The nodes that do appear under the
-// adapter belong to the peripherals connected to it, and the walk
-// stops at the bluetooth subtree that holds them. So the test the
-// rest of the inventory applies, that the subtree carries device
-// nodes, does not see an adapter that works correctly, and no other
-// branch of this policy publishes one.
+// An adapter has no device node of its own, because a Bluetooth stack
+// binds an AF_BLUETOOTH socket to the adapter by index. The nodes under
+// the adapter in sysfs belong to connected peripherals, and the walk
+// leaves them out. So the inventory, which skips a device with no
+// nodes in its subtree, makes an exception for an adapter. The claim
+// still matters: it records which workload owns the radio and
+// schedules that workload on the radio's machine. Any node left in the
+// subtree is the adapter's own, and the device has it beside the usbfs
+// node. The nodes that claimDelivery adds reach the claim through this
+// device.
 //
-// The claim is worth publishing without a node to hand over. It
-// states which workload owns the radio, and it holds that workload on
-// the machine the radio is plugged into, which is what a Bluetooth
-// service in a container needs. The usbfs node is what a userspace
-// stack opens if it drives the hardware itself.
-//
-// Any node left in the subtree belongs to the adapter, because the
-// walk already removed the peripherals' nodes, so the delivery
-// carries it beside the usbfs node. An adapter with no usbfs node
-// publishes nothing, because such a claim would deliver no node at
-// all.
-//
-// The delivery can also carry /dev/uhid, /dev/uinput, and the legacy
-// evdev nodes, which claimDelivery adds from outside the subtree, and
-// this device is where those nodes reach a claim.
-//
-// The device is exclusive. The kernel arbitrates nothing between two
-// Bluetooth stacks on one radio: both scan, both pair, and each one
-// reads a state the other wrote.
+// The device is exclusive, because the kernel does not arbitrate
+// between two Bluetooth stacks on one radio. Both would scan and pair,
+// and each would read state that the other wrote.
 func publishBluetooth(delivery hardware.Delivery) []publishedDevice {
 	if delivery.BusNode == "" {
 		return nil
@@ -376,28 +276,22 @@ func publishBluetooth(delivery hardware.Delivery) []publishedDevice {
 	return []publishedDevice{{Nodes: append(delivery.DevNodes(), delivery.BusNode)}}
 }
 
-// hasRenderNode reports whether the device delivers a DRM render
-// node. The kernel names these /dev/dri/renderD<n>, and they are the
-// nodes that do GPU work without display authority: a container that
-// holds one can encode, decode, and compute. The render node is also
-// what makes sharing safe: the driver arbitrates concurrent clients
-// on it, and the lab measured twelve encoders dividing one integrated
-// GPU evenly.
+// hasRenderNode reports whether the delivery has a DRM render node,
+// /dev/dri/renderD<n>, which lets a container encode, decode, and
+// compute on the GPU without display authority.
 func hasRenderNode(delivery hardware.Delivery) bool {
 	return slices.ContainsFunc(delivery.DevNodes(), isRenderNode)
 }
 
-// isRenderNode reports whether one drm node is a render node. Every
-// other node the drm subsystem registers for a card carries display
-// authority with it, so the inverse of this test is the card half.
+// isRenderNode reports whether a drm node is a render node. Any other
+// drm node of a GPU is a card node.
 func isRenderNode(node string) bool {
 	return strings.HasPrefix(node, "/dev/dri/renderD")
 }
 
-// graphicsDevice reports whether every kind belongs to the graphics
-// stack or to the companions a graphics device is known to deliver. A
-// kind outside both is hardware nobody has examined, and such a
-// delivery keeps the whole and exclusive default.
+// graphicsDevice reports whether every subsystem is a graphics or a
+// companion subsystem. A delivery with any other subsystem is hardware
+// that the policy does not recognize.
 func graphicsDevice(kinds []string) bool {
 	for _, kind := range kinds {
 		if !graphicsSubsystems[kind] && !companionSubsystems[kind] {
@@ -407,10 +301,7 @@ func graphicsDevice(kinds []string) bool {
 	return true
 }
 
-// audioDevice reports whether every kind belongs to an audio
-// controller. A kind outside the table is something else beside the
-// card, and such a delivery keeps the whole and exclusive default
-// until somebody examines it.
+// audioDevice reports whether every subsystem is an audio subsystem.
 func audioDevice(kinds []string) bool {
 	for _, kind := range kinds {
 		if !audioSubsystems[kind] {
@@ -420,12 +311,9 @@ func audioDevice(kinds []string) bool {
 	return true
 }
 
-// bluetoothAdapter reports whether a device is a Bluetooth host
-// controller on the USB bus. This is the one shape the policy names
-// by its driver instead of by the kinds it delivers, because it
-// delivers no kind at all. btusb drives every adapter that follows
-// the standard USB Bluetooth interface, which covers the dongles and
-// the radios built into a board.
+// bluetoothAdapter reports whether d is a Bluetooth host controller on
+// the USB bus. btusb drives every adapter that follows the standard USB
+// Bluetooth interface, both dongles and radios built into a board.
 func bluetoothAdapter(d hardware.Device) bool {
 	return d.Bus == "usb" && d.Driver == "btusb"
 }
