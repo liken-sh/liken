@@ -252,7 +252,11 @@ func tearDownFlux(c *apiclient.Client, clusterDoc *cluster.Cluster) *api.Conditi
 	// Stage 2: wait until no controller pod exists, terminating pods
 	// included.
 	pods, err := kubernetes.List[annotatedObject](c, fluxControllerPodsPath)
-	if err != nil || len(pods) > 0 {
+	if err != nil {
+		fmt.Printf("listing the Flux controller pods for the Flux teardown: %v\n", err)
+		return nil
+	}
+	if len(pods) > 0 {
 		return nil
 	}
 
@@ -262,9 +266,14 @@ func tearDownFlux(c *apiclient.Client, clusterDoc *cluster.Cluster) *api.Conditi
 	// until the Namespace is gone. A 404 is not logged, because those
 	// passes find most objects already deleted. A 409 is not logged,
 	// because the API server returns one for a delete of a Namespace
-	// that is already terminating.
+	// that is already terminating. A finalizer that stays keeps the
+	// Namespace in Terminating, so any other error of the patch is
+	// logged.
 	for _, path := range fluxTeardownPaths[:2] {
-		_ = kubernetes.PatchJSON(c, path, []byte(`{"metadata": {"finalizers": null}}`))
+		err := kubernetes.PatchJSON(c, path, []byte(`{"metadata": {"finalizers": null}}`))
+		if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
+			fmt.Printf("removing the finalizers of %s for the Flux teardown: %v\n", path, err)
+		}
 	}
 	for _, path := range fluxTeardownPaths {
 		err := c.RequestJSON(http.MethodDelete, path, nil, nil)

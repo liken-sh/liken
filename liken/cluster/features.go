@@ -197,9 +197,13 @@ type FeatureTeardown string
 
 const (
 	// TeardownAddon is the default: retraction removes the feature's
-	// seeded manifests while k3s runs, and k3s deletes the addon's
-	// objects itself. This is the right shape for a feature whose
-	// objects are inert data and simple workloads.
+	// seeded manifests while k3s runs. k3s does not delete what it
+	// deployed from a removed file, because its deploy controller
+	// applies only the files that exist. So the cluster operator's
+	// janitor deletes each workload whose liken.sh/feature annotation
+	// names the retracted feature (cluster-operator/janitor.go). This
+	// is the right shape for a feature whose objects are inert data
+	// and simple workloads.
 	TeardownAddon FeatureTeardown = ""
 
 	// TeardownJanitor means k3s must never delete this feature's
