@@ -11,6 +11,7 @@ package disks
 
 import (
 	"bytes"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"strings"
@@ -200,5 +201,54 @@ func TestFATWriterRefusesAnUnformattedVolume(t *testing.T) {
 	}
 	if _, err := OpenFATVolume(f); err == nil {
 		t.Error("OpenFATVolume accepted a blank file as a FAT32 volume")
+	}
+}
+
+// withBootSector formats a volume and then changes its boot sector.
+func withBootSector(t *testing.T, change func(boot []byte)) *os.File {
+	t.Helper()
+	f := formattedVolume(t)
+	boot := make([]byte, SectorSize)
+	if _, err := f.ReadAt(boot, 0); err != nil {
+		t.Fatalf("reading the boot sector: %v", err)
+	}
+	change(boot)
+	if _, err := f.WriteAt(boot, 0); err != nil {
+		t.Fatalf("writing the boot sector: %v", err)
+	}
+	return f
+}
+
+// A boot sector whose numbers leave no data region, or give clusters of
+// no sectors, describes a volume that the writer cannot lay out. The
+// writer must refuse it, not wrap the cluster count or divide by zero.
+// Each case keeps 128 sectors per cluster where it can, so that a
+// wrapped count asks for about 128 MiB and not 16 GiB.
+func TestFATWriterRefusesAGeometryItCannotUse(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(boot []byte)
+	}{
+		{"total sectors before the data region", func(boot []byte) {
+			boot[13] = 128
+			binary.LittleEndian.PutUint32(boot[32:36], 1)
+		}},
+		{"clusters of no sectors", func(boot []byte) {
+			boot[13] = 0
+		}},
+		{"less than one cluster after the data region", func(boot []byte) {
+			boot[13] = 128
+			reserved := uint32(binary.LittleEndian.Uint16(boot[14:16]))
+			fatSectors := binary.LittleEndian.Uint32(boot[36:40])
+			binary.LittleEndian.PutUint32(boot[32:36], reserved+2*fatSectors+1)
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := withBootSector(t, c.change)
+			if _, err := NewFATWriter(f); err == nil {
+				t.Error("NewFATWriter accepted the volume, want an error that gives the geometry")
+			}
+		})
 	}
 }

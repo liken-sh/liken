@@ -111,10 +111,25 @@ func NewFATWriter(dev interface {
 	if numFATs != 2 {
 		return nil, fmt.Errorf("the volume has %d FATs, and the writer needs 2", numFATs)
 	}
-	w.dataStart = w.reservedSectors + numFATs*w.fatSectors
-
 	totalSectors := binary.LittleEndian.Uint32(boot[32:36])
+	if w.sectorsPerCluster == 0 {
+		return nil, fmt.Errorf("the boot sector gives 0 sectors for each cluster")
+	}
+	// The sum is taken in 64 bits, because a large FAT size in 32 bits
+	// wraps to a small data start that looks valid.
+	dataStart := uint64(w.reservedSectors) + uint64(numFATs)*uint64(w.fatSectors)
+	if dataStart >= uint64(totalSectors) {
+		return nil, fmt.Errorf("the boot sector gives %d sectors in all, and the data region starts at sector %d after %d reserved sectors and %d FATs of %d sectors",
+			totalSectors, dataStart, w.reservedSectors, numFATs, w.fatSectors)
+	}
+	w.dataStart = uint32(dataStart)
 	clusters := (totalSectors - w.dataStart) / w.sectorsPerCluster
+	// The root directory takes cluster 2, so a volume needs at least
+	// one data cluster.
+	if clusters == 0 {
+		return nil, fmt.Errorf("the boot sector gives %d sectors after the data start at sector %d, and one cluster needs %d",
+			totalSectors-w.dataStart, w.dataStart, w.sectorsPerCluster)
+	}
 
 	// This holds the whole table in memory: the clusters, plus the
 	// two flag entries. Entries 0 and 1 repeat what the format
