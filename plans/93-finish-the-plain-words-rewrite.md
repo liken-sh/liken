@@ -106,15 +106,16 @@ reaches other components:
 
 ## Leftovers in rewritten components
 
-- `display-operator`: comments that still use "holds", "takes",
-  "states", and "the one".
-- `equipment-operator`: about 60 log strings that join two
-  statements with "; ", and the verb "asked" for a command sent to a
-  television.
-- `transect`: exported names that still read as private words, and
-  some page copy.
-- `liken`: `cluster/features.go` states something about
-  `TeardownAddon` that the restart code of `init` contradicts.
+Each one is an open problem of its component:
+
+- [`display-operator`](../display-operator/plans/open-problems/comments-that-the-rewrite-did-not-reach.md):
+  comments that the rewrite did not reach.
+- [`equipment-operator`](../equipment-operator/plans/open-problems/log-lines-that-join-two-statements.md):
+  log lines that join two statements.
+- [`transect`](../transect/plans/open-problems/names-and-page-copy-that-the-rewrite-did-not-reach.md):
+  exported names and page copy.
+- [`liken`](../liken/plans/open-problems/a-comment-on-teardownaddon-contradicts-the-restart-code.md):
+  a comment that contradicts the restart code.
 
 ## Instructions, plans, and other repositories
 
