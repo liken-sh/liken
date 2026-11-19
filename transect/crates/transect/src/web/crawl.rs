@@ -117,9 +117,11 @@ fn outside_links(html: &str) -> String {
 fn without(html: &str, open: &str, close: &str) -> String {
     let mut text = String::new();
     let mut rest = html;
-    while let Some(at) = rest
-        .find(&format!("{open} "))
-        .or_else(|| rest.find(&format!("{open}>")))
+    let (spaced, closed) = (format!("{open} "), format!("{open}>"));
+    while let Some(at) = [rest.find(&spaced), rest.find(&closed)]
+        .into_iter()
+        .flatten()
+        .min()
     {
         text.push_str(&rest[..at]);
         rest = rest[at..].split_once(close).map_or("", |(_, after)| after);
@@ -170,6 +172,16 @@ fn subject(url: &str) -> &str {
 #[case::a_loss("/?lose=node-alpha", "node-alpha")]
 fn a_page_is_about_its_subject(#[case] url: &str, #[case] expected: &str) {
     assert_eq!(subject(url), expected);
+}
+
+#[test]
+fn without_removes_an_element_before_one_with_attributes() {
+    let html = "<p><code>x</code> and <code class=\"y\">z</code></p>";
+    let text = without(html, "<code", "</code>");
+    assert_eq!(
+        text, "<p> and </p>",
+        "without({html:?}) = {text:?}, want both code elements removed"
+    );
 }
 
 #[test]

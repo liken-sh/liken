@@ -29,24 +29,45 @@ pub enum Skip {
     Taint(String),
 }
 
-/// The keys of the taints that the DaemonSet controller adds
-/// tolerations for on every pod it creates, even when the template
-/// lists none.  So a `DaemonSet`'s pod can run on a machine that is
-/// cordoned, under pressure, or not ready.
-const TOLERATED_BY_DAEMON_SETS: [&str; 7] = [
-    "node.kubernetes.io/not-ready",
-    "node.kubernetes.io/unreachable",
-    "node.kubernetes.io/disk-pressure",
-    "node.kubernetes.io/memory-pressure",
-    "node.kubernetes.io/pid-pressure",
-    "node.kubernetes.io/unschedulable",
-    "node.kubernetes.io/network-unavailable",
+/// The taints that the DaemonSet controller adds tolerations for on
+/// every pod it creates, even when the template lists none, each with
+/// the one effect the controller tolerates.  So a `DaemonSet`'s pod can
+/// run on a machine that is cordoned or under pressure, and stays on a
+/// machine that turns not ready or unreachable.  A machine whose taint
+/// is `not-ready:NoSchedule` gets no new pod.
+/// `AddOrUpdateDaemonPodTolerations` in
+/// `pkg/controller/daemon/util/daemonset_util.go` of Kubernetes adds
+/// them.
+const TOLERATED_BY_DAEMON_SETS: [(&str, &str); 6] = [
+    ("node.kubernetes.io/not-ready", "NoExecute"),
+    ("node.kubernetes.io/unreachable", "NoExecute"),
+    ("node.kubernetes.io/disk-pressure", "NoSchedule"),
+    ("node.kubernetes.io/memory-pressure", "NoSchedule"),
+    ("node.kubernetes.io/pid-pressure", "NoSchedule"),
+    ("node.kubernetes.io/unschedulable", "NoSchedule"),
 ];
+
+/// The controller adds a toleration of this taint, with the effect
+/// `NoSchedule`, only to a pod whose template sets `hostNetwork`.
+const NETWORK_UNAVAILABLE: &str = "node.kubernetes.io/network-unavailable";
 
 /// The reason that the DaemonSet controller does not create a pod of
 /// `template` for `node`, or `None` when the pod fits there.
 pub fn skip(template: &PodSpec, node: &Node) -> Option<Skip> {
-    check(template, node, &TOLERATED_BY_DAEMON_SETS)
+    let mut pod = template.clone();
+    let host_network = pod.host_network == Some(true);
+    let network = host_network.then_some((NETWORK_UNAVAILABLE, "NoSchedule"));
+    let added = TOLERATED_BY_DAEMON_SETS
+        .into_iter()
+        .chain(network)
+        .map(|(key, effect)| Toleration {
+            key: Some(key.into()),
+            operator: Some("Exists".into()),
+            effect: Some(effect.into()),
+            ..Toleration::default()
+        });
+    pod.tolerations.get_or_insert_default().extend(added);
+    check(&pod, node)
 }
 
 /// Whether the scheduler can place a pod of `spec` on `node`.  Unlike
@@ -64,13 +85,12 @@ pub fn fits(spec: &PodSpec, node: &Node) -> bool {
     if cordoned && !tolerations.iter().any(|t| tolerates(t, &cordon)) {
         return false;
     }
-    check(spec, node, &[]).is_none()
+    check(spec, node).is_none()
 }
 
 /// Returns the first of the three checks that fails, in the order node
-/// selector, required node affinity, taints.  A taint whose key is in
-/// `exempt` is tolerated whatever the template lists.
-fn check(template: &PodSpec, node: &Node, exempt: &[&str]) -> Option<Skip> {
+/// selector, required node affinity, taints.
+fn check(template: &PodSpec, node: &Node) -> Option<Skip> {
     let no_labels = BTreeMap::new();
     let labels = node.metadata.labels.as_ref().unwrap_or(&no_labels);
     let name = node.metadata.name.as_deref().unwrap_or_default();
@@ -99,7 +119,6 @@ fn check(template: &PodSpec, node: &Node, exempt: &[&str]) -> Option<Skip> {
         .into_iter()
         .flatten()
         .filter(|taint| matches!(taint.effect.as_str(), "NoSchedule" | "NoExecute"))
-        .filter(|taint| !exempt.contains(&taint.key.as_str()))
         .find(|taint| !tolerations.iter().any(|t| tolerates(t, taint)))
         .map(|taint| Skip::Taint(taint.key.clone()))
 }
@@ -268,6 +287,30 @@ mod tests {
         "hostNetwork: false",
         "{}",
         "[{key: node.kubernetes.io/unschedulable, effect: NoSchedule}]",
+        None
+    )]
+    #[case::not_ready_taint_of_the_effect_the_controller_does_not_tolerate(
+        "hostNetwork: false",
+        "{}",
+        "[{key: node.kubernetes.io/not-ready, effect: NoSchedule}]",
+        Some(Skip::Taint("node.kubernetes.io/not-ready".into()))
+    )]
+    #[case::not_ready_taint_the_controller_tolerates(
+        "hostNetwork: false",
+        "{}",
+        "[{key: node.kubernetes.io/not-ready, effect: NoExecute}]",
+        None
+    )]
+    #[case::network_unavailable_without_the_host_network(
+        "hostNetwork: false",
+        "{}",
+        "[{key: node.kubernetes.io/network-unavailable, effect: NoSchedule}]",
+        Some(Skip::Taint("node.kubernetes.io/network-unavailable".into()))
+    )]
+    #[case::network_unavailable_on_the_host_network(
+        "hostNetwork: true",
+        "{}",
+        "[{key: node.kubernetes.io/network-unavailable, effect: NoSchedule}]",
         None
     )]
     fn skip_returns_the_first_failed_check(
