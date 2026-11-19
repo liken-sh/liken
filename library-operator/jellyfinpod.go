@@ -18,6 +18,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
@@ -173,11 +174,11 @@ func buildJellyfinService(catalog *NamespaceCatalog) *Service {
 // standJellyfin brings the namespace into line with what the Catalog states.
 // A Catalog that names a Jellyfin server stands the pod and the Service, and
 // a Catalog that names none takes both down.
-func (o *operator) standJellyfin(ctx context.Context, catalog *NamespaceCatalog) error {
+func (o *operator) standJellyfin(ctx context.Context, catalog *NamespaceCatalog, now time.Time) error {
 	if catalog.Spec.Jellyfin == nil {
 		return o.retireJellyfin(ctx, catalog)
 	}
-	if _, err := o.standJellyfinPod(ctx, catalog); err != nil {
+	if _, err := o.standJellyfinPod(ctx, catalog, now); err != nil {
 		return err
 	}
 	return o.standJellyfinService(ctx, catalog)
@@ -186,9 +187,9 @@ func (o *operator) standJellyfin(ctx context.Context, catalog *NamespaceCatalog)
 // The pod goes through standPod, so a missing pod is created and a pod built
 // from another template is deleted and stood again on the next pass, the rule
 // every pod this operator stands follows.
-func (o *operator) standJellyfinPod(ctx context.Context, catalog *NamespaceCatalog) (*Pod, error) {
+func (o *operator) standJellyfinPod(ctx context.Context, catalog *NamespaceCatalog, now time.Time) (*Pod, error) {
 	desired := buildJellyfinPod(catalog, o.scannerImage, o.busAddress, o.topicBase, o.mediaTopicBase)
-	return o.standPod(ctx, desired)
+	return o.standPod(ctx, desired, now)
 }
 
 // The Service is written on divergence alone, the rule standGossipService

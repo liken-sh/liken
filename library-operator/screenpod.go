@@ -554,7 +554,7 @@ func (o *operator) reconcileScreens(ctx context.Context, namespace string, catal
 			}
 		}
 		desired := buildScreenPod(player, inNamespace, catalog, o.browserImage, o.corrosionImage, o.topicBase, o.household)
-		if _, err := o.standPod(ctx, desired); err != nil {
+		if _, err := o.standPod(ctx, desired, now); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the screen of %s/%s: %v\n", namespace, name, err)
 		}
 	}

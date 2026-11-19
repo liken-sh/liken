@@ -84,6 +84,10 @@ type ObjectMeta struct {
 	Finalizers        []string          `json:"finalizers,omitempty"`
 	DeletionTimestamp string            `json:"deletionTimestamp,omitempty"`
 	OwnerReferences   []OwnerReference  `json:"ownerReferences,omitempty"`
+	// The API server writes the time it created the object. The wait
+	// before a pod that the kubelet ended is replaced counts from it
+	// (endedpods.go).
+	CreationTimestamp time.Time `json:"creationTimestamp,omitzero"`
 }
 
 // Deleting reports that somebody asked for this object's deletion.

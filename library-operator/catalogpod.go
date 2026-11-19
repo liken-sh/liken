@@ -12,6 +12,8 @@ package main
 
 import (
 	"context"
+	"strings"
+	"time"
 )
 
 // The name every durable copy of the namespace's catalog is numbered
@@ -143,7 +145,7 @@ func reporterSidecar(catalog *NamespaceCatalog, image, busAddress, topicBase str
 // Create the claim before the pods, because every replica mounts it.
 // With a class other than per-node, run only one replica because the
 // claim binds to one node.
-func (o *operator) standCatalogPods(ctx context.Context, catalog *NamespaceCatalog) ([]*Pod, error) {
+func (o *operator) standCatalogPods(ctx context.Context, catalog *NamespaceCatalog, now time.Time) ([]*Pod, error) {
 	store := catalogStoreOf(catalog)
 	wanted, err := o.storeCopies(ctx, store, catalogReplicaCount(catalog))
 	if err != nil {
@@ -154,7 +156,7 @@ func (o *operator) standCatalogPods(ctx context.Context, catalog *NamespaceCatal
 	}
 	pods := make([]*Pod, wanted)
 	for index := range wanted {
-		pod, err := o.standCatalogPod(ctx, catalog, index)
+		pod, err := o.standCatalogPod(ctx, catalog, index, now)
 		if err != nil {
 			return pods, err
 		}
@@ -166,9 +168,9 @@ func (o *operator) standCatalogPods(ctx context.Context, catalog *NamespaceCatal
 // Return the existing pod if it matches the template, or create and
 // return a pod if none exists. If this pass deletes an outdated pod,
 // return nil, as the operator does for its other pods.
-func (o *operator) standCatalogPod(ctx context.Context, catalog *NamespaceCatalog, index int) (*Pod, error) {
+func (o *operator) standCatalogPod(ctx context.Context, catalog *NamespaceCatalog, index int, now time.Time) (*Pod, error) {
 	desired := buildCatalogPod(catalog, index, o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
-	return o.standPod(ctx, desired)
+	return o.standPod(ctx, desired, now)
 }
 
 // The copy that reports the namespace's catalog, out of the pods the pass
@@ -195,12 +197,35 @@ func catalogPodBlocker(pod *Pod) (string, string) {
 	switch {
 	case pod == nil:
 		return catalogReasonPodPending, "there is no catalog pod yet"
-	case pod.Status.Phase == podFailed:
+	case endedByKubelet(pod):
+		// The pod waits for its replacement, or a finalizer keeps it
+		// after the delete (endedpods.go).
 		return catalogReasonPodFailed, podFailureMessage(pod)
+	case tries(pod) > 0 && (pod.Status.Phase == podPending || pod.Status.Phase == ""):
+		// A replacement keeps the reason until it runs. The kubelet can
+		// reject each new pod at admission, so it goes from Pending to
+		// Failed and never runs, and a reason that changed on each try
+		// would post two Events for each retry. A pod that the pass has
+		// just created has no phase in the copy it holds. A replacement
+		// that runs is judged by the rules below, whatever its count.
+		return catalogReasonPodFailed, replacementMessage(pod)
 	case pod.Status.Phase != podRunning || !everyContainerReady(pod):
 		return catalogReasonPodPending, podPendingMessage(pod)
 	}
 	return "", ""
+}
+
+// The message of a replacement that is not ready yet, with the kubelet's
+// words about it when it has written any.
+func replacementMessage(pod *Pod) string {
+	message := "the kubelet ended the catalog pod, and its replacement is not ready yet"
+	if words := strings.TrimSuffix(pod.Status.Message, "."); words != "" {
+		return message + ": " + words
+	}
+	if pod.Status.Reason != "" {
+		return message + ": " + pod.Status.Reason
+	}
+	return message
 }
 
 // An absent claim is created and an existing one is left alone, the

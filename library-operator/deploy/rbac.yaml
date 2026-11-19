@@ -218,7 +218,9 @@ rules:
   # of one pod by a field selector, and only while that pod stays
   # Pending. It creates an event for each condition transition of a
   # Library, a Catalog, or a MetadataProvider, and for each Job it
-  # creates, each walk that ends, and each stranded copy it deletes. It
+  # creates, each walk that ends, each stranded copy it deletes, and each
+  # pod that the kubelet ended and the operator created again, on the
+  # Catalog or the Player that owns the pod. It
   # patches the count of an event that repeats within ten minutes. The
   # grant is cluster-wide, because the objects are in any namespace.
   - apiGroups: [""]

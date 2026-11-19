@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -346,12 +347,12 @@ func podPendingMessage(pod *Pod) string {
 
 func podFailureMessage(pod *Pod) string {
 	if pod.Status.Message != "" {
-		return "the catalog pod failed: " + pod.Status.Message
+		return "the kubelet ended the catalog pod: " + strings.TrimSuffix(pod.Status.Message, ".")
 	}
 	if pod.Status.Reason != "" {
-		return "the catalog pod failed: " + pod.Status.Reason
+		return "the kubelet ended the catalog pod: " + pod.Status.Reason
 	}
-	return "the catalog pod failed"
+	return "the kubelet ended the catalog pod"
 }
 
 // writeLibraryStatus writes the status compose derives from the

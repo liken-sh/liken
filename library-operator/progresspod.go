@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"time"
 )
 
 // The two container names a person reads in kubectl logs. They say what
@@ -239,7 +240,7 @@ func (o *operator) standProgressClaim(ctx context.Context, catalog *NamespaceCat
 //
 // The claim is stood once, before any pod, on the same terms as the
 // catalog store's claim.
-func (o *operator) standProgressPods(ctx context.Context, catalog *NamespaceCatalog) ([]*Pod, error) {
+func (o *operator) standProgressPods(ctx context.Context, catalog *NamespaceCatalog, now time.Time) ([]*Pod, error) {
 	store := progressStoreOf(catalog)
 	wanted, err := o.storeCopies(ctx, store, progressReplicaCount(catalog))
 	if err != nil {
@@ -250,7 +251,7 @@ func (o *operator) standProgressPods(ctx context.Context, catalog *NamespaceCata
 	}
 	pods := make([]*Pod, wanted)
 	for index := range wanted {
-		pod, err := o.standProgressPod(ctx, catalog, index)
+		pod, err := o.standProgressPod(ctx, catalog, index, now)
 		if err != nil {
 			return pods, err
 		}
@@ -261,10 +262,10 @@ func (o *operator) standProgressPods(ctx context.Context, catalog *NamespaceCata
 
 // The pod that stands for one Catalog's progress store after this pass,
 // on the same terms as every other pod this operator stands.
-func (o *operator) standProgressPod(ctx context.Context, catalog *NamespaceCatalog, index int) (*Pod, error) {
+func (o *operator) standProgressPod(ctx context.Context, catalog *NamespaceCatalog, index int, now time.Time) (*Pod, error) {
 	desired := buildProgressPod(catalog, index, o.scannerImage, o.corrosionImage,
 		o.busAddress, o.topicBase, o.mediaTopicBase)
-	return o.standPod(ctx, desired)
+	return o.standPod(ctx, desired, now)
 }
 
 // The media operator's topic base, as the environment states it, or

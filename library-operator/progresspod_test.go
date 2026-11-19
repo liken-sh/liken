@@ -246,7 +246,7 @@ func TestStandProgressPodsCreateThePodsAndTheStoresClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house", "house")
 
-	if _, err := testOperator(t, cluster).standProgressPods(t.Context(), catalog); err != nil {
+	if _, err := testOperator(t, cluster).standProgressPods(t.Context(), catalog, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -265,10 +265,10 @@ func TestTheProgressMemberSelectorSelectsTheProgressLabelAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house", "house")
 	operator := testOperator(t, cluster)
-	if _, err := operator.standProgressPod(t.Context(), catalog, 0); err != nil {
+	if _, err := operator.standProgressPod(t.Context(), catalog, 0, testNow); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := operator.standCatalogPod(t.Context(), catalog, 0); err != nil {
+	if _, err := operator.standCatalogPod(t.Context(), catalog, 0, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -381,7 +381,7 @@ func TestStandProgressPodsReportsAFailedCopy(t *testing.T) {
 	catalog.Spec.Progress.Replicas = 2
 	cluster.broken["/api/v1/namespaces/house/pods/house-progress-0"] = http.StatusInternalServerError
 
-	_, err := testOperator(t, cluster).standProgressPods(t.Context(), catalog)
+	_, err := testOperator(t, cluster).standProgressPods(t.Context(), catalog, testNow)
 
 	if err == nil {
 		t.Fatal("err = nil, want the failure the stand could not read past")

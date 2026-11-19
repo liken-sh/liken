@@ -88,7 +88,7 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 		// The pod is stood before the status is written, so a Catalog
 		// that has just been created reports its own pod on the pass
 		// that made it rather than one tick later.
-		catalogPods, err := o.standCatalogPods(ctx, catalog)
+		catalogPods, err := o.standCatalogPods(ctx, catalog, now)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "standing the catalog pods in %s: %v\n", namespace, err)
 		}
@@ -98,7 +98,7 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 		if err := o.standCatalogEndpoints(ctx, namespace, owners, members); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the catalog endpoints in %s: %v\n", namespace, err)
 		}
-		progressPods, err := o.standProgressPods(ctx, catalog)
+		progressPods, err := o.standProgressPods(ctx, catalog, now)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "standing the progress pods in %s: %v\n", namespace, err)
 		}
@@ -116,7 +116,7 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 		// The jellyfin pair stands beside the progress store while
 		// the Catalog names a Jellyfin server, and comes down when it
 		// names none.
-		if err := o.standJellyfin(ctx, catalog); err != nil {
+		if err := o.standJellyfin(ctx, catalog, now); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the jellyfin role in %s: %v\n", namespace, err)
 		}
 		// the one-time backfill stands after the pair, on the Jobs

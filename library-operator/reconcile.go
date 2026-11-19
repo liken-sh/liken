@@ -266,7 +266,7 @@ func libraryVolume(volume *PersistentVolume) *LibraryVolume {
 // live comparison would either roll on every pass or grow a
 // field-by-field allowlist. This operator does the same with one
 // annotation on the pod it creates.
-func (o *operator) standPod(ctx context.Context, desired *Pod) (*Pod, error) {
+func (o *operator) standPod(ctx context.Context, desired *Pod, now time.Time) (*Pod, error) {
 	if err := stampTemplateHash(&desired.Metadata, desired.Spec); err != nil {
 		return nil, err
 	}
@@ -304,6 +304,14 @@ func (o *operator) standPod(ctx context.Context, desired *Pod) (*Pod, error) {
 	// claim only after the pod before it has released it.
 	if live.Metadata.DeletionTimestamp != "" {
 		return live, nil
+	}
+
+	// A pod that the kubelet ended is replaced after a wait
+	// (endedpods.go). A pod of another template is not: the person who
+	// changed the template can have fixed what the kubelet refused, so
+	// the branch below replaces it at once, and the new pod has no count.
+	if endedByKubelet(live) && sameTemplate(&live.Metadata, &desired.Metadata) {
+		return o.replaceEnded(ctx, live, desired, now)
 	}
 
 	// A live pod stamped with a different hash is stale, and so is one

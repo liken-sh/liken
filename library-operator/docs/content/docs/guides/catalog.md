@@ -132,7 +132,40 @@ minutes cannot move, because its claim is bound to that node. The
 operator deletes the pod, and its claim on a class that binds a claim
 to a node, so the next pass creates the replica on another node. It
 posts a `StoreCopyHealed` `Warning` `Event` on the `Catalog` that names
-the replica and the node. Each change of the `Ready` condition posts an
+the replica and the node.
+
+The kubelet can end a pod for a cause outside its containers: an
+eviction for pressure on its node, a rejection at admission, or a
+node shutdown. The pod then stays `Failed` or `Succeeded`, and its
+`restartPolicy` does not start it again. The operator deletes such a
+replica of either store, or the Jellyfin pod, and creates it again in
+the same pass, where the scheduler places it. A pod that ended young
+waits first, because the kubelet can reject the new pod on the same
+node at once: 10 seconds after its creation for the first try,
+doubling with each try, to a limit of 5 minutes. The pod's annotation
+`library.liken.sh/tries` counts the tries. When you edit the `Catalog`
+so that the pod changes, an ended pod is replaced at once, and the new
+pod has no count. The operator posts a `PodRecreated` `Warning`
+`Event` on the `Catalog`, with the pod's name and the kubelet's reason
+and message, for the first try. It posts no further `Event` until a
+pod ran for longer than 5 minutes before the kubelet ended it.
+
+A replica on a node that is not `Ready` stays where it is, because a
+node-local class keeps its data on that node. The node can come back
+from a reboot, and after ten minutes the heal above takes the replica.
+When the node's `Ready` condition has no `lastTransitionTime`, the heal
+cannot measure the ten minutes, so the operator measures them from the
+end of the replica and then replaces it.
+
+While a replica of the catalog that the kubelet ended waits, `Ready` is
+`False` with the reason `PodFailed` and the kubelet's words. A replica
+that a finalizer keeps after the delete, and a replica on a node that
+is not `Ready`, report the same. The reason stays `PodFailed` while
+each replacement is `Pending`, and the ordinary reasons apply once a
+replacement runs, so a node that rejects each new pod posts one
+`Event` for the condition and not one for each try.
+
+Each change of the `Ready` condition posts an
 `Event` too, with the condition's reason and message. `ManyCatalogs`,
 `ClassNotPerNode`, and `PodFailed` are `Warning`s.
 

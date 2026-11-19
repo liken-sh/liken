@@ -11,10 +11,11 @@ package main
 // words. The condition reasons are declared beside the conditions
 // (api.go, namespacecatalog.go, metadataprovider.go, providercheck.go,
 // imdbcheck.go), and warningReasons below names the ones that post a
-// Warning. Three actions that change no condition post an Event of
-// their own, with the reasons declared here: a Job created, a walk that
-// ended, a placing of the end titles that ended, and a stranded copy
-// deleted. Nothing else posts one: a pass, a
+// Warning. Each action that changes no condition posts an Event of its
+// own, with the reasons declared here: a Job created, a walk that ended,
+// a placing of the end titles that ended, a stranded copy deleted, and a
+// pod that the kubelet ended created again. Nothing else
+// posts one: a pass, a
 // provider call, and a webhook go to the log and the metrics.
 //
 // Only the operator binary posts Events. The pod build creates no
@@ -50,6 +51,15 @@ const (
 	// The heal deleted a durable copy of a store, and its claim, from a
 	// node that stayed NotReady. Warning, because a node is down.
 	reasonStoreCopyHealed = "StoreCopyHealed"
+	// The pass created a long-running pod again after the kubelet ended
+	// it, on the Catalog that owns the pod. Warning, because the kubelet
+	// ends a pod for pressure on its node, a rejection at admission, or a
+	// node shutdown, and a node under pressure can need a person.
+	reasonPodRecreated = "PodRecreated"
+	// The same, on the Player that owns a screen pod. The Player is
+	// media-operator's object, so the reason takes this component's
+	// prefix.
+	reasonScreenPodRecreated = "LibraryPodRecreated"
 )
 
 // The condition reasons that post a Warning, because a person must act:
@@ -195,6 +205,34 @@ func postStoreCopyHealed(recorder *events.Recorder, pod *Pod, message string) {
 			Name:       owner.Name,
 			UID:        owner.UID,
 		}, reasonStoreCopyHealed, message)
+		return
+	}
+}
+
+// postPodRecreated posts the replacement of a pod that the kubelet
+// ended, on the object that controls the pod: the Catalog for its store
+// copies and its Jellyfin pod, and the Player for its screen. The ended
+// pod and the kubelet's words in its status are gone once the pass
+// replaces it, so the Event is where a person reads why the pod was
+// created again. A Player is media-operator's object, so the reason
+// there carries this component's prefix.
+func postPodRecreated(recorder *events.Recorder, pod *Pod) {
+	for _, owner := range pod.Metadata.OwnerReferences {
+		if !owner.Controller {
+			continue
+		}
+		reason := reasonPodRecreated
+		if owner.Kind != "Catalog" {
+			reason = reasonScreenPodRecreated
+		}
+		recorder.Warning(events.ObjectReference{
+			APIVersion: owner.APIVersion,
+			Kind:       owner.Kind,
+			Namespace:  pod.Metadata.Namespace,
+			Name:       owner.Name,
+			UID:        owner.UID,
+		}, reason, fmt.Sprintf("Created the pod %s again, because the kubelet ended it: %s",
+			pod.Metadata.Name, podEndedBy(pod)))
 		return
 	}
 }

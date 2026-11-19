@@ -275,8 +275,9 @@ const (
 	// The Catalog asks for more than one copy of a store on a class that
 	// is not per-node, so the namespace stands one copy of that store.
 	catalogReasonClassNotPerNode = "ClassNotPerNode"
-	// The catalog pod has not started, and the catalog pod
-	// failed.
+	// The catalog pod has not started. The kubelet ended the catalog pod,
+	// and it waits for its replacement or for a finalizer that keeps it
+	// after the delete (endedpods.go).
 	catalogReasonPodPending = "PodPending"
 	catalogReasonPodFailed  = "PodFailed"
 )

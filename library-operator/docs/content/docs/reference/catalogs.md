@@ -134,7 +134,7 @@ The catalog cluster that this Catalog runs. Only the library operator writes it.
 | <span id="status--replicas"></span>`replicas` | [object](#statusreplicas) | no | The durable copies of the namespace's two stores: for each, the count that is up beside the count the Catalog asks for. |
 | <span id="status--screens"></span>`screens` | [\[\]object](#statusscreens) | no | One entry per screen pod in the namespace, in Player order: the Player it draws for, the claim its catalog agent runs on, the claim its art cache is on, the node it runs on, and its phase. A screen whose namespace has no single Catalog runs on emptyDirs and names neither claim. |
 | <span id="status--jellyfin"></span>`jellyfin` | [object](#statusjellyfin) | no | The one-time backfill of the progress the namespace's Jellyfin server already held before this operator recorded it: the server it ran against, its current phase, and when it finished. Present only while spec.jellyfin names a server. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready. It is False with the reason ClassNotPerNode when the Catalog asks for copies of a store on a class that cannot hold more than one, and otherwise False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready. It is False with the reason ClassNotPerNode when the Catalog asks for copies of a store on a class that cannot hold more than one, and otherwise False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up. PodFailed names a copy that the kubelet ended, while it waits for its replacement, while a finalizer keeps it after the delete, or while its node is not Ready, and it stays while each replacement is Pending, until one runs. |
 
 ### status.replicas
 
@@ -187,7 +187,7 @@ The one-time backfill of the progress the namespace's Jellyfin server already he
 
 ### status.conditions[]
 
-The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready. It is False with the reason ClassNotPerNode when the Catalog asks for copies of a store on a class that cannot hold more than one, and otherwise False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up.
+The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready. It is False with the reason ClassNotPerNode when the Catalog asks for copies of a store on a class that cannot hold more than one, and otherwise False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up. PodFailed names a copy that the kubelet ended, while it waits for its replacement, while a finalizer keeps it after the delete, or while its node is not Ready, and it stays while each replacement is Pending, until one runs.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

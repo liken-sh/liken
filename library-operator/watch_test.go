@@ -220,6 +220,14 @@ func TestAWatchWakesThePassOnlyForAChangeItActsOn(t *testing.T) {
 		{name: "a member pod whose reporter is no longer ready", wakes: true, change: func(cluster *fakeCluster) {
 			cluster.pods["house-catalog-0"].Status.ContainerStatuses[0].Ready = false
 		}},
+		{name: "a catalog pod that the kubelet evicted", wakes: true, change: func(cluster *fakeCluster) {
+			cluster.pods["house-catalog-0"].Status.Phase = podFailed
+			cluster.pods["house-catalog-0"].Status.Reason = "Evicted"
+		}},
+		{name: "a Jellyfin pod that the kubelet evicted", wakes: true, change: func(cluster *fakeCluster) {
+			cluster.pods["house-jellyfin"].Status.Phase = podFailed
+			cluster.pods["house-jellyfin"].Status.Reason = "Evicted"
+		}},
 		{name: "a person's finalizer", wakes: true, change: func(cluster *fakeCluster) {
 			cluster.people["person-a"].Metadata.Finalizers = []string{progressFinalizer}
 		}},
@@ -261,6 +269,7 @@ func TestAWatchWakesThePassOnlyForAChangeItActsOn(t *testing.T) {
 				boundHouse(cluster)
 				member := readyCatalogPod("house", "house")
 				cluster.pods[member.Metadata.Name] = member
+				cluster.pods["house-jellyfin"] = testJellyfinPod(jellyfinCatalog())
 				seedPlayer(cluster, "den", "house", screenController)
 				cluster.people["person-a"] = &Person{Metadata: ObjectMeta{Name: "person-a"}}
 				cluster.jobs["house/movies-walk-a"] = &Job{Metadata: ObjectMeta{Name: "movies-walk-a", Namespace: "house",

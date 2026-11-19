@@ -56,7 +56,8 @@ const screenController = "library.liken.sh/media-browser"
 //     schedule, the backoff of a failed Job, of a cleanup Job, and of the
 //     Jellyfin backfill, the grace before a succeeded Job is deleted, the
 //     cadence of a provider check, the grace on an unschedulable screen,
-//     and the grace on a NotReady node. Without the tick, each waits for
+//     the grace on a NotReady node, and the wait before a pod that the
+//     kubelet ended is replaced. Without the tick, each waits for
 //     an unrelated wake.
 //   - The counts of a report that changes no decision, which fold holds
 //     for the next pass instead of waking one.

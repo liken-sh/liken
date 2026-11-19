@@ -238,12 +238,12 @@ func TestStandJellyfinTakesDownThePairACatalogNoLongerAsksFor(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := jellyfinCatalog()
 	operator := testOperator(t, cluster)
-	if err := operator.standJellyfin(t.Context(), catalog); err != nil {
+	if err := operator.standJellyfin(t.Context(), catalog, testNow); err != nil {
 		t.Fatal(err)
 	}
 
 	catalog.Spec.Jellyfin = nil
-	if err := operator.standJellyfin(t.Context(), catalog); err != nil {
+	if err := operator.standJellyfin(t.Context(), catalog, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -262,7 +262,7 @@ func TestStandJellyfinTakesDownAServiceStoodAgain(t *testing.T) {
 	operator := testOperator(t, cluster)
 
 	for _, named := range []*NamespaceCatalog{housekeepingCatalog(), jellyfinCatalog(), housekeepingCatalog()} {
-		if err := operator.standJellyfin(t.Context(), named); err != nil {
+		if err := operator.standJellyfin(t.Context(), named, testNow); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -284,7 +284,7 @@ func TestStandJellyfinLeavesObjectsItDidNotStand(t *testing.T) {
 	})
 	catalog := housekeepingCatalog()
 
-	if err := testOperator(t, cluster).standJellyfin(t.Context(), catalog); err != nil {
+	if err := testOperator(t, cluster).standJellyfin(t.Context(), catalog, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -306,14 +306,14 @@ func TestStandJellyfinReplacesAStalePod(t *testing.T) {
 	cluster.pods["house-jellyfin"] = stale
 	operator := testOperator(t, cluster)
 
-	if err := operator.standJellyfin(t.Context(), catalog); err != nil {
+	if err := operator.standJellyfin(t.Context(), catalog, testNow); err != nil {
 		t.Fatal(err)
 	}
 	if cluster.heldPod("house-jellyfin") != nil {
 		t.Fatal("the stale pod still stands")
 	}
 
-	if err := operator.standJellyfin(t.Context(), catalog); err != nil {
+	if err := operator.standJellyfin(t.Context(), catalog, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -377,7 +377,7 @@ func TestStandJellyfinReportsAFailure(t *testing.T) {
 			cluster := newFakeCluster()
 			cluster.broken[one.broken] = http.StatusInternalServerError
 
-			err := testOperator(t, cluster).standJellyfin(t.Context(), jellyfinCatalog())
+			err := testOperator(t, cluster).standJellyfin(t.Context(), jellyfinCatalog(), testNow)
 
 			if err == nil {
 				t.Fatal("err = nil, want the failure the stand could not read past")
@@ -401,12 +401,12 @@ func TestRetireJellyfinReportsAFailure(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			operator := testOperator(t, cluster)
-			if err := operator.standJellyfin(t.Context(), jellyfinCatalog()); err != nil {
+			if err := operator.standJellyfin(t.Context(), jellyfinCatalog(), testNow); err != nil {
 				t.Fatal(err)
 			}
 			cluster.broken[one.broken] = http.StatusInternalServerError
 
-			err := operator.standJellyfin(t.Context(), housekeepingCatalog())
+			err := operator.standJellyfin(t.Context(), housekeepingCatalog(), testNow)
 
 			if err == nil {
 				t.Fatal("err = nil, want the failure the retire could not read past")

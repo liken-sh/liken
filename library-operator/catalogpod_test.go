@@ -263,13 +263,16 @@ func TestCatalogPodOfFindsTheNamespacesOwn(t *testing.T) {
 // the catalog pod is replaced like every other pod this operator
 // stands: a pod built from a different template is stale, so the pass
 // deletes it and the pass after that creates the replacement. A pod
-// already on its way out is left alone.
+// already on its way out is left alone, whatever its phase.
 func TestStandCatalogPodReplacesAStalePod(t *testing.T) {
 	stale := readyCatalogPod("house", "house")
 	stale.Metadata.Annotations[templateHashAnnotation] = "an-older-template"
 	leaving := readyCatalogPod("house", "house")
 	leaving.Metadata.Annotations[templateHashAnnotation] = "an-older-template"
 	leaving.Metadata.DeletionTimestamp = "2026-08-29T12:00:00Z"
+	endedAndLeaving := readyCatalogPod("house", "house")
+	endedAndLeaving.Status.Phase = podFailed
+	endedAndLeaving.Metadata.DeletionTimestamp = "2026-08-29T12:00:00Z"
 
 	cases := []struct {
 		name    string
@@ -279,6 +282,7 @@ func TestStandCatalogPodReplacesAStalePod(t *testing.T) {
 	}{
 		{name: "a stale pod", live: stale, deletes: 1},
 		{name: "a pod already going", live: leaving, stands: true},
+		{name: "a Failed pod already going", live: endedAndLeaving, stands: true},
 		{name: "a pod that matches", live: readyCatalogPod("house", "house"), stands: true},
 	}
 	for _, one := range cases {
@@ -286,7 +290,7 @@ func TestStandCatalogPodReplacesAStalePod(t *testing.T) {
 			cluster := newFakeCluster()
 			cluster.pods["house-catalog-0"] = one.live
 
-			pod, err := testOperator(t, cluster).standCatalogPod(t.Context(), housekeepingCatalog(), 0)
+			pod, err := testOperator(t, cluster).standCatalogPod(t.Context(), housekeepingCatalog(), 0, testNow)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -308,7 +312,7 @@ func TestStandCatalogPodsReportsAFailedClaim(t *testing.T) {
 	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog"] =
 		http.StatusInternalServerError
 
-	_, err := testOperator(t, cluster).standCatalogPods(t.Context(), housekeepingCatalog())
+	_, err := testOperator(t, cluster).standCatalogPods(t.Context(), housekeepingCatalog(), testNow)
 
 	if err == nil {
 		t.Fatal("err = nil, want the failure the stand could not read past")

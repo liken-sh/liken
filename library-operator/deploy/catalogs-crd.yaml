@@ -272,7 +272,7 @@ spec:
                       description: "When the backfill finished, in UTC. Absent until it did."
                 conditions:
                   type: array
-                  description: "The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready. It is False with the reason ClassNotPerNode when the Catalog asks for copies of a store on a class that cannot hold more than one, and otherwise False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up."
+                  description: "The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready. It is False with the reason ClassNotPerNode when the Catalog asks for copies of a store on a class that cannot hold more than one, and otherwise False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up. PodFailed names a copy that the kubelet ended, while it waits for its replacement, while a finalizer keeps it after the delete, or while its node is not Ready, and it stays while each replacement is Pending, until one runs."
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

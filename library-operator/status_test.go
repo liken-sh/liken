@@ -133,6 +133,12 @@ func TestReadyConditionNamesTheStepThatIsMissing(t *testing.T) {
 	failed.Status.Reason = "Evicted"
 	failedPod.choice = catalogChoice{catalog: testNamespaceCatalog(), pod: failed}
 
+	succeededPod := scanning()
+	succeeded := readyCatalogPod("house", "house")
+	succeeded.Status.Phase = podSucceeded
+	succeeded.Status.Reason = "Terminated"
+	succeededPod.choice = catalogChoice{catalog: testNamespaceCatalog(), pod: succeeded}
+
 	startingPod := scanning()
 	starting := readyCatalogPod("house", "house")
 	starting.Status.ContainerStatuses[0].Ready = false
@@ -170,7 +176,11 @@ func TestReadyConditionNamesTheStepThatIsMissing(t *testing.T) {
 		},
 		{
 			name: "a catalog pod the kubelet gave up on", seen: failedPod,
-			reason: reasonCatalogPending, message: "the catalog pod failed: Evicted",
+			reason: reasonCatalogPending, message: "the kubelet ended the catalog pod: Evicted",
+		},
+		{
+			name: "a catalog pod the kubelet ended as Succeeded", seen: succeededPod,
+			reason: reasonCatalogPending, message: "the kubelet ended the catalog pod: Terminated",
 		},
 		{
 			name: "a catalog pod whose containers are not ready", seen: startingPod,
@@ -306,14 +316,19 @@ func TestPodFailureMessagePrefersTheKubeletsWords(t *testing.T) {
 		{
 			name:   "a message",
 			status: PodStatus{Message: "the node is out of memory"},
-			want:   "the catalog pod failed: the node is out of memory",
+			want:   "the kubelet ended the catalog pod: the node is out of memory",
 		},
 		{
 			name:   "a reason alone",
 			status: PodStatus{Reason: "Evicted"},
-			want:   "the catalog pod failed: Evicted",
+			want:   "the kubelet ended the catalog pod: Evicted",
 		},
-		{name: "neither", status: PodStatus{}, want: "the catalog pod failed"},
+		{
+			name:   "a message that ends a sentence",
+			status: PodStatus{Message: "The node was low on resource: memory."},
+			want:   "the kubelet ended the catalog pod: The node was low on resource: memory",
+		},
+		{name: "neither", status: PodStatus{}, want: "the kubelet ended the catalog pod"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {

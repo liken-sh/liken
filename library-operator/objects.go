@@ -652,6 +652,20 @@ const (
 type ContainerStatus struct {
 	Name  string `json:"name"`
 	Ready bool   `json:"ready"`
+	// The state the kubelet reports. A container that stopped carries the
+	// time it stopped, which tells how long a pod that the kubelet ended
+	// ran (endedpods.go).
+	State ContainerState `json:"state,omitzero"`
+}
+
+// ContainerState is the one state of a container that this operator
+// reads: terminated, with the time the container stopped.
+type ContainerState struct {
+	Terminated *ContainerStateTerminated `json:"terminated,omitempty"`
+}
+
+type ContainerStateTerminated struct {
+	FinishedAt time.Time `json:"finishedAt,omitzero"`
 }
 
 // The pod phases Kubernetes reports, named here so the

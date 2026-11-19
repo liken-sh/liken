@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
@@ -357,6 +358,9 @@ func (f *fakeCluster) route(w http.ResponseWriter, r *http.Request) {
 		}
 		var created Pod
 		_ = json.NewDecoder(r.Body).Decode(&created)
+		// The API server writes the time of the create, which the wait
+		// before an ended pod is replaced counts from.
+		created.Metadata.CreationTimestamp = time.Now().UTC()
 		f.pods[created.Metadata.Name] = &created
 		_ = json.NewEncoder(w).Encode(created)
 	case r.Method == http.MethodDelete:

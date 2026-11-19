@@ -39,6 +39,20 @@ the `Player`, so deleting the `Player` deletes the pod. It has two
 containers: the catalog agent as a native sidecar, and the browser.
 The browser starts after the agent's startup probe passes.
 
+When the kubelet ends the pod, for an eviction, a rejection at
+admission, or a node shutdown, the pod stays `Failed` or `Succeeded`.
+The operator deletes it and creates it again in the same pass. A pod
+that ended young waits first, 10 seconds after its creation for the
+first try, doubling with each try to a limit of 5 minutes, because the
+`Player`'s display claim puts the new pod on the same node, where the
+kubelet can reject it again. The annotation `library.liken.sh/tries`
+counts the tries. When you edit the `Player` or the namespace's
+libraries so that the pod changes, an ended pod is replaced at once.
+The operator posts a `LibraryPodRecreated` `Warning` `Event` on the
+`Player`, with the kubelet's reason and message, for the first try,
+and no further `Event` until a pod ran for longer than 5 minutes
+before the kubelet ended it. `kubectl describe player` shows it.
+
 The pod mounts every `Library` of the namespace read-only, whatever
 the browser does. It mounts its own catalog claim and its own art
 claim, where the browser keeps every piece of art it scaled. It uses
