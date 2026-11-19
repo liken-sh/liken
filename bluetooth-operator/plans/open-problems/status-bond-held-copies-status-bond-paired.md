@@ -1,6 +1,7 @@
 # `status.bond.held` copies `status.bond.paired`
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 `peripheralStatus` in `peripheral.go` sets both fields from the same
 expression:
@@ -33,14 +34,26 @@ So the two fields of a `Peripheral` always have the same value, and
   into the status, so the expression may date from a time when
   `Paired` was the only property read.
 
-## What would confirm it
+## The reproduction
 
-A unit test of `peripheralStatus` with a device that BlueZ reports as
-`Paired` and not `Bonded`, which the CRD says is possible ("A device
-can be paired without a stored key"). The test shows whether `held`
-then reports the keys that the CRD promises.
+The test ran a reconcile pass over the fake API server and the fake
+radio with a paired controller, then changed the controller in the
+fake radio to `Paired` and not `Bonded`, which the CRD says is
+possible ("A device can be paired without a stored key"), and ran a
+second pass. It asserted that `status.bond.held` is false, as the CRD
+describes, and it failed with:
+
+    status.bond = {Held:true Paired:true Bonded:false Trusted:true Connected:true Secret:liken-system/bluetooth-bond-a0-ab-51-33-b7-12 PairedAt:2026-08-17T17:30:00Z Request:}, want held false because bluetoothd stores no key for the device
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
+
+What does `status.bond.held` tell a person, and when does the
+`BondLost` warning fire? The options are that bluetoothd still has
+the device, that it stores a link key for it, or that it is paired.
+A last option removes `held`.
 
 - Which BlueZ fact `held` reports: the device object (`present`), the
   stored key (`Bonded`), or the pairing (`Paired`).

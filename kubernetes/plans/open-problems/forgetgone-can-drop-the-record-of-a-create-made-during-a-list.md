@@ -1,6 +1,7 @@
 # `ForgetGone` can drop the record of a create made during a list
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 An operator calls `memo.Versions.ForgetGone` after each
 `informer.CurrentList`, with the keys that the list returned.
@@ -33,15 +34,28 @@ object and can create it again. A create by name then fails with a
   `astrophotography-operator`, and `watches.go` in
   `liken/cluster-operator`.
 
-## What would confirm it
+## The reproduction
 
-A test in `kubernetes/memo` that calls `Unheld` on an empty store,
-then `Send` for a new key with a version, then `ForgetGone` with an
-empty list and the same empty store, and checks `Noted` for the key.
-Then, for each caller, whether a `Send` for the same kind can run
-while a pass runs `CurrentList`.
+A test in `kubernetes/memo` calls `Unheld` on an empty store, then
+`Send` for a new key that returns a version, as a create on another
+goroutine does. Then it calls `ForgetGone` with the keys that `Unheld`
+returned and the same empty store, and asserts that `Noted` is still
+true for the new key. It failed with:
+
+```
+Noted(studio) = false after ForgetGone, want true because the create came after the list read Unheld
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`. It does not show whether any caller sends a create for the
+kind while a pass runs `CurrentList`. That is still to check for each
+caller.
 
 ## What a fix has to decide
+
+When an operator creates an object while a pass lists that kind, the
+pass can forget the create and make the object again. The choice is
+between these:
 
 - Whether `ForgetGone` keeps each record written after a point that
   the caller takes before the list, as `SendList` does with

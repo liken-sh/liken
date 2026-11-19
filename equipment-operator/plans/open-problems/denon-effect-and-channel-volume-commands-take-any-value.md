@@ -1,6 +1,7 @@
 # Denon effect and channel volume commands take any value
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 Each command builder in `denon/protocol.go` returns an error for a
 value outside the receiver's range, except two. `EffectCommand`
@@ -25,16 +26,35 @@ it returns the trim on every pass until the send budget of
   `AudioDelayCommand`, and `LFECommand` beside it each have one.
 - `ChannelVolumeCommand` and `HalfStepDigits` in `denon/level.go`.
 
-## What would confirm it
+## The reproduction
 
-A unit test of `ChannelVolumeCommand` with 0.3 and -60, and of
-`EffectCommand` with -5 and 150. A test of `Pending` with a declared
-trim of 0.3 and a reported trim of 0.0.
+A table test calls `EffectCommand` with -5 and 150, and
+`ChannelVolumeCommand` with -60 and 0.3, and wants an error from each.
+Each case failed and named the line that the builder returned:
+
+```
+the builder returned "PSEFF -5", want an error
+the builder returned "PSEFF 150", want an error
+the builder returned "CVFL 0-10", want an error
+the builder returned "CVFL 50", want an error
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
+
+The test did not cover `Pending` with a trim of 0.3 and a reported
+0.0. The resend until `sendLimit` follows from the `float64`
+comparison in `Settings.Pending`, read in the code.
 
 ## What a fix has to decide
 
-- Where the range is enforced: in the CRD schema, in the command
-  builders, or both.
-- The receiver's range for the effect level and for a channel trim,
-  which the repository does not record.
-- Whether a trim between half steps is refused or rounded.
+The operator sends an effect level or a channel trim outside what the
+receiver accepts, and sends a trim between half steps, such as 0.3
+dB, again until the send budget ends.
+
+- What range does the receiver accept for the effect level and for a
+  channel trim? The repository does not record it.
+- Is the range enforced in the `Receiver` CRD, in the command
+  builders, or in both?
+- Is a trim between half steps refused, or rounded to the nearest
+  half step?

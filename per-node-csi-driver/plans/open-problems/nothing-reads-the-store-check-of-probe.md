@@ -1,7 +1,8 @@
 # Nothing reads the store check of `Probe`
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
-A review of the comments against the code found it.
+Open bug, recorded on 2026-11-18. A review of the comments against the
+code found it. On 2026-11-19 the upstream sources were read, and
+neither the kubelet's CSI client nor the registrar calls `Probe`.
 
 `Probe` in `per-node-csi-driver/identity.go` reports ready only when
 `storeIsWriteable` can create and delete a file in the store. Its
@@ -12,20 +13,31 @@ effect only when some process calls `Probe` and acts on `Ready`.
 The node plugin's pod in `deploy/node.yaml` runs two containers: the
 driver and `csi-node-driver-registrar`. It runs no `livenessprobe`
 sidecar, which is the upstream sidecar that calls `Probe`, and neither
-container has a liveness or readiness probe. The review did not find a
-call to `Probe` in the kubelet or in the registrar, but it did not
-check their source. If neither calls it, a read-only or failing store
+container has a liveness or readiness probe. Neither the kubelet's CSI
+client nor the registrar calls `Probe`, so a read-only or failing store
 leaves the pod Ready and running, and the first sign of the fault is a
 failed `NodePublishVolume` for a pod. `TestProbeIsReadyWhenTheStoreIsWriteable`
 and `TestProbeIsNotReadyWhenTheStoreIsGone` in `identity_test.go` test
 the check, but not any consumer of it.
 
-## What would confirm it
+## Evidence
 
-Read the source of the kubelet's CSI plugin and of
-`csi-node-driver-registrar` v2.18.0 for a call to `Probe`. On the lab,
-make the store read-only on the node, and check whether the node
-plugin's pod stays Ready and keeps running.
+- In `pkg/volume/csi/csi_client.go` and `csi_plugin.go` on the
+  `master` branch of kubernetes/kubernetes, read on 2026-11-19, the
+  only match for `Probe` is `ProbeVolumePlugins`, the function that
+  registers the volume plugin. The kubelet's CSI client sends no
+  `Probe` request.
+- In `cmd/csi-node-driver-registrar/main.go` and `node_register.go` of
+  `node-driver-registrar` at the tag `v2.18.0`, the matches for
+  `Probe` are the `kubelet-registration-probe` mode, which checks the
+  registration and not the driver. The registrar asks the driver only
+  for its name, with `csirpc.GetDriverName`.
+- `deploy/node.yaml` runs no `livenessprobe` sidecar.
+
+No unit test can show that nothing calls `Probe`. A run on the lab
+that makes the store read-only on the node, and checks whether the
+node plugin's pod stays Ready and keeps running, would show the
+effect.
 
 ## What a fix has to decide
 

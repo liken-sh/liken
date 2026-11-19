@@ -1,6 +1,10 @@
 # A cleared app_id stays in the operator's store
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. It is suspected and not reproduced. Checked
+against the code on 2026-11-19: `send_app_id` returns with no line for
+an empty `app_id` at `weston/layout/liken-layout.c:861`. No unit test
+can show the defect, because no Go test runs the C module. A Wayland
+client on the lab fleet can, as "What would confirm it" says.
 
 The layout module reads each surface's xdg `app_id` at every commit
 and sends a `surface-app-id` line to display-operator when it changes.

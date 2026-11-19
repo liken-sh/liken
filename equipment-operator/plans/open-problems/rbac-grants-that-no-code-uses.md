@@ -1,6 +1,11 @@
 # RBAC grants that no code uses
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. Checked against the code on
+2026-11-19: `grep -rn "MethodPut\|ReplaceStatus" --include=*.go .`
+finds no call outside the tests, and `applyCECBus` is called only at
+`cecbus_client.go:99` and `:116`, each with a `/status` path. A unit
+test cannot show an unused grant. A run on the `lab` fleet with the
+verbs removed can.
 
 `deploy/rbac.yaml` grants two verbs that no request of the component
 needs:

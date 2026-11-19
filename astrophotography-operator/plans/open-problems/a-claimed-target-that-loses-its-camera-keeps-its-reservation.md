@@ -1,6 +1,7 @@
 # A claimed target that loses its camera keeps its reservation
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 A runner claims a `Target` by writing its reservation's name to
 `status.reservation`. Other Ready reservations skip a target that a
@@ -34,18 +35,29 @@ work ends.
   `cameraFor` fails, but `claimNext` never reaches `prepare` for a
   target that `eligible` refused.
 
-## What would confirm it
+## The reproduction
 
-A test with two Ready reservations on two telescopes, in which the
-first reservation has claimed a target and the test then changes the
-target's `spec.opticalTrain` to a train of the second telescope. The
-bug is real if the second reservation does not claim the target while
-the first stays Ready.
+A test in the runner's world starts one Ready reservation, with a
+target that the reservation has already claimed in
+`status.reservation` and whose `spec.opticalTrain` is a train that the
+session has no camera on. After a minute of the fake clock, the test
+reads the target and wants no claim. It failed with:
+
+```
+after a minute the target is claimed by "east-tonight", want no claim because the session has no camera on west-imaging
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
 
-- Whether `releaseIneligible` releases a claimed target for every
-  reason that `eligible` refuses it, and with which reason for the
-  `Imaging` condition, such as `NoTrain`.
-- Whether `next` checks the train before each frame, so an edit
-  during work releases the target at the next frame.
+When you move a claimed target to a train that the reservation has no
+camera on, the target stays claimed until that reservation is no
+longer Ready, so the other telescope's reservation does not take it.
+
+- Does the reservation give the target up at once, and with which
+  `Imaging` reason, such as `NoTrain`? Or does it keep the claim, as
+  now?
+- Does it also give the target up between two frames, while it is
+  imaging that target, or only when its work on the target ends?

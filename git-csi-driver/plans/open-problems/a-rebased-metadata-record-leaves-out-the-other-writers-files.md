@@ -1,7 +1,7 @@
 # A rebased metadata record leaves out the other writer's files
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
-A review of the comments against the code found it.
+Open bug, recorded on 2026-11-18. A review of the comments against the
+code found it, and a unit test reproduced it on 2026-11-19.
 
 After a rejected push, `rebaseAndRetry` in `push.go` rebases the
 volume's commits onto the remote's ref and then calls
@@ -22,14 +22,29 @@ that the other writer changed has the volume's old value.
 correct record. Until then, a stage on another node replays the
 pushed record, and that file gets the default mode of a checkout.
 
-## What would confirm it
+## The reproduction
 
-A test in `push_test.go` where another writer pushes a file with mode
-`0600` and its record, and the volume then pushes a commit that the
-remote rejects. After the retry, the remote's `metadataRef` has no
-line for the file.
+A test gave an armed volume a commit and a metadata record, then
+pushed a commit that adds `secret.yaml` to the remote, with a record
+that gives the file the mode `0600`. Then the volume pushed: the
+remote refused the first push, and the retry rebased and pushed. The
+test wanted the remote's record to keep the line for `secret.yaml`,
+and failed with:
+
+```
+the remote's record after the rebase is "0664 1000 1000 a.txt\n0600 1000 1000 one.yaml\n", want the line "0600 1000 1000 secret.yaml" that the other writer recorded
+```
+
+The record lists only the paths whose mode or owner is not the
+default, not the whole tree as the comment on `reparentMetadata` says.
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
+
+After a rebase, should the driver record the modes again from the
+checkout, or merge the other writer's record into its own?
 
 Whether `reparentMetadata` walks the rebased checkout with
 `walkTreeMetadata` in place of reusing the old record tree, or merges

@@ -1,6 +1,7 @@
 # Two caches keep entries that nothing reads again
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. Unit tests reproduced both items on
+2026-11-19.
 
 Two maps in `media-operator` add an entry for each new key and delete
 none, so they grow for the life of the process.
@@ -25,14 +26,34 @@ none, so they grow for the life of the process.
 - `playerstatus.go`: the only `delete` in the type is
   `delete(p.payloads, topic)` in `clear`.
 
-## What would confirm it
+## The reproduction
 
-For `verdictCache`, a test that authenticates many tokens that expire,
-moves the bubble's clock past their expiry, and reads the map's
-length. For `activities`, a test that publishes a Player's status,
-clears it as deleted, and reads the map.
+The tests are not in the tree, because a failing test cannot land on
+`main`.
+
+- For `verdictCache`, a test stores a subject and a grant that expire
+  after a minute, reads each of them two minutes later, and asserts
+  that both maps are empty. It failed with:
+
+  ```
+  after the reads past expiry the cache holds 1 subjects and 1 grants, want none
+  ```
+
+- For `activities`, a test in a `synctest` bubble with a fake broker
+  publishes a playing status for a Player, clears the Player as
+  deleted, publishes an idle status on the same topic, and asserts
+  that `publishDerived` reports no change of activity. It failed with:
+
+  ```
+  the first status of the Player created again reports a change from "playing", want no change because the Player is new
+  ```
 
 ## What a fix has to decide
+
+`media-api` keeps an entry for every token it ever accepted, so its
+memory grows with each short-lived token. A Player that you delete and
+create again with the same name logs a change of activity from the
+deleted Player.
 
 When an expired verdict leaves `verdictCache`: on the read that finds
 it expired, or on a sweep. A sweep on a timer is allowed only as a

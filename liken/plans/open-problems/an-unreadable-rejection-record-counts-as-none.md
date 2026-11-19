@@ -1,6 +1,7 @@
 # An unreadable rejection record counts as none
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 When machine-operator cannot read the record of a document that init
 rejected at boot, it treats the document as not rejected. It can then
@@ -17,15 +18,37 @@ The rejection is then `nil`. `decideConvergence` in `converge.go`
 blocks a spec only when the rejection is not `nil` and its hash equals
 the spec's hash, so with `nil` it stages the spec for the next boot.
 
+A unit test ran `convergeRegistryCredentials` against a fake API server
+whose credentials `Secret` differs from what the machine booted with,
+to learn the hash of the declared document. Then it wrote a
+`rejection.yaml` with that hash and a field that `Rejection` does not
+have, so `yaml.UnmarshalStrict` refuses it, and ran the same pass
+again. It asserted that the pass stages nothing, and failed with:
+
+```
+with a rejection record that does not decode, the pass stages the document (False/RestartRequested), want nothing staged
+```
+
+With the same record and no extra field, the pass staged nothing.
+The test is not in the tree, because a failing test cannot land on
+`main`.
+
 ## What would confirm it
 
-A test that writes a rejection record that does not decode, with the
-hash of the declared spec, and runs a pass. The test checks whether
-the spec is staged and whether the condition reports
-`RejectedLastBoot`.
+The unit test above confirms it for the credentials document. The
+`Machine` spec, the `Cluster` document, and the system release discard
+the error in the same way.
 
 ## What a fix has to decide
 
-What a pass does when the record cannot be read: report the condition
-as `Unknown` and stage nothing, or treat the record as present. The
-same decision applies to each document that has a rejection record.
+When the operator cannot read the record of an earlier rejection,
+what does the pass do?
+
+- Report the condition as `Unknown`, and stage nothing until the
+  record reads.
+- Treat the record as present, and report `RejectedLastBoot`, so the
+  document is not tried again until a person changes it.
+
+The same decision applies to each document that has a rejection
+record, and to init's reads of the same files in
+[an-unreadable-rejection-record-is-dropped-with-no-message.md](an-unreadable-rejection-record-is-dropped-with-no-message.md).

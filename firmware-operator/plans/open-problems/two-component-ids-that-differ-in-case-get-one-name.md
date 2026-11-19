@@ -1,6 +1,7 @@
 # Two component IDs that differ in case get one name
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 `createDiscovered` in `discovered.go` tries the names that
 `groupNames` in `grouping.go` returns for a catalog component, in
@@ -32,20 +33,27 @@ on each pass, and the scan pod is never deleted.
   `com.hp.laptop.System.S70.firmware`. The plan states that the whole
   ID in lowercase gives each pair one name, and records no remedy.
 
-## What would confirm it
+## The reproduction
 
-A test of the discovery world with one machine whose scan reports two
-devices, one for each of two component IDs that differ only in case.
-The test checks that each component gets a `Firmware`, and that the
-scan pod is deleted after the pass.
+A test calls `groupNames` for `com.hp.laptop.system.S70.firmware` and
+`com.hp.laptop.System.S70.firmware`, and wants the second component to
+have a name that the first does not take. It failed with:
+
+```
+the names of the second component are [hp-laptop-system-s70 com.hp.laptop.system.s70.firmware] and the first takes [hp-laptop-system-s70 com.hp.laptop.system.s70.firmware], want a name of the second that the first does not take
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`. The test checks the names only. The error of
+`createDiscovered` and the kept scan pod follow from them in the code.
 
 ## What a fix has to decide
 
-- Which third name the second component takes, such as the whole ID
-  with a hash of the exact ID as a suffix, as `discoveredName` does for
-  a GUID set.
-- Whether a component that gets no name fails only its own group, so
-  that the scan pod is deleted and the other groups are not written
-  again on each pass.
-- How a person learns that a component has no `Firmware`: an `Event`
-  or a condition on the `FirmwareCatalog`.
+- What name does the second of two components that differ only in
+  case get, such as the whole ID with a hash of the exact ID as a
+  suffix, as `discoveredName` does for a GUID set?
+- Does a component that gets no name fail only its own group, so that
+  the scan pod is deleted and the other groups are not written again
+  on each pass?
+- How do you learn that a component got no `Firmware`: an `Event`, or
+  a condition on the `FirmwareCatalog`?

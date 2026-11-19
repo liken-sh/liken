@@ -1,6 +1,7 @@
 # A failed `DOME_POLICY` write is not retried
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 `keepDomePolicies` in `domepolicy.go` writes `DOME_POLICY` to each
 connected mount of a `Ready` reservation's telescope when the policy
@@ -23,21 +24,38 @@ property is not written again.
 - `domepolicy.go`, `keepDomePolicies`: `p.tried[id] = key` runs before
   the goroutine that calls `lockPolicy`, and the goroutine does not
   clear the entry when `lockPolicy` returns an error.
-- `indiconn.go` lines 118 and 133: the only places that set a
+- `indiconn.go:118` and `indiconn.go:133`: the only places that set a
   server's epoch.
 
-## What would confirm it
+## The reproduction
 
-A test in a `synctest` bubble with the fake INDI server, where the
-mount's driver does not reply to a `DOME_POLICY` write until
-`policyWait` ends. After the timeout, delete the observatory's last
-dome or add one, and check whether a later pass writes the policy
-again while the server's epoch stays the same.
+A test in a `synctest` bubble with the fake INDI server holds every
+change to the mount's `DOME_POLICY`, deletes the observatory's last
+`Dome`, so the mount needs `DOME_IGNORED`, and waits past
+`policyWait`. Then it releases the hold, changes a label of the
+`Telescope` east so that a pass runs while the server's epoch and
+the wanted policy stay the same, and reads `DOME_POLICY`. It failed
+with:
+
+```
+after the write timed out and a later pass ran, DOME_POLICY is "Ok DOME_LOCKS", want Ok DOME_IGNORED because the observatory has no dome
+```
+
+With the `tried` check removed from `keepDomePolicies`, the same test
+passes. The test is not in the tree, because a failing test cannot land on
+`main`.
+
+A change to the domes does not show the defect: deleting the last
+dome or adding the first one changes the wanted policy, which is part
+of the key in `tried`, so the policy is written again.
 
 ## What a fix has to decide
 
+A mount whose driver did not answer a `DOME_POLICY` write in time
+keeps the wrong policy until its driver reconnects.
+
 - Which failures count as a refusal that must not be written again,
-  and which failures, such as a timeout or a closed connection, clear
-  the `tried` entry so that the next pass writes the policy again.
-- Whether a retry after a timeout needs a delay, so that a driver that
-  never replies is not written on every pass.
+  and which ones, such as a timeout or a closed connection, let the
+  next pass write the policy again?
+- Does a retry after a timeout wait first, so that a driver that
+  never answers is not written on every pass?

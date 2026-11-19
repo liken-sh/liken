@@ -1,6 +1,16 @@
 # `media-api` stays unready after a failed startup review
 
 Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+On 2026-11-19 the claim was checked against the code:
+`grep -rn 'ready.Store' --include=*.go .` finds one call, at
+`apiserve.go:348`, inside `runAPI`. No unit test can run `runAPI`,
+because it reads the in-cluster configuration, exits on an error, and
+listens on a real socket. A start of `media-api` on the `lab` fleet
+while the API server refuses `TokenReview`, followed by a read of
+`/readyz` after the API server recovers, would show the defect. If
+the startup review moved into a function that takes the authorizer
+and returns when the review gets a response, a test with
+`apiservertest` could drive it.
 
 `runAPI` in `apiserve.go` calls `apiServerResponds` once, after the
 first read of the CA `ConfigMap`s, and sets `server.ready` only when

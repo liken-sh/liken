@@ -1,6 +1,10 @@
 # Growing a role on the system disk fails the boot
 
 Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+The code was checked on 2026-11-19, and the evidence below holds. The
+kernel's refusal shows only on a disk with a mounted partition, so no
+unit test can show it. A run on a `lab` guest, as "What would confirm
+it" describes, can.
 
 When a declared size grows a partition on the disk that holds the
 running system's boot slot, init rewrites the partition table and asks
@@ -28,7 +32,7 @@ before init mounts any role, but that covers the roles, not the boot
 slot that the root image was mounted from. `planAllGrowth` refuses to
 grow the system slots and the boot roles, but not other roles on the
 system disk. `reconcileStorage` returns the error from `applyGrowth`
-(`init/storage.go:295`).
+(`init/storage.go:296`).
 
 ## What would confirm it
 

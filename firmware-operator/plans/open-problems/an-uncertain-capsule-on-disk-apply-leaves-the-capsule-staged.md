@@ -1,6 +1,7 @@
 # An `Uncertain` capsule-on-disk apply leaves the capsule staged
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 When a capsule apply ends `Uncertain`, its message says "the reboot
 keeps liken's BootNext and the capsule does not run". That reason is
@@ -26,7 +27,7 @@ write that no rehearsal passed.
   that adds only `fileCapsuleDelivery`.
 - `keepsBootNext` in `apply.go` is false after `Uncertain`, which
   changes only `spec.keepBootNext` of the `Disruption`.
-- `tendESPs` in `liken/init/efiactuator.go` calls
+- `updateESPs` in `liken/init/efiactuator.go` calls
   `removeStagedCapsules` only for the slot that is not proven. The
   apply pod writes the ESP of the proven slot, which is the one the
   next boot reads.
@@ -34,9 +35,25 @@ write that no rehearsal passed.
   a `Written` result. No drill of an `Uncertain` result in that mode
   is recorded.
 
-## What would confirm it
+## The reproduction
 
-On the `lab` fleet, with the capsule-on-disk build of the lab
+A test of the apply in `scan/` lets the fake `fwupdtool` stage a
+capsule on disk: it writes `OsIndications` with bit `0x4` and
+`EFI/UpdateCapsule/fwupd-9c13b7f1.cap` on the ESP, and then fails. It
+wants no staged capsule on the ESP after an `Uncertain` result. It
+failed with:
+
+```
+after the result Uncertain "fwupdtool install: fwupdtool: failed to write, after it wrote to the machine, so the reboot keeps liken's BootNext and the capsule does not run" the ESP still holds the staged capsule, want it removed, because the firmware installs it on the next boot
+```
+
+The message of that result gives the reason of NVRAM mode. The test is not in the tree, because a failing test cannot land on
+`main`.
+
+## What a lab run would add
+
+The test shows that the file and the bit stay. Whether the firmware
+then installs the capsule is a fact of the firmware. On the `lab` fleet, with the capsule-on-disk build of the lab
 firmware: approve a capsule, make the apply end `Uncertain` after
 fwupd staged the file, for example by a failure of `repairUpdater`,
 and read the firmware's log and the next scan after the reboot. The
@@ -44,9 +61,11 @@ capsule runs if the scan reads the new version.
 
 ## What a fix has to decide
 
-- Whether an `Uncertain` capsule apply removes the staged file and
-  clears the bit before the reboot, or whether `init` does it when
-  `spec.keepBootNext` is false.
+- After an `Uncertain` apply in capsule-on-disk mode, which program
+  removes the staged capsule and clears the `OsIndications` request
+  before the reboot: the apply pod, or `init` when
+  `spec.keepBootNext` is false? A change in `init` is in the `liken`
+  component.
 - Whether that cleanup is part of plan 09, which removes fwupd's boot
   entry and updater after a capsule.
 - What the `Uncertain` messages say in each mode.

@@ -1,7 +1,7 @@
 # A claim lookup through the API ignores the phase
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
-A review of the comments against the code found it.
+Open bug, recorded on 2026-11-18. A review of the comments against the
+code found it, and a unit test reproduced it on 2026-11-19.
 
 `claimOf` in `arming.go` finds the claim of a volume handle in two
 ways. It reads the store of the node's `PersistentVolume` watch first,
@@ -23,13 +23,25 @@ was. The kubelet stages a volume only after its `PersistentVolume` is
 bound, so the case needs a lookup after a release, which a retry of
 `arming.find` or a later `claimFor` can be.
 
-## What would confirm it
+## The reproduction
 
-A case in `arming_test.go` with a fake clientset that holds one
-`Released` `PersistentVolume` of the handle with a `claimRef`.
-`claimOf` returns that claim and no error.
+A test gave the fake clientset of a node one `PersistentVolume` of the
+handle, in the phase `Released`, with a `claimRef` to `home/config`,
+and called `claimOf` for the handle. It wanted an error, because the
+claim was deleted, and failed with:
+
+```
+claimOf returned the claim {namespace:home name:config} of a Released PersistentVolume and no error, want an error because that claim was deleted
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
+
+When the only `PersistentVolume` of a volume's handle is `Released`,
+should the driver treat the volume as having no claim, and should
+arming then keep retrying or leave the volume unarmed?
 
 Whether the API path refuses a `PersistentVolume` that is not `Bound`
 with the same error as one with no `claimRef`, and what each caller

@@ -4,6 +4,11 @@ Open problem, and an open design question. The publish of an OS
 release boots the build stamped with the release's version only
 through the UEFI chain. The BIOS chain is drilled on the development
 build of the same commit, not on the build that the release ships.
+On 2026-11-19 this was checked against the workflows: the publish job
+runs `make smoke-uefi` alone (`.github/workflows/component-liken.yaml:562`),
+and the `build` job runs both drills (lines 391 and 392 of the same
+file). No unit test can show it. A run of the publish job that also
+runs `make smoke-bios` would.
 
 The survey of 2026-09-11 in
 [milestone 66](../completed/66-durability-and-safety.md) found this,

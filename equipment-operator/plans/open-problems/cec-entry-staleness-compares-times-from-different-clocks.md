@@ -1,6 +1,7 @@
 # CEC entry staleness compares times from different clocks
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 `podLiveness.stale` in `cecpods.go` compares the `lastTransitionTime`
 of a node workload pod's `Ready` condition with the `reportedAt` of
@@ -25,16 +26,33 @@ grace ends.
   `l.now.Before(ends)`.
 - The `readiness` comment states the single-clock assumption.
 
-## What would confirm it
+## The reproduction
 
-Read `MarkPodsNotReady` in the Kubernetes node lifecycle controller to
-confirm which clock stamps the condition. Then a test of `stale` with
-a `lastTransitionTime` a few seconds before `reportedAt` and the pod
-not Ready.
+A test of the derived `CECBus` conditions gives the machine a pod
+that is not Ready since 2 seconds before the entry's `reportedAt`, as
+a node lifecycle controller whose clock runs 2 seconds behind marks
+it, and derives the conditions 5 seconds after the write. It wants
+the `Joined` condition to have the reason `Stale`. It failed with:
+
+```
+condition Joined is {Type:Joined Status:True ObservedGeneration:3 Reason:Joined Message:Every adapter has a logical address LastTransitionTime:2026-09-26 12:00:00 +0000 UTC} 5 seconds after the write, want reason Stale, because the pod is not Ready
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
+
+The pod data in this test is the same as that of a pod that is still
+starting, which `TestAnEntryIsCurrentWhileItsMachinesPodIsReadyOrStarting`
+in `cecbus_derive_test.go` expects to read as current. So `stale`
+cannot tell the two cases apart from the times alone.
 
 ## What a fix has to decide
 
-- Whether the operator accepts the delay of up to `cecStartupGrace`
-  and the comment states it.
-- Whether `stale` allows for clock skew, or compares only times from
-  one clock.
+An entry can read as current for up to `cecStartupGrace`, 60
+seconds, after its pod stopped, when the clock that marked the pod
+not Ready runs behind the node's clock.
+
+- Does the operator accept that delay, and the comment on `stale`
+  state it?
+- Or does `stale` allow for clock skew? That changes how a pod that
+  is still starting is judged.

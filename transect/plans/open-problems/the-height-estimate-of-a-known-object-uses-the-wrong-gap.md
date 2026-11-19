@@ -1,7 +1,7 @@
 # The height estimate of a known object uses the wrong gap
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
-A review of the comments against the code found it.
+Open bug, recorded on 2026-11-18. A review of the comments against the
+code found it, and a unit test reproduced it on 2026-11-19.
 
 `center` in `crates/transect-map/src/map/known/fit.rs` estimates the
 height of the object box in the middle of a known kind's diagram. It
@@ -16,13 +16,24 @@ estimate, so a box that comes out short clips its last line.
 border, so `relation` estimates 2 px more than it needs. That direction
 does no harm.
 
-## What would confirm it
+## The reproduction
 
-Render a known kind's page in a browser with an object that has a calm
-reason and several chips, and compare the box's content height with the
-height that `center` returns.
+A test read the `gap` of the last `.known-object` rule in `known.css`,
+6 px, and wanted `center` for a kind and a name to be the frame, one
+line, the name, and that gap. It failed with:
+
+```
+the box of a kind and a name is 77 px high, want 79 because known.css sets a gap of 6 px on .known-object
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
+
+Should `fit.rs` keep its own copy of each size in `known.css`, with a
+test that fails when they differ, or should the server set those
+sizes in the CSS?
 
 Whether `fit.rs` keeps its own copy of each CSS size, with a test that
 reads `known.css` and fails when they differ, or the CSS takes its

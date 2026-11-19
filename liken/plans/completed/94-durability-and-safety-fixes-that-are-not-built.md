@@ -17,8 +17,12 @@ that proves it:
 
 * [The BIOS arm has no device flush](../open-problems/the-bios-arm-has-no-device-flush.md),
   with the readback after the write that reads the page cache.
-* [Two comments state opposite rules about FAT](../open-problems/two-comments-state-opposite-rules-about-fat.md).
-* [The primary and backup GPT have no barrier between them](../open-problems/the-primary-and-backup-gpt-have-no-barrier.md).
+* Two comments state opposite rules about FAT. Fixed on 2026-11-19:
+  the comment of `syncDirectory` states the rule that the lab showed,
+  and `installGRUB` flushes the boot home with `flushSlot`.
+* The primary and backup GPT have no barrier between them. Fixed on
+  2026-11-19: a table write writes the backup copy and syncs it, and
+  then writes the primary copy and syncs it.
 * [`LastUsableLBA` is off by one](../open-problems/last-usable-lba-is-off-by-one.md).
 * The wpa_supplicant control channel can panic on close. Fixed on
   2026-11-17: the reader sends each event under the lock that `close`
@@ -26,7 +30,9 @@ that proves it:
 * [Two waits have no bound after SIGKILL](../open-problems/two-waits-have-no-bound-after-sigkill.md),
   with open question 1.
 * [The proving watchdog blocks its own shutdown](../open-problems/the-proving-watchdog-blocks-its-own-shutdown.md).
-* [The node password is minted after a step that can fail](../open-problems/the-node-password-is-minted-after-a-step-that-can-fail.md).
+* The node password is minted after a step that can fail. Fixed on
+  2026-11-19: init accepts a link that already names the password
+  directory, and fails the boot when it cannot make the link.
 * [An empty device walk deletes the `ResourceSlice`](../open-problems/an-empty-device-walk-deletes-the-resourceslice.md),
   with open question 2.
 * [A reboot skips the drain on any failed Node read](../open-problems/a-reboot-skips-the-drain-on-any-failed-node-read.md).

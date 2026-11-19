@@ -1,6 +1,7 @@
 # A composition with a late begin is cancelled as idle
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 `mux` in `apicompose.go` creates one pipe for each upstream body and
 sets the body's idle mark to the time of the pipe's creation.
@@ -31,13 +32,27 @@ what the code does.
 - `apicompose.go`: `displayTarget` and `audioTarget` take
   `composeLeadIn`.
 
-## What would confirm it
+## The reproduction
 
-A test in a `synctest` bubble that composes with `t=60` against
-siblings that send their first byte at 61 seconds. The composition is
-cancelled at about 60 seconds.
+A test in a `synctest` bubble sets one mark at the bubble's start, as
+`mux` does when it creates a pipe, and calls `watchIdle` with `t=60`.
+It lets the clock run to 61 seconds, before a sibling would send its
+first byte, and asserts that the composition's context is not
+cancelled. It failed with:
+
+```
+the composition with t=60 was cancelled as idle at 61 seconds, want it running until a sibling has had upstreamIdleTimeout to send its first byte
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`. It calls `watchIdle` directly and does not run `mux`, because
+`mux` runs ffmpeg and reads its output from an OS pipe, which stops
+the bubble's clock.
 
 ## What a fix has to decide
+
+A recording or a stream that you ask to start more than 30 seconds
+ahead is cut off at its start time.
 
 Where the idle count starts: at the begin time plus `composeLeadIn`, at
 the first body byte, or at the later of the two, which is what the

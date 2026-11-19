@@ -13,25 +13,34 @@ the result depend on the machine. Each break makes a test slower, or
 makes it fail on a busy CI runner. Nobody has measured how often they
 fail.
 
+Each break was checked against the code on 2026-11-19, at the lines
+named below. No unit test can fail on them, because each one is in a
+test's own code.
+
 - `capture_test.go`: the capture harness, `newCaptureHarness`, serves
   through `httptest.NewServer` on a real loopback socket and runs the
   shell scripts in `testdata/capture/bin` in place of `pw-record`,
-  `pw-dump`, `flac`, and `opusenc`. Outside a bubble,
-  `TestAClientThatHungUpEndsCleanly` polls the harness's log every
-  10 ms for up to 3 s of wall time, and
+  `pw-dump`, `flac`, and `opusenc` (`capture_test.go:82`). Outside a
+  bubble, `TestAClientThatHungUpEndsCleanly` polls the harness's log
+  every 10 ms for up to 3 s of wall time (`capture_test.go:757`), and
   `TestTheContainerSendsItsHeadersBeforeTheDiscardIsOver` fails when
-  the headers take more than 200 ms of wall time.
+  the headers take more than 200 ms of wall time
+  (`capture_test.go:796`).
 - `metrics_test.go`: `TestTheListenerServesTheRegistryAtSlashMetrics`
   and `TestTheMetricsListenerStopsWithTheRun` listen on
-  `127.0.0.1:0` and wait up to 20 s of wall time.
-- `graphprobe_test.go`: the tests put a shell script named `pw-dump`
-  on `PATH`, and `TestCheckGraphReportsAPWDumpThatHangs` runs one that
-  sleeps for 30 s, with a 100 ms context timeout on the real clock.
+  `127.0.0.1:0` and wait up to 20 s of wall time
+  (`metrics_test.go:85,93,110,124`).
+- `graphprobe_test.go` and `pipewire_test.go`: the tests put a shell
+  script named `pw-dump` on `PATH`, through `stubProbeDump` in
+  `pwdumpstub_test.go`, and `TestCheckGraphReportsAPWDumpThatHangs`
+  runs one that sleeps for 30 s (`graphprobe_test.go:36`), with a
+  100 ms context timeout on the real clock.
 - `tokenreview_test.go`, `authorize_test.go`, and
   `apiclientca_test.go` start their fake API servers with
   `httptest.NewServer`, not with `kubernetes/apiservertest`.
 - `mixer_test.go`: `TestMixerReadsTheLocalCard` opens
-  `/dev/snd/controlC0` on the machine that runs the test. It skips
+  `/dev/snd/controlC0` on the machine that runs the test
+  (`mixer_test.go:272`). It skips
   when the file is missing or does not open, so it passes on CI and
   tests the hardware of a workstation.
 

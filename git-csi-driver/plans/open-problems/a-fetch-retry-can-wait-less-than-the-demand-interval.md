@@ -1,7 +1,7 @@
 # A fetch retry can wait less than `--demand-min-interval`
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
-A review of the comments against the code found it.
+Open bug, recorded on 2026-11-18. A review of the comments against the
+code found it, and a unit test reproduced it on 2026-11-19.
 
 `nextRetry` in `follow.go` computes the wait before the fetch loop
 retries a fetch that failed for a demand. Its comment says that a
@@ -24,12 +24,24 @@ often as the interval allows.
 `cli.go` accepts any value for `--demand-min-interval`, and
 `republish_rotation_test.go` sets `demandMin` to an hour.
 
-## What would confirm it
+## The reproduction
 
-A case in `demand_retry_test.go` that sets `demandMin` to an hour and
-calls `nextRetry`. It returns 5 minutes.
+A test set `demandMin` of a fetch loop to an hour and called
+`nextRetry` once. It wanted a wait of at least an hour, and failed
+with:
+
+```
+the first retry waits 5m0s with --demand-min-interval=1h0m0s, want at least 1h0m0s because a retry does not pass the timer that limits demands
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
+
+When `--demand-min-interval` is longer than 5 minutes, should a
+remote that keeps failing be tried again every 5 minutes, or never
+more often than the interval?
 
 Which rule wins: the cap, so a remote that comes back is fetched
 within 5 minutes, or the interval, so a retry never fetches sooner

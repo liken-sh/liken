@@ -1,6 +1,11 @@
 # init reads state again on timers
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. The claim was checked against the
+code on 2026-11-19: `init/proving.go:258` waits on
+`time.After(5 * time.Second)`, `init/supervisor.go:428` and `443` pass
+intervals of 3 and 5 seconds to `pollAndReport`, and
+`init/storage.go:390` sets a poll of 500 milliseconds. No unit test
+can show a rule finding.
 
 The root `AGENTS.md` calls a timer that reads state again to find a
 change a defect, unless a comment at the timer names the failure that
@@ -17,7 +22,7 @@ at them names such a failure.
   `pollAndReport` (`init/supervisor.go:478`) every 3 and 5 seconds for
   up to 5 minutes (`init/supervisor.go:428` and `443`), to print the
   node and pod tables on the console.
-- `awaitStorageDevices` (`init/storage.go:387`) reads `/sys/block`
+- `awaitStorageDevices` (`init/storage.go:388`) reads `/sys/block`
   every 500 milliseconds for up to 30 seconds. Its comment says it
   polls because the wait happens once for each boot and lasts seconds.
 

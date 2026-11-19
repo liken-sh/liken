@@ -1,6 +1,11 @@
 # The machine permission tests fail as root
 
 Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+On 2026-11-19 the helpers and their callers below were checked against
+the code, and none of the callers checks the effective user. No unit
+test can show the failure, because it needs the tests to run as root.
+A run as root on that day did not start: `unshare -r` was refused on
+the workstation, and no `golang` image was pulled there.
 
 Several tests of `liken/machine` make a read or a write fail by
 removing permission bits with `chmod`. Root bypasses those bits, so
@@ -17,9 +22,9 @@ The helpers in `machine/helpers_test.go` remove permissions:
 - `unreadableFile` sets a file to `0o000`.
 
 Their callers expect an error: `machine/staging_test.go` (lines 341,
-348, 355, 392, and 399), `machine/machine_test.go:178`,
+348, 355, 362, 369, 377, 384, 392, and 399), `machine/machine_test.go:178`,
 `machine/imports_test.go:125`, and `machine/reboot_test.go:183`. None
-of these tests checks the effective user. `init/rootimage_test.go:364`
+of these tests checks the effective user. `init/rootimage_test.go:335`
 in the same component checks `os.Geteuid() == 0` for this reason.
 
 ## What would confirm it

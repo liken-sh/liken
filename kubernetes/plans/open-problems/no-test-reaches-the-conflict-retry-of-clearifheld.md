@@ -1,6 +1,7 @@
 # No test reaches the conflict retry of `clearIfHeld`
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A mutation of the code reproduced it
+on 2026-11-19.
 
 When a leader steps down, `Lead.end` in `kubernetes/election/election.go`
 waits for client-go's elector to release the `Lease`, and then calls
@@ -30,14 +31,20 @@ client-go's retry and does not reach the retry loop of `clearIfHeld`.
   renewal test failed with `clearIfHeld` removed, with the client-go
   of that time.
 
-## What would confirm it
+## The reproduction
 
-Run `TestAStepDownReleasesTheLeaseAfterALateRenewal` with the call to
-`clearIfHeld` in `end` removed, and read the coverage profile of
-`election` for the lines after `apierrors.IsConflict` in
-`clearIfHeld`.
+Two changes to `election.go` leave every test of `election` passing.
+With the call to `clearIfHeld` removed from `end`,
+`TestAStepDownReleasesTheLeaseAfterALateRenewal` still passes. With
+the retry loop of `clearIfHeld` cut from three tries to one, `go test
+./election` still reports `ok`. So no test needs `clearIfHeld` in the
+late renewal case, and no test reaches its retry. Neither change is in
+the tree.
 
 ## What a fix has to decide
+
+The question is whether the step down still needs its own retry after
+a conflict, now that client-go retries its release.
 
 - Whether `clearIfHeld` still needs its conflict retry. It is still
   needed for an expired `Lease` of an earlier process of this pod,

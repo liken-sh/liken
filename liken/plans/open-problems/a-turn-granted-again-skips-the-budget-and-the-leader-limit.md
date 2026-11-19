@@ -1,6 +1,7 @@
 # A turn granted again skips the budget and the leader limit
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 cluster-operator can give a machine its reboot turn a second time
 while another machine is down. Then two machines are out of service
@@ -35,18 +36,35 @@ while it waits. Another machine can go down in that time:
 `TestAMachineWhoseEntryOutlivedItsGrantIsGrantedAgain` and
 `TestAStalledRolloutGrantsNoEntryAgain` in
 `cluster-operator/requests_test.go` cover the grant and the stall.
-No test has a second machine that is down at the time of the grant.
+No test in the tree has a second machine that is down at the time of
+the grant.
 
-## What would confirm it
+A unit test reproduced both cases. Each case gave `decideRollout` a
+machine with an entry in `status.rebootTurns` at an older
+resourceVersion, an open Disruption, and a request for a turn again,
+beside a machine in the phase Lost. The first case is leader `node-1`
+beside leader `node-2`, with a budget of two. The second is worker
+`node-4` beside worker `node-3`, with a budget of one. The test
+asserted that `decideRollout` grants no turn. It failed with:
 
-A table test of `decideRollout` with a pending entry for a machine
-that requests a turn again, beside a leader or a worker that is Lost,
-which reads `r.grant`.
+```
+grants = [node-1] while node-2 is Lost, want none
+grants = [node-4] while node-3 is Lost, want none
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
 
-Whether the machine that is granted again waits while another leader
-is out of service and while the other machines that are down fill the
-budget. When it waits, decide whether the entry stays in
-`status.rebootTurns` and still counts against the budget, and what
-reason its Disruption's `Granted` condition reports.
+When a machine is due its reboot turn a second time and another
+machine is down, should it wait, as a first grant waits for the
+leader limit and the budget?
+
+- **Wait.** Then decide whether the machine keeps its entry in
+  `status.rebootTurns` while it waits, so the entry still counts
+  against the budget, and what reason its Disruption's `Granted`
+  condition reports.
+- **Go ahead.** The rollout then states, in the header of
+  `cluster-operator/rollout.go`, that a machine granted again can
+  break the leader limit and the budget.

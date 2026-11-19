@@ -1,7 +1,13 @@
 # A restart can taint a `Source` that a recorder holds
 
 Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
-A review of the comments against the code found it.
+A review of the comments against the code found it. The code was
+checked on 2026-11-19: `audio-operator/main.go:276` passes
+`sinkEndpoints(named)` to `waitForNodes`, so the wait leaves out the
+capture endpoints. No unit test runs `main`, so only the drill below
+can show the eviction. A small function that returns the endpoints to
+wait for, extracted from `main` with no change in behavior, would let
+a unit test show the shorter fact.
 
 At startup, `main.go` in `audio-operator` calls `waitForNodes` before
 the first reconcile pass, so that the pass does not run before
@@ -23,11 +29,9 @@ capture node can evict the recorder.
 
 ## What would confirm it
 
-A drill on the `lab` fleet: a pod that records from a `Source` with
-no toleration for the `disconnected` taint, then a restart of the
-operator's pod, and the recorder's pod events. A unit test can show
-the shorter fact that `waitForNodes` returns while a capture node is
-missing.
+A drill on the `lab` fleet, which has not run: a pod that records
+from a `Source` with no toleration for the `disconnected` taint, then
+a restart of the operator's pod, and the recorder's pod events.
 
 ## What a fix has to decide
 

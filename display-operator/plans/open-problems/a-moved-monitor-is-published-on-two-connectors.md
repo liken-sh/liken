@@ -1,6 +1,7 @@
 # A moved monitor is published on two connectors
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 The link history in `links.go` keeps the last monitor of a connector
 that reads disconnected, so a monitor that shows another input keeps
@@ -26,19 +27,31 @@ runs.
 - `links.go`, `loadFromDisplays`: the `elsewhere` map skips a monitor
   that is connected now on another connector.
 
-This differs from
-[two monitors of one model share a Display](two-monitors-of-one-model-share-a-display.md):
-there two monitors have one identity, and here one monitor has two
-connectors.
+This differs from [two monitors of one model share a
+Display](two-monitors-of-one-model-share-a-display.md): there two
+monitors have one identity, and here one monitor has two connectors.
 
-## What would confirm it
+## The reproduction
 
-A test of `withLinks` over two passes: `HDMI-A-1` connected with a
-monitor, then `HDMI-A-1` disconnected and `HDMI-A-2` connected with
-the same monitor. Read `Remembered` on `HDMI-A-1`. On the lab fleet,
-move a cable between two ports and read the node's `ResourceSlice`.
+The test ran `withLinks` over two passes: first `HDMI-A-1` connected
+with a monitor and `HDMI-A-2` disconnected, then `HDMI-A-1`
+disconnected and `HDMI-A-2` connected with the same monitor. It
+asserted that `Remembered` on `HDMI-A-1` has no monitor id after the
+second pass. It failed with:
+
+```
+HDMI-A-1 publishes the monitor gsm-5b09-lg-hdr-wqhd, which is connected on HDMI-A-2, want no monitor on HDMI-A-1
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`. On the lab fleet, a cable moved between two ports and a read
+of the node's `ResourceSlice` would show the same result on hardware.
 
 ## What a fix has to decide
+
+When a monitor's cable moves to another port, should the pod on the
+old port lose its screen at once, or after the `disconnectGrace`
+period?
 
 `withLinks` sees every output of a pass, so it can drop the
 remembered monitor of a disconnected connector when that monitor is

@@ -1,6 +1,11 @@
 # The idle screen polls for the compositor socket
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. On 2026-11-19 the code confirmed it:
+`idle/src/harness/respawn.rs:187` loops on `UnixStream::connect`, and
+`respawn.rs:191` sleeps between attempts. No unit test can show the
+wait without real time. A drill on the `lab` fleet that restarts the
+compositor would show how long the client waits after the socket
+appears.
 
 When the compositor restarts, the first process of the idle screen's
 container, in `idle/src/harness/respawn.rs`, waits for the new

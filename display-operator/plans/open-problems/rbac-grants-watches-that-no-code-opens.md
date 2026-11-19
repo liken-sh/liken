@@ -1,6 +1,16 @@
 # RBAC grants watches that no code opens
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. Checked against the code on
+2026-11-19. `grep -rn "wakeWatch(\|informer.Source{\|informer.One{"
+--include=*.go display-operator` finds watches on `pods`, `displays`,
+`layouts`, the capture sidecar's pods, the `Secret` objects
+`display-api-tls` and `display-capture-server` (`serving.go:164` and
+`:228`), and the `ConfigMap` `extension-apiserver-authentication`
+(`clientcerts.go:93`). It finds none on `resourceclaims` or on the
+`ConfigMap` `display-api-ca`. The grants are at
+`deploy/rbac.yaml:38` and `deploy/api.yaml:212`. No unit test reads
+RBAC, so a run on the lab fleet proves the removal, as "What would
+confirm it" says.
 
 Two rules in the manifests grant `watch` on objects that no code in
 display-operator watches. A grant that nothing uses widens what a

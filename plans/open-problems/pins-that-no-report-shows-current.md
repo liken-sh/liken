@@ -5,7 +5,14 @@ repository except four. Each one can fall behind upstream, or away
 from another pin, and no report shows it. The rule that every pin
 stays current is in `AGENTS.md`, under "Every pin stays current".
 
-## The three pins, as seen on 2026-11-01
+The document was checked against the tree on 2026-11-19:
+`ls library-operator/appearances/models library-operator/titles/models`
+lists no `latest.sh`, and no file of `ci/` reads
+`liken.sh/.terraform.lock.hcl` or compares the syft of
+`buildkit-syft-scanner` with the `syft` entry. No unit test can show a
+report that does not exist.
+
+## The first pins, as seen on 2026-11-01
 
 - **The face models.** `library-operator/appearances/models/pin.toml`
   pins the two models of the `library-operator-appearances` image at
@@ -33,7 +40,7 @@ stays current is in `AGENTS.md`, under "Every pin stays current".
 
 - **The text models.** `library-operator/titles/models/pin.toml` pins
   the two PP-OCR models of the `library-operator-titles` image, and
-  the list of characters that the reader writes, at one commit of each
+  the list of characters that the reader reads, at one commit of each
   project that publishes them. No `latest.sh` reports those commits or
   the models. The question of what "current" means is the same as for
   the face models.

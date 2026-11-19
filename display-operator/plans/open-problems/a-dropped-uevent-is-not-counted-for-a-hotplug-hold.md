@@ -1,6 +1,7 @@
 # A dropped uevent is not counted for a hotplug hold
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 A hotplug hold keeps a connector that reads disconnected in the slice
 for `hotplugSettle`, and starts the hold again each time a new drm
@@ -27,12 +28,27 @@ and it can end while the receiver still pulses the line.
   connector (`lostEventsAction`), but a drop at the channel produces
   no such report.
 
-## What would confirm it
+## The reproduction
 
-A test that fills the channel, sends one more event that names a held
-connector, and reads `hotplugCounts.count` for it.
+In a `synctest` bubble, the test made a channel with room for one
+event and sent two events through `sendDRMEvent`: one that names
+connector 100, which filled the channel, and one that names connector
+403, which `sendDRMEvent` dropped. It then started `countHotplugs` on
+the channel, read the event that passed, and asserted that the count
+of connector 403 is at least 1. It failed with:
+
+```
+the count of connector 403 is 0 after its event was dropped at a full channel, want at least 1
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
+
+When a burst of uevents overflows the reader's queue, should the
+reader count each event before it can drop it, or should a drop count
+as a lost event that extends the hold of every connector?
 
 The count can move in front of the channel, into the reader, so every
 event is counted before a drop. Or a drop at the channel can count as

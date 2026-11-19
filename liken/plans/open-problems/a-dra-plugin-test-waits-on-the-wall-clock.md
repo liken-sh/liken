@@ -1,6 +1,10 @@
 # A DRA plugin test waits on the wall clock
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. The claim was checked against the
+code on 2026-11-19: `machine-operator/draplugin_test.go:633` sets a
+deadline from `time.Now()`, and `:641` calls `time.Sleep`. No unit
+test can fail on a wait of this kind. A CI run on a loaded runner is
+where the wait can reach its deadline.
 
 `TestServeRespondsOnBothSockets` in
 `machine-operator/draplugin_test.go` waits for a socket file with a
@@ -11,8 +15,8 @@ clock.
 
 ## The evidence
 
-`waitForSocket` in `machine-operator/draplugin_test.go` checks for the
-file with `os.Stat` every 10 milliseconds until a deadline of 5
+`waitForSocket` (`machine-operator/draplugin_test.go:631`) checks for
+the file with `os.Stat` every 10 milliseconds until a deadline of 5
 seconds from `time.Now()`. The test starts `serveDRAPlugin` in a
 goroutine and connects to it through real Unix sockets with gRPC. The
 `testing` skill says that a goroutine that reads a real socket is not

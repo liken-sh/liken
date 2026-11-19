@@ -1,6 +1,10 @@
 # The ClusterRole grants verbs that no call uses
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. Checked against the code on
+2026-11-19: outside the tests, the operator writes no pod, creates a
+`Service` with a `POST` (`workload.go:87`) and deletes one
+(`workload.go:128`), and changes a claim only with the merge patch in
+`outboxfinalizer.go:61`. A unit test cannot show an unused grant. A run on the `lab` fleet with the verbs removed can.
 
 The `ClusterRole` in `deploy/rbac.yaml` grants four verbs that no
 request of the operator uses:

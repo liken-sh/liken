@@ -1,6 +1,7 @@
 # The up-next focus panel can cover the current time
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 In `display/src/upnext/column.rs`, the comment on `ART_Y` says that
 near the credits the scrubber draws the current time under the
@@ -23,13 +24,26 @@ wrong one.
   compares the constants with the same literals, so it does not check
   the edge that the comment names.
 
-## What would confirm it
+## The reproduction
 
-A capture of the display with the up-next column focused near the
-credits, at a position where the current time is under the column. A
-test can compare `FOCUS_BOTTOM` with `scrubber::TOP`.
+A test in `upnext/column.rs` asserts that `FOCUS_BOTTOM` is at or
+above `scrubber::TOP`, the top of the current time's text. It failed
+with:
+
+```
+the focus panel ends at y 858, want at or above y 846, where the scrubber draws the current time
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`. It compares the two constants and does not show that the
+panel and the time draw at the same x. A capture of the display with
+the up-next column focused near the credits, at a position where the
+current time is under the column, would show the overlap.
 
 ## What a fix has to decide
+
+Near the credits, the focus panel of the up-next column can cover the
+top of the current time.
 
 Which is right, the comment or the constant. If the comment is right,
 the panel ends at 846 or above, and the art and the lines above it

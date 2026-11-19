@@ -1,6 +1,11 @@
 # A capture frame presents an undrawn surface
 
 Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+On 2026-11-19 the claim was checked against the code:
+`idle/src/harness/frame.rs:180` skips `Renderer::present` on a capture
+frame, and `frame.rs:195` calls `frame.present()` with no condition.
+No unit test can show the frame on the screen, because it needs a
+window under a compositor.
 
 In `idle/src/harness/frame.rs`, `frame` acquires the surface texture
 and then, on a frame that `capture` writes to a PNG, skips

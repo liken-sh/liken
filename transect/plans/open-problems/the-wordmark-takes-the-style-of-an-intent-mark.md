@@ -1,7 +1,11 @@
 # The wordmark takes the style of an intent mark
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
-A review of the comments against the code found it.
+Open bug, recorded on 2026-11-18. A review of the comments against the
+code found it. On 2026-11-19, `layout.html` in
+`crates/transect-frame/src/frame/` still gives the wordmark image
+`class="mark"`, and `intent.css` in `crates/transect-resources/src/intent/`
+still styles `.mark` with padding and a border. No unit test can show
+the computed style; a browser does.
 
 `layout.html` in `crates/transect-frame/src/frame/` gives the wordmark
 image in the masthead `class="mark"`, and links `intent/intent.css` on

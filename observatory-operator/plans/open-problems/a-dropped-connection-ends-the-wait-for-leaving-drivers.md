@@ -1,6 +1,7 @@
 # A dropped connection ends the wait for leaving drivers
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 When devices leave a running INDI server, `setDrivers` in
 `serverdrivers.go` patches the server pod's driver annotation and
@@ -28,20 +29,30 @@ start the drivers again before the shim reads the new annotation.
   wait and the pod delete exists so that indiserver does not start a
   leaving driver again.
 
-## What would confirm it
+## The reproduction
 
-A test with the fake INDI server and `fakeshim_test.go`. Start a
-reservation, move one device to another server, and close the
-operator's client connection with `indiWorld.cut` after the
-annotation patch and before the leaving driver exits. Check whether
-the device pod is deleted while its driver still runs, and whether
-the server starts that driver again.
+A test with the fake INDI server and `fakeshim_test.go` makes the
+shim stop a leaving driver after 10 seconds, deletes the `Focuser`
+east of a Ready reservation, and after 2 seconds closes the
+operator's client connections to the server `east-telescope` with
+`indiWorld.cut`, while the server keeps running. It wants no driver
+started again. It failed with:
+
+```
+restarted drivers = ["east-telescope east-focuser"] after the connection dropped, want none, because the driver stopped before its pod was deleted
+```
+
+The same test without the cut passes. The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
 
-- How the wait tells a closed client connection from a server that
-  restarted, for example by the server pod's UID or by the
-  annotation that the next connection's driver list shows.
-- Whether the wait subscribes again after a reconnect and keeps
-  waiting until `driverStopLimit`, or reads the devices that the new
-  connection defines.
+When the operator's connection to a running INDI server drops while it
+waits for a leaving driver to stop, it deletes the device's pod at
+once, and indiserver starts the driver again.
+
+- How does the wait tell a dropped connection from a server that
+  restarted: by the server pod's UID, or by the driver list that the
+  next connection shows?
+- After a reconnect, does the wait go on until `driverStopLimit`, or
+  read the devices that the new connection defines?

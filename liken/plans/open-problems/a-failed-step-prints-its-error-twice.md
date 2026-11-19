@@ -1,6 +1,7 @@
 # A failed step prints its error twice
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19 for `carryOutConvergence`.
 
 Some steps of a machine-operator pass print their error to the log and
 also record it in the pass outcome. The loop then prints the recorded
@@ -29,14 +30,35 @@ After the pass, `run` in `loop.go` prints "the pass did not finish
 ..." with `describeUnfinished`, which gives the step and the error of
 each recorded failure.
 
+A unit test staged a spec, made the store's directory read-only, and
+called `carryOutConvergence` with a decision to withdraw the staged
+spec, while it read the operator's standard output. It asserted that a
+step that records its failure in the outcome prints nothing, and
+failed with:
+
+```
+the step recorded its failure and also printed "withdrawing the staged spec: remove /tmp/TestAStepThatRecordsItsFailurePrintsNothing1817336013/001/manifests/staged.yaml: permission denied\n", want the loop's line as the only record
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`. The other steps in the list print and record the same way, at
+`release.go:242` and `:260`, `cluster.go:259` and `:280`,
+`loop.go:154`, and `cdi.go:202`.
+
+The comment on `describeUnfinished` in `loop.go` says that each step
+already logs its own failure, and the loop's line names only the first
+three failures and counts the rest.
+
 ## What would confirm it
 
-A test, or the log of a lab guest, in which one of these steps fails,
-for example a promotion on a read-only `machineState`. The log shows
-the error once from the step and once from the loop.
+The unit test above confirms it for one step.
 
 ## What a fix has to decide
 
-Whether the loop's line is the one record of a failed step, so that
-the steps stop printing, or whether a step keeps a log line that
-holds detail that the outcome does not record.
+Is the loop's "the pass did not finish" line the one record of a
+failed step?
+
+- Yes. The steps stop printing. The loop's line then is the only
+  record of the failures past the first three that it names.
+- No. A step keeps a log line when the line holds detail that the
+  outcome does not record.

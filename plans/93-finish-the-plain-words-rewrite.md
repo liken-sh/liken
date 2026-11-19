@@ -130,10 +130,9 @@ Each one is an open problem of its component:
   comments that the rewrite did not reach.
 - [`equipment-operator`](../equipment-operator/plans/open-problems/log-lines-that-join-two-statements.md):
   log lines that join two statements.
-- [`transect`](../transect/plans/open-problems/names-and-page-copy-that-the-rewrite-did-not-reach.md):
-  exported names and page copy.
-- [`liken`](../liken/plans/open-problems/a-comment-on-teardownaddon-contradicts-the-restart-code.md):
-  a comment that contradicts the restart code.
+- `transect`: exported names and page copy. No document lists them,
+  so a survey of the crates' exported names and of the page
+  templates is the first step.
 
 ## Instructions, plans, and other repositories
 

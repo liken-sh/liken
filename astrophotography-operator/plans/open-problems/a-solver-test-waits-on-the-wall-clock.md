@@ -1,6 +1,10 @@
 # A solver test waits on the wall clock
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. Checked against the code on
+2026-11-19: `solver/engine_test.go:75` reads `time.Now()` and line 77
+compares `time.Since(started)` with 5 seconds, outside a `synctest`
+bubble. A unit test cannot show a failure that depends on the load of
+the machine. A run of the package under load can.
 
 `TestAnEngineThatHangsIsStoppedAtTheTimeout` in
 `solver/engine_test.go` sets `Engine.Timeout` to 200 ms, runs the

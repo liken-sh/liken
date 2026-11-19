@@ -1,6 +1,7 @@
 # The index watch discards a failed read
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 `follow` in `solver/indexwatch.go` returns nil when a read of the
 inotify file fails, for any reason. `run` then closes the watch,
@@ -23,14 +24,26 @@ so a read that fails while `ctx` is live is a different case.
 - `solver/indexwatch.go`, `run`: no wait between one `open` and the
   next.
 
-## What would confirm it
+## The reproduction
 
-A test that gives `follow` an `inotify` whose file is closed before
-the read, with a live `ctx`, and counts the calls to `open` within a
-fixed time of a `synctest` bubble.
+A test opens a real watch on an index directory in `t.TempDir()`,
+closes the watch's file, and calls `follow` on it, as a read that
+fails while `ctx` is live. It wants the read's error, either returned
+or in the log. It failed with:
+
+```
+follow returned no error and logged nothing for a read of a closed watch, want the read's error in one of them
+```
+
+The test runs outside a `synctest` bubble, because a goroutine that
+waits on a real inotify file is not durably blocked. It is not in the
+tree, because a failing test cannot land on `main`.
 
 ## What a fix has to decide
 
-- Whether `follow` returns the error of a read that fails while `ctx`
-  is live, so the solver stops and the pod restarts, or logs it and
-  reopens after a backoff.
+When the solver cannot read its watch of the index directory, it
+opens the watch again and reads every index file, with no pause and
+no log line.
+
+- Does the solver stop, so that Kubernetes restarts its pod?
+- Or does it log the error and open the watch again after a pause?

@@ -1,6 +1,9 @@
 # A test dials a real port for an unreachable registry
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. Checked against the code on
+2026-11-19: the case dials a real port at `ci/bases_test.go:164`.
+Whether the dial makes a run slow depends on the machine, and that
+part is not checked.
 A review of the comments against the code found it.
 
 The root `AGENTS.md` says that a test reaches no host outside the
@@ -12,10 +15,11 @@ cases use `fakeRegistry`, which serves in the test process. This case
 gives `Registry` no `Client`, so `http.DefaultClient` opens a real TCP
 connection to port 1 of the machine that runs the test.
 
-The test expects the connection to be refused. The result depends on
-the machine: a process that listens on port 1, or a sandbox or
-firewall that drops the packet in place of a refusal, gives another
-error, or a wait of up to 30 seconds, the dial timeout of
+The case passes on any failure to read the registry, because every
+failure gives "builds from the tree", so a refusal and another error
+give the same result. The run time depends on the machine: a sandbox
+or firewall that drops the packet in place of a refusal makes the
+case wait up to 30 seconds, the dial timeout of
 `http.DefaultTransport`.
 
 ## What would confirm it

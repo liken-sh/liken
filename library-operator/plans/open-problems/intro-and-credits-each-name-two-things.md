@@ -1,5 +1,9 @@
 # Intro and credits each name two things
 
+Open problem. Checked against the code on 2026-11-19: `marks.go` still
+declares `markKindIntro = "intro"` and `markKindCredits = "credits"`.
+No unit test can show a name that reads two ways.
+
 The mark kinds `intro` and `credits` name the title sequences at the
 start and at the end of a video. In the catalog, `credits` also names
 the list of a title's people, and the `credits` fact fetches that list.

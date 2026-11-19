@@ -1,6 +1,11 @@
 # Tests that wait on the wall clock or open real sockets
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. Checked against the code on
+2026-11-19: the waits are at `src/reader/alarm/tests.rs:12`, and the
+fake broker binds a `TcpListener` at `src/reader/tests.rs:555`. The
+poll with no limit is at `src/reader/tests.rs:446`. No unit test can
+fail on a test that waits. How often they fail on a loaded runner is
+not measured.
 
 The tests of the reader and of its alarm run real threads and wait on
 real time, and some of them talk to a fake broker on a real loopback
@@ -13,7 +18,7 @@ tests fail.
 
 - `src/reader/alarm/tests.rs` starts each `Alarm::wait` on a new
   thread and reads its result with `recv_timeout` and a limit of
-  500 ms. `a_wait_with_nothing_armed_blocks_until_a_ring` waits the
+  500 ms. `a_wait_with_no_deadline_blocks_until_a_signal` waits the
   full 500 ms on every run to show that the wait has not returned.
 - `src/reader/tests.rs`:
   - `fake_broker` binds a `TcpListener` on `127.0.0.1:0`, sets a read

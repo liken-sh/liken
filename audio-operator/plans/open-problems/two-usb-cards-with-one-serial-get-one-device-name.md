@@ -1,7 +1,8 @@
 # Two USB cards with one serial get one device name
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
-A review of the comments against the code found it.
+Open bug, recorded on 2026-11-18. A review of the comments against the
+code found it, and a unit test reproduced the duplicate name on
+2026-11-19.
 
 `endpointName` in `audio-operator/names.go` names a USB card that
 reports a serial from the machine's name, "usb", the vendor, the
@@ -22,16 +23,22 @@ every place that keys by the name:
   prepare call for that name reaches one card and not the other.
 - Both endpoints write the same `Sink` or `Source`.
 
-## What would confirm it
+## The reproduction
 
-Two USB audio dongles of one model that report the same serial,
-plugged into one machine, and the result of the next reconcile pass.
-A unit test of `nameEndpoints` with two such cards shows the
-duplicate name without hardware.
+The test called `nameEndpoints` for `liken-1` with two USB cards of
+one vendor and product that report the serial `000000000000`, on the
+ports `1-2` and `1-3`. It asserted that the cards get two names, and
+it failed with:
+
+    both cards are named "liken-1-usb-0d8c-0014-000000000000-usb-audio", want two names, because a ResourceSlice holds each device name once
+
+The test is not in the tree, because a failing test cannot land on
+`main`. The effect on the `ResourceSlice` and the `Sink` needs two
+such dongles plugged into one machine, and the next reconcile pass.
 
 ## What a fix has to decide
 
-How to name the second card. The port path, which a card with no
+How is the second of two identical dongles named? The port path, which a card with no
 serial already uses, tells the two apart, but it changes when the
 card moves to another port. A fix that adds the port path only on a
 collision keeps the names of every other card, but the name of a card

@@ -1,6 +1,13 @@
 # A level write covers two channels of a suspended node
 
 Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+The code was checked on 2026-11-19: `channelCount` at
+`audio-operator/volume.go:146` returns 2 for an empty
+`channelVolumes`. No unit test can show the defect, because it
+depends on what PipeWire prints for a real suspended node with more
+than 2 channels, and no fixture of one exists. A hand-made graph would
+test only the fallback that the comment on `stereoChannels` already
+states.
 
 `channelCount` in `audio-operator/volume.go` returns the number of
 channels that a level write sets. It returns the length of the node's

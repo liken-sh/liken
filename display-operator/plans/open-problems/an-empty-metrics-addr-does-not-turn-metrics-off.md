@@ -1,6 +1,7 @@
 # An empty METRICS_ADDR does not turn metrics off
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 The comment in `main.go` says that an empty `METRICS_ADDR` disables
 the metrics listener, "so a run on a workstation and every test in
@@ -20,12 +21,23 @@ off in the operator or in display-api.
   result of `envOr`.
 - `api.go`: the `address != ""` test is always true.
 
-## What would confirm it
+## The reproduction
 
-Run the binary with `METRICS_ADDR=` set and read the listening ports.
-A unit test of the lookup can check the same with `t.Setenv`.
+The test set `METRICS_ADDR` to the empty string with `t.Setenv`, read
+the address with `envOr("METRICS_ADDR", defaultMetricsAddr)` as `main`
+and `api.go` do, and asserted the empty string. It failed with:
+
+```
+the metrics address for METRICS_ADDR= is ":9200", want "" so that listen opens no port
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
+
+Should setting `METRICS_ADDR` to the empty string turn the metrics
+port off, or should metrics always be on?
 
 The lookup can use `os.LookupEnv`, so a variable that is set and
 empty differs from one that is unset. Or the comment and the

@@ -1,5 +1,7 @@
 # An episode the model is sure of moves toward its season's usual length
 
+Open bug. A unit test reproduced it on 2026-11-19.
+
 `titles place` places each video alone, and then places it again with
 the usual length of the end titles of its folder as a guide, when at
 least three other videos of the folder were placed with a confidence of
@@ -28,3 +30,26 @@ own start, and takes the folder's guide only where it is not sure. The
 [plan 96](../completed/96-end-titles-from-the-picture.md) records no
 measurement of what the guide does for the episodes the model is not
 sure of. So the change needs both groups measured.
+
+## The reproduction
+
+A test placed four episodes of one folder with a temperature of 8.
+Three have end titles of 60 seconds, and the fourth has end titles of
+64 seconds, with answers that are clear on each side of the start.
+Placed alone, the fourth episode starts at 336 s with a confidence of
+at least 0.8, which the test checks first. The test wanted the same
+start when the folder is placed together, and failed with:
+
+```
+the episode starts at Some(340.0) with its season and at Some(336.0) alone, want its own start because the model was sure of it
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
+
+## What a fix has to decide
+
+Should an episode whose end titles the model places with confidence
+on its own keep that start, and take the season's usual length only
+where the model is not sure? Or should every episode of a season move
+toward its usual length, as now?

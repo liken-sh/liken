@@ -2,7 +2,10 @@
 
 Open question, recorded on 2026-11-18. Nothing fails today. A review
 of the comments against the code asked whether the reason for the
-timer holds.
+timer holds. The code was checked on 2026-11-19: `awaitPipewire` at
+`audio-operator/restarts.go:207-217` calls `time.Sleep(pause)` in a
+loop until `pipewireReturnLimit`. No unit test can show the question,
+because it is about which events PipeWire's socket directory reports.
 
 When WirePlumber exits, `runWireplumber` in
 `audio-operator/restarts.go` calls `awaitPipewire` to wait until

@@ -1,6 +1,7 @@
 # A reboot skips the drain on any failed Node read
 
-Open bug, of medium priority. When machine-operator's read of the
+Open bug, of medium priority. A unit test reproduced it on
+2026-11-19. When machine-operator's read of the
 `Node` fails on the pass that carries out an approved reboot, the
 machine reboots without a drain. No `PodDisruptionBudget` protects its
 workloads, and status reports a normal reboot.
@@ -17,7 +18,7 @@ act.
 `disruptions.gate` (`machine-operator/disruptions.go`) calls
 `gateThroughDrain` only when a reboot is requested, the conductor
 granted a turn, and the Node read succeeded
-(`machine-operator/disruptions.go:69`). On a timeout, a server error,
+(`machine-operator/disruptions.go:70`). On a timeout, a server error,
 or any other read failure, it leaves `requestReboot` set. The comment
 gives demotion as the reason, when there is no Node to cordon. The
 condition does not distinguish that lifecycle state from an API error
@@ -29,15 +30,23 @@ the Eviction API, so no `PodDisruptionBudget` protects its workloads.
 The convergence still reports the normal reboot-requested result, and
 it reports no drain-read failure.
 `TestAGrantedRebootWithNoNodeSkipsTheDrain`
-(`machine-operator/disruptions_test.go:16`) asserts the skip on
+(`machine-operator/disruptions_test.go:13`) asserts the skip on
 purpose, with a server error as its input.
 
-A temporary fixture called the gate with a read error, a granted turn,
-and a convergence that requested a reboot. The result still requested
-the reboot, and the gate made no call to the drain client. This
-verifies only the gate's behavior. No live eviction or reboot drill
-ran. The defect is the decision to skip the drain, not the eviction
-step in `machine-operator/drain.go`.
+A unit test called the gate with a Node read error that names a 500
+answer, a granted turn, and a convergence that requested a reboot,
+through a fake API server that fails the test on any request. It
+asserted that the gate holds the reboot, and failed with:
+
+```
+after a Node read that failed with 500, requestReboot is true, want the reboot held until the drain can run
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`. It contradicts `TestAGrantedRebootWithNoNodeSkipsTheDrain`,
+which the fix changes. This verifies only the gate's behavior. No live
+eviction or reboot drill ran. The defect is the decision to skip the
+drain, not the eviction step in `machine-operator/drain.go`.
 
 ## The fix
 
@@ -53,14 +62,14 @@ did not add it (`machine-operator/observedgeneration.go`), so this fix
 adds it.
 
 The demotion path keeps its order. `carryOutDemotion`
-(`machine-operator/demotion.go:105`) writes its reboot intent before it
+(`machine-operator/demotion.go:88`) writes its reboot intent before it
 deletes the Node, because the deletion can terminate its own pod. That
 intent uses the runtime channel on tmpfs, so it does not survive a
 power loss. The fix must not strand a machine whose Node was removed
 on purpose.
 
 The fix needs no new user-facing disruption policy. The five-minute
-`drainDeadline` (`machine-operator/drain.go:65`) allows a reboot on
+`drainDeadline` (`machine-operator/drain.go:55`) allows a reboot on
 purpose when workloads do not leave in time. The fix does not change
 that limit, `rebootPolicy`, or the conductor's grant rules. Whether a
 `PodDisruptionBudget` should block a reboot with no limit is a separate
@@ -71,6 +80,14 @@ explicit demotion path. An unexpected read failure must hold the
 reboot and show in status. A successful retry must resume the drain,
 the existing deadline must still apply, and a demoted machine must
 still reboot and register again after its Node is deleted.
+
+This needs the maintainer's decision before the fix is built: how does
+the gate tell a Node that a demotion deleted on purpose from a Node
+read that failed? `carryOutDemotion` writes its own reboot intent, so
+a demotion does not depend on the gate to reboot. One option is that
+only a `404` on a machine whose demotion is under way skips the drain.
+Another is that every failed read holds the reboot, and the demotion
+reboots through its own intent alone.
 
 ## What the lab can measure
 

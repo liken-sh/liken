@@ -10,6 +10,14 @@ The survey of 2026-09-11 in
 and [milestone 94](../completed/94-durability-and-safety-fixes-that-are-not-built.md)
 held it until 2026-11-17.
 
+The claim was checked against the workflow on 2026-11-19:
+`.github/workflows/releases-cert.yaml:49` downloads the `lego` archive
+by version with no digest, and the `lego` step and the step that
+installs the certificate both read `RELEASES_CERT_TOKEN`
+(`.github/workflows/releases-cert.yaml:67` and `87`). No unit test can
+show this. A workflow run that gives `lego` a changed archive, and
+fails before the token is used, proves the fix.
+
 ## The evidence
 
 `.github/workflows/releases-cert.yaml` downloads

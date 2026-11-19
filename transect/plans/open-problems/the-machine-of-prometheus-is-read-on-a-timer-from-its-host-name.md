@@ -1,7 +1,7 @@
 # The machine of Prometheus is read on a timer from its host name
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
-A review of the comments against the code found it.
+Open bug, recorded on 2026-11-18. A review of the comments against the
+code found it, and a unit test reproduced it on 2026-11-19.
 
 The loss view says when a lost machine runs Prometheus. `poll` in
 `crates/transect-ground/src/loss/blind/poll.rs` reads Prometheus's host
@@ -22,13 +22,32 @@ these faults:
 - `blinded` compares only the pod name, not the namespace, so a pod of
   the same name in another namespace can match.
 
-## What would confirm it
+## The reproduction
 
-A unit test of `blinded` with a Prometheus pod that has `hostNetwork:
-true` and a `sources.prometheus` set to its node's name. No `Blind` is
-returned. The timer is visible in the code.
+A test gave `blinded` one running pod, `metrics/prometheus-0` on the
+machine `beta` with `hostNetwork: true`, the host name `beta` that such
+a pod reports, and a loss of `beta`. It wanted Prometheus reported on
+`beta`, and failed with:
+
+```
+the sources on lost machines are on [], want Prometheus on beta, where its pod runs
+```
+
+The timer is in the code: `PROMETHEUS_POD_INTERVAL` in
+`crates/transect/src/main.rs` is 60 seconds, and `main` passes it to
+`loss::blind::poll::poll`. No test was written for the pod of the same
+name in another namespace, because `Sources` holds no namespace, so
+the right answer depends on the decision below.
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
+
+How should `transect` find the Prometheus pod from the state of the
+cluster with no timer, for example from the `Service` that the
+`MetricsSource` address names, and what should the loss view say when
+Prometheus runs outside the cluster?
 
 How to find the Prometheus pod from the cluster's state with no timer,
 for example from the endpoints of the `Service` that the

@@ -1,7 +1,7 @@
 # Stuck pods are grouped by the rank of their reason
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
-A review of the comments against the code found it.
+Open bug, recorded on 2026-11-18. A review of the comments against the
+code found it, and a unit test reproduced it on 2026-11-19.
 
 `Gather::stuck` in `crates/transect-ground/src/loss/next.rs` keys its
 groups by `Stranded::rank()`, and keeps the first `Stranded` value of
@@ -13,15 +13,31 @@ their `machine`, `kind`, or `device` fields hold.
 So when a loss covers two machines, a workload stuck on a disk of
 `alpha` and a workload stuck on a disk of `beta` go into one group. The
 sidebar then names only the first machine for both. The same happens to
-two `Attached` volumes of different kinds and to two different devices.
+two `Attached` volumes of different kinds, to two different devices,
+and to two `StatefulSet` pods on different machines.
 
-## What would confirm it
+## The reproduction
 
-A test of the loss view with two lost machines, each with a pod whose
-volume is on that machine's own disk. The "what happens next" text
-names one machine.
+A test recorded the `Deployment` `web` as stuck on a disk of `alpha`
+and the `Deployment` `db` as stuck on a disk of `beta`, and read the
+reasons of the groups. It wanted one group for each machine, and
+failed with:
+
+```
+the stuck groups name [Disk { machine: "alpha" }], want each machine whose disk holds a stuck workload
+```
+
+The test chose one line for each machine, which is one of the two
+options below.
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
+
+When workloads are stuck on two lost machines for the same reason,
+should the sidebar give one line for each machine, or one line for
+the reason that lists every machine?
 
 Whether the group key is the whole `Stranded` value, which gives one
 line for each machine, or the rank with a list of machines in one line.

@@ -1,10 +1,13 @@
 # Log lines that join two statements
 
-Open problem, recorded on 2026-11-18.
+Open problem, recorded on 2026-11-18. Checked against the code on
+2026-11-19: a search of the Go files outside the tests for a format
+string that holds `"; "` finds such lines, for example
+`television_show.go:36`, `"%s; asked Television %s to show Display %s"`.
 
 About 60 log strings join two statements with "; ", against the rule
-in [`brand/messages.md`](../../../brand/messages.md) that a log line
-states one fact. Some log lines also say that the operator "asked" a
+in [`brand/voice.md`](../../../brand/voice.md), under Sentences, to
+write two sentences in place of a semicolon. Some log lines also say that the operator "asked" a
 television to do something, where the operator sent a command. The
 rewrite that
 [root plan 93](../../../plans/93-finish-the-plain-words-rewrite.md)

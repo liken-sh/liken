@@ -1,7 +1,7 @@
 # `lowerFirst` lowercases a message that starts with a kind
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced
-in a running operator.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19. It is not reproduced in a running operator.
 
 `lowerFirst` in `observatory-operator/logs.go` puts the first letter
 of a message in lowercase when the first word has no second capital
@@ -16,13 +16,25 @@ a message of the form "%s ..." with a resource first comes out as
 `lateactivation.go` made such a message, two tests failed, and the
 message went back to a form that starts with a lowercase word.
 
-## What would confirm it
+## The reproduction
 
-A test that passes a message that starts with a resource's `String()`
-to `procCall.summary` and reads the result.
+A test builds `Dome lab` with `resource.String()` and calls
+`procCall.summary` with `Dome lab is not connected`, for a procedure
+call with a condition. It wants the kind to keep its capital. It
+failed with:
+
+```
+summary = "When the weather is unsafe: dome lab is not connected", want "When the weather is unsafe: Dome lab is not connected"
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
 
-Whether `lowerFirst` leaves a word alone when it is the name of a
-kind, or the callers pass the fragment and the resource separately so
-that no function has to guess.
+A message that starts with a resource, such as `Dome lab`, comes out
+as `dome lab` after a colon.
+
+- Does `lowerFirst` leave a word alone when it is the name of a kind?
+- Or do the callers pass the resource apart from the rest of the
+  message, so that no function has to guess?

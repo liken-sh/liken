@@ -1,6 +1,9 @@
 # Tests that wait on the wall clock
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. Each wait below was checked against
+the code on 2026-11-19, at `relay_test.go:31`, `cli/pair_test.go:114`,
+and `connect_test.go:284,318`. No unit test can fail on them, because
+each one is in a test's own code.
 
 The root `AGENTS.md` says that a test waits on the fake clock of a
 `synctest` bubble, never on real time, and the `testing` skill lists

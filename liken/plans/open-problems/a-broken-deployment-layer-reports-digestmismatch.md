@@ -1,6 +1,7 @@
 # A broken deployment layer reports DigestMismatch
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 When machine-operator cannot use the deployment layer of the running
 slot, `VersionConverged` reports the reason `DigestMismatch`, the
@@ -26,15 +27,31 @@ the condition message says. `Ensure` returns a `fetchRejected` state
 until the request changes, so a repair of the layer also does not
 clear the state until the operator restarts or the target changes.
 
+A unit test served a release from a fake release server, gave the
+fetcher a running slot with no deployment layer, waited for the fetch
+to settle, and passed its snapshot to `versionCondition`. It asserted
+that the reason is not `DigestMismatch`, and failed with:
+
+```
+with no layer in the running slot, VersionConverged is False/DigestMismatch (Release 0.2.0 cannot be downloaded to slot B: the running slot's deployment layer has no readable sidecar (open /tmp/TestABrokenLayerIsNotReportedAsADigestMismatch2389742403/002/deployment.cpio.sha256: no such file or directory), so repair or reinstall this machine: this machine's deployment layer is unusable), want a reason other than DigestMismatch
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
+
 ## What would confirm it
 
-A test of `versionCondition` with the snapshot that `fetcher.run`
-writes for an `errLayer` error. On a lab guest, a damaged sidecar of
-the running slot's layer, then a new target, and a read of the
-`VersionConverged` condition.
+The unit test above confirms the reason. On a lab guest, a damaged
+sidecar of the running slot's layer, then a new target, and a read of
+the `VersionConverged` condition, would confirm it on a machine.
 
 ## What a fix has to decide
 
-The reason for a broken layer, and whether it is `Blocked` like
-`DigestMismatch`. Whether a rejected layer is tried again after a
-person repairs the machine, and what event starts that.
+When a machine's own deployment layer is damaged, which reason does
+the machine show in place of the one that says the catalog is wrong?
+And is that machine `Blocked`, as it is for `DigestMismatch`?
+
+After a person repairs the machine, does the operator try the layer
+again by itself, or only after the operator restarts or the target
+changes, as it does now? If it tries again by itself, the fix must
+name the event that starts the new try.

@@ -1,6 +1,10 @@
 # Comments that the rewrite did not reach
 
-Open problem, recorded on 2026-11-18.
+Open problem, recorded on 2026-11-18. Checked against the code on
+2026-11-19. The comments remain, for example "takes the outputs it
+finds" at `display-operator/wayland.go:18`, and "takes the first
+frame" and "takes the moment" at `display-operator/capturestream.go:18`
+and `:25`. No unit test can fail on a comment.
 
 The rewrite of this component's text, which
 [root plan 93](../../../plans/93-finish-the-plain-words-rewrite.md)

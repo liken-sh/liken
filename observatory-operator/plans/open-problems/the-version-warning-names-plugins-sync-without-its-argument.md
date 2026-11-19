@@ -1,6 +1,7 @@
 # The version warning names `plugins sync` without its argument
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 When the plugin's version differs from the operator's, or is older
 than the operator's minimum, `decideVersionAction` in `cli/version.go`
@@ -26,17 +27,25 @@ names the command in the same form.
 - `liken/docs/content/docs/reference/cli.md`: the reference gives
   `liken plugins sync [-server URL] <deployment-dir>`.
 
-## What would confirm it
+## The reproduction
 
-Run `kubectl liken plugins sync` with no argument on a workstation
-that has the toolkit installed as `kubectl-liken`, and read the
-result.
+A test calls `decideVersionAction` with a CLI version older than the
+operator's and wants the warning to name `plugins sync
+<deployment-dir>`. It failed with:
+
+```
+the warning is "this CLI is 2026.11.01-001 and the operator is 2026.11.18-001; run kubectl liken plugins sync", want the command plugins sync <deployment-dir>
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
 
-- Whether the warning names the argument, as in
-  `kubectl liken plugins sync <deployment-dir>`, or whether
-  `plugins sync` reads a default deployment directory when none is
-  given.
-- Whether every component's copy changes in one commit, so that the
-  copies stay the same.
+The command that the version warning gives fails with a usage error,
+because `plugins sync` needs the deployment directory.
+
+- Does the warning print `kubectl liken plugins sync <deployment-dir>`
+  in every component's CLI?
+- Or does `plugins sync` use a default deployment directory when you
+  give none?

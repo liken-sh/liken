@@ -1,6 +1,7 @@
 # The info route returns 304 for a changed screen
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 display-api serves three JSON documents through `document` in
 `api.go`: the discovery document, the OpenAPI document, and the info
@@ -23,13 +24,26 @@ true, until display-api is upgraded.
 - `routes.go`, the comment on the route kinds, gives the `ETag` and
   the 304 only to a document route. An info route is a separate kind.
 
-## What would confirm it
+## The reproduction
 
-A test in `api_test.go` that reads the info document, changes the
-mode that the fake sidecar reports, and sends the first `ETag` back in
-`If-None-Match`. The response should be a 200 with the new mode.
+The test read the info document of `HDMI-A-1` from display-api with
+the fake sidecar, changed the fake to report a 3840x2160 mode, and
+read the document again with the first `ETag` in `If-None-Match`. It
+asserted a 200. It failed with:
+
+```
+after the mode changed to 3840x2160, a client holding the ETag "dev" got 304, want 200 with the new mode
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
+
+Should the info route send no `ETag`, so a client always reads the
+current screen, or an `ETag` made from a hash of the document, which
+still answers 304 when nothing changed but makes a `HEAD` request
+build the document?
 
 The info route can send no `ETag`, or an `ETag` made from a hash of
 the body, which still gives a client a 304 when nothing changed. The

@@ -1,7 +1,11 @@
 # Drill 05 can read the stats of another drill's volume
 
 Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
-A review of the comments against the code found it.
+A review of the comments against the code found it. On 2026-11-19 the
+claim was checked against the code: `lab/drills/05.sh:44` matches
+`pvcRef.name` alone. No unit test can show it, because the drill is a
+shell script that reads a kubelet's stats summary. A `make drill` run
+on the lab, as the next section describes, would show it.
 
 `used_bytes` in `per-node-csi-driver/lab/drills/05.sh` reads the
 kubelet's stats summary for the node and prints the `usedBytes` of the

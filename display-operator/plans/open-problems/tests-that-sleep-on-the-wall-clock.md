@@ -1,6 +1,14 @@
 # Tests that sleep on the wall clock
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. Checked against the code on
+2026-11-19: `grep -n "time.Sleep\|time.After(" display-operator/*_test.go`
+finds each sleep and poll below, at `arrivals_test.go:86`, `:206`,
+`:228`, and `:249`, `weston_test.go:369` and `:384`,
+`clientcerts_test.go:364`, `serving_test.go:166` and `:182`,
+`layoutlink_test.go:195` and `:213`, `wayland_test.go:354`, `:370`,
+`:664`, and `:795`, `watchserver_test.go:341`, and
+`layoutstore_test.go:70`. No unit test can fail on a test that sleeps.
+How often they fail on a loaded runner is not measured.
 
 The root `AGENTS.md` and the `testing` skill say that a test waits on
 the fake clock of a `synctest` bubble, and never sleeps or polls on

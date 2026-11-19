@@ -1,6 +1,8 @@
 # `Asleep` keeps the time of an earlier disconnect
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced the first of
+the two outcomes below on 2026-11-19. No unit test has run the
+second.
 
 The wake press counts the sleep from the `lastTransitionTime` of the
 `Connected` condition. That time moves only when the condition's
@@ -39,15 +41,28 @@ another with no `LinkUp` between:
   press, `follow` sees the same time as `wakePressedFor` and schedules
   nothing, and the second wake gets no press.
 
-## What would confirm it
+## The reproduction
 
-A test that runs `connectedCondition` and `follow` on a stored
-`ClosedByDevice` condition and then on a stored `Asleep` condition
-that already got a press, with a device that is disconnected in both
-passes and a new `Asleep` link-end reason. The test checks
-`asleepSince` against the time of the second pass.
+The test built the `Connected` condition with `connectedCondition`
+from a stored `ClosedByDevice` condition an hour old, for a remote
+that is disconnected and whose link timed out, so the pass writes
+`Asleep`. It passed that condition to `follow`, set the relay's clock
+5 seconds after the pass, and opened the remote's keyboard node. It
+asserted that the node receives no press, because the sleep is
+shorter than `wakeAfter`, and it failed with:
+
+    the keyboard node received 000000000000000000000000000000000100f00001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100f00000000000000000000000000000000000000000000000000000000000 5 seconds after the sleep, want nothing because the sleep is shorter than 10s
+
+The test is not in the tree, because a failing test cannot land on
+`main`. The second outcome, from `Asleep` to `Asleep`
+after a press, needs a test of the same form with a stored `Asleep`
+condition whose time already got a press.
 
 ## What a fix has to decide
+
+Should the 10-second rule for a wake press count from the time that
+the `Connected` condition last changed its status, or from the time
+that the operator saw the link drop?
 
 - Whether the sleep is timed from the condition, which follows the
   Kubernetes rule for `lastTransitionTime`, or from a time that the

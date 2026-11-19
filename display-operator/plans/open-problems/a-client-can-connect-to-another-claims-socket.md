@@ -1,6 +1,7 @@
 # A client can connect to another claim's socket
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 Each claim on a screen gets its own Wayland socket, and the layout
 module places every surface of a socket on the output that the socket
@@ -22,20 +23,36 @@ variable it was given.
   and `bind`.
 - `main.go`: `socketName = "wayland-0"`, at
   `socketDir + "/" + socketName`.
-- `claimsockets.go`, `claimSocketNames`: each claim's sockets are
-  `wayland-<claim UID>` in the same directory.
+- `claimsockets.go`, `claimSocketNames`: a claim's first socket is
+  `wayland-<claim UID>`, and each later output of the same claim is
+  `wayland-<claim UID>-<device>`, all in the same directory.
 - Plan 17 keeps the layout module's control socket out of this
   directory, because "a consumer that could reach the control socket
   could place surfaces". No plan states the same choice for the
   Wayland sockets.
 
-## What would confirm it
+## The reproduction
 
-On the lab fleet, two claims on two screens of one node. From the
-first claim's pod, connect a client to the second claim's socket and
-read `status.surfaces` of both `Display` resources.
+The test built the CDI edits of one output for a claim whose socket is
+`wayland-claim-a`, and asserted that no mount has the host path
+`/var/run/display.liken.sh`, the directory that holds every socket. It
+failed with:
+
+```
+the edits mount /var/run/display.liken.sh, which holds wayland-0 and the socket of every other claim, want only wayland-claim-a
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`. The test shows the mount, not a client that uses it. On the
+lab fleet, two claims on two screens of one node would show the rest:
+from the first claim's pod, connect a client to the second claim's
+socket and read `status.surfaces` of both `Display` resources.
 
 ## What a fix has to decide
+
+Should each claim get a directory of its own, or a mount of its one
+socket that still works after the compositor restarts and binds the
+socket again?
 
 CDI can mount one socket file per claim in place of the directory.
 But `bind_listening_socket` in `liken-layout.c` unlinks the path and

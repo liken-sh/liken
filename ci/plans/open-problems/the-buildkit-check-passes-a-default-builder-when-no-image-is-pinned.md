@@ -1,7 +1,7 @@
 # The BuildKit check passes a default builder when no image is pinned
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
-A review of the comments against the code found it.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19. A review of the comments against the code found it.
 
 The comment on `buildkitKey` in `ci/buildkit.go` says that
 `checkBuildKit` fails a `docker/setup-buildx-action` step that sets
@@ -27,14 +27,25 @@ for a component that builds images. A composite action under
 has no such guard. `buildkit_test.go` tests `unpinnedBuilders` only
 with a pinned image, `fixtureBuildKit`.
 
-## What would confirm it
+## The reproduction
 
-A test that calls `checkBuildKit` on a tree whose `images.toml` has no
-`buildkit` entry and whose `.github/actions/<name>/action.yml` runs
-`setup-buildx-action` with no `driver-opts`. The suspicion is
-confirmed when the test gets no finding.
+The test wrote a tree whose `toolchains/images.toml` has a `[build]`
+table with no `buildkit` entry, and a composite action under
+`.github/actions/build-setup/` that runs `setup-buildx-action` with no
+`driver-opts`. It called `checkBuildKit` on the tree and asserted at
+least one finding. It failed with:
+
+```
+the findings are empty, want one for the step that runs moby/buildkit:buildx-stable-1
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
+
+When `images.toml` pins no BuildKit image, should `ci pins` report the
+missing pin, or report each build step that names no image?
 
 Whether a missing `buildkit` entry is itself a finding of `ci pins`,
 as it is an error of the generator, or whether `unpinnedBuilders`

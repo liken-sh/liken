@@ -1,6 +1,8 @@
 # `replace` ignores the restore of the immutable flag and short writes
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced the first
+fault on 2026-11-19. No unit test can show the second without a change
+to `replace`.
 
 `variableStore.replace` in `scan/apply.go` writes a whole EFI
 variable. The capsule apply calls it through `repairUpdater` in
@@ -28,18 +30,31 @@ database update does not have:
 - `appendOnce` and its comment in `scan/apply_linux.go`.
 - The restore report in `write` in `scan/apply.go`.
 
-## What would confirm it
+## The reproduction
 
-A test of `replace` with a store whose `setFlags` fails on the second
-call. The test checks that `replace` or its caller reports the flag.
-The short write needs a file that accepts part of a write, so a test
-needs a store with a write function in place of `os.OpenFile`.
+A test calls `replace` on a variable file in `t.TempDir()` with a
+store whose `flags` reports the immutable flag and whose `setFlags`
+fails on its second call, the restore. It wants an error from
+`replace`. It failed with:
+
+```
+replace returned no error when the immutable flag was not set again, want the flag's failure
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
+
+For the short write, `replace` opens the file with `os.OpenFile` and
+calls `os.File.Write` itself (`scan/apply.go:119` and `:123`), so a
+test cannot give it a file that accepts part of a write. A test needs
+`replace` to write through a function of `variableStore`, as the
+append does with `write`.
 
 ## What a fix has to decide
 
-- Whether `replace` returns the restore error, or returns it apart
-  from the write error so that `stageCapsule` reports it as the
-  database write does, with the write still counted as done.
-- Whether `replace` writes through the same single-call function as
-  `appendOnce`, and whether `variableStore` gives both paths one
-  write function.
+- When the repaired boot entry is written and its immutable flag
+  cannot be set again, does the apply count as `Written` with a note,
+  as a database update does, or as `Uncertain`?
+- Does `replace` write through the same single-call function as
+  `appendOnce`, and does `variableStore` give both paths one write
+  function?

@@ -1,6 +1,7 @@
 # A WiiM receiver refuses spec.power Off on every pass
 
-Open bug, recorded on 2026-11-18. It is suspected and not reproduced.
+Open bug, recorded on 2026-11-18. A unit test reproduced it on
+2026-11-19.
 
 When a `Receiver` with a `wiim` block has `spec.power` `Standby` or
 `Off`, `receiverUnit.setPower` in `reconcile.go` calls
@@ -23,15 +24,27 @@ protocol block.
 - `setPower` has no send budget, unlike the settings, which stop after
   `sendLimit` sends (`send_budget.go`).
 
-## What would confirm it
+## The reproduction
 
-A test that sets `spec.power` `Off` on a WiiM `Receiver`, runs two
-passes, and counts the refusal lines in the receiver log.
+A test starts a fake WiiM, calls `setPower` with `Standby` twice, as
+two passes do, and counts the log lines that hold the refusal. It
+wants one. It failed with two identical lines:
+
+```
+after two passes the log has 2 refusals, want 1: ["Receiver studio: generation 0 requests power Standby; sent power Standby; the command was not applied: a WiiM has no standby command, so it cannot power off" ...]
+```
+
+The test is not in the tree, because a failing test cannot land on
+`main`.
 
 ## What a fix has to decide
 
-- Whether the CRD refuses `Standby` and `Off` for a `wiim` block, or
-  the operator accepts them and records them as settled with nothing
-  sent.
-- Whether a refused power command gets a send budget, as a setting
-  does, and a condition that reports the refusal.
+A WiiM has no standby, so a `Receiver` with a `wiim` block and
+`spec.power` set to `Standby` or `Off` logs the same refusal on every
+pass, at least every 30 seconds.
+
+- Does the API server refuse `Standby` and `Off` for a WiiM when you
+  apply the `Receiver`, with a CEL rule?
+- Or does the operator accept the value, send nothing, and report the
+  refusal once, for example with a send budget as the settings have
+  and a condition?
