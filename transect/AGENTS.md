@@ -214,13 +214,14 @@ Next, in order:
 
 - The maintainer's pass over the access lens, then a review of its
   design and a round on performance.
-- Plan 07 runs `transect` in the cluster.  Its "What is built" section
-  lists what exists: the probes, the env, SIGTERM, the image, the
-  kustomize base in `deploy/`, and the CI that publishes the image and
-  the base.  What remains is `transect crds` and `transect rbac`,
-  metadata-only ConfigMaps, sign-in, the CRDs for `transect`'s own
-  resources, and the cluster's own deploy.  The maintainer still works
-  from outside the cluster.
+- Plan 07, in `plans/completed/`, ran `transect` in a cluster: the
+  probes, the env, SIGTERM, the image, the kustomize base in `deploy/`,
+  and the CI that publishes the image and the base.  Its "Closed on
+  2026-11-19" section lists the parts that were dropped and that no
+  plan holds: `transect crds` and `transect rbac`, the CRDs for
+  `transect`'s own resources, the "sign in again" banner, and the kind
+  knowledge that each operator would ship.  Write a new plan before you
+  build one of them.
 - The etcd role label is the one distribution's convention left in the
   code; plan 08 gives the reason it waits.
 - The maintainer's pass over the vulnerabilities pages.  Plan 10's

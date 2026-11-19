@@ -15,6 +15,48 @@ stays as it is and stays the main way to develop.
 the CI that `ci/` generates for every component.  Its group is
 `transect.liken.sh`.
 
+## Closed on 2026-11-19
+
+The plan is closed.  `transect` runs in a cluster, and the maintainer
+decided on 2026-11-19 to drop the parts below that are not built and to
+design them again when one is needed.  The sections after this one keep
+the plan as it was written, so "What is built" still says that nothing
+is deployed.
+
+A home cluster has run the `Deployment` since 2026-11-11.  Its
+repository follows the deploy artifact `transect-deploy` at a release
+tag, and patches the in-cluster addresses of Prometheus, Alertmanager,
+and the log store into the `Deployment` as `TRANSECT_*` variables.  The
+ingress controller's forward auth admits one group of the identity
+provider and deletes a client's copy of the user headers.  The
+cluster's default-deny policy admits the ingress controller and
+Prometheus, and egress stays open, as in the cluster's other
+namespaces.  `transect`'s resources and overlays are files in a
+read-only `git-csi-driver` volume of the cluster's repository, as
+recommendation 5 gives, and `transect` loads them again on a push
+without a restart.  On 2026-11-19, 6.5 hours after its pod started, the
+pod used 110Mi of memory against the request of 256Mi.  That reading is
+the second measurement that stage 2 asks for.
+
+The `ConfigMap` watch is metadata-only: the store in
+`crates/transect-cluster/src/cluster/mod.rs` holds
+`PartialObjectMeta<ConfigMap>`.
+
+These parts are not built, and no plan holds them:
+
+- `transect rbac`.  The cluster's repository keeps the aggregated
+  `ClusterRole` of the custom groups by hand.
+- `transect crds`, the CRDs of stage 6, and the status that `transect`
+  would write to them.  The conditions of a resource show on
+  `/resources` only.
+- Stage 8, the kind knowledge that each operator would ship.  It needs
+  the CRDs.
+- The access lens does not read the `expected-access` annotation.
+- The "sign in again" banner.  A page whose session expired stops
+  updating and shows no message.
+- The line that shows who is signed in.  No code reads a user header.
+- The egress policies of stage 4, which a cluster writes for itself.
+
 ## What is built
 
 Parts of stages 1, 2, 3, and 7 are built; nothing is deployed.
