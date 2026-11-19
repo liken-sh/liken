@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"reflect"
 	"slices"
 	"testing"
@@ -51,6 +52,29 @@ func TestAPendingFrameStartsAPromotionJob(t *testing.T) {
 		}
 		if job.Spec.Template.Metadata.Labels[labelManagedBy] != managedBy {
 			t.Errorf("the pod's labels are %v, so the pod watch does not select it", job.Spec.Template.Metadata.Labels)
+		}
+	})
+}
+
+// A pod that the kubelet ends, such as for an eviction, gets the
+// condition DisruptionTarget, and the Job's podFailurePolicy runs a new
+// pod in its place without counting one of the Job's retries. The fake
+// API server runs no Job controller that reads the policy, so the test
+// reads the Job that the operator created.
+func TestAPromotionJobRunsItsPodAgainWhenTheKubeletEndsIt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		putClaim(api, "frames")
+		putClaim(api, "archive")
+		putTarget(t, api, withPending(m42(), 1, 0))
+		startOperator(t, api)
+		synctest.Wait()
+
+		job := decode[map[string]any](api, jobsPath, observatoryNS, "m42-promote-1")
+		policy, _ := json.Marshal(job["spec"].(map[string]any)["podFailurePolicy"])
+		want := `{"rules":[{"action":"Ignore","onPodConditions":[{"status":"True","type":"DisruptionTarget"}]}]}`
+		if string(policy) != want {
+			t.Errorf("podFailurePolicy = %s, want %s", policy, want)
 		}
 	})
 }

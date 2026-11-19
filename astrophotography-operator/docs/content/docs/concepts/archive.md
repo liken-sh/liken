@@ -64,7 +64,10 @@ Only one `Job` runs for a target at a time, because only one writer may
 append to the target's catalog. Only one runs for an outbox claim at a
 time, so only one copy at a time uses the network. Kubernetes stops a
 `Job` after an hour, retries a failed pod twice, and deletes the `Job`
-an hour after it finishes.
+an hour after it finishes. A pod that the kubelet ends, such as for an
+eviction, a preemption, or the node's shutdown, has the condition
+`DisruptionTarget`. The `Job`'s `podFailurePolicy` ignores that pod, so
+the `Job` runs a new pod and does not count it as one of the retries.
 
 ## Where the `Job` runs
 

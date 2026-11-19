@@ -46,10 +46,25 @@ type jobObject struct {
 func (j *jobObject) GetObjectMeta() memo.Meta { return &j.Metadata.ObjectMeta }
 
 type jobSpec struct {
-	BackoffLimit            int32       `json:"backoffLimit"`
-	ActiveDeadlineSeconds   int64       `json:"activeDeadlineSeconds"`
-	TTLSecondsAfterFinished int32       `json:"ttlSecondsAfterFinished"`
-	Template                podTemplate `json:"template"`
+	BackoffLimit            int32             `json:"backoffLimit"`
+	ActiveDeadlineSeconds   int64             `json:"activeDeadlineSeconds"`
+	TTLSecondsAfterFinished int32             `json:"ttlSecondsAfterFinished"`
+	PodFailurePolicy        *podFailurePolicy `json:"podFailurePolicy,omitempty"`
+	Template                podTemplate       `json:"template"`
+}
+
+type podFailurePolicy struct {
+	Rules []podFailurePolicyRule `json:"rules"`
+}
+
+type podFailurePolicyRule struct {
+	Action          string              `json:"action"`
+	OnPodConditions []podConditionMatch `json:"onPodConditions"`
+}
+
+type podConditionMatch struct {
+	Type   string `json:"type"`
+	Status string `json:"status"`
 }
 
 type jobStatus struct {

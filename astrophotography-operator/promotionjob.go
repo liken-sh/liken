@@ -97,6 +97,16 @@ func promotionJob(t *astrophotography.Target, claim string, number, pending int3
 		APIVersion: "batch/v1", Kind: "Job", Metadata: meta,
 		Spec: jobSpec{
 			BackoffLimit: promotionBackoff, ActiveDeadlineSeconds: promotionDeadline, TTLSecondsAfterFinished: promotionTTL,
+			// A pod that the kubelet ends, such as for an eviction, a
+			// preemption, or a node's shutdown, has the condition
+			// DisruptionTarget. Its promote run did not fail, so the Job
+			// controller runs a new pod without counting it against the
+			// backoff limit. The API server accepts a podFailurePolicy
+			// only with the restartPolicy Never below.
+			PodFailurePolicy: &podFailurePolicy{Rules: []podFailurePolicyRule{{
+				Action:          "Ignore",
+				OnPodConditions: []podConditionMatch{{Type: "DisruptionTarget", Status: "True"}},
+			}}},
 			Template: podTemplate{Metadata: podMeta, Spec: podSpec{
 				RestartPolicy: "Never",
 				// The INDI driver pods of observatory-operator run as user
