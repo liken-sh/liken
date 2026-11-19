@@ -56,7 +56,7 @@ The TV's CEC identity, copied from the TV's entry in the `CECBus`'s `status.devi
 | <span id="statuscec--logicaladdress"></span>`logicalAddress` | integer | yes | The TV's logical address, always `0`. |
 | <span id="statuscec--osdname"></span>`osdName` | string | no | The name that the TV reports, at most 14 characters. |
 | <span id="statuscec--vendor"></span>`vendor` | string | no | The TV's IEEE OUI from its Device Vendor ID, as six hex digits. A Device Vendor ID of `000000` means no vendor, so the operator ignores it. The field keeps the last real vendor, or stays absent until the TV reports one. |
-| <span id="statuscec--cecversion"></span>`cecVersion` | string | no | The CEC version that the TV reports: 1.3a, 1.4, or 2.0. |
+| <span id="statuscec--cecversion"></span>`cecVersion` | string | no | The CEC version that the TV reports, from `1.1` to `2.0`. |
 
 ### status.session
 

@@ -177,7 +177,7 @@ spec:
                                 description: "The IEEE OUI of the device, as six hex digits. A Device Vendor ID of 000000 means no vendor, so it never replaces a vendor that the device reported before. The field is absent until the device reports a real one."
                               cecVersion:
                                 type: string
-                                description: "The CEC version that the device reports: `1.3a`, `1.4`, or `2.0`."
+                                description: "The CEC version that the device reports, from `1.1` to `2.0`."
                               power:
                                 type: string
                                 description: "The power status that the device last reported: `On`, `Standby`, `ToOn`, or `ToStandby`."
@@ -215,7 +215,7 @@ spec:
                         description: "The IEEE OUI of the device, as six hex digits. A Device Vendor ID of 000000 means no vendor, so it never replaces a vendor that the device reported before. The field is absent until the device reports a real one."
                       cecVersion:
                         type: string
-                        description: "The CEC version that the device reports: `1.3a`, `1.4`, or `2.0`."
+                        description: "The CEC version that the device reports, from `1.1` to `2.0`."
                       power:
                         type: string
                         description: "The power status that the device last reported: `On`, `Standby`, `ToOn`, or `ToStandby`."

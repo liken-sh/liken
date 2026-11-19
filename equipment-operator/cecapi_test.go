@@ -116,10 +116,6 @@ type cecAPI struct {
 	heldEntry      chan struct{}
 	holds          sync.WaitGroup
 	stoppedEntry   chan struct{}
-	// A GET of the CECBus named createdUnseen returns 404 even when the
-	// bus exists, as when another client creates the bus just after the
-	// GET.
-	createdUnseen string
 	// reads counts the GET requests that are not watches, by path.
 	// watches counts the watch requests, by path.
 	reads   map[string]int
@@ -422,12 +418,7 @@ func (a *cecAPI) handle(w http.ResponseWriter, r *http.Request) {
 		a.serveList(w)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, cecBusesPath+"/"):
 		a.mutex.Lock()
-		name := strings.TrimPrefix(path, cecBusesPath+"/")
-		if name == a.createdUnseen {
-			w.WriteHeader(http.StatusNotFound)
-		} else {
-			a.serveStored(w, cecBusesPath, name)
-		}
+		a.serveStored(w, cecBusesPath, strings.TrimPrefix(path, cecBusesPath+"/"))
 		a.mutex.Unlock()
 	case r.Method == http.MethodPatch && strings.HasSuffix(path, "/status"):
 		a.applyStatus(w, r, strings.TrimSuffix(strings.TrimPrefix(path, cecBusesPath+"/"), "/status"))

@@ -233,6 +233,7 @@ func TestAPeerThatCannotAnswerDoesNot(t *testing.T) {
 		{"a mute peer", cectest.Peer{Logical: 0, Mute: true}, cec.GiveOSDName(4, 0), cec.OpSetOSDName, false},
 		{"an unknown request", cectest.Peer{Logical: 0}, cec.NewMessage(4, 0, cec.OpMenuRequest, 0), cec.OpMenuStatus, true},
 		{"a reply to another question", cectest.Peer{Logical: 0}, cec.GiveOSDName(4, 0), cec.OpCECVersion, false},
+		{"a peer older than CEC 1.3a", cectest.Peer{Logical: 0, NoVersion: true}, cec.GetCECVersion(4, 0), cec.OpCECVersion, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

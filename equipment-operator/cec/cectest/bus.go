@@ -28,9 +28,16 @@ type Peer struct {
 	PrimaryType byte
 	OSDName     string
 	Vendor      cec.VendorID
-	Version     cec.Version
-	Power       cec.PowerStatus
-	Mute        bool
+	// Version is the CEC Version that the peer reports. Its zero value
+	// is Version11, the operand 0x00.
+	Version cec.Version
+	// NoVersion makes the peer answer Get CEC Version with a Feature
+	// Abort, as a device older than CEC 1.3a does: the message is new in
+	// 1.3a (HDMI-CEC 1.3a, CEC 13.6.4), and a device answers an opcode
+	// it does not support with a Feature Abort (CEC 12.3).
+	NoVersion bool
+	Power     cec.PowerStatus
+	Mute      bool
 	// Garbled makes every transmission to the peer fail with a lost
 	// arbitration, as a disturbed wire does. A test uses it to check
 	// how a program handles a failure that is not a NACK.
@@ -213,6 +220,9 @@ func (p Peer) answer(request cec.Message) (reply cec.Message, aborted bool, ok b
 	case cec.OpGiveDeviceVendorID:
 		return cec.DeviceVendorID(p.Logical, p.Vendor), false, true
 	case cec.OpGetCECVersion:
+		if p.NoVersion {
+			return cec.Message{}, true, false
+		}
 		return cec.CECVersionReport(p.Logical, request.From, p.Version), false, true
 	case cec.OpGiveDevicePowerStatus:
 		reported := p.Power

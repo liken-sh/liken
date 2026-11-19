@@ -84,7 +84,9 @@ func TestTheWakeAfterAPickSendsActiveSourceAlone(t *testing.T) {
 }
 
 // When a person selects another source before the screen wakes, the
-// wake sends Image View On as well as Active Source.
+// wake sends Image View On as well as Active Source. The test waits
+// until the adapter has read the second Set Stream Path, because a wake
+// that the adapter handles first finds the pick of the Display current.
 func TestAPickThatMovedOnIsForgotten(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -93,6 +95,7 @@ func TestAPickThatMovedOnIsForgotten(t *testing.T) {
 		pickTheDisplay(wire)
 		screenAsked(t, api, screenWake)
 		wire.Send(cec.NewMessage(cec.AddressTV, cec.AddressBroadcast, cec.OpSetStreamPath, 0x15, 0x00))
+		synctest.Wait()
 
 		session := wokeNow()
 		api.putTelevision(waking(session))

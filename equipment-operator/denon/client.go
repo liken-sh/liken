@@ -32,7 +32,7 @@ const (
 // The first full read is the client's read of the receiver's state from the
 // replies to Queries after a connect. The receiver sends the replies in
 // one burst, so the first full read is complete when no line has arrived for
-// firstReadQuiet.
+// firstReadQuiet after the first reply.
 const firstReadQuiet = time.Second
 
 // queueDepth is the size of a connection's write queue. It fits every
@@ -427,10 +427,17 @@ func (d *Client) writeLoop(ctx context.Context, conn net.Conn, out <-chan string
 // whether any line was recognized.
 func (d *Client) readLoop(conn net.Conn) (answered bool) {
 	reader := bufio.NewReader(conn)
-	// Each recognized line restarts the timer, so it fires firstReadQuiet
-	// after the last reply of the burst.
-	firstReadTimer := time.AfterFunc(firstReadQuiet, d.recordFirstReadDone)
-	defer firstReadTimer.Stop()
+	// The first recognized line starts the timer and each later one
+	// restarts it, so it fires firstReadQuiet after the last reply of the
+	// burst. A receiver that has sent nothing yet has reported no state,
+	// so the wait for its first reply has no limit until silenceLimit
+	// ends the connection.
+	var firstReadTimer *time.Timer
+	defer func() {
+		if firstReadTimer != nil {
+			firstReadTimer.Stop()
+		}
+	}()
 	for {
 		if err := conn.SetReadDeadline(time.Now().Add(silenceLimit)); err != nil {
 			return answered
@@ -445,7 +452,11 @@ func (d *Client) readLoop(conn net.Conn) (answered bool) {
 		}
 		if d.fold(line) {
 			answered = true
-			firstReadTimer.Reset(firstReadQuiet)
+			if firstReadTimer == nil {
+				firstReadTimer = time.AfterFunc(firstReadQuiet, d.recordFirstReadDone)
+			} else {
+				firstReadTimer.Reset(firstReadQuiet)
+			}
 		}
 	}
 }

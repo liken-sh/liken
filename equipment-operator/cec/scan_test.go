@@ -136,6 +136,29 @@ func TestAVendorOfZeroIsAskedOnce(t *testing.T) {
 	}
 }
 
+// The CEC Version operand 0x00 is version 1.1 (HDMI-CEC 1.3a, CEC Table
+// 26). A device that reports it has a known version, so
+// the next introduction does not ask again, and the status names 1.1.
+func TestAVersionOfZeroIsVersion11(t *testing.T) {
+	tv := television
+	tv.Version = cec.Version11
+	bus := cectest.NewBus()
+	bus.Add(tv)
+	bus.Add(receiver)
+	_, device := joined(t, bus)
+	directory := cec.NewDirectory()
+	directory.SetOwn(4)
+
+	_, err := cec.Introduce(device, directory, 4, 0, nil)
+	mustSucceed(t, err)
+	again, err := cec.Introduce(device, directory, 4, 0, nil)
+	mustSucceed(t, err)
+
+	if got := directory.Lookup(0).Version.String(); again != 0 || got != "1.1" {
+		t.Errorf("the second introduction asked %d questions and the directory holds version %q, want 0 questions and version 1.1", again, got)
+	}
+}
+
 func TestAnIntroductionForgetsADeviceThatLeft(t *testing.T) {
 	bus := room()
 	_, device := joined(t, bus)

@@ -615,7 +615,7 @@ spec:
                       description: "The receiver's IEEE OUI on the bus, as six hex digits. A Device Vendor ID of `000000` means no vendor, so it never replaces a vendor that the device reported earlier, and the field is absent until the device reports a real one."
                     cecVersion:
                       type: string
-                      description: "The CEC version that the receiver reports: `1.3a`, `1.4`, or `2.0`."
+                      description: "The CEC version that the receiver reports, from `1.1` to `2.0`."
                     systemAudioMode:
                       type: string
                       enum: ["On", "Off"]

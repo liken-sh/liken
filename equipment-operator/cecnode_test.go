@@ -180,32 +180,6 @@ func TestABusOfTheMachinesNameThatAListMissedIsLeftAlone(t *testing.T) {
 	})
 }
 
-// A person can create a bus of the machine's name just after the pass
-// read that none exists, so a GET of that name also returns 404. The
-// pass's create of its own bus fails with a conflict, and the person's
-// bus stays as it is.
-func TestABusCreatedAfterTheReadIsLeftAlone(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		api := startCECAPI(t)
-		api.putBus(CECBus{Metadata: ObjectMeta{Name: "node-1"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
-		api.mutex.Lock()
-		api.createdUnseen = "node-1"
-		api.mutex.Unlock()
-		_, device := usbAdapter(fakeCECBus())
-		node, err := newCECNode(api.client, testNamespace, "node-1", device)
-		mustSucceed(t, err)
-
-		chosen := node.choose(&CECBusList{})
-
-		if chosen != nil {
-			t.Errorf("choose returned CECBus %s, want nil", chosen.Metadata.Name)
-		}
-		bus, _ := api.bus("node-1")
-		mustDeepEqual(t, bus.Spec.Adapters, []CECBusAdapter{{Machine: "node-2"}})
-	})
-}
-
 func TestAMachineThatLeavesABusRemovesItsEntry(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

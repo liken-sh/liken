@@ -250,20 +250,34 @@ func (p PowerStatus) String() string {
 	return ""
 }
 
-// Version is the operand of CEC Version.
+// Version is the operand of CEC Version (HDMI-CEC 1.3a, CEC Table 26).
 type Version byte
 
+// The operand 0x00 is version 1.1, so VersionUnknown takes a value that
+// no version uses.
 const (
+	Version11      Version = 0
+	Version12      Version = 1
+	Version12a     Version = 2
+	Version13      Version = 3
 	Version13a     Version = 4
 	Version14      Version = 5
 	Version20      Version = 6
-	VersionUnknown Version = 0
+	VersionUnknown Version = 0xff
 )
 
 // String returns the version number, or an empty string for a value
 // this package does not define.
 func (v Version) String() string {
 	switch v {
+	case Version11:
+		return "1.1"
+	case Version12:
+		return "1.2"
+	case Version12a:
+		return "1.2a"
+	case Version13:
+		return "1.3"
 	case Version13a:
 		return "1.3a"
 	case Version14:

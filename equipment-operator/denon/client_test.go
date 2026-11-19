@@ -4,6 +4,7 @@ package denon
 
 import (
 	"context"
+	"io"
 	"net"
 	"strings"
 	"testing"
@@ -310,6 +311,24 @@ func TestTheFirstFullReadCompletesAfterTheConnectReplies(t *testing.T) {
 
 		waitForField(t, harness.events, equipment.EventFirstReadDone)
 		mustMatch(t, harness.client.FirstReadDone(), true)
+	})
+}
+
+// A receiver that accepts the connection and has not answered the
+// connect queries yet has sent no state, so the first full read is not
+// complete, however long the receiver takes to answer.
+func TestTheFirstFullReadWaitsForTheFirstReply(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		silent := testNetwork.listen(t, func(conn net.Conn) { _, _ = io.Copy(io.Discard, conn) })
+		harness := startClient(t, silent)
+
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+
+		if harness.client.FirstReadDone() {
+			t.Error("FirstReadDone is true 10 seconds after the connect, and the receiver has sent no line, want false")
+		}
 	})
 }
 
