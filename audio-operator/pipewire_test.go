@@ -167,6 +167,17 @@ func TestParseGraphReportsBrokenOutput(t *testing.T) {
 	}
 }
 
+func TestAFailedGraphReadIncludesTheStderrOfPWDump(t *testing.T) {
+	stubProbeDump(t, "1")
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	_, err := readGraph(ctx)
+	want := "running pw-dump: exit status 1: remote error: Connection refused"
+	if err == nil || err.Error() != want {
+		t.Errorf("readGraph returned %v, want %q", err, want)
+	}
+}
+
 // The peer of the Bluetooth fixtures as the key of pwGraph.Speakers, as
 // the device name that the operator publishes, and as the node name
 // that WirePlumber builds.

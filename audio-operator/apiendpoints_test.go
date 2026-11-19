@@ -389,6 +389,20 @@ func TestAPathOutsideTheTableIsANotFound(t *testing.T) {
 	}
 }
 
+// RFC 9110 section 9.3.2: a HEAD response has the headers of the GET
+// response, so a client can read the length of the problem document.
+func TestAHeadThatFailsHasTheLengthOfTheProblem(t *testing.T) {
+	harness := newAPIHarness(t)
+	got := harness.call(t, http.MethodGet, "/v1/audio/sinks/missing", nil)
+	_, _ = io.Copy(io.Discard, got.Body)
+	head := harness.call(t, http.MethodHead, "/v1/audio/sinks/missing", nil)
+	_, _ = io.Copy(io.Discard, head.Body)
+	if want := got.Header.Get("Content-Length"); want == "" || head.Header.Get("Content-Length") != want {
+		t.Errorf("the HEAD for a missing Sink says Content-Length: %q, want %q, the length of the GET's problem",
+			head.Header.Get("Content-Length"), want)
+	}
+}
+
 func TestAHeadOnTheInfoRouteMakesNoPrivateCall(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.addSink("kitchen", "node-1", drillPipeWireNode)

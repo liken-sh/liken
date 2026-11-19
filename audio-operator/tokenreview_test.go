@@ -91,6 +91,19 @@ func TestATokenMintedForAnotherAudienceIsRefused(t *testing.T) {
 	}
 }
 
+// This is the response that a real API server sends for a token minted
+// for another audience: authenticated, with no audience in common.
+func TestATokenThatSharesNoAudienceIsRefused(t *testing.T) {
+	fake := newReviewServer(t, tokenReviewStatus{
+		Authenticated: true,
+		User:          tokenUserInfo{Username: "system:serviceaccount:default:listener"},
+	})
+	_, err := fake.reviewer(apiAudience).review("a.b.c")
+	if !errors.Is(err, ErrTokenDenied) {
+		t.Fatalf("the review of a token with an empty status.audiences returned %v, want ErrTokenDenied", err)
+	}
+}
+
 func TestARefusalIncludesTheReviewsErrorText(t *testing.T) {
 	fake := newReviewServer(t, tokenReviewStatus{
 		Authenticated: false,

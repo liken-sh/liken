@@ -242,9 +242,11 @@ func readGraph(ctx context.Context) (pwGraph, error) {
 	// Output then waits for the stdout pipe. Without it, Output blocks
 	// past the kill when another process inherited the pipe.
 	command.WaitDelay = time.Second
+	stderr := &stderrBuffer{}
+	command.Stderr = stderr
 	raw, err := command.Output()
 	if err != nil {
-		return pwGraph{}, fmt.Errorf("running pw-dump: %w", err)
+		return pwGraph{}, fmt.Errorf("running pw-dump: %w: %s", err, unexpectedStderr(stderr.String()))
 	}
 	return parseGraph(raw)
 }

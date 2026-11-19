@@ -165,23 +165,27 @@ const caKeyFile = "ca.key"
 // adopt loads the CA and the leaf from the data of an existing
 // audio-api-tls Secret. When the leaf is expiring, adopt mints a new one
 // and updates the Secret.
+//
+// adopt replaces the pair with one setKeys call at the end, so a
+// forwarded request reads the old pair or the new pair, and a Secret
+// that adopt refuses leaves the pair that the API already serves.
 func (c *certificates) adopt(data map[string][]byte) error {
-	c.public = keyPair{Certificate: data[tlsCertFile], Key: data[tlsKeyFile]}
-	if len(c.public.Certificate) == 0 || len(c.public.Key) == 0 {
+	public := keyPair{Certificate: data[tlsCertFile], Key: data[tlsKeyFile]}
+	if len(public.Certificate) == 0 || len(public.Key) == 0 {
 		return fmt.Errorf("the Secret %s has no %s and %s", apiTLSSecret, tlsCertFile, tlsKeyFile)
 	}
 	if len(data[caKeyFile]) == 0 {
 		// Another issuer, such as cert-manager, writes this Secret.
 		// The API serves its leaf and signs nothing.
-		c.authority = authority{Pair: keyPair{Certificate: data[tlsCABundle]}}
+		c.setKeys(authority{Pair: keyPair{Certificate: data[tlsCABundle]}}, public)
 		return nil
 	}
 	found, err := readAuthority(keyPair{Certificate: data[tlsCABundle], Key: data[caKeyFile]})
 	if err != nil {
 		return err
 	}
-	c.authority = found
-	if !expiring(c.public, c.now()) {
+	if !expiring(public, c.now()) {
+		c.setKeys(found, public)
 		return nil
 	}
 	leaf, err := found.mintLeaf(c.service, serviceNames(c.service, c.namespace), c.now())

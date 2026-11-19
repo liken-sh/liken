@@ -109,11 +109,11 @@ func writeProblem(w http.ResponseWriter, method string, document problem) {
 	}
 	body = append(body, '\n')
 	w.Header().Set("Content-Type", problemType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	if method == http.MethodHead {
 		w.WriteHeader(document.Status)
 		return
 	}
-	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(document.Status)
 	_, _ = w.Write(body)
 }

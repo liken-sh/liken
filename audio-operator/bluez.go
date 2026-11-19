@@ -353,8 +353,15 @@ func waitForBus(ctx context.Context, timeout time.Duration) (*dbus.Conn, error) 
 // temporary directory.
 var wireplumberConfigDir = "/etc/wireplumber/wireplumber.conf.d"
 
-// monitorFragmentName starts with 60 so that it sorts after the image's
-// fragments, which start with 50 and 51.
+// monitorFragmentName is the fragment that the declare init container
+// writes into wireplumberConfigDir. WirePlumber sorts fragments by file
+// name only within each directory, so the 60 prefix orders this
+// fragment only against other fragments in /etc. It does not decide
+// that this fragment overrides the image's 50- and 51- fragments: the
+// directory decides that, as wireplumberConfigDir explains. The prefix
+// continues the numbering of the image's fragments, so a person who
+// lists both directories reads the fragments in the order that
+// WirePlumber applies them.
 const monitorFragmentName = "60-liken-bluetooth.conf"
 
 // monitorConfig turns on WirePlumber's bluez monitor, which the image's

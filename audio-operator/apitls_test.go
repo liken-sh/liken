@@ -1,10 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -360,6 +360,72 @@ func TestASecretWithNoLeafIsARefusal(t *testing.T) {
 	}
 }
 
+// storeAdoptableSecret replaces audio-api-tls with a leaf and a CA that
+// another API pod minted, with caKey as the CA's private key.
+func storeAdoptableSecret(t *testing.T, store *objectStore, caKey []byte) keyPair {
+	t.Helper()
+	issued, err := mintAuthority(time.Now())
+	if err != nil {
+		t.Fatalf("minting the other pod's CA: %v", err)
+	}
+	leaf, err := issued.mintLeaf(apiService, serviceNames(apiService, "liken-system"), time.Now())
+	if err != nil {
+		t.Fatalf("minting the other pod's leaf: %v", err)
+	}
+	if caKey == nil {
+		caKey = issued.Pair.Key
+	}
+	store.mu.Lock()
+	store.secrets[apiTLSSecret] = secret{
+		Metadata: EndpointMeta{Name: apiTLSSecret},
+		Data: map[string]string{
+			tlsCertFile: base64.StdEncoding.EncodeToString(leaf.Certificate),
+			tlsKeyFile:  base64.StdEncoding.EncodeToString(leaf.Key),
+			tlsCABundle: base64.StdEncoding.EncodeToString(issued.Pair.Certificate),
+			caKeyFile:   base64.StdEncoding.EncodeToString(caKey),
+		},
+	}
+	store.mu.Unlock()
+	return leaf
+}
+
+func TestARefusedSecretLeavesTheServedPairInPlace(t *testing.T) {
+	store := newObjectStore(t)
+	certs := store.certificates()
+	if _, err := certs.ensure(); err != nil {
+		t.Fatalf("minting the certificates: %v", err)
+	}
+	served, public := certs.keys()
+	storeAdoptableSecret(t, store, []byte("not pem"))
+
+	if _, err := certs.ensure(); err == nil {
+		t.Fatal("a Secret whose CA key is not PEM was adopted")
+	}
+	authority, leaf := certs.keys()
+	if !bytes.Equal(leaf.Certificate, public.Certificate) || !bytes.Equal(authority.Pair.Certificate, served.Pair.Certificate) {
+		t.Error("after the refusal, the API holds a pair from the refused Secret, want the pair it served before")
+	}
+}
+
+// A forwarded request reads the CA while keepCertificates adopts the
+// Secret, so go test -race reports a write that does not take mu.
+func TestAnAnchorReadDuringAnAdoptIsNotARace(t *testing.T) {
+	store := newObjectStore(t)
+	storeAdoptableSecret(t, store, nil)
+	certs := store.certificates()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 20 {
+			_ = certs.anchor()
+		}
+	}()
+	if _, err := certs.ensure(); err != nil {
+		t.Fatalf("adopting the Secret: %v", err)
+	}
+	<-done
+}
+
 func TestPEMThatIsNotACertificateIsARefusal(t *testing.T) {
 	if _, err := parseCertificate([]byte("not pem")); err == nil {
 		t.Error("text that is not PEM parsed as a certificate")
@@ -373,8 +439,8 @@ func TestPEMThatIsNotACertificateIsARefusal(t *testing.T) {
 	if !expiring(keyPair{Certificate: []byte("x")}, time.Now()) {
 		t.Error("a certificate that cannot be read was not treated as expiring")
 	}
-	if _, err := expiryOf(keyPair{Certificate: []byte("x")}); !errors.Is(err, err) || err == nil {
-		t.Error("a certificate that cannot be read reported an expiry")
+	if at, err := expiryOf(keyPair{Certificate: []byte("x")}); err == nil || !at.IsZero() {
+		t.Errorf("expiryOf of a certificate that cannot be read = %v, %v, want no time and an error", at, err)
 	}
 }
 
