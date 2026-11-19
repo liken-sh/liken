@@ -8,12 +8,15 @@ package image
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/liken-sh/liken/liken/machine"
 )
@@ -214,5 +217,28 @@ func TestMediaRefusesAMissingArtifact(t *testing.T) {
 	err := Media(releaseDir, layerFixture(t), filepath.Join(t.TempDir(), "out"), io.Discard)
 	if err == nil {
 		t.Error("a release missing a listed artifact must not be packed")
+	}
+}
+
+// An older release lists no microcode archive, so verifiedRelease does
+// not open it, and Media opens it first. A file that is there but that
+// cannot be opened must report the error of the open, not advise a
+// newer release.
+func TestMediaReportsAnUnlistedArtifactThatDoesNotOpen(t *testing.T) {
+	releaseDir := releaseFixtureWith(t, map[string]string{
+		"vmlinuz":    "kernel bytes",
+		"liken.sqfs": "system image bytes",
+		"boot.cpio":  "boot archive bytes",
+		"liken":      "toolkit bytes",
+	})
+	// A symbolic link to itself fails the open with ELOOP, which no
+	// permission bypasses, so the test holds when it runs as root.
+	microcode := filepath.Join(releaseDir, microcodeArtifact)
+	if err := os.Symlink(microcodeArtifact, microcode); err != nil {
+		t.Fatal(err)
+	}
+	err := Media(releaseDir, layerFixture(t), filepath.Join(t.TempDir(), "out"), io.Discard)
+	if !errors.Is(err, unix.ELOOP) {
+		t.Errorf("Media returned %v, want an error that wraps the ELOOP of %s", err, microcodeArtifact)
 	}
 }

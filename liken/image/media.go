@@ -33,8 +33,10 @@ package image
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -70,10 +72,16 @@ func Media(releaseDir, layerPath, out string, log io.Writer) error {
 	// whole initrd), then the boot archive, then the layer, so the
 	// layer's entries override at unpack.
 	for _, name := range []string{microcodeArtifact, "boot.cpio"} {
+		// A release older than these archives does not have them, and
+		// only a newer release fixes that. Any other error of the open
+		// is about this directory, so it is wrapped as it is.
 		part, err := os.Open(filepath.Join(releaseDir, name))
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("release %s has no %s, so it cannot make install media. Use a newer release",
 				release.Metadata.Name, name)
+		}
+		if err != nil {
+			return fmt.Errorf("opening the %s of release %s: %w", name, release.Metadata.Name, err)
 		}
 		_, err = io.Copy(f, part)
 		part.Close()
