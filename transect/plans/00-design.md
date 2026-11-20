@@ -354,9 +354,19 @@ found the same parts in each view that worked:
   A step that no signal names shows that it has none.
 - **The source of each kind of fact.**
 
-The form of the drawing changes with the pattern, and these parts stay
-the same.  So a reader learns once how to read any pattern view, and
-learns each form once.
+The form of the drawing changes with the question, and these parts
+stay the same.  So a reader learns once how to read any pattern view,
+and learns each form once.  The cases found these forms:
+
+- **A schematic** shows how a service is built: each part once, in its
+  tier, with what each wire carries.
+- **A sequence** shows interactions in order: a lane for each
+  participant, and a labelled arrow for each interaction.
+- **A pipeline** shows the order of work: the stages from left to
+  right, and what each one waits for.
+
+One system can have a view in each form, because each form answers a
+different question about it.
 
 A pattern view shows where instrumentation is missing.  In each case
 the most useful reading was on the step where work can stop, and each
@@ -558,9 +568,16 @@ What the case showed:
 
 - **One part has a role in each of several patterns.**  The same store
   is the queue of the work queue, the cache of the requests, and a
-  primary with replicas of its own.  The design keeps one view for
-  each pattern, and the part appears in each under the role it has
-  there.
+  primary with replicas of its own.  The first drawing gave each
+  pattern a view of its own, so the store appeared in each one, and
+  the maintainer found that the views read as pipelines and not as
+  the service.
+- **A service needs a schematic.**  A schematic shows how a service is
+  built and gives no order of events.  Each part appears once, in the
+  tier that it belongs to: the edge, the processes, and the state.
+  Each wire states what it carries.  A part has the shape of its sort,
+  so a store looks like a store.  A pattern is a marked path through
+  the one picture, as the work queue is the wires that carry tasks.
 - **A relation can be hidden in a `Secret`.**  The pods read the
   database's address from a `Secret`, and `transect` reads no
   `Secret`.  So no object that it reads joins the web pods to the
