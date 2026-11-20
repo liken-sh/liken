@@ -228,5 +228,9 @@ Next, in order:
   "Open questions" lists what to decide in that pass.
 - Plan 11 is a stub to write out in full: the evidence behind a
   sign-in gate.
+- Plan 13 is a design for review: patterns, such as a work queue or a
+  pipeline, that knowledge binds to objects with a `find` block and
+  that `transect` draws with a reading of loss for each role.  Its
+  "Open questions" list what to decide before its first stage.
 
 Slice 2, the flow agent and the `calls` edge, is not started.
