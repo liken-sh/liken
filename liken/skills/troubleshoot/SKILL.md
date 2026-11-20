@@ -3,7 +3,7 @@ name: troubleshoot
 description: "Diagnose a liken machine from its Machine resource: the phase, the condition that is False, and the status field it names, for each failure from the stick menu to a Pending device claim. Use when a machine is Lost, Blocked, crashed, on the old version, waits for a reboot turn, stays drained without a reboot, or refuses a disk."
 ---
 
-This skill is the guide at https://liken.sh/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/docs/guides/troubleshoot/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Troubleshoot
 

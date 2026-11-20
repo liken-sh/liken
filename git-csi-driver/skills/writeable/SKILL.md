@@ -3,7 +3,7 @@ name: writeable
 description: "Give an application a git repository as a writeable volume that the driver commits and pushes. Use when an application writes files that must go into git, when upstream moves, when several writers share one repository, or to restore a volume."
 ---
 
-This skill is the guide at https://liken.sh/git/docs/guides/writeable/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/git/docs/guides/writeable/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Give an application a repository to write
 

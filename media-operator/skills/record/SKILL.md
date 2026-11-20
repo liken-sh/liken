@@ -3,7 +3,7 @@ name: record
 description: "Capture a Player's screen and sound as one MP4 or MKV with the kubectl liken media capture command, or over HTTP with kubectl and curl. Use to record what a Player is playing right now."
 ---
 
-This skill is the guide at https://liken.sh/media/docs/guides/record/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/media/docs/guides/record/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Record what a player is playing
 

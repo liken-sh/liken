@@ -3,7 +3,7 @@ name: install
 description: "Install observatory-operator on a liken cluster, run the example observatory of INDI simulators, reserve its telescope, and connect KStars to it. Covers deploy/firmware/, the Firmware objects that load QHY cameras on a cluster that runs firmware-operator. Use when a cluster has no observatory.liken.sh resources yet, to try the operator with no hardware, or when removing the operator."
 ---
 
-This skill is the guide at https://liken.sh/observatory/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/observatory/docs/guides/install/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Install the operator
 

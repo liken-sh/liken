@@ -3,7 +3,7 @@ name: replicated-store
 description: "Run a replicated store as a Deployment on one per-node claim with anti-affinity across nodes and a PodDisruptionBudget. Use when several pods each keep a full copy of one data set and keep the copies in agreement over the network."
 ---
 
-This skill is the guide at https://liken.sh/per-node/docs/guides/replicated-store/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/per-node/docs/guides/replicated-store/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Run a replicated store
 

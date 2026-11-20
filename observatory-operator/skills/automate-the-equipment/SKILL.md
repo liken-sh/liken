@@ -3,7 +3,7 @@ name: automate-the-equipment
 description: "Declare what the operator does with the equipment at the start and end of each reservation and when a condition changes: unpark and park the dome and mount, open and close the dust cap, cool and warm the camera, power devices from a switch, park on bad weather, and run a container as a Job. Use when setting up a dome or a roll-off roof, protecting equipment from weather, cooling a camera, or testing procedures against the simulators."
 ---
 
-This skill is the guide at https://liken.sh/observatory/docs/guides/automate-the-equipment/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/observatory/docs/guides/automate-the-equipment/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Automate the equipment
 

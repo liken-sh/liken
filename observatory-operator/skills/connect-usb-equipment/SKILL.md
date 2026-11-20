@@ -3,7 +3,7 @@ name: connect-usb-equipment
 description: "Give an INDI device its USB hardware: load the kernel driver on the liken machine, find the device in the node's ResourceSlice, write a DeviceClass, and put a claim in the device's spec.claim. Covers which astronomy equipment can reach a pod and which cannot, and the QHY cameras that need firmware-operator to load their firmware. Use when connecting a real mount, focuser, filter wheel, power box, or camera, or when a device's pod stays Pending."
 ---
 
-This skill is the guide at https://liken.sh/observatory/docs/guides/connect-usb-equipment/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/observatory/docs/guides/connect-usb-equipment/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Connect USB equipment
 

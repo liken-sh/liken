@@ -3,7 +3,7 @@ name: pictures
 description: "Give a Person a picture with spec.avatar, from an https:// URL, a data: URI, an NFS export, or a claim, and read the AvatarReady condition to see why a screen shows initials instead. Use when a person's face should appear on the screens, when a replaced picture does not show, or when a picture fails to load."
 ---
 
-This skill is the guide at https://liken.sh/people/docs/guides/pictures/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/people/docs/guides/pictures/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Give a person a picture
 

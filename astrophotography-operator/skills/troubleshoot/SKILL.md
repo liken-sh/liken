@@ -3,7 +3,7 @@ name: troubleshoot
 description: "Find why a Target does not start, stops, or does not reach the archive, from its conditions and Events and the reservation's Events, and fix it: a target with no reservation, Imaging False with OutboxFull, ExposureFailed, GuidingFailed, NoFilter, NoTrain, SlewFailed, CenteringFailed, or Deleting, ArchiveAvailable False with ClaimMissing, Unschedulable, CopyFailed, VerifyFailed, or NameConflict, the Events AstrophotographyNoOutbox, AstrophotographyIdle, AstrophotographyWorkerPending, AstrophotographyOutboxFull, AstrophotographyNotCentered, PromotionReportLost, and PromotionRetry, the retry annotation for a frame that failed, a Solver that is not Ready, a target that does not delete, and an outbox claim that does not delete. Use when a target does not image, when frames stay pending, or when a condition is False."
 ---
 
-This skill is the guide at https://liken.sh/astrophotography/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/astrophotography/docs/guides/troubleshoot/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Troubleshoot
 

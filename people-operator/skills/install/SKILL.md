@@ -3,7 +3,7 @@ name: install
 description: "Install the Person resource definition and people-operator from its kustomize base, and declare the people of a cluster. Use when a cluster needs Person objects for other operators to refer to, or when a running operator must be upgraded or removed."
 ---
 
-This skill is the guide at https://liken.sh/people/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/people/docs/guides/install/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Install the operator
 

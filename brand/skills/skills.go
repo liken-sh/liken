@@ -27,12 +27,17 @@ import (
 
 // preamble is the first paragraph of every skill. It gives the
 // guide's URL, and it tells the agent to check the kubectl context
-// before the first command, because a workstation often has more than
-// one context, and a command against the wrong cluster changes that
-// cluster.
+// before the first command that reaches a cluster, because a
+// workstation often has more than one context, and a command against
+// the wrong cluster changes that cluster. A guide such as the install
+// guide runs no command against the context, so the check names the
+// commands that it covers.
 const preamble = "This skill is the guide at %s, emitted for agents. " +
-	"Before the first command, run `kubectl config current-context` " +
-	"and confirm that it names the cluster the person means."
+	"Before the first command that reaches a cluster, run " +
+	"`kubectl config current-context` and confirm that it names the " +
+	"cluster the person means. A `liken` command that takes a " +
+	"deployment directory reaches that directory's cluster, whatever " +
+	"the context is."
 
 // skillName is the Agent Skills rule for a name: lowercase letters,
 // digits, and single hyphens between them. The slug is both the

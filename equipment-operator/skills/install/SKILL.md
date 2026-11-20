@@ -3,7 +3,7 @@ name: install
 description: "Install equipment-operator on a liken cluster, declare a Receiver, and put it under a Player. Use when an AV receiver must report its power, input, and volume to the cluster."
 ---
 
-This skill is the guide at https://liken.sh/equipment/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/equipment/docs/guides/install/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Install the operator
 

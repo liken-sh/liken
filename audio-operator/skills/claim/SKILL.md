@@ -3,7 +3,7 @@ name: claim
 description: "Play one workload's sound through one physical output with a ResourceClaim and a Deployment, or share one output among several claims. Use when a pod needs a speaker, the analog jack, a Bluetooth speaker with a chosen codec, or a microphone to record from, or when two workloads must play through one speaker at once."
 ---
 
-This skill is the guide at https://liken.sh/audio/docs/guides/claim/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/audio/docs/guides/claim/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Play sound to an output
 

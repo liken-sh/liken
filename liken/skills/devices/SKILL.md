@@ -3,7 +3,7 @@ name: devices
 description: "Give a pod a device through Dynamic Resource Allocation: a GPU for a Deployment, a USB adapter that one pod holds alone, or /dev/kvm for a pod that boots virtual machines. Use when a workload needs hardware, or when a pod with a device claim does not schedule."
 ---
 
-This skill is the guide at https://liken.sh/docs/guides/devices/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/docs/guides/devices/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Give a workload a device
 

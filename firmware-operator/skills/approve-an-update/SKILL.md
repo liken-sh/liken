@@ -3,7 +3,7 @@ name: approve-an-update
 description: "Approve one release of a firmware component that firmware-operator discovered by setting spec.update.version and pinning the cabinet's URL and SHA-256 on its Firmware, and limit the approval to some machines with spec.machines. Read the Approved, Rehearsed, and Applied conditions and columns, status.rehearsals and status.applies, and the Disruption with spec.hold that holds each machine's reboot turn while the apply pod writes. Withdraw an approval. Use when a person wants a board's UEFI firmware, the Secure Boot revocation list, or another device to move to a newer release, when an approval is False, or when a machine waits for its turn to write an update."
 ---
 
-This skill is the guide at https://liken.sh/firmware/docs/guides/approve-an-update/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/firmware/docs/guides/approve-an-update/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Approve a firmware update
 

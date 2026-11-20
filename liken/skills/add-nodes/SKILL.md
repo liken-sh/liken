@@ -3,7 +3,7 @@ name: add-nodes
 description: "Add one declared machine to a running liken cluster: write its manifest, rebuild the install stick, boot the machine from it, and watch it join. Use when a cluster needs another node."
 ---
 
-This skill is the guide at https://liken.sh/docs/guides/add-nodes/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/docs/guides/add-nodes/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Add machines to a cluster
 

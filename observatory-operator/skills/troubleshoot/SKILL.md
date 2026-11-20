@@ -3,7 +3,7 @@ name: troubleshoot
 description: "Find why a reservation failed or waits, from the step and the device its status names: a reservation in Wait or Requires with Waiting for ... SetUp=True or Safe=True, a Missing Telescope, ParentFound False, HorizonFound False, two devices on one driver in StartSite or PowerOn, a missing outbox PersistentVolumeClaim, a pod that stays Pending in StartDevices, a QHY camera whose Firmware object reports a failed upload, a device that does not connect, a device in Error because its driver does not serve the kind, a device that waits for the next session, an action that times out, a park that a lock refused with MountUnparkRefused or DomeParkRefused, a failed job, or a delete that does not finish. Then run the failed step again with the retry annotation. Use when a Reservation is Failed or stuck, when a device reports Error, or when a resource will not delete."
 ---
 
-This skill is the guide at https://liken.sh/observatory/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/observatory/docs/guides/troubleshoot/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Troubleshoot
 

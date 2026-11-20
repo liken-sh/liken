@@ -3,7 +3,7 @@ name: install
 description: "Install per-node-csi-driver from its kustomize base with the per-node StorageClass, and set the plugin's flags. Use when a cluster needs one directory per node per volume."
 ---
 
-This skill is the guide at https://liken.sh/per-node/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/per-node/docs/guides/install/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Install the driver
 

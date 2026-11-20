@@ -3,7 +3,7 @@ name: find-your-frames
 description: "Find a target's frames in its archive claim, choose their file names with spec.archive.format and its tokens such as {object}, {night}, {filter}, and {datetime}, read the night date and the FRAMEID suffix in a name, query the frame catalog with jq, copy the frames to a computer with a short-lived pod and kubectl exec tar, and check each file against the SHA-256 the catalog recorded. Use when a person wants their frames, asks where a frame went or why it has that name, or wants to check the archive."
 ---
 
-This skill is the guide at https://liken.sh/astrophotography/docs/guides/find-your-frames/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/astrophotography/docs/guides/find-your-frames/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Find and verify your frames
 

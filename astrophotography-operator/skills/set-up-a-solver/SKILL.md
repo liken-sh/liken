@@ -3,7 +3,7 @@ name: set-up-a-solver
 description: "Choose astrometry.net's index files for a camera's field, load them into a PersistentVolumeClaim, declare a Solver, and check that it is Ready with its index series. Use when a Target needs spec.centering, when adding index files, or when a Solver is not Ready."
 ---
 
-This skill is the guide at https://liken.sh/astrophotography/docs/guides/set-up-a-solver/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/astrophotography/docs/guides/set-up-a-solver/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Set up a solver
 

@@ -3,7 +3,7 @@ name: rollback
 description: "Return a machine or the fleet to a version that works: the automatic fallback after a failed first boot, and the deliberate rollback that points the Cluster at an earlier release. Use when an upgrade fails or misbehaves."
 ---
 
-This skill is the guide at https://liken.sh/docs/guides/rollback/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/docs/guides/rollback/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Roll back
 

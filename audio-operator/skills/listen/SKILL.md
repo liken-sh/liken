@@ -3,7 +3,7 @@ name: listen
 description: "Record the sound of a Sink or a Source with the kubectl liken audio capture command, or over HTTP with kubectl and curl, and save it as WAV, FLAC, or Opus. Use to hear what a speaker plays or what a microphone records."
 ---
 
-This skill is the guide at https://liken.sh/audio/docs/guides/listen/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/audio/docs/guides/listen/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Listen to what a speaker plays
 

@@ -3,7 +3,7 @@ name: troubleshoot
 description: "Find why firmware-operator did not finish an upload, a scan, an approval, a rehearsal, or an apply, from the status of the Firmware or FirmwareCatalog, the message of each entry or record, and the Disruption of the machine's reboot turn, and release a machine that stays drained. Use when kubectl get firmware shows Failed or Conflict, or shows Approved, Rehearsed, or Applied as False or Unknown, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get firmwarecatalog shows Ready False, when a machine has no scan record, when a scan or rehearsal record stays Running after the kubelet ended its pod, or when a machine stays drained in a turn that the operator holds."
 ---
 
-This skill is the guide at https://liken.sh/firmware/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/firmware/docs/guides/troubleshoot/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Troubleshoot uploads, scans, approvals, rehearsals, and applies
 

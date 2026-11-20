@@ -3,7 +3,7 @@ name: verify
 description: "Check that a liken release or a liken image is the one that liken's CI published, before you install it, adopt it into a Cluster's catalog, or deploy it, with liken verify release, liken verify image, and liken sbom. Read the packages of a release's or an image's SBOM, give the SBOM to a vulnerability scanner, and learn what each failure of a check means. Use before an install or an upgrade, before a catalog edit, when auditing what a fleet runs, or when a verify command fails."
 ---
 
-This skill is the guide at https://liken.sh/docs/guides/verify/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/docs/guides/verify/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Verify a release or an image
 

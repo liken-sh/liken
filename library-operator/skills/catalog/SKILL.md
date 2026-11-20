@@ -3,7 +3,7 @@ name: catalog
 description: "The Catalog resource: the SQLite database Corrosion replicates, one cluster per namespace, and how pods, Jobs, and screens read and write it. Use when declaring a Catalog, when rows do not land, or when reading the catalog by hand."
 ---
 
-This skill is the guide at https://liken.sh/library/docs/guides/catalog/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/catalog/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # The catalog
 

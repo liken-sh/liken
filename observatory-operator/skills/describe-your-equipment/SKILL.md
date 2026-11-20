@@ -3,7 +3,7 @@ name: describe-your-equipment
 description: "Describe a real observatory as observatory.liken.sh resources: the site, each telescope, its optical tubes and trains, and one resource per device with the INDI driver and image that run it. Use when setting up someone's mount, cameras, focuser, filter wheel, dome, or other astronomy equipment, when choosing an INDI driver, when saving the horizon that a telescope sees from where it stands, or when a resource reports ParentFound False."
 ---
 
-This skill is the guide at https://liken.sh/observatory/docs/guides/describe-your-equipment/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/observatory/docs/guides/describe-your-equipment/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Describe your equipment
 

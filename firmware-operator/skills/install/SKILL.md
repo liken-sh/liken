@@ -3,7 +3,7 @@ name: install
 description: "Install firmware-operator, the Firmware and FirmwareCatalog resource definitions, the lvfs FirmwareCatalog, and the scan image from its kustomize base, confirm that one copy is the leader, and remove it. Use when a cluster has USB devices that need firmware from the host, when a cluster should find firmware updates, when running a development build, or when removing the operator."
 ---
 
-This skill is the guide at https://liken.sh/firmware/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/firmware/docs/guides/install/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Install the operator
 

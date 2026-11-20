@@ -3,7 +3,7 @@ name: pair-a-controller
 description: "Pair a Bluetooth game controller or remote with kubectl, from the pairing window to a claim a pod holds. Use when a new controller must join a cluster, when approving a device the radio reports, or when unpairing one."
 ---
 
-This skill is the guide at https://liken.sh/bluetooth/docs/guides/pair-a-controller/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/bluetooth/docs/guides/pair-a-controller/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Pair a controller and give it to a pod
 

@@ -3,7 +3,7 @@ name: declare-a-target
 description: "Declare a Target and the archive claim for its frames: the object and its J2000 coordinates, the sequences of filter, exposure, and count, the optical train, dithering, centering, and FITS keywords. Then check its progress, choose which target goes first with priority, pause it with suspend, edit it during a night, and delete it. Use when a person wants to image an object, when the API server refuses a Target, when a target never starts, or when changing, pausing, or deleting a target."
 ---
 
-This skill is the guide at https://liken.sh/astrophotography/docs/guides/declare-a-target/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/astrophotography/docs/guides/declare-a-target/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Declare a target
 

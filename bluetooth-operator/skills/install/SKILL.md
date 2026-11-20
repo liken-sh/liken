@@ -3,7 +3,7 @@ name: install
 description: "Install bluetooth-operator on a liken cluster and verify that it claims the radio. Use when a cluster has no Bluetooth devices yet, when running a development build, or when removing the operator."
 ---
 
-This skill is the guide at https://liken.sh/bluetooth/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/bluetooth/docs/guides/install/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 <a id="install-the-operator"></a>
 

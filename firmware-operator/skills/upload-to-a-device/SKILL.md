@@ -3,7 +3,7 @@ name: upload-to-a-device
 description: "Find out whether a USB device needs firmware from the host, write a Firmware with spec.upload for it, and read status.devices and the Events to see whether it loaded. Covers the QHY5L-II guide camera on an FX2 chip, translating a vendor's udev rule, spec.machines, and what a Conflict means. Use when a camera, logic analyzer, or other USB device appears as a bare chip and no driver opens it."
 ---
 
-This skill is the guide at https://liken.sh/firmware/docs/guides/upload-to-a-device/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/firmware/docs/guides/upload-to-a-device/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Upload firmware to a device
 

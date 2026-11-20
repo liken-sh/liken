@@ -3,7 +3,7 @@ name: mapping-a-controller
 description: "Declare a Remote, find the codes a controller emits with discovery, and write a Keymap row for each button the base mapping gets wrong. Use when adding a paired controller to a Player, or when a controller's button does the wrong thing or nothing."
 ---
 
-This skill is the guide at https://liken.sh/media/docs/guides/mapping-a-controller/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/media/docs/guides/mapping-a-controller/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Map a new controller
 

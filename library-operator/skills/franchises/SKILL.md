@@ -3,7 +3,7 @@ name: franchises
 description: "Declare a Library of kind franchises from a git checkout on a claim, and write a franchise file. Use when a namespace should show the films and series of one story in story order with their own calendar."
 ---
 
-This skill is the guide at https://liken.sh/library/docs/guides/franchises/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/franchises/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Franchises
 

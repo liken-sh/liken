@@ -3,7 +3,7 @@ name: hardware-modules
 description: "Make a machine's hardware appear as devices by naming its drivers in spec.modules in load order, with the parameters they need, by declaring in spec.serio the serial-line attachment a USB-CEC adapter needs, and by rebooting when a driver bound the wrong device. Use when a GPU, sound card, radio, sensor, USB controller, or USB-CEC adapter is missing from what a machine publishes, or when status.hardware.unclaimed lists a device."
 ---
 
-This skill is the guide at https://liken.sh/docs/guides/hardware-modules/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/docs/guides/hardware-modules/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Load the drivers for a machine's hardware
 

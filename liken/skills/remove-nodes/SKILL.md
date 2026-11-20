@@ -3,7 +3,7 @@ name: remove-nodes
 description: "Remove one machine from a running liken cluster: demote it first if it is a leader, drain it, power it off, delete its Node and Machine, and rebuild the install stick without it. Use when a node leaves the cluster for good, including a machine whose hardware is already gone."
 ---
 
-This skill is the guide at https://liken.sh/docs/guides/remove-nodes/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/docs/guides/remove-nodes/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Remove machines from a cluster
 

@@ -3,7 +3,7 @@ name: set-up-a-portable-telescope
 description: "Keep a portable telescope's equipment off until a person carries it out, uncovers it, and polar aligns it: require the SetUp condition in spec.requires, reserve the telescope and watch the reservation wait in its Requires step, confirm with kubectl liken observatory set-up, read the SET UP UNTIL column, let the confirmation expire at dawn or at --until, answer the notify action that asks the person to cover the telescope at the end of the night, and run take-down. Use when a telescope is not on a fixed pier, when a reservation waits in Wait or Requires with Waiting for ... SetUp=True, when AttentionNeeded is True with the reason Notified, when SetUp is False with the reason Expired, or when nothing must power on before a person or the weather allows it."
 ---
 
-This skill is the guide at https://liken.sh/observatory/docs/guides/set-up-a-portable-telescope/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/observatory/docs/guides/set-up-a-portable-telescope/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Set up a portable telescope
 

@@ -3,7 +3,7 @@ name: claim
 description: "Run one fullscreen program on one monitor from a Deployment through a ResourceClaim. Use when a pod needs a screen, a specific mode or refresh rate, the panel's brightness or power, or when a monitor moves or unplugs."
 ---
 
-This skill is the guide at https://liken.sh/display/docs/guides/claim/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/display/docs/guides/claim/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Put a window on a screen
 

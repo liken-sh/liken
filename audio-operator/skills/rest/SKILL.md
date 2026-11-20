@@ -3,7 +3,7 @@ name: rest
 description: "Set endpoint volume, mute an output, close a microphone, set a sound card control, declare a sink's channel layout, or let several claims share an endpoint, with kubectl and without a claim or an interruption to a playing pod. Use when a speaker needs a different default level, when another operator needs volume control, when a multichannel stream plays in stereo, or when two workloads must play through one speaker at once."
 ---
 
-This skill is the guide at https://liken.sh/audio/docs/guides/rest/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/audio/docs/guides/rest/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 <a id="set-what-an-endpoint-rests-at"></a>
 

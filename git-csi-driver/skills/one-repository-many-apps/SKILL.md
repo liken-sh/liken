@@ -3,7 +3,7 @@ name: one-repository-many-apps
 description: "Give many applications one git repository, one directory each, as separate writeable volumes on the same ref. Use when several applications share one configuration repository and none may read another's files."
 ---
 
-This skill is the guide at https://liken.sh/git/docs/guides/one-repository-many-apps/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/git/docs/guides/one-repository-many-apps/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Give many applications one repository
 

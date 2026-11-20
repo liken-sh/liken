@@ -3,7 +3,7 @@ name: image-a-target
 description: "Image a Target on a telescope that observatory-operator runs. Create the outbox claim and reserve the telescope with holder astrophotography-operator. Then follow the night through the Imaging condition, its reasons Slewing, Centering, Guiding, and Exposing, the counts in status.sequences, and the Events, as the operator slews, centers, guides, exposes, dithers, and promotes each frame to the archive. Then end the night. Use when a person wants the operator to take frames, or wants to know what the operator does during a night."
 ---
 
-This skill is the guide at https://liken.sh/astrophotography/docs/guides/image-a-target/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/astrophotography/docs/guides/image-a-target/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Image a target
 

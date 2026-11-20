@@ -3,7 +3,7 @@ name: gitops
 description: "Run a liken fleet from a git repository with the flux feature: lay out the repository, register the deploy key, watch the first sync, and work by commit. Use when a cluster's machines and workloads should converge to git, or when rotating the deploy key or turning the feature off."
 ---
 
-This skill is the guide at https://liken.sh/docs/guides/gitops/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/docs/guides/gitops/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Run the fleet from git
 

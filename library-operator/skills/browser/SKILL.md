@@ -3,7 +3,7 @@ name: browser
 description: "Put the media browser on a Player's screen in place of the idle screen, and learn its keys, its screens, and how it starts playback. Use when a Player should show the namespace's catalog and start a Play from a remote."
 ---
 
-This skill is the guide at https://liken.sh/library/docs/guides/browser/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/browser/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Put the media browser on a screen
 

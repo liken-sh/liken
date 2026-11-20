@@ -3,7 +3,7 @@ name: guide-with-phd2
 description: "Add a Guider to a telescope so the operator runs PHD2 with the guide camera and the mount, then calibrate and guide from KStars and Ekos through PHD2's event server, and read the guiding RMS from the Guider's status. Use when a telescope needs autoguiding, when choosing between mount and ST-4 pulses, or when PHD2 does not connect or keeps restarting."
 ---
 
-This skill is the guide at https://liken.sh/observatory/docs/guides/guide-with-phd2/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/observatory/docs/guides/guide-with-phd2/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Guide with PHD2
 

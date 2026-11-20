@@ -3,7 +3,7 @@ name: layout
 description: "Put programs from several namespaces on one monitor, each in its own rectangle, with a Layout. Use when two or more pods must share one screen, or when a window should show for a while and then leave."
 ---
 
-This skill is the guide at https://liken.sh/display/docs/guides/layout/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/display/docs/guides/layout/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Put regions on a screen
 

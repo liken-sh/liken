@@ -3,7 +3,7 @@ name: install
 description: "Install a liken cluster from a downloaded release: describe the cluster, mint its identity, build the install stick, boot each machine from it, and reach the cluster with kubectl. Use when creating a cluster on blank x86-64 machines."
 ---
 
-This skill is the guide at https://liken.sh/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/docs/guides/install/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Install a cluster
 

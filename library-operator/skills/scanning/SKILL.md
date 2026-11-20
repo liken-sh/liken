@@ -3,7 +3,7 @@ name: scanning
 description: "How a scan walks a library's root into the catalog: what it reads, when it runs, how mark and sweep removes what is gone, and what deleting a Library does. Use when titles are missing from the wall, when a scan seems stuck, or before deleting a Library."
 ---
 
-This skill is the guide at https://liken.sh/library/docs/guides/scanning/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/scanning/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Scanning
 

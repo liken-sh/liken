@@ -3,7 +3,7 @@ name: webhooks
 description: "Connect Radarr, Sonarr, and Jellyfin to a Library's webhook so an import rescans one folder at once. Use when new titles should appear on the wall in seconds instead of on the hourly walk, or to rescan one folder by hand."
 ---
 
-This skill is the guide at https://liken.sh/library/docs/guides/webhooks/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/webhooks/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Connect Radarr, Sonarr, and Jellyfin
 

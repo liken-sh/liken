@@ -3,7 +3,7 @@ name: screenshot
 description: "Capture a Display with the kubectl liken display capture command, or take a screenshot, a clip, or a live stream over HTTP with kubectl and curl. Use when someone asks what a screen shows, or to record it."
 ---
 
-This skill is the guide at https://liken.sh/display/docs/guides/screenshot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/display/docs/guides/screenshot/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Take a picture of a screen
 

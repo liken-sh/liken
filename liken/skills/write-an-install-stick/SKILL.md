@@ -3,7 +3,7 @@ name: write-an-install-stick
 description: "Write a liken install image to a USB stick and prove that the bytes on the stick match the image, before a machine boots from it. Use when building install media for a new machine or a reinstall, or when a machine refuses to boot from a stick that was just written."
 ---
 
-This skill is the guide at https://liken.sh/docs/guides/write-an-install-stick/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/docs/guides/write-an-install-stick/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Write an install stick
 

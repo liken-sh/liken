@@ -3,7 +3,7 @@ name: read-only
 description: "Mount a git repository read-only, inline in a pod spec or through a claim, with pull on demand and webhooks. Use when a pod needs a checkout it never writes, including a checkout of a private repository."
 ---
 
-This skill is the guide at https://liken.sh/git/docs/guides/read-only/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/git/docs/guides/read-only/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Mount a repository read-only
 

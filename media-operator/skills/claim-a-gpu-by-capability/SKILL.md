@@ -3,7 +3,7 @@ name: claim-a-gpu-by-capability
 description: "Claim a GPU render node whose media driver decodes, encodes, or scales what a workload needs, by pairing a media.liken.sh capability device with the liken.sh render node of the same GPU. Use when a workload decodes 10-bit or AV1 video on a GPU, when a transcoder needs a hardware encoder, or when a pod with a capability claim does not schedule."
 ---
 
-This skill is the guide at https://liken.sh/media/docs/guides/claim-a-gpu-by-capability/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/media/docs/guides/claim-a-gpu-by-capability/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Claim a GPU by what it decodes
 

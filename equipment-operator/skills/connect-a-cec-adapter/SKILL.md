@@ -3,7 +3,7 @@ name: connect-a-cec-adapter
 description: "Connect a USB-CEC adapter to a liken machine and to a room's HDMI tree, take its CECBus from Listen to Control, adopt the Television, and let the room's Player wake the TV and turn it off. Use when a TV must wake with a Player, when a TV remote must drive a Player or set the receiver's volume, or when a CECBus or a Television reports a fault."
 ---
 
-This skill is the guide at https://liken.sh/equipment/docs/guides/connect-a-cec-adapter/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/equipment/docs/guides/connect-a-cec-adapter/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Connect a USB-CEC adapter
 

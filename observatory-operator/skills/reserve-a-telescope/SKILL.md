@@ -3,7 +3,7 @@ name: reserve-a-telescope
 description: "Reserve a telescope for a night with a Reservation, watch it start the equipment, connect KStars and Ekos to its INDI server, expose the server and PHD2 outside the cluster, and end the night safely. Use when someone wants to observe, when KStars cannot reach the telescope, or when deciding how to expose INDI from a cluster."
 ---
 
-This skill is the guide at https://liken.sh/observatory/docs/guides/reserve-a-telescope/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/observatory/docs/guides/reserve-a-telescope/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Reserve a telescope
 

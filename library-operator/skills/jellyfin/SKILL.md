@@ -3,7 +3,7 @@ name: jellyfin
 description: "Keep playback progress the same in both directions between the progress store and a Jellyfin server through spec.jellyfin on the Catalog. Use when a cluster runs Jellyfin beside the operator, or when a backfill of progress is needed."
 ---
 
-This skill is the guide at https://liken.sh/library/docs/guides/jellyfin/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/library/docs/guides/jellyfin/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Keep progress with Jellyfin
 

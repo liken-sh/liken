@@ -3,7 +3,7 @@ name: find-updates
 description: "Find which firmware each machine's devices keep and which newer releases the LVFS catalog offers, with the lvfs FirmwareCatalog and the scan pods of firmware-operator. Read kubectl get firmwarecatalog and its status.machines records, kubectl get firmware and the Machines and Behind columns, a discovered Firmware's status.machines entries with their cabinet URL and SHA-256, and the Events. Use when you want to know whether a board's UEFI firmware, an SSD, or a dock has an update, when a scan did not run, or to understand what a scan touches on a machine."
 ---
 
-This skill is the guide at https://liken.sh/firmware/docs/guides/find-updates/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/firmware/docs/guides/find-updates/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Find firmware updates
 

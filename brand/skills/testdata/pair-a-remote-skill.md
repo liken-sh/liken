@@ -3,7 +3,7 @@ name: pair-a-remote
 description: "Pair a Bluetooth remote with a machine and map its keys. Use this when a room has a new remote."
 ---
 
-This skill is the guide at https://liken.sh/media/docs/guides/pair-a-remote/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/media/docs/guides/pair-a-remote/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Pair a remote
 

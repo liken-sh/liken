@@ -3,7 +3,7 @@ name: upgrade
 description: "Move every machine in a fleet to a new release with one edit to the Cluster, and watch the rollout. Use when a new release is on the channel and the fleet should take it."
 ---
 
-This skill is the guide at https://liken.sh/docs/guides/upgrade/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/docs/guides/upgrade/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Upgrade the fleet
 

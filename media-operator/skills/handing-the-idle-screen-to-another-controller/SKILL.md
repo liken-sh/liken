@@ -3,7 +3,7 @@ name: handing-the-idle-screen-to-another-controller
 description: "Hand a Player's idle screen to another operator through spec.idle.controller, and follow the contract that operator uses to draw the screen and read presses. Use when something other than media-operator should draw the screen while nothing plays."
 ---
 
-This skill is the guide at https://liken.sh/media/docs/guides/handing-the-idle-screen-to-another-controller/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/media/docs/guides/handing-the-idle-screen-to-another-controller/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Hand the idle screen to another controller
 

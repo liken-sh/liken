@@ -3,7 +3,7 @@ name: pair
 description: "Play a video on one monitor with its sound on that monitor's own speakers, in one claim and one pod. Use when a workload needs a screen and its sound together on one HDMI or DisplayPort monitor."
 ---
 
-This skill is the guide at https://liken.sh/audio/docs/guides/pair/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/audio/docs/guides/pair/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Pair sound with its screen
 

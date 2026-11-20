@@ -3,7 +3,7 @@ name: adopt
 description: "Join liken machines to an existing k3s cluster with embedded etcd and replace its machines one at a time while the cluster serves. Use when moving a cluster onto liken without exporting or restoring its state."
 ---
 
-This skill is the guide at https://liken.sh/docs/guides/adopt/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/docs/guides/adopt/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Adopt an existing k3s cluster
 

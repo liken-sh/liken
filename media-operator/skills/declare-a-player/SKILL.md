@@ -3,7 +3,7 @@ name: declare-a-player
 description: "Declare a Player for the screen and speakers a machine is connected to, take it from created to a Screen condition of Present, and prove it plays. Use when a machine is connected to a television or a monitor and should play media on it, when a Player's idle pod stays Pending, or when a film's Dolby or DTS track should reach an A/V receiver encoded."
 ---
 
-This skill is the guide at https://liken.sh/media/docs/guides/declare-a-player/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
+This skill is the guide at https://liken.sh/media/docs/guides/declare-a-player/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
 
 # Declare a Player
 
