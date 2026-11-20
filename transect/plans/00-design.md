@@ -413,6 +413,117 @@ case had a step with no signal.
 
 Settled on 2026-11-20.
 
+## Elevations of a pattern
+
+A pattern has a list of elevations.  Each elevation has a name, answers
+one question about the pattern, and shows its author.  A `Player` has
+the room, which shows what the player is made of, and the signal path,
+which shows where picture and sound go.  Both are drawn over the same
+roles, so a role with no part is empty in each one.
+
+More than one author can state an elevation of the same pattern.
+`transect` shows each one, as it shows every claim, and it does not
+choose between them.  The reader moves from one elevation to the next,
+and each elevation has its own URL, as each elevation of the proof of
+concept has.
+
+One elevation opens first, so the list has an order.  Each author
+orders the elevations that they state, and the knowledge that a cluster
+has installed comes before the knowledge that `transect` ships.
+
+Settled on 2026-11-20.
+
+## Who draws a pattern
+
+`transect` draws a pattern of its catalog itself.  Requests, a work
+queue, and a primary with replicas are the same model in every project
+that has one, so a reader learns each view once.  A project that has
+such a pattern states only which of its parts has which role.
+
+A pattern that one project owns has no view in the catalog.  A `Player`
+with its display, its receiver, and its remote is a model that only
+`media-operator` has, and so is a telescope with its optical trains and
+its mount.  The author of such a pattern states an arrangement: a
+sketch that gives each role a place and a size, and names a shape for
+it.  A display is a large panel, a receiver is a small box below it,
+and a remote is a small shape in front.  This is another form, beside
+the schematic, the sequence, and the pipeline, and it answers what a
+thing is made of.
+
+The author states the places and the shapes.  `transect` owns
+everything else, so that every sketch reads the same way:
+
+- **The shapes.**  An author names a shape from a small set that
+  `transect` draws, such as a screen, a box, a handheld, a speaker, and
+  a store.  An author does not ship a drawing.
+- **The states.**  A part that is healthy, a part that deviates, and a
+  role with no part look the same in every elevation.
+- **The readings, the wires, and the source of each fact.**
+
+An arrangement can repeat.  The author of the telescope sketches one
+optical train, and `transect` draws that sketch once for each train
+that the telescope has.  The author also states which roles a train is
+expected to have.  An expected role with no part is drawn empty, and an
+optional role with no part leaves its place blank.
+
+An arrangement is knowledge and not a template.  A person reads it as a
+view, and an agent reads the same roles as a query.
+
+Settled on 2026-11-20.  The set of shapes and the form in which an
+author writes an arrangement are open.
+
+## Where the knowledge of a pattern ships
+
+The knowledge of a first-party pattern ships with its operator.
+`media-operator` ships what it states about a `Player`, and
+`observatory-operator` ships what it states about a telescope.  The
+knowledge of a third-party project, such as CloudNativePG, ships with
+`transect` as a stock set.  Both are in one format, so a stock entry
+can state an arrangement too.
+
+This settles where the knowledge of a pattern ships.  It does not
+settle where a claim about one cluster is stored, or who may write it.
+
+Settled on 2026-11-20.
+
+## The patterns that the proof of concept draws
+
+The proof of concept draws several patterns and names none of them a
+pattern.  An agent read the code for them on 2026-11-20, and these are
+the nearest to a pattern view:
+
+- **The references of a kind.**  A `KindKnowledge` gives each reference
+  field of a kind a label, and the page of a custom resource draws a
+  box for each one, with the field that it was read from.  A field with
+  no value keeps its box, which reads "names nothing now", so a role
+  with no part is drawn already.  The page does not mark a reference
+  that names an object that does not exist.  The `Player` and the
+  equipment of the observatory are drawn this way, from
+  `examples/liken`.
+- **The entry path.**  The page of a workload draws the route, the
+  ingress controller, the `Service`, and the pods from left to right,
+  with the rate of requests on the route.  It marks a `Service` that
+  has no ready endpoints, a route with no TLS, and a controller that
+  `transect` guessed.  The roles are in the code, and a resource
+  supplies the controller.
+- **The guards.**  The same page lists what protects a workload with
+  replicas: that its pods spread across machines, a
+  `PodDisruptionBudget`, a rolling update, a readiness probe, and a CPU
+  limit.  Each one is shown as held, open, or a warning.  These are
+  expectations that the code states.  The design gives them to the
+  owner of the cluster to state, as conventions.
+- **A primary with replicas.**  The knowledge of CloudNativePG names
+  the field that gives the primary.  The proof of concept uses it to
+  say what the loss of that pod stops.
+
+Each of these lacks a name for its model, and the code or a resource of
+`transect`'s own states each one.  The first new work lays them against
+"A pattern view" and builds what each one lacks.
+
+`LogPattern` in `transect-observe` uses the word "pattern" for a filter
+on log lines.  One of the two names must change before the code has a
+pattern in the sense of this document.
+
 ## The walk `Job`, through the primitives
 
 This section tests the primitives against the first case.  Its facts
@@ -658,3 +769,7 @@ served.
 - What makes parts of the same sort, for likeness.
 - What a pattern's catalog holds first.  The cases will show which
   patterns are real.
+- Which shapes `transect` draws, and the form in which an author
+  writes an arrangement.
+- Which of `LogPattern` and the pattern of this document keeps the
+  name.
