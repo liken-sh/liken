@@ -10,8 +10,8 @@ import (
 )
 
 // goImageFindings lists each place where a Dockerfile builds or copies
-// a Go program in a way that the section "Go programs" of the root
-// AGENTS.md does not allow:
+// a Go program in a way that the section "Go programs" of the images
+// skill does not allow:
 //
 //   - A `go build` without CGO_ENABLED=0 and -trimpath. Without them
 //     the binary is not static and contains paths of the build machine.

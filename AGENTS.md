@@ -2,20 +2,19 @@
 
 The `liken` project is one system, and this repository holds all of
 it. Each top-level directory is one component, named for what it
-ships. `liken/` is the OS. The operators claim a machine's hardware
-and serve its interfaces. The CSI drivers attach storage. `transect/`
-serves a live, read-only map of a cluster's layers, the relationships
-between its parts, and their health. `brand/` holds the theme, the
-voice rules, and the site tools. `kubernetes/`
-is the Go module that the operators import to read, write, and watch
-Kubernetes objects. `notices/` holds the scripts that copy the license
-notices of the third-party software in an image into that image. `ci/` reads each
-component's `package.toml` and writes the CI workflows. `liken.sh/`
-declares the domain, the release channel, and the organization's
-repositories in Terraform. `plans/` holds the plans that cover more
-than one component, and each component keeps its own plans in its own
-`plans/`. The plans of the OS are in `liken/plans/`. Each component has its own
-`AGENTS.md` for the work inside it.
+ships, and `README.md` beside this file says what each one is for.
+
+A component's `README.md` says what the component is for, what it is
+responsible for, how it fits with the other components, and what its
+main parts are. A component's `AGENTS.md` says how the component
+runs, which rules a change to it must keep, and where its boundaries
+are. Read both before you change a component. This file holds the
+rules that every component shares, so a component's `AGENTS.md` does
+not repeat them.
+
+`plans/` holds the plans that cover more than one component, and each
+component keeps its own plans in its own `plans/`. The plans of the
+OS are in `liken/plans/`.
 
 Four repositories stay outside: `corrosion`, `plugins`, `log`, and
 `liken-dev-cluster`. Plan 69 in `plans/completed/` gives the reasons.
@@ -87,15 +86,8 @@ component keeps its view of the world current in the same three steps:
    state again.
 
 For Kubernetes, list first and then watch from the list's
-`resourceVersion`. The watch starts at that version, not at the present,
-so the API server sends every change made after the list, and the order
-loses nothing. A `410 Gone` means the version is too old: list again. A
-watch with no `resourceVersion` first sends every object as it is now,
-and then the changes, so each open costs as much as a list. Start a
-watch from a version, and open it again from the last version it
-delivered.
-
-A watch loop needs three guards: resume from the last version instead
+`resourceVersion`, so the API server sends every change made after
+the list. A watch loop needs three guards: resume from the last version instead
 of listing, list again only for a 410 and only once, and decide the
 wait by how long the server kept the watch open. Each guard failed in
 review in a hand-written loop, so the operators watch through
@@ -160,6 +152,74 @@ crosses into another component's domain, update that component's
 pages too. The `operators` skill under `.agents/skills` lists the
 pages each kind of change touches.
 
+## Plans
+
+Where a plan is states its status: a file at the top of a `plans/`
+directory is not built, and a file in `completed/` is built. The
+commit that builds a plan moves the plan to `completed/` and dates
+its header, because a built plan that stays at the top tells the next
+session that the work is open. A component's code exists only where a
+plan calls for it. A small fix that a test reproduces and that
+changes no design needs no plan. Load the `plans` skill under
+`.agents/skills` before you write a plan or an open problem, and
+before the commit that builds or closes one.
+
+## Go components
+
+Each operator and each CSI driver is one Go module in its own
+directory, named `github.com/liken-sh/liken/<directory>`. `ci pins`
+fails when a module's Go version differs from the `golang` image of
+`toolchains/images.toml`, or when two modules name different versions
+of one dependency.
+
+- **The program is `package main`, flat at the top of the
+  directory**, with one domain to a file and each file's tests beside
+  it. No component has a `cmd/`, an `internal/`, or a `pkg/`. A
+  subdirectory is a package only when another component imports it,
+  when it is a protocol or a device driver, when it holds the Go
+  types of the component's API, or when it is a second program. The
+  fake of a package, for the tests of other packages, is in
+  `<package>test/`. `liken/` is the exception: it is one module with
+  a directory for each program.
+- **An operator reads, writes, and watches Kubernetes through the
+  `kubernetes/` module**, which it names with a `replace` in `go.mod`,
+  so it builds against the code in the tree. No component uses
+  controller-runtime or kubebuilder. `kubernetes/README.md` names
+  each package.
+- **`deploy/` is a kustomize base**, with the CRDs, the RBAC, and the
+  workloads. A person writes each CRD by hand, except where a
+  component's `AGENTS.md` names a generator. The base sets the
+  namespace `liken-system` with a `NamespaceTransformer` that is
+  `unsetOnly`, and `ci` fails on a top-level `namespace:`.
+- **`docs/` is the component's manual**, and `skills/` holds the
+  skill that each guide of the manual generates for the component's
+  users. `make test-docs` writes the reference pages and the skills
+  again and fails when they differ from the commit.
+- **`cli/` is the component's `kubectl` plugin**, which
+  `Dockerfile.cli` builds.
+- **`make test` in the component runs every check that CI runs for
+  it**: `gofmt`, `go mod tidy -diff`, `go vet`, the tests with the
+  race detector, and the coverage gate of `.testcoverage.yml`. The
+  `testing` skill holds the gate's rule.
+
+## Rust components
+
+Each Rust crate, or group of crates that ship in one image, is a
+cargo workspace of its own, on edition 2024. Its
+`rust-toolchain.toml` names the Rust of the `rust` image of
+`toolchains/images.toml`, and `ci pins` fails when it differs.
+
+- **Each dependency names one exact version**, as in `=0.25.1`, and
+  `ci pins` fails when two `Cargo.toml` files name different versions
+  of one crate. So a bump changes every copy in one commit.
+- **A crate links a crate of another component by its relative
+  path.** The Dockerfile copies that crate from a build context that
+  the component's `package.toml` declares, to the same relative path.
+- **Unit tests are in a `#[cfg(test)]` module beside the code.**
+- **`make test` runs every check that CI runs**: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and the tests under
+  `cargo llvm-cov` with a floor on line coverage.
+
 ## Branch names
 
 This repository works on `main`. `corrosion`, outside this repository,
@@ -174,267 +234,35 @@ ships, because a pin that stays on an old line collects faults that
 upstream already fixed. The bases stayed on Debian stable, and Weston
 fell two major versions behind and drew the wrong colors. So a pin is
 current when it matches the newest upstream release that is not a
-pre-release, with no soak time:
-
-- A pin that `liken` builds from source follows the newest release of
-  the upstream project.
-- A pin that `liken` takes from a package repository, a registry, or
-  a channel server follows the newest channel that the repository
-  offers to install as a whole, and the newest package in that
-  channel: Debian sid, Alpine `edge`, Ubuntu's development series,
-  and k3s's `latest` channel. A PPA counts as its own repository,
-  and its newest channel is the newest series it publishes.
-- A pin that must stay back is a hold, and its report row states the
-  reason. A comment alone does not count.
-
-Every pin has a `latest.sh` beside it, and `make versions` at the top
-of the repository runs all of them and prints one table. A pin that
-several components share has one owner: `toolchains/images.toml`
-names each outside image once, and checks in `ci/` fail when two
-copies of a Go version, a Rust version, a Go module, a crate, or an
-image tag disagree. The `bump-components` skill under
-`.agents/skills` holds the row format and the procedure, and root
-plan 83 holds the reasons.
-
-## Pins and downloads
+pre-release, with no soak time. A pin that must stay back is a hold,
+and its row in the report of `make versions` states the reason. A
+comment alone does not count.
 
 A build uses only the bytes that a commit named, so a person who
-reviews the commit reviews what every later build downloads. Every
-pin in the repository follows these rules, and
-`cd ci && go run . pins -root ..` fails CI on each break that a
-pattern can find. Every `fetch.sh` and `latest.sh` sources
-`toolchains/pin.sh`, which holds one implementation of each step of a
-pin, and prek runs `ci pins` on each commit that changes a pin. The
-`bump-components` skill holds the procedure, the patterns, and the
-comment that excuses one line.
+reviews the commit reviews what every later build downloads. The
+digest of every file that a pin downloads is in the repository, and
+no build step reads a digest from the network.
+`cd ci && go run . pins -root ..` fails on a pin or a download that
+breaks a rule, and prek runs it on each commit that changes one.
 
-- The digest of every file that a pin downloads is in the
-  repository, and `latest.sh --bump` writes it. No `fetch.sh`,
-  Dockerfile, or other build step reads a digest from the network,
-  because a checksum file read at build time accepts whatever the
-  upstream serves that day.
-- A pin whose files a release ships holds a manifest, `pin.toml`,
-  beside its `fetch.sh`, because the SBOM of a release must name each
-  of those files, and only the pin knows where it came from. The
-  manifest has one table for each file that the fetch downloads, with
-  its `version`, `url`, `sha256`, `purl`, and the SPDX expression of
-  its `license`, and an optional CycloneDX `scope` of `excluded` for a
-  file that only the build reads. It also has a table, with the scope
-  `excluded`, for each file of the corresponding source that
-  `liken/licensing/sources.sh` mirrors onto the release channel, so
-  the bump that moves a binary moves its source too. The manifest is
-  the one copy of the URL and the digest: `latest.sh --bump` writes
-  them with `set_pin`, `fetch.sh` and the source mirror download with
-  `fetch_pinned`, and every other reader takes a field with
-  `pin_value`. A purl follows the purl specification for the file's
-  kind: `pkg:deb/ubuntu/...?arch=amd64` for a package of Ubuntu's
-  archive, `?arch=source` for a file of its source package,
-  `pkg:github/<owner>/<name>@<tag>`
-  for a GitHub release or tag, and `pkg:generic/<name>@<version>` with
-  the `download_url` and the `checksum` for any other file. A person
-  reads the upstream's license and writes the expression. The
-  programs that buildroot builds, the closure images, and the Go and
-  Rust binaries need no manifest, because buildroot's CycloneDX SBOM,
-  the `status.d` records, the build info, and cargo-auditable already
-  name them. `unmanifested` in `ci/manifests.go` names each other
-  `fetch.sh` that needs no manifest, with the reason.
-- A pin whose files an image ships holds a `pin.toml` too, beside the
-  Dockerfile that fetches them, because syft finds no package in a
-  file that a Dockerfile fetches by its checksum. An entry that an
-  image ships also names its CycloneDX `type`, one that syft keeps,
-  such as `library`, `application`, or `machine-learning-model`, and
-  the `cpe` that NVD lists the upstream under, when NVD has one. The
-  Dockerfile keeps a copy of the URL and the digest in its
-  `ADD --checksum`, because BuildKit reads the checksum from the
-  Dockerfile's text, and the pin's `latest.sh --bump` writes both
-  copies. The image build runs `image-sbom` from
-  `toolchains/manifest`, through the build context `manifest`, and the
-  image carries the record that it writes at
-  `/usr/share/doc/liken/<image>.cdx.json`. syft copies the components
-  of each such file into the image's SBOM. `toolchains/manifest` is
-  also the reader that the SBOM of a release uses, so a field means
-  the same in both. `ci pins` fails on an `ADD --checksum` that no
-  manifest beside the Dockerfile names at that digest, and on a
-  Dockerfile that fetches a manifest's file and runs no `image-sbom`.
-  A Debian package needs no entry, because the closure that unpacks
-  it writes its dpkg record, and `unmanifestedDownloads` in
-  `ci/manifests.go` names each Dockerfile whose downloads only its
-  build reads.
-- When the upstream signs the checksum file that a bump copies a
-  digest from, the bump verifies the signature first. Without that
-  check, a mirror that changes the file changes the pin. The keys are
-  in the repository, and a key that more than one component reads is
-  in `trust/keys/`.
-- A download goes to a `.partial` file, which takes its name in the
-  cache only after its digest matches. A cached file that does not
-  match is downloaded again. So a torn or changed download never
-  takes the name of a good one.
-- Every `FROM` and `COPY --from` names an image of
-  `toolchains/images.toml`, or an image of the repository by its bare
-  name, and a shell script that runs an outside image reads its
-  reference with `image_of`, so that one entry pins each outside
-  image.
-- Every `VERSION`, every `fetch.sh`, and every Dockerfile that
-  downloads has a `latest.sh` that `make versions` runs, so no pin
-  falls behind where the report cannot show it.
-- A check that a binary is static accepts both "statically linked"
-  and "static-pie linked", because gcc on Alpine builds a static PIE
-  for `-static`.
-- Every `uses:` of a GitHub Action names the commit of a release, as
-  in `actions/checkout@<commit> # <release>`, because the owner of an
-  action can move a tag to other code, and the publish jobs run their
-  actions with a token that writes the registry and one that signs
-  images. `actionPins` in `ci/actions.go` names each repository of
-  actions once, the generated workflows and the composite actions
-  name the same commits, and `ci/latest.sh --bump <repository>`
-  writes the commit of the newest release's tag.
+Load the `pins` skill under `.agents/skills` before you add or change
+a `VERSION`, a `fetch.sh`, a `latest.sh`, a `pin.toml`, an image of
+`toolchains/images.toml`, or a download in a Dockerfile. Load the
+`bump-components` skill to move the pins to newer releases. Root plan
+83 holds the reasons.
 
-## Closures
+## Images
 
-An image that ships files of Debian or Ubuntu packages without the
-packages is a closure on scratch, and a closure holds no
-`/var/lib/dpkg/status`. Without a package record, syft writes an SBOM
-with almost none of the image's packages, and Trivy finds no package
-to match against an advisory.
-
-So every closure on a Debian or Ubuntu builder sources
-`vulkan/closure.sh`, the closure library, through a build context, and
-calls `collect` and then `notices`. No closure writes its own ldd walk
-or its own copy of the notices. For every package that the tree holds
-a file of, `notices` writes `/var/lib/dpkg/status.d/<package>`, the
-package's stanza from the builder's dpkg status, and
-`/var/lib/dpkg/status.d/<package>.md5sums`. It also copies
-`/etc/os-release` and the distribution's version file, so a scanner
-knows which advisories apply. syft and Trivy read this layout, which
-Google's distroless images use. `indi/closure.sh` is a copy of the
-library, because the build context of `indi` does not reach `vulkan/`,
-and `cd ci && go run . pins -root ..` fails when the two copies
-differ. A closure that unpacks a Debian package that its Dockerfile
-fetches by checksum, as `library-operator/appearances/inference-closure.sh`
-does, writes the same record from the package's control file, so the
-package needs no `pin.toml` entry.
-
-## Rust binaries
-
-A Rust binary holds no record of the crates that it links, so syft
-and Trivy list none of them from an image, and a scan matches no
-advisory against them. So every Dockerfile that builds Rust runs
-`cargo auditable build` in place of `cargo build`. cargo-auditable
-records the crate graph of the build in the binary's `.dep-v0`
-section, and both scanners read that section. The stub build of the
-dependency layer runs through it too, so the dependencies compile
-once under the same wrapper that the real build uses.
-
-`toolchains/cargo-auditable/fetch.sh` pins cargo-auditable, and the
-`latest.sh` beside it reports and bumps the pin. Each Rust image
-takes `toolchains/` as the build context `toolchains`, copies
-`fetch.sh` and `pin.sh` from it, and runs `fetch.sh`, so one pin
-serves every image. `cd ci && go run . pins -root ..` fails on a
-Dockerfile that runs `cargo build`.
-
-## Go programs
-
-A Go binary records the modules it links in its build info, and syft
-and Trivy read that record to list the modules of an image. Every
-Dockerfile that ships a Go program builds it the same way, so the
-record is in every binary, and a person, a manifest, or an operator
-that writes a pod's command finds the program at the same path in
-every image:
-
-```dockerfile
-FROM golang AS build
-...
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /<name> .
-COPY --from=notices go.sh /
-RUN CGO_ENABLED=0 sh /go.sh /notices .
-
-FROM scratch
-COPY --from=build /<name> /<name>
-COPY --from=build /notices /
-ENTRYPOINT ["/<name>"]
-```
-
-- The builder is the `golang` entry of `toolchains/images.toml`. A CLI
-  image runs the build stage with `--platform=$BUILDPLATFORM` and
-  cross-compiles with `GOOS` and `GOARCH`.
-- `CGO_ENABLED=0` makes a static binary that runs on `scratch` and on
-  any base, and the build needs no C toolchain. No Go program in the
-  repository needs cgo. `media-capabilities` calls libva through
-  purego, which needs no cgo, but its binary names the dynamic loader,
-  so it runs only on the `vaapi` base that carries libva.
-- `-trimpath` keeps the paths of the build machine out of the binary.
-- `-s -w` drops the symbol table and the DWARF data. The build info is
-  in its own section, which `-s -w` keeps, and
-  `go version -m <binary>` prints it. A panic's stack trace keeps its
-  function names. No build runs upx, strip, or objcopy on a Go
-  program, because upx and objcopy can hide or remove the build info.
-- `-X main.version=${VERSION}` is there only when the program has a
-  `version` variable.
-- The program is at `/<name>`, where `<name>` is the program's name,
-  in every image that ships it, on any base. A second program of the
-  same image, such as a pod build or a helper that a manifest runs, is
-  at `/<its name>` too.
-- `notices/go.sh` writes the license notices of the standard library
-  and of each linked module. An image whose program makes HTTPS
-  requests to hosts outside the cluster copies the `trust` component.
-- When every pod that runs the image sets a non-root `runAsUser`, the
-  image names the same user with a numeric `USER`, so `docker run`
-  runs the program the same way. An image that a pod runs as root
-  keeps root and names no `USER`.
-
-`cd ci && go run . pins -root ..` fails on a `go build` without
-`CGO_ENABLED=0`, `-trimpath`, or `-ldflags "-s -w"`, on a program
-built, copied, or named in an `ENTRYPOINT` at a path other than
-`/<name>`, and on upx, strip, or objcopy run on a program.
-
-## Static programs
-
-A program that the OS image or an image's `FROM scratch` stage
-carries from another project must be one static binary, because a
-`liken` machine and those images have no loader and no shared
-libraries. buildroot builds these programs, from the BR2_EXTERNAL tree
-in `liken/userland/`, because it builds the musl toolchain and every
-library from source tarballs that its `.hash` files pin, and its
-`legal-info` and `utils/generate-cyclonedx` write the source offer and
-the CycloneDX SBOM of each build. An Alpine container with `apk add`
-installs the packages of the day of the build, so no build takes that
-form, and `cd ci && go run . pins -root ..` fails on an `apk add`.
-
-- A new program is a buildroot package that a fragment of
-  `liken/userland` selects: `os.config` for the OS, which
-  `liken/userland/build.sh` builds and copies into `dist/`, and
-  `bluetoothd.config` for the bluetoothd image, which its Dockerfile
-  builds. `liken/userland/buildroot.sh` runs both builds with
-  `common.config`. A change to buildroot's recipe is a hook in
-  `external.mk`.
-- A cold build of the OS's programs takes most of the OS build job, so
-  `liken/userland/artifact.sh` keeps each finished `dist/` in
-  `ghcr.io/liken-sh/userland`, tagged with a hash of the tree and the
-  `buildroot` entry. `make` pulls the tag, and builds only when the
-  pull fails. Only CI on `main` pushes a tag.
-- When buildroot's recipe builds a program only with shared libraries,
-  a recipe of the tree builds it static: `iscsi/` holds open-iscsi and
-  libkmod, and `bluetooth/` holds BlueZ. A patch to a project's source
-  is one that upstream can take, such as a build definition that
-  respects meson's `default_library`.
-- buildroot is pinned to a commit on its `master` branch in
-  `liken/userland/VERSION`, and its builder is the `buildroot` entry of
-  `toolchains/images.toml`. The bluetoothd Dockerfile names the same
-  commit and digest, and the same SPDX license list that
-  `generate-cyclonedx` reads, and `ci pins` fails when they differ.
-  syft finds no package in a static program, so the bluetoothd image
-  carries buildroot's SBOM of its build as its record for syft:
-  `image-sbom -buildroot` keeps the target packages and leaves out the
-  host tools. When master
-  packages an older release than upstream,
-  `liken/userland/versions.mk` sets the newer version, and
-  `patches/<package>/<version>/<package>.hash` pins its tarball.
-  buildroot's recipe holds patches for the version that it names, and
-  a later release can already hold their changes. The file
-  `patches/<package>/<version>/held` names each patch of the recipe
-  that the release holds, and `liken/userland/buildroot.sh` keeps
-  buildroot from applying it. A patch is a debt: when a release holds
-  a patch's change, take the release and drop the patch.
+Every image builds through `docker-bake.hcl`, on a workstation and in
+CI, as the target of the same name:
+`docker buildx bake media-operator-player --load` at the top of the
+repository. syft and Trivy list what an image holds from records
+inside it, so every Dockerfile builds a Go program, a Rust binary, a
+closure of Debian or Ubuntu packages, and a static program in one
+form each, and `ci pins` fails on a Dockerfile that breaks a form.
+Load the `images` skill before you write or change a Dockerfile, a
+`FROM` line, a closure script, or a buildroot recipe under
+`liken/userland/`.
 
 ## Releases and development builds
 
@@ -448,144 +276,9 @@ the `go.mod` and `Cargo.lock` files in the tree. Run `make workflows` after you
 change a `package.toml` or a `FROM` line; CI fails when the generated
 files differ from what the generator writes.
 
-Every image builds through `docker-bake.hcl`, on a workstation and in
-CI, as the target of the same name:
-`docker buildx bake media-operator-player --load` at the top of the
-repository. A Dockerfile that builds on a base image of the repository
-names it bare, as in `FROM mpv`, and no Dockerfile names a published
-tag of a base. The bake file gives the build the base's published
-image when that image is the build of the tree's recipe, and builds
-the base from its own directory at the same commit when it is not.
-`make bases` at the top of the repository checks the published tag of
-each pinned base that an image builds on. The check passes when a
-signature of the base's own workflow covers the image's digest, and
-the `sh.liken.recipe` label read through that digest equals the recipe
-of the tree. `make bases` writes the reference and digest of each base
-that passes into `docker-bake.override.hcl`, which bake reads after
-the generated file and git ignores. CI's plan job runs the same
-command once for each run, and every build of the run reads its
-output. So a release does not install a base's packages from
-snapshot.debian.org again, and a commit that raises a base's revision
-builds the new base, and its consumers on it, from the tree until the
-base's tag is published. Root plan 89 holds the reasons.
-
-The base images, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`, are
-pinned components: each states a version, the date of the snapshot of
-Debian sid that it installs from, and a revision, and publishes under the tag
-`<version>-<revision>`. A change to a base's recipe needs a new
-revision, and so does each pinned component that builds on it. CI fails
-when a recipe changed with no new revision. Each base lists the
-upstream releases it holds under `[package.upstream]`, and each entry
-becomes the image label `sh.liken.upstream.<name>`. `indi` is pinned
-the same way, on dated snapshots of Ubuntu, the INDI PPA, and the PHD2
-PPA, and CI builds its 17 images only when its tag is new.
-`astrometry`, the plate solver that `astrophotography-operator` runs,
-is pinned on the bases' Debian snapshot and moves with them. `trust` pins
-the CA bundle that the OS build and every image that verifies TLS read,
-so one bump reaches all of them. The `bump-components`
-skill under `.agents/skills` holds the procedure.
-
-Every image that CI publishes, as a development build, a release, or
-a pinned component's tag, carries an SBOM and the provenance of its
-build, so a person who pulls it can read what it holds and how it was
-built. buildx writes both as attestations into the image's index on
-ghcr.io, with the syft scanner that `toolchains/images.toml` pins.
-CI's builders run the BuildKit daemon that the same file pins as
-`buildkit`, because buildx's default image is a tag that moves to
-each BuildKit release. Then cosign, pinned in the same file, signs the digest of that index
-keyless, as the component's workflow at `refs/heads/main` or at the
-release tag. The signature is in the same ghcr.io repository, and
-Rekor records it. syft lists what a program or a package database
-records about itself, and copies the components of each record that
-an image carries at `/usr/share/doc/liken/<image>.cdx.json`, so the
-SBOM also names the pinned files and the buildroot packages that
-"Pins and downloads" and "Static programs" give the records of.
-One signature covers the image and both attestations, because the
-index names each of them by its digest. `ci/sign.go` holds the
-settings, and the `releases` skill holds the commands that verify an
-image:
-
-```sh
-cosign verify ghcr.io/liken-sh/<image>@<digest> \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/liken-sh/liken/\.github/workflows/component-[a-z0-9-]+\.yaml@refs/(heads/main|tags/[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3})$'
-docker buildx imagetools inspect ghcr.io/liken-sh/<image>@<digest> --format '{{ json .SBOM }}'
-docker buildx imagetools inspect ghcr.io/liken-sh/<image>@<digest> --format '{{ json .Provenance }}'
-```
-
-An image says what it is through the keys of the OCI image
-specification, so a person who reads ghcr.io or `docker inspect`
-learns its name, description, version, commit, and manual.
-`ci publish` writes those keys, and the `sh.liken.*` keys of a pinned
-image, at publish time from the image's `package.toml` and the
-commit: each one as a label of the config and as an annotation of
-the index and each manifest. Every `[[outputs.images]]` entry states
-a `description` of one line. No Dockerfile writes a `LABEL` or a
-`MAINTAINER`, so a fork's build claims nothing, and
-`cd ci && go run . pins -root ..` fails on one. A label of a base
-passes through `FROM`, so an image writes each label of the
-repository images under it, and a key it does not own reads `""`.
-The publish reads the pushed labels back and fails before it signs an
-image whose labels differ. The `releases` skill holds the keys and
-their values.
-
-An OS release carries its SBOM, so a person or a scanner can read
-what a release ships without the tree it was built from. The SBOM is
-`sbom.cdx.json`, a CycloneDX document, beside the release's other
-files on `releases.liken.sh`, and `release.yaml` names it by its
-digest like every other artifact. `make release` writes it with
-`liken/releases/sbom/scan.sh`: syft, which `toolchains/images.toml`
-pins, scans the root filesystem that the image build staged, each
-image archive in it, the toolkit, and the programs that k3s writes
-out of its own binary. Then `liken/releases/sbom` merges those scans
-with each `pin.toml` and with buildroot's SBOM, and checks the result
-against the CycloneDX schema in `liken/releases/sbom/schema/`. When
-syft finds a program that a manifest or buildroot already names, the
-SBOM keeps the manifest's or buildroot's component, with its purl and
-license. The property `liken:source` of each component names its
-source, and the `compositions` state which lists are complete.
-
-A known vulnerability in a file that the OS takes from an upstream
-release reaches the repository's Security tab only when a scanner can
-match the file's name, and no package database records the kernel,
-the bootloaders, the microcode, k3s, or Flux. So each of those entries of a
-`pin.toml` states the `cpe` that NVD lists the upstream under, at the
-upstream's own version, and a `type` that a scanner keeps, and its
-`latest.sh --bump` writes the CPE with `cpe_version`.
-`liken/releases/sbom/vulnerabilities.sh` runs grype, which
-`toolchains/images.toml` pins, over a release's SBOM, with the
-settings in `grype.yaml` beside it: it leaves out each component with
-the scope `excluded`, keeps each finding that has a fixed version, and
-drops each finding that `grype.yaml` names with its reason. Trivy
-scans every image, and it matches no component by its CPE, so this
-one scan runs grype. The OS's `build` job runs `make vulnerabilities`
-on each build, which scans what the commit built, and uploads under
-the category `grype/liken`, so a finding that a bump can clear shows
-on `main` before a release ships it. The OS's publish job scans the
-release that it publishes, and the `liken` job of
-`.github/workflows/scan.yaml` scans the newest release on the channel
-every third day. Both upload under `grype/liken-release`, so the
-findings of the tree and of the newest release do not replace each
-other. The same workflow
-scans every published image again with Trivy, because a vulnerability
-that is recorded after a publish reaches no alert until a later scan,
-and the vulnerability databases publish no event that a workflow can
-subscribe to. `linux-firmware` has no name in NVD, and the iptables
-programs of `k3s-root-xtables` have no CPE, so the scan matches
-neither.
-
-The OS's publish job signs each file of the release, `release.yaml`
-and every artifact that it names, keyless with the same pinned cosign,
-and publishes the Sigstore bundle `<file>.sigstore.json` beside each
-file. `liken/releases/sign.sh` holds the settings, and the `releases`
-skill holds the commands that verify a file:
-
-```sh
-cosign verify-blob <file> --bundle <file>.sigstore.json \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/liken-sh/liken/\.github/workflows/component-liken\.yaml@refs/tags/[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$'
-```
-
-The `releases` skill under `.agents/skills` holds the calendar scheme,
-what a tag releases, and how to pin a development build. Load it before
-tagging, publishing an image, or pinning a development build.
+Every image and every OS release that CI publishes carries an SBOM
+and a keyless cosign signature of the workflow that built it. Load
+the `releases` skill before you tag, publish an image, or pin a
+development build. Load the `sbom-and-scans` skill before you verify
+a published image or a release file, or change an SBOM, a signature,
+or a vulnerability scan.

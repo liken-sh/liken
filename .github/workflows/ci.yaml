@@ -333,7 +333,7 @@ jobs:
         working-directory: ci
         run: go run . generate -root .. -check
 
-      - name: check the pins and the downloads against the rules in AGENTS.md
+      - name: check the pins and the downloads against the rules of the pins and images skills
         working-directory: ci
         run: go run . pins -root ..
 

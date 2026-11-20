@@ -16,8 +16,8 @@ The static programs of the OS build from source. Under
 buildroot builds `mke2fs`, `mount.nfs`, `wpa_supplicant`, tzdata, and
 open-iscsi as static musl programs from the BR2_EXTERNAL tree in
 `userland/` (`userland/os.config`), from source tarballs that
-buildroot's `.hash` files pin. "Static programs" in the root
-`AGENTS.md` states that form. Each file of an OS release is signed
+buildroot's `.hash` files pin. "Static programs" in the `images`
+skill states that form. Each file of an OS release is signed
 keyless with cosign (`releases/sign.sh`), and each release publishes a
 CycloneDX SBOM (`releases/sbom/`). Milestone 72's status paragraph
 names the commits.

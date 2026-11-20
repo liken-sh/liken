@@ -54,7 +54,7 @@ key, gives an integrity check that does not come from that download.
   split on 2026-10-04.
 * Add a reviewable update process for the `lego` pin, as the
   `latest.sh` of every other pin gives (see "Pins and downloads" in the
-  root `AGENTS.md`).
+  `pins` skill).
 
 A pin fixes which upstream bytes run. It does not make them
 trustworthy. The selected bytes and each later pin update still need

@@ -18,7 +18,7 @@ The bases `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`, and
 (`vulkan/latest.sh`), and every image built on a base carries that
 base's packages. Each base is a closure that records its packages in
 `/var/lib/dpkg/status.d/` and copies `/etc/os-release` and
-`/etc/debian_version` (the Closures section of the root `AGENTS.md`).
+`/etc/debian_version` (the Closures section of the `images` skill).
 Trivy reads that record and detects the OS as `debian forky/sid`.
 
 On 2026-11-01, Trivy 0.76.1, the version that `ci/trivy.go` pinned

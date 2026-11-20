@@ -49,7 +49,7 @@ repos:
         name: pins and downloads follow the rules
         # `ci pins` checks that each shared pin names one version, and
         # that each pin follows the rules of "Pins and downloads" in
-        # AGENTS.md: each fetch.sh and latest.sh sources
+        # the pins skill: each fetch.sh and latest.sh sources
         # toolchains/pin.sh and downloads through it, no build reads a
         # digest from the network, each pin has a latest.sh that make
         # versions runs, and each pin that a release ships has a

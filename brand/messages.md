@@ -84,6 +84,12 @@ fragment that reads well after the part before it.
   names the path, so "opening /etc/liken/machine.yaml: open
   /etc/liken/machine.yaml: permission denied" says it twice. When a
   caller has nothing to add, it returns the error as it is.
+- **An error that wraps another program's failure includes that
+  program's own text, word for word.** For a tool, that is its
+  `stderr`. For a daemon socket, a message bus, or a provider, it is
+  the response body or the error string. The status field or the
+  record that the failure writes includes the text too, so a person
+  reads the cause from the log or the status without opening a shell.
 - **Put the cause last**, so the newest context comes first:
   "reading the catalog: %w". A sentinel that a caller compares with
   `errors.Is` can come first, with the detail after it:
@@ -116,6 +122,12 @@ chain to a person. That line is where the next step goes.
 A log line is a record that a person searches and filters, so the
 text that names the event is the same on every occurrence.
 
+- **An operation that a person causes writes one line**, which says
+  what started it, what the program sent, and what came back: a
+  press, a playback request, a change of volume, or an edit that an
+  operator acts on. A loop that a person does not see, such as a
+  poll, a repeat, or a status write that changes nothing, writes no
+  line.
 - **The message states what happened and names the object by its
   kind**: "The scan pod exited", not "exited" or "no events". Write
   it in the past tense for an action, and in the present tense for a

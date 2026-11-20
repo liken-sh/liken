@@ -9,7 +9,7 @@
 //	go run ./ci plan                decide what this workflow run does
 //	go run ./ci bases [-out FILE]   check each pinned base's published image, and write docker-bake.override.hcl
 //	go run ./ci deps                check each [depends] against the code
-//	go run ./ci pins                check the pins, the downloads, and the actions against AGENTS.md
+//	go run ./ci pins                check the pins, the downloads, and the actions against the pins and images skills
 //	go run ./ci namespaces          check that a namespace override moves no deploy object
 //	go run ./ci selectors           check that each DeviceClass guards every attribute it reads
 //	go run ./ci publish ...         push one component's outputs
@@ -226,10 +226,10 @@ func pins(root string, stdout io.Writer) error {
 		fmt.Fprintln(stdout, f)
 	}
 	if len(drift) > 0 || len(fetches) > 0 || len(manifests) > 0 || len(actions) > 0 {
-		return fmt.Errorf("the pins check found pins that drift: %d, downloads that break a rule in AGENTS.md: %d, manifests that disagree with their pins: %d, actions or builders that run code no commit pins: %d",
+		return fmt.Errorf("the pins check found pins that drift: %d, downloads that break a rule of the pins and images skills: %d, manifests that disagree with their pins: %d, actions or builders that run code no commit pins: %d",
 			len(drift), len(fetches), len(manifests), len(actions))
 	}
-	fmt.Fprintln(stdout, "every shared pin has one version, every download follows the rules in AGENTS.md, every pin that ships has a manifest that agrees with it, and every action and builder is pinned by commit")
+	fmt.Fprintln(stdout, "every shared pin has one version, every download follows the rules of the pins and images skills, every pin that ships has a manifest that agrees with it, and every action and builder is pinned by commit")
 	return nil
 }
 

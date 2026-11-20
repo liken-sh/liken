@@ -13,8 +13,8 @@ import (
 )
 
 // checkFetches lists each file that breaks a rule for how the
-// repository downloads what it pins. "Pins and downloads" in root
-// AGENTS.md gives the reasons for these rules:
+// repository downloads what it pins. "Pins and downloads" in the
+// pins skill gives the reasons for these rules:
 //
 //   - A fetch.sh or a Dockerfile never downloads a checksum file.
 //   - A fetch.sh downloads into a .partial file.

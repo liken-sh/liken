@@ -101,7 +101,7 @@ a `pin.toml` names and checks it against its digest.
 
 Every domain that vendors something pins it by version and by digest,
 and its `fetch.sh` and `latest.sh` follow the rules in "Pins and
-downloads" in the root `AGENTS.md`. `make versions` at the top of the
+downloads" in the `pins` skill. `make versions` at the top of the
 repository asks every upstream what it has now and prints the answer
 beside each pin, for every component. Root plan 83 gives the rule that
 the report checks.

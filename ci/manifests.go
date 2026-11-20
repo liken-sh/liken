@@ -117,7 +117,7 @@ var addChecksum = regexp.MustCompile(`^ADD\b.*--checksum=sha256:([0-9a-f]*)\s+(\
 var argDefault = regexp.MustCompile(`^ARG\s+([A-Za-z_][A-Za-z0-9_]*)=(\S+)`)
 
 // checkManifests lists each pin whose manifest is missing, incomplete,
-// or different from what its fetch downloads. Root AGENTS.md states the
+// or different from what its fetch downloads. The pins skill states the
 // rules under "Pins and downloads":
 //
 //   - Each directory with a fetch.sh has a pin.toml, unless
