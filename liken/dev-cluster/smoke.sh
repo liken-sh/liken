@@ -461,7 +461,7 @@ setsid make install NODE=node-1 FIRMWARE="$FIRMWARE" HARDWARE="$HARDWARE" \
 guest=$!
 watch_hold "$INSTALL_LOG" \
     "liken: installed to slot" \
-    "liken: install failed" \
+    "liken: the install did not finish" \
     "the install boot"
 echo "$drill: install complete; booting the installed disk"
 

@@ -3,7 +3,7 @@
 Open problem. `make versions` and `ci pins` cover every pin in the
 repository except four. Each one can fall behind upstream, or away
 from another pin, and no report shows it. The rule that every pin
-stays current is in `AGENTS.md`, under "Every pin stays current".
+stays current is in the `pins` skill, under "Every pin stays current".
 
 The document was checked against the tree on 2026-11-19:
 `ls library-operator/appearances/models library-operator/titles/models`
