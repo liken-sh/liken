@@ -59,7 +59,6 @@ is one kind among several, and the map is not organized around it.
 | authenticates through | an application → the identity provider | an `Ingress`'s forward-auth middleware, read through kind knowledge, and intent's `authenticates-through` |
 | allowed to call | a client → a database | NetworkPolicies |
 | part of | a camera → the optical train it is part of | kind knowledge's references |
-| calls | a client → a database, observed | conntrack on each machine |
 
 A cycle among these edges is a cold-start risk: two parts that each need
 the other to come up.  The map shows cycles.  `part of` records what an
@@ -87,10 +86,6 @@ gathers them into one thing (see "Outside the cluster").
   counts them.  A report is current only when a pod of its workload
   runs the image digest that the report names.  Plan 10 describes the
   pages and the rule.
-- The difference between the edges a `NetworkPolicy` allows and the
-  edges conntrack observes is a security view: an observed edge that no
-  policy allows is a gap, and an allowed edge with no traffic is a
-  stale policy.
 - The access lens answers two questions: what may reach a port, and
   what an account may do.  It answers them as a matrix for the cluster
   (`/access` and `/access/accounts`), with both on a namespace's access
@@ -211,17 +206,6 @@ start.
 `transect` never writes live data into a resource's status.  Health and
 traffic change every few seconds, and writing them to the API would
 load etcd for no reader that needs it.
-
-### The flow agent
-
-The flow agent is a `DaemonSet` that reads the conntrack table on its
-machine when the server asks, and returns the flows aggregated to
-workload pairs and ports.  It runs on the host network with
-`NET_ADMIN`.  Only the `calls` edges and the security comparison need
-it.
-
-A machine running [`liken`](https://liken.sh) could later publish its
-flow summary as a `liken` feature, with no privileged pod at all.
 
 ### The web interface
 
@@ -746,8 +730,7 @@ taken as a ref.  An object of a GitOps kind is ready by the condition
 
 The edge vocabulary is fixed because loops, the cascade, and the edge
 row read edge kinds; a verb an operator invents is display text in
-`label`.  `calls` is not in it: that edge is what the flow agent
-observes, not what a configuration declares.
+`label`.
 
 `referencedBy` reads names that an annotation writes in its own form,
 such as an ingress controller's list of middlewares on an `Ingress`,
@@ -1716,8 +1699,7 @@ transect --kubeconfig ~/.kube/config --prometheus http://localhost:9090
 It uses the kubeconfig's credentials, so it sees what that user sees.
 Prometheus can be any URL that reaches it, such as a `kubectl
 port-forward`, and `--prometheus` takes precedence over the address the
-`MetricsSource` gives.  Only the flow agent has to run inside the
-cluster, and without it the map has every edge but `calls`.
+`MetricsSource` gives.
 
 `transect`'s own resources (`Layers`, `KindKnowledge`, `Intent`,
 `DeviceKnowledge`, `Outside`, `RegistryMirror`, `Forge`,
@@ -1762,35 +1744,3 @@ them through the router.
 - **A dashboard.**  Grafana already shows time series.  `transect` links
   to the dashboards that exist and draws none of its own.
 - **A history.**  `transect` shows the cluster as it is now.
-
-## Slices
-
-Each slice is useful before the next one starts.
-
-1. **Structure and health.**  The elevations and every edge the API
-   gives, with Prometheus coloring the boxes, run from a workstation.
-   This slice has no agent and no resources of `transect`'s own.
-2. **Observed edges.**  The flow agent, the `calls` edges, and the
-   comparison with NetworkPolicies.
-3. **Knowledge.**  Kind knowledge, intent annotations, log sources, and
-   log patterns, shaped by the gaps the first two slices show.
-
-## Later
-
-- **Snapshots.**  The graph would be serialized at a moment and
-  committed to git, so that git's history is the timeline and a diff is
-  the comparison.  A snapshot would be taken on a schedule, when an
-  alert fires, and around a rollout.
-- **An MCP server**, so an agent can ask what a workload depends on and
-  what depends on it.
-- **Sign-in evidence**, in the stub plan `plans/11-sign-in-evidence.md`.
-  `plans/completed/10-vulnerabilities.md` built the vulnerabilities
-  pages.
-
-## Open questions
-
-- **How the page authenticates in a cluster**: an identity provider in
-  front of it, or the viewer's own Kubernetes credentials.  This waits
-  on running `transect` in the cluster, which also brings the CRDs for
-  its resources, their status conditions, and a log source's
-  credential as a mounted file.

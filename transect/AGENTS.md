@@ -190,47 +190,16 @@ the loader cannot find a library.
 
 ## Where to start
 
-Slices 1 and 3 are built, by plans 01 through 06, 08, 09, and 10, in
-`plans/completed/`: the elevations, every edge the API gives, image
-provenance, a lost machine and a workload's section, kind knowledge,
-intent, log sources, and plan 06's answers to the maintainer's
-feedback: a board for every object, lens tabs, quick search, one
-trimmed store for every CRD with no per-view watch, HTTP/2 to the API
-server, machine, ground, and volume pages, traffic numbers, and device
-facts.  Plan 08 moved the knowledge of particular projects out of the
-code into resources: the GitOps tool, the monitoring stack's
-conventions, the ingress controller, forges, log levels, certificate
-issuers, the resource under a `Node`, and storage consoles.  Plan 09
-built the access lens: what may reach each port from outside the
-cluster, and what each account may do, at `/access`, on a namespace's
-and a workload's access tab, and on an account's page.  Plan 10 reads
-a vulnerability scanner's reports through kind knowledge's `findings`:
-`/vulnerabilities`, a page per finding id, and a workload's
-vulnerabilities tab.  Plan 12 split the one crate into the workspace
-that "Where things live" describes, to lower the memory CI's tests job
-peaks at.  Read the plans in order for how each part was built.
+`transect` as it is now is a proof of concept, and the maintainer
+intends to design its ideas again.  No plan for new work is open.  The
+plans in `plans/completed/` record how each part was built, in order:
+plans 01 through 06 built the elevations, every edge the API gives,
+image provenance, a lost machine, kind knowledge, intent, log sources,
+lens tabs, quick search, and the machine, ground, and volume pages.
+Plan 07 ran `transect` in a cluster.  Plan 08 moved the knowledge of
+particular projects out of the code into resources, plan 09 built the
+access lens, plan 10 the vulnerabilities pages, and plan 12 split the
+crate into the workspace that "Where things live" describes.
 
-Next, in order:
-
-- The maintainer's pass over the access lens, then a review of its
-  design and a round on performance.
-- Plan 07, in `plans/completed/`, ran `transect` in a cluster: the
-  probes, the env, SIGTERM, the image, the kustomize base in `deploy/`,
-  and the CI that publishes the image and the base.  Its "Closed on
-  2026-11-19" section lists the parts that were dropped and that no
-  plan holds: `transect crds` and `transect rbac`, the CRDs for
-  `transect`'s own resources, the "sign in again" banner, and the kind
-  knowledge that each operator would ship.  Write a new plan before you
-  build one of them.
-- The etcd role label is the one distribution's convention left in the
-  code; plan 08 gives the reason it waits.
-- The maintainer's pass over the vulnerabilities pages.  Plan 10's
-  "Open questions" lists what to decide in that pass.
-- Plan 11 is a stub to write out in full: the evidence behind a
-  sign-in gate.
-- Plan 13 is a design for review: patterns, such as a work queue or a
-  pipeline, that knowledge binds to objects with a `find` block and
-  that `transect` draws with a reading of loss for each role.  Its
-  "Open questions" list what to decide before its first stage.
-
-Slice 2, the flow agent and the `calls` edge, is not started.
+`plans/open-problems/` holds the defects that a test reproduced in the
+code as it is.  Write a plan before you build anything new.
