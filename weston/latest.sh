@@ -81,4 +81,4 @@ set_pin weston "$latest" "$url" "$sha256" "$(generic_purl weston "$latest" "$url
 set_toml "$here/package.toml" package.upstream weston "\"$latest\""
 bumped weston "$pinned" "$latest"
 echo "the signature of $tarball checks against signing-keys.asc"
-next_step "raise weston's revision and display-operator's, run make workflows, and run layout/smoke.sh"
+next_step "raise weston's revision, run make workflows, and run layout/smoke.sh"

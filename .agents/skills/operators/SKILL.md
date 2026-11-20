@@ -421,10 +421,9 @@ loop that the operator writes around the informer.
 
 A long-running process serves Prometheus metrics on a port of its
 own. Root plan 65, `plans/completed/65-prometheus-metrics.md`, is the
-contract for the names, the labels, and the port, and it lists the
-components that serve none. Read it before you add or rename a
-metric, and copy a component that already serves metrics when you add
-the first one to a component.
+contract for the names, the labels, and the port. Read it before you
+add or rename a metric. A component with no `metrics.go` serves none
+yet, so copy a component that has one when you add its first metric.
 
 A new metric also needs a test that scrapes it, and a row in the
 component's `docs/content/docs/reference/metrics.md`. Check the

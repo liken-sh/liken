@@ -13,7 +13,7 @@ waits for the drills below. None of the drills has run.
 Plan 16's phase 2 is built: the client reads the WiiM's settings
 families after its subscriptions are live, after a write to a family,
 on each new subscription, and at the 30-minute backstop
-`settingsResync` (`wiim/client.go:58`), and not on the 10-second poll.
+`settingsResync` (in `wiim/client.go`), and not on the 10-second poll.
 [Plan 16](completed/16-the-wiims-settings.md) records how. Plan 20's
 phase 1, the zero-value fix, is built (b247ebd7): `Client.Settings()`
 reports no value for the balance, the status light, or the touch
@@ -176,7 +176,7 @@ on them.
   `network` has setters, and leaving them out is a choice.
 * `{"status":"Failed"}` does not always mean the model lacks a field.
 * The status already reports most of these families: `readSettings`
-  (`wiim/client.go:438`) reads them. Only the spec held two.
+  (in `wiim/client.go`) reads them. Only the spec held two.
 * Plan 13 said `reboot` fails on an Amp. `pywiim` reboots an Amp
   with `StartRebootTime:1`
   ([`api/diagnostics.py`](https://github.com/mjcumming/pywiim/blob/main/pywiim/api/diagnostics.py)).
