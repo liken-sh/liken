@@ -144,10 +144,12 @@ compositor, and the compositor opens the graphics card.
 
 The [`Display`](/docs/reference/displays/) lists each window under
 its claim's name in `status.surfaces`. Only one claim can hold an
-output. A second claim for the same output cannot allocate, so its pod
-stays `Pending` until the first claim is released. Use a
-[`Layout`](/docs/guides/layout/) when two workloads must share one
-screen.
+output, because that claim can set the panel's mode. A second claim
+for the same output cannot allocate, so its pod stays `Pending` until
+the first claim is released. To let several workloads draw on one
+screen, each claims the connector's draw device, as
+[Put regions on a screen](/docs/guides/layout/) shows, and a `Layout`
+places their windows.
 
 A client that sends YUV video frames can set each frame's color
 encoding and range through `wp_color_representation_manager_v1`. The

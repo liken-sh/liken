@@ -41,10 +41,10 @@ arcseconds per pixel and its short side is 38.1 arcminutes.
 
 | Series | Quads, in arcminutes | Fits a short side of |
 |---|---|---|
-| 4206 | 16 to 22 | 22 arcminutes or more |
-| 4207 | 22 to 30 | 30 arcminutes or more |
-| 4208 | 30 to 42 | 42 arcminutes or more |
-| 4209 | 42 to 60 | 60 arcminutes or more |
+| 4206 | 16 to 22 | 16 arcminutes or more |
+| 4207 | 22 to 30 | 22 arcminutes or more |
+| 4208 | 30 to 42 | 30 arcminutes or more |
+| 4209 | 42 to 60 | 42 arcminutes or more |
 
 A series of smaller quads also fits, and solves a frame with fewer
 bright stars, but its files are larger. For the field of 38.1

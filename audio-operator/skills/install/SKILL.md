@@ -246,9 +246,9 @@ endpoint and one `Source` for each capture endpoint, with the same
 names as the devices:
 
     kubectl get sinks
-    NAME                                            NODE      CONNECTION   VOLUME   MUTE    CLAIMS   CONNECTED   READY   AGE
-    kitchen-pci-0000-00-1f-3-hdmi-0                 kitchen   hdmi         100      false            True        True    2m
-    kitchen-usb-0573-1573-a34004801402-usb-audio    kitchen   usb          100      false            True        True    2m
+    NAME                                            NODE      CONNECTION   VOLUME   MUTE    CLAIMS   CONNECTED   READY   LAYOUT        LAYOUT SOURCE   AGE
+    kitchen-pci-0000-00-1f-3-hdmi-0                 kitchen   hdmi         100      false            True        True    ["FL","FR"]   ELD             2m
+    kitchen-usb-0573-1573-a34004801402-usb-audio    kitchen   usb          100      false            True        True    ["FL","FR"]   ChannelMap      2m
 
     kubectl get sources
     NAME                                                    NODE      CONNECTION   VOLUME   MUTE    CLAIMS   CONNECTED   READY   AGE

@@ -95,8 +95,9 @@ node that takes both holds the sum of the two. The appearances worker
 is a pod of the same kind. It requests `32Mi` of memory and one core
 of CPU, and its limit is `1536Mi`, because the largest measured run held
 740 MB in the tool and `ffmpeg` together, for a 4K file decoded in
-software. The two workers of one `Library` can run at the same
-time.
+software. The titles worker is a pod of the same kind too, with a
+limit of `1536Mi` and a request of one core of CPU. The workers of
+one `Library` can run at the same time.
 A worker with `parallelism` above 1 runs that many such pods, and two
 of them can share a node, so a node can hold the limit more than once.
 
@@ -137,6 +138,8 @@ measured yet.
 * **Leave `spec.appearances.enabled` off**, its default. The first
   pass decodes every frame of every feature, and its limit of
   `1536Mi` is more than a one-gigabyte machine holds.
+* **Leave `spec.titles.enabled` off**, its default. Its worker has
+  the same limit of `1536Mi`.
 * **Walk less often.** `spec.scan.schedule` defaults to once an hour.
   A webhook covers imports between walks:
 

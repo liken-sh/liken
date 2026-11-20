@@ -22,8 +22,6 @@ volumes.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: liken-system
-
 resources:
   - https://github.com/liken-sh/liken//per-node-csi-driver/deploy?ref=<tag>
 
@@ -35,6 +33,11 @@ images:
 The driver's version is the tag of the release that last published it. The
 [GitHub release](https://github.com/liken-sh/liken/releases) for each
 tag lists every component and its version.
+
+The base puts its objects in `liken-system`, so your kustomization
+needs no `namespace` field. That field would also move the dashboard
+of the `deploy/monitoring` component out of the `monitoring`
+namespace.
 
 Apply the kustomization from its directory:
 

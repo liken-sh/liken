@@ -12,7 +12,7 @@ drawing in its own rectangle. This guide puts a notice board on the
 left 70% of a lobby screen and a parking-lot camera in the upper
 right. You need the operator [installed](https://liken.sh/display/docs/guides/install/) and
 you should have read the [claim guide](https://liken.sh/display/docs/guides/claim/), because
-each program claims the screen the way that guide shows.
+each program's claim has the shape that guide shows.
 
 A screen with no `Layout` shows every window fullscreen, with the
 newest on top. A `Layout` divides the screen into regions. Each region
@@ -78,9 +78,10 @@ and the `LayoutResolved` condition is `False` with the reason
 
 ## 3. Label the pods
 
-Each program claims the screen from its own namespace, as the claim
-guide shows. The only addition is the label that the region's selector
-reads. This is the camera, in the `facilities` namespace:
+Each program claims the screen's draw device from its own namespace.
+The claim has the shape that the claim guide shows, and the pod adds
+the label that the region's selector reads. This is the camera, in the
+`facilities` namespace:
 
     apiVersion: apps/v1
     kind: Deployment
@@ -111,10 +112,31 @@ reads. This is the camera, in the `facilities` namespace:
                 claims:
                   - name: screen
 
-The notice board, in the `frontdesk` namespace, has the same shape. It
-has its own claim on the same connector and the label
-`panel: notices`. Both namespaces can claim the same screen because
-its device accepts more than one claim at a time.
+The notice board, in the `frontdesk` namespace, has the same shape,
+with the label `panel: notices`. Each program claims the connector's
+draw device, not its output device. The output device accepts one
+claim, because that claim can set the panel's mode, so a second claim
+through `display-output` stays `Pending`. The draw device has the
+name of the output with a `-draw` suffix, and many claims can hold it
+at the same time. Create a class for it, as you created
+`display-output`:
+
+    apiVersion: resource.k8s.io/v1
+    kind: DeviceClass
+    metadata:
+      name: display-draw
+    spec:
+      selectors:
+        - cel:
+            expression: |
+              device.driver == "display.liken.sh" &&
+              has(device.attributes["display.liken.sh"].draw)
+
+Name `display-draw` in each claim, and keep the `connector` selector
+and the `display.liken.sh/disconnected` toleration from the claim
+guide. The draw device has the same taints as the output device. A
+draw claim sets neither the panel's mode nor its power, because a
+write from one claim would change the screen for the others.
 
 When a window is placed in a region, the compositor tells the program
 the region's size, and the program redraws at that size, as it does

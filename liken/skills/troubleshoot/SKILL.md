@@ -98,6 +98,14 @@ gives the reason:
   gives the order of the fixes.
 * `RejectedLastBoot`: the machine booted the change once, and the
   boot failed. See the next section.
+* `DigestMismatch`: the `release.yaml` that the machine downloaded
+  does not match the `digest` of its entry in the catalog. A second
+  download gets the same bytes, so the machine stays on its release
+  until you correct the entry. Compute the digest again as
+  [Upgrade the fleet](https://liken.sh/docs/guides/upgrade/#1-find-the-release)
+  shows.
+* Any other reason: the condition's message says what to change,
+  such as the spec, the catalog, or a credentials `Secret`.
 
 ## A machine returned to the old version
 

@@ -327,14 +327,15 @@ take any shape that dynamic resource allocation allows, and the choice
 of a GPU is the cluster owner's, so the device classes and selectors
 stay in your own YAML. You write a `ResourceClaimTemplate` in the
 namespace of the `Library`, and the `Library` names it in
-`spec.trickplay.gpuResourceClaimTemplate` or
-`spec.appearances.gpuResourceClaimTemplate`. Each pod of the worker
+`spec.trickplay.gpuResourceClaimTemplate`,
+`spec.appearances.gpuResourceClaimTemplate`, or
+`spec.titles.gpuResourceClaimTemplate`. Each pod of the worker
 claims a device from that template. The field is named for the role
 of the claim, the GPU the worker decodes on, so a claim for another
 kind of device, such as an NPU for the face models, takes a field of
 its own.
 
-Both workers need a GPU whose VA-API driver decodes the library's
+Every worker needs a GPU whose VA-API driver decodes the library's
 video, 10-bit HEVC included, and scales 10-bit frames. A render node
 alone does not say what its driver can do. On a fleet of mixed GPUs, a
 pod can then land on a GPU that the image's driver cannot open, such as
@@ -1116,7 +1117,7 @@ The preferred languages are the library's `spec.languages`, then the
 household's `audioLanguages` from the media operator's
 `MediaPreferences`, and `en` when neither names any.
 
-A trailer file beside the title still plays as before.
+A trailer file beside the title plays as well.
 
 ### Intro and credits marks
 

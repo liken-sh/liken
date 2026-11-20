@@ -255,8 +255,9 @@ container beside every phase the `Library`'s sources serve: the probe,
 the arrival fact, identity, the `.nfo` facts, the art, the trailers,
 the marks, the people, and the trailer files. All of them start
 together, and each phase works on a title as soon as the walk and the
-phases before it have written that title's rows. Trickplay and the
-appearances each run in a worker `Job` of their own after the walk
+phases before it have written that title's rows. Trickplay, the
+appearances, and the end titles each run in a worker `Job` of their
+own after the walk
 `Job` ends. The
 [enrichment guide](/docs/guides/enrichment/#3-what-the-phases-do)
 describes the phases. The `scan` container runs a person's own image

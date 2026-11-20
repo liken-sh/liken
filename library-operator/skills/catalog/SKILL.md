@@ -331,6 +331,7 @@ queries and lists the cluster's members. For a `Catalog` named
     kubectl -n media exec media-catalog-0 -c catalog -- /corrosion query "SELECT COUNT(*) FROM movies"
     kubectl -n media exec media-catalog-0 -c catalog -- /corrosion cluster members
 
-The tables are in the repository at `corrosion/schema/catalog.sql`,
-with a comment on each. Every table is keyed by its library first, so
+The tables are in the repository at
+`library-operator/corrosion/schema/catalog.sql`, with a comment on
+each. Every table is keyed by its library first, so
 two libraries in one namespace never share a row.

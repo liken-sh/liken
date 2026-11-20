@@ -123,14 +123,14 @@ images have the same version, so pin each of them to it:
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
     resources:
-      - https://github.com/liken-sh/liken//bluetooth-operator/deploy?ref=2026.09.29-002
+      - https://github.com/liken-sh/liken//bluetooth-operator/deploy?ref=<version>
     images:
       - name: ghcr.io/liken-sh/bluetooth-operator
-        newTag: 2026.09.29-002
+        newTag: <version>
       - name: ghcr.io/liken-sh/bluetoothd
-        newTag: 2026.09.29-002
+        newTag: <version>
       - name: ghcr.io/liken-sh/bluetooth-bondfetch
-        newTag: 2026.09.29-002
+        newTag: <version>
 
 The manifests contain:
 

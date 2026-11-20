@@ -55,7 +55,8 @@ you are likely to set:
 * `spec.ignore` lists path components the scanner skips, such as a
   recycle bin or a staging directory.
 * `spec.scan.schedule` is the cron expression the full walk runs on,
-  in the cluster's time zone. It defaults to once an hour, on the hour.
+  in UTC unless it starts with a `CRON_TZ=` prefix. It defaults to
+  once an hour, on the hour.
 * `spec.trickplay.enabled` builds the thumbnail sheets for the scrub
   bar. It is off by default, because the first pass reads every video
   end to end. A trickplay worker `Job` of its own decodes the videos
@@ -126,8 +127,8 @@ Four conditions report why the phase is what it is:
   as its finalizer keeps the object from being removed.
 
 A fifth condition, `GPUClaimTemplates`, does not change the phase. It
-reports the `ResourceClaimTemplates` that the enabled trickplay and
-appearances workers name. The reason for `False` is
+reports the `ResourceClaimTemplates` that the enabled trickplay,
+appearances, and titles workers name. The reason for `False` is
 `ClaimTemplateNotFound`, and the operator starts no worker whose
 template is missing. It is absent on a library whose enabled workers
 name none.
@@ -163,7 +164,8 @@ last hour:
   person to act post a `Warning`: `ClaimNotFound`, `VolumeNotFound`,
   `ManyCatalogs`, `ScheduleInvalid`, `JobNotStarted`, `JobFailed`,
   `ProviderNotFound`, `ProviderNotReady`, `FactNotServed`,
-  `ClaimTemplateNotFound`, and the `Departing` reason `Blocked`. Every
+  `ClaimTemplateNotFound`, the `EndTitlesModel` reasons `Rejected` and
+  `FitFailed`, and the `Departing` reason `Blocked`. Every
   other reason posts a `Normal` `Event`, so a `Ready` that returns to
   `True` posts `Ready`.
 * `JobCreated` (`Normal`) names each `Job` the operator creates for the
