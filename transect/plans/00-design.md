@@ -79,7 +79,31 @@ So a new idea is judged first by whether a primitive lets the reader
 reach the conclusion.  `transect` computes a conclusion itself only
 when a stated expectation makes the check exact.
 
-Settled on 2026-11-20.
+The primitives are these:
+
+- **Parts.**  The things that exist: objects, containers, and the
+  things around the cluster.
+- **Relations.**  How parts connect, read from the cluster: one runs
+  on another, stores on it, owns it, or reaches it.
+- **Roles.**  What a part does within a named pattern.
+- **Claims.**  Facts that people and agents add, each attached to a
+  part or a relation.
+- **Expectations.**  What a pattern or a convention says is true of a
+  part, shown as met or unmet.
+- **Likeness.**  Which parts are of the same sort, so that `transect`
+  can show them side by side.
+- **Signals.**  What happens while the cluster runs: a condition or an
+  `Event` from the Kubernetes API, a metric from Prometheus, a trace
+  from an OpenTelemetry store, a line from a log store.
+
+Parts and relations say what the cluster is, and signals say what it
+does.  A signal reaches the reader through `transect`, attached to the
+part or the relation that it describes, so that a person or an agent
+can reason about the behavior of a system in the place where they read
+its structure.
+
+The list was settled on 2026-11-20.  What makes parts "of the same
+sort" is open.
 
 ## Patterns
 
@@ -293,6 +317,6 @@ served.
   places that keep their position from one visit to the next, a mark on
   each fact that states its source, and the elevations from the cluster
   down to a container.
-- The primitives themselves, as a short list.
+- What makes parts of the same sort, for likeness.
 - What a pattern's catalog holds first.  The cases will show which
   patterns are real.
