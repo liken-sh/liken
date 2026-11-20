@@ -47,7 +47,8 @@ not in a test.
   starts with `start` or `new`, such as `startWorld` in
   `firmware-operator/world_test.go`, which returns a `world` with the
   operator and its fake API server. To find the helpers of a package,
-  run `grep -nE '^func (start|new)' *_test.go` in its directory.
+  run `grep -nE '^func (start|new|[a-z]+World)' *_test.go` in its
+  directory, and read a test of the same domain for the one it uses.
 - **Push setup into fixtures and builders.** A builder reads as the
   thing it builds. `fakeCECBus` in `equipment-operator/cecnode_test.go`
   declares a TV and a receiver in two lines. `managedObjects` in

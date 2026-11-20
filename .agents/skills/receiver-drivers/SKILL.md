@@ -130,7 +130,8 @@ Unsupported, and the reason names the document.
 
 ## The exceptions and the condition
 
-`status.settingExceptions` lists each field whose state differs from
+Plan 14 designs `status.settingExceptions`, and the CRD does not have
+it yet. It lists each field whose state differs from
 its tier, with the reason. When the device sent its own text, the
 reason includes that text. When a declared field is in the list, the
 `SettingsConfirmed` condition is `False`, and the condition's message

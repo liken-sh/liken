@@ -419,10 +419,12 @@ loop that the operator writes around the informer.
 
 ## Metrics
 
-Every long-running process serves Prometheus metrics on a port of its
+A long-running process serves Prometheus metrics on a port of its
 own. Root plan 65, `plans/completed/65-prometheus-metrics.md`, is the
-contract for the names, the labels, and the port. Read it before you
-add or rename a metric.
+contract for the names, the labels, and the port, and it lists the
+components that serve none. Read it before you add or rename a
+metric, and copy a component that already serves metrics when you add
+the first one to a component.
 
 A new metric also needs a test that scrapes it, and a row in the
 component's `docs/content/docs/reference/metrics.md`. Check the

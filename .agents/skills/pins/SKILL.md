@@ -318,7 +318,8 @@ image includes it at `/usr/share/doc/liken/<image>.cdx.json`. syft
 copies the components of each such file into the image's SBOM. The
 SBOM of a release uses the same reader, `toolchains/manifest`, so a
 field means the same in both. A Dockerfile that fetches a file of a
-manifest and runs no `image-sbom` fails `ci pins`.
+manifest and runs no `image-sbom` fails `ci pins`. The `record` stage
+of `weston/Dockerfile` is one to copy.
 
 **A CPE for a file of the OS.** No package database records the
 kernel, k3s, the bootloaders, or the microcode. So an entry of the OS

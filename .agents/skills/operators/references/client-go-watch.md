@@ -84,8 +84,9 @@ list.
 of a `Source`, with the `Handler`, `Synced`, and `Reopened` of its
 `Options`. `Convert` decodes each object, and `Report` logs an object
 that does not decode. `bluetooth-operator` is the reference for the
-handlers: they are in `requestwatch.go` and `editwatch.go`, and
-`watch_test.go` runs them through the real reflector.
+handlers: they are in `requestwatch.go` and `editwatch.go`, and the
+tests beside each file run them through the real reflector against
+the fake server of `watch_test.go`.
 `liken/kubernetes/watch` has `liken`'s handlers. `WakeOnChange`,
 `WakeOnEdit`, and `WakeOnContent` are for a collection whose
 `Transform` trims each object to the fields that the pass reads.

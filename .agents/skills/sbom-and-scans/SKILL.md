@@ -346,7 +346,10 @@ docker run --rm "aquasec/trivy:$version" image --scanners vuln --ignore-unfixed 
 
 The scan does not match `linux-firmware`, which NVD does not list. It
 also does not match the iptables programs of `k3s-root-xtables`,
-whose entry records the version of k3s-root.
+whose entry records the version of k3s-root. Trivy also reports no
+finding for a Debian package of an image built from Debian sid, and
+`plans/open-problems/trivy-matches-nothing-on-debian-sid.md` has the
+evidence.
 
 ## Answer a finding
 
@@ -382,7 +385,9 @@ tells you what clears the alert.
    a reviewer can check.
 5. **Does a newer release of the upstream include the fix?** Run the
    pin's `latest.sh` with no argument. When the pin is behind, bump it
-   with the `bump-components` skill.
+   with the `bump-components` skill. For a Debian package of a base
+   image, the pin is the Debian snapshot, which `vulkan/latest.sh`
+   moves for every base.
 6. **Is the pin current, with no fix upstream?** Do nothing. The
    alert stays open until upstream releases a fix, and no one
    dismisses it. A module that k3s links is an example: `liken`

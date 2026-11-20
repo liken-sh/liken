@@ -68,12 +68,12 @@ watch loop needs failed review in a hand-written loop. The
 `operators` skill has the guards.
 
 Use a timer as a clock: a time-to-live, a deadline, the wait before a
-retry, or the age of a certificate. A timer that reads state again to look for a change is a
-defect when the source has an event to subscribe to. It is correct in
-two cases, each with a comment at the timer. A long resync can be a
-backstop for a subscription, and its comment says which failure it
-covers. A source can publish no event at all, such as a file behind
-an HTTP URL, and its comment says why no event exists.
+retry, or the age of a certificate. A timer that reads state again to
+look for a change is a defect when the source has an event to
+subscribe to. It is correct in two cases, each with a comment. A long
+resync can be a backstop for a subscription, and its comment says
+which failure it covers. A source can publish no event at all, such
+as a file behind an HTTP URL, and its comment says why none exists.
 
 ## Conditions, Events, and log lines
 

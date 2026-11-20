@@ -182,7 +182,8 @@ in the log for the upload of `release.yaml` to
 3. To check the signatures too, run
    `liken verify release -digest sha256:<hex> <version>` for the OS
    and `liken verify image ghcr.io/liken-sh/<image>:<version>` for an
-   image. The `sbom-and-scans` skill explains what each one checks.
+   image. Run the CLI from the tree as `go run ./cli` in `liken/`.
+   The `sbom-and-scans` skill explains what each one checks.
 
 ## 7. Report
 

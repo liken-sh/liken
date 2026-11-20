@@ -55,11 +55,11 @@ fails. The comment at the top of `init/components.go` has the rule.
 `machine-operator` serves the `liken.sh` DRA driver, which publishes
 each machine's hardware as devices. A device's attributes record the
 facts about it that no other layer can observe. An extension operator
-claims a device
-through the standard DRA interfaces, the same ones that work with any
-other DRA driver. No code in the OS reads an operator's kinds. When
-an operator needs a new fact about a device, the OS adds the fact as
-an attribute, and the logic of the feature stays in the operator.
+claims a device through the standard DRA interfaces, the same ones
+that work with any other DRA driver. No code in the OS reads an
+operator's kinds. When an operator needs a new fact about a device,
+the OS adds the fact as an attribute, and the logic of the feature
+stays in the operator.
 
 ## Finding things
 

@@ -4,8 +4,8 @@ package main
 // faults that change no condition. For a condition transition,
 // endpointevents.go posts an Event with the condition's own reason,
 // such as NoNode. A person filters kubectl get events on a reason,
-// and the troubleshooting guide names each one, so a reason is part of
-// the published interface.
+// and the reference pages of Sink and Source name each one, so a
+// reason is part of the published interface.
 //
 // A Sink and a Source are cluster-scoped, so kubernetes/events posts
 // their Events in the namespace default, where kubectl describe sink

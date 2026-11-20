@@ -139,8 +139,8 @@ var argDefault = regexp.MustCompile(`^ARG\s+([A-Za-z_][A-Za-z0-9_]*)=(\S+)`)
 //     unmanifestedDownloads. A Dockerfile that ADDs a file that a
 //     manifest lists, with a scope other than excluded, also runs
 //     image-sbom.
-//   - A sums file next to a pin.toml, such as models.sha256, has the
-//     same digest as the manifest for each file that both list.
+//   - A sums file next to a pin.toml, such as models.sha256, has a
+//     line with the digest of each entry of the manifest.
 //   - The source mirror contains no digest.
 func checkManifests(root string) ([]string, error) {
 	files, err := sourceFiles(root)
@@ -460,22 +460,35 @@ func expandArgs(text string, args map[string]string) string {
 	})
 }
 
-// sumsFindings lists each line of a sums file, such as models.sha256,
-// whose digest for a manifest entry's file differs from the entry's
-// sha256. A build that checks files against the sums file and an SBOM
-// that reads the manifest must describe the same bytes.
+// sumsFindings checks a sums file, such as models.sha256, against the
+// manifest beside it. A build checks its files against the sums file,
+// and an SBOM is made from the manifest, so they must describe the
+// same bytes. A finding is a line whose digest for an entry's file
+// differs from the entry's sha256, or an entry whose sha256 is on no
+// line. The second check covers a file that the build stores under a
+// name other than the last part of its URL.
 func sumsFindings(file, manifest, text string, entries map[string]map[string]string) []string {
 	var findings []string
+	listed := map[string]bool{}
+	reported := map[string]bool{}
 	for i, raw := range strings.Split(text, "\n") {
 		fields := strings.Fields(raw)
 		if len(fields) != 2 {
 			continue
 		}
 		digest, name := fields[0], strings.TrimPrefix(fields[1], "*")
-		for _, entry := range entries {
+		listed[digest] = true
+		for entryName, entry := range entries {
 			if path.Base(entry["url"]) == name && entry["sha256"] != digest {
+				reported[entryName] = true
 				findings = append(findings, fmt.Sprintf("%s:%d lists %s with sha256:%s, and %s has sha256 %s", file, i+1, name, digest, manifest, entry["sha256"]))
 			}
+		}
+	}
+	for _, entryName := range slices.Sorted(maps.Keys(entries)) {
+		digest := entries[entryName]["sha256"]
+		if digest != "" && !listed[digest] && !reported[entryName] {
+			findings = append(findings, fmt.Sprintf("%s has no line with sha256:%s, which %s records for %s", file, digest, manifest, entryName))
 		}
 	}
 	return findings
