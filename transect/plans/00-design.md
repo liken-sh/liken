@@ -131,6 +131,30 @@ intended, and that mark is a claim like any other.
 
 Settled on 2026-11-20.
 
+## Where expectations come from
+
+A thing is out of place when it does not meet an expectation, and each
+expectation has a source that `transect` shows with it:
+
+- **A pattern.**  `transect`'s catalog states what a pattern expects,
+  and a claim states that a group of parts is one.
+- **Peers.**  The expectation is that a thing matches the things built
+  the same way.  `transect` computes it from the cluster, and nobody
+  states it.
+- **The owner's conventions.**  The owner of the cluster states a rule
+  for the whole cluster, such as that every namespace has a policy that
+  refuses traffic by default, or that every workload with replicas
+  spreads them across machines.
+
+A cluster's owner often checks conventions in the repository that holds
+the cluster's manifests, before a commit.  That check reads the
+manifests of that repository.  It does not read what runs, and it does
+not read what an agent applied by another way.  A convention that
+`transect` holds is checked against the running cluster, so it covers
+both.
+
+Settled on 2026-11-20.
+
 ## Claims
 
 A claim is a fact that a person or an agent adds because the cluster
@@ -249,9 +273,6 @@ served.
 ## Open positions
 
 - Who may state what, and whose claim holds when two disagree.
-- Where the expectations of a pattern come from: `transect`'s catalog,
-  a thing's peers, or a convention that the cluster's owner sets for
-  the whole cluster.
 - What counts as the cluster's surroundings, such as a storage server,
   a forge, an identity provider, and the devices on a bus.
 - Which ideas of the proof of concept carry over.  The candidates are
