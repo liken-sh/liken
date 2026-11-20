@@ -66,6 +66,21 @@ stays true.
 
 Settled on 2026-11-20.
 
+## Simple primitives
+
+`transect` gives the reader a small set of simple primitives, and the
+reader does the reasoning.  A primitive is good when a person or an
+agent can combine it with the others to reach a conclusion that
+`transect` never computed.  A reader who sees how a system works and
+where it does not work can tell what its loss would cost, and a reader
+who sees a thing beside its peers can tell which one drifted.
+
+So a new idea is judged first by whether a primitive lets the reader
+reach the conclusion.  `transect` computes a conclusion itself only
+when a stated expectation makes the check exact.
+
+Settled on 2026-11-20.
+
 ## Patterns
 
 A pattern is a named set of expectations.  To call a group of workloads
@@ -109,38 +124,36 @@ A thing is out of place in one of these ways:
   does not arrive.
 
 Excess, broken, unexplained, and different from its peers are faults
-of structure.  The cluster's objects show them, and `transect` can
-find one as soon as the object is applied.  Not flowing is a fault of
-behavior.  The objects can be correct while it
-happens, so `transect` needs a signal, such as a metric or a count in
-the service that receives the work, and it needs knowledge of what is
-expected to flow.
+of structure, and the cluster's objects show them.  Not flowing is a
+fault of behavior.  The objects can be correct while it happens, so
+`transect` needs a signal, such as a metric or a count in the service
+that receives the work, and it needs knowledge of what is expected to
+flow.
 
 Settled on 2026-11-20.
 
 ## Peers
 
-`transect` compares a thing with its peers without being told what to
-expect.  Agents build by copying a thing that works and changing it, so
-the things that a new one was copied from are what to compare it with.
-When every workload of a kind but one is built from the same template,
-that one is worth a look, and no person wrote a rule to say so.
+`transect` shows a thing beside its peers, the things that were built
+the same way, so that a person or an agent who reads the page can
+notice the one that differs.  Agents build by copying a thing that
+works and changing it, so the things that a new one was copied from are
+what to compare it with.
 
-A difference can be deliberate.  A person or an agent marks it as
-intended, and that mark is a claim like any other.
+`transect` does not search for such differences itself.  To find a
+difference that matters with no stated expectation is a harder problem,
+and it waits.  The maintainer corrected an earlier form of this
+position, which had `transect` compare peers without being asked.
 
 Settled on 2026-11-20.
 
 ## Where expectations come from
 
-A thing is out of place when it does not meet an expectation, and each
-expectation has a source that `transect` shows with it:
+An expectation that `transect` checks is one that somebody stated, and
+`transect` shows its source with it:
 
 - **A pattern.**  `transect`'s catalog states what a pattern expects,
   and a claim states that a group of parts is one.
-- **Peers.**  The expectation is that a thing matches the things built
-  the same way.  `transect` computes it from the cluster, and nobody
-  states it.
 - **The owner's conventions.**  The owner of the cluster states a rule
   for the whole cluster, such as that every namespace has a policy that
   refuses traffic by default, or that every workload with replicas
@@ -172,10 +185,11 @@ does not record it.  Every claim is attached to something that
   the workload doubled its parts reads differently from one written
   yesterday.
 
-A mark that a difference is intended is attached to that difference.
-When the difference changes, such as when the account gains another
-grant, the mark no longer covers it, and `transect` reports the
-difference again.
+A person or an agent can mark an unmet expectation as intended, such
+as a namespace that has no default policy on purpose.  The mark is
+attached to the state that it was written about.  When that state
+changes, the mark no longer covers it, and `transect` reports the
+expectation again.
 
 So the reader can always tell when to stop trusting a claim.  This
 matters most for claims that agents write.  An agent's account of its
@@ -279,5 +293,6 @@ served.
   places that keep their position from one visit to the next, a mark on
   each fact that states its source, and the elevations from the cluster
   down to a container.
+- The primitives themselves, as a short list.
 - What a pattern's catalog holds first.  The cases will show which
   patterns are real.
