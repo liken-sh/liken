@@ -1,102 +1,74 @@
 # Working on astrophotography-operator
 
-This directory holds the operator that images the targets a person
-declares on a telescope that `observatory-operator` controls, and the
-manifests that run it. `plans/00-design.md` is the design, and the `plans/`
-directory holds the plans that build it. Code exists only where a plan
-calls for it. This component depends on `observatory-operator`, and
-`observatory-operator` does not depend on it. [Root plan
-74](../plans/completed/74-astrophotography.md) records the contract between the
-two components, and [plan 08](plans/completed/08-the-component-and-the-first-session.md)
-gives the order in which the pieces of plans 01, 02, and 03 build.
+`astrophotography-operator` is a Go Kubernetes operator. `README.md`
+says what it is for and describes its kinds.
 
-The layout follows `observatory-operator`'s: the operator's
-`package main` flat at the top, one domain to a file, and these
-packages:
+## How it runs
 
-- `astrophotography/`, the Go types of `Target` and `Solver`, whose
-  CRDs in `deploy/` are written by hand.
-- `sky/`, the conversion between J2000 and the equinox of the date,
-  and the altitude and azimuth at a site, from Meeus's *Astronomical
-  Algorithms*.
-- `outbox/`, the layout of a reservation's outbox, which the runner,
-  the worker, and the promotion `Job` share.
-- `catalog/`, a target's frame catalog: the line (`catalog.go`), the
-  reader that counts the totals (`read.go`), and the writer that
-  appends (`append.go`).
-- `promote/`, `worker/`, and `solver/`, the three modes of the binary
-  that do not run the operator. Each has the types of its interface
-  with the operator: the promotion report, and the HTTP requests and
-  responses of the worker and the solver. `promote/` also has the
-  promotion `Job`'s run and `promote.Name`, which renders a frame's
-  name from `archive.format`.
+The operator is one `Deployment` in `liken-system`. Only the pod that
+has the `Lease` acts. The operator watches these objects:
 
-The operator imports `observatory-operator`'s `indi`, `phd2`, and
-`observatory` packages through the `replace` in `go.mod`, and the
-`Dockerfile` copies those three packages from the build context
-`observatory`. A change to them runs this component's tests too.
+- the `Target`s and `Solver`s
+- the `Reservation`s whose holder is `astrophotography-operator`
+- the kinds of `observatory-operator` that it reads
+- the objects that it creates
 
-`make test` runs every check CI runs. The manual at
-https://liken.sh/astrophotography/ changes with the code, and
-`docs/AGENTS.md` covers writing it. The resource pages are generated
-from the CRDs, and `skills/` is generated from the guides, so run
-`make -C docs generate skills` after an edit to either.
+For each of its reservations that is `Ready`, the operator connects to
+the telescope's INDI server as one more client. When the telescope has
+a `Guider`, it also connects to PHD2's event server. Through those
+connections, it runs the night.
 
-## The resources
+The operator's other modes run from the image
+`astrophotography-operator-worker`. That image is the same binary,
+built on the `astrometry` image:
 
-The tests in `astrophotography/` read the CRDs through the API
-server's own validators and compare them with the Go types, the way
-`observatory-operator`'s tests do:
+- A worker `Deployment` in the reservation's namespace mounts the
+  outbox and finds the stars of a centering frame.
+- A solver `Deployment` for each `Solver` mounts the index files and
+  solves one star list at a time.
+- A promotion `Job` moves a target's frames from the outbox to the
+  archive and appends each one to the target's catalog.
 
-- `drift_test.go` compares each Go type with its CRD, field by field.
-- `enum_test.go` checks that each CRD enum equals the Go constants.
-- `validation_test.go` runs resources that a person could write
-  through the structural schema and the CEL rules, and
-  `target_test.go` checks the defaults that the CRD fills in.
-- `fitskeywords_test.go` compares the `Target`'s `spec.fitsKeywords`
-  with `observatory-operator`'s field, and its refused names with
+Only the operator connects to the worker and the solver. It copies
+each star list from the worker to the solver. So the star list
+travels over the network between nodes, and the frame does not. The
+operator writes each target's progress into the
+target's status.
+
+## Design
+
+A frame in the archive does not change. So anything that the operator
+writes into a frame is hard to change later: the FITS keywords, the
+frame's identity, and the suffix that the operator can add to a file
+name. The catalog is beside the frames, and a person can read it long
+after the cluster is gone. So these rules apply to the catalog:
+
+- A field keeps its name and meaning once the operator writes it.
+- The operator never writes a line again.
+- A new kind of record goes on a new line.
+
+This component depends on `observatory-operator`.
+`observatory-operator` does not depend on this one. This operator
+imports `observatory-operator`'s Go packages, so a change to those
+packages also runs this component's tests. It reads only what
+`observatory-operator` publishes for a reservation's holder.
+`observatory-operator/AGENTS.md` describes the contract between them.
+
+The reasons for these decisions are in `plans/`. Read the relevant
+plan before you change how something works.
+
+## Finding things
+
+- `deploy/` contains the CRDs of `Target` and `Solver`, which are
+  written by hand. The tests in `astrophotography/` compare them with
+  the Go types through the API server's own validators.
+- `astrophotography/fitskeywords_test.go` compares the `Target`'s
+  `spec.fitsKeywords` with `observatory-operator`'s field. It also
+  compares the keyword names that the field rejects with
   `RefusedFITSKeywords`.
-- `example_test.go` checks `examples/first-session.yaml`, the drill of
-  plan 08, against both operators' CRDs, against the Go types, and for
-  references to objects that it does not declare.
-
-## The operator
-
-`main.go` builds the clients, and `leader.go` waits for the `Lease`,
-runs the operator, and releases the `Lease` after the last write.
-`operator.go` opens the watches of `watch.go`, which notify one
-`changeNotifier` on every change: the `Target`s and `Solver`s, the `Reservation`s whose
-`spec.holder` is `astrophotography-operator`, the kinds of
-`observatory-operator` that the runner reads, and the pods,
-`Service`s, `Deployment`s, and `Job`s the operator creates, and every
-`PersistentVolumeClaim`. `runners.go` starts the runner of plan 01
-for each `Ready` reservation (`runner.go`): it chooses and claims a
-target (`selection.go`) that is above the telescope's horizon
-(`horizon.go`), checks that the filter wheel has its filters
-(`filters.go`), slews (`slew.go`), exposes each frame
-(`exposure.go`, `framesaved.go`), counts it into the target's status
-(`counting.go`), and finishes a frame in flight after a restart
-(`resume.go`). `steps.go` declares the interfaces of guiding and
-centering, which the tests replace.
-`centering.go` centers a target with a plate solve, through the
-centering frames of `centeringframe.go` and the client of
-`platesolve.go`. `guider.go`, `guiding.go`, and `dither.go` guide and
-dither with PHD2.
-`promotion.go` is the loop of plan 03, which
-starts the promotion `Job`s and applies their reports
-(`promotionstatus.go`), and starts a `Job` again for the frames a `Job`
-left when a person adds the retry annotation (`promotionretry.go`). `outboxfinalizer.go` keeps the finalizer on
-the outbox claims, and `targetfinalizer.go` keeps it on the `Target`s,
-so a delete waits for the frames that promotion has not moved.
-`metrics.go` has the registry and the listener of root plan 65, and
-`events.go` the reasons of the `Event`s that no
-condition transition gives. Each loop of plans 01, 02, and 03 starts in
-`operator.run` and waits on the `changeNotifier`.
-
-The tests run the operator in a `testing/synctest` bubble against
-`fakeapi_test.go`, an API server on `kubernetes/apiservertest` that
-serves every watched collection, and the Lease server of
-`kubernetes/election/electiontest`. `fakeobjects_test.go` serves the
-reads and writes of one object, with a 409 for a stale
-`resourceVersion`, and `promote/` runs against files in
-`t.TempDir()`.
+- `astrophotography/example_test.go` checks
+  `examples/first-session.yaml` against both operators' CRDs, the Go
+  types, and its own references.
+- The manual's reference pages and `skills/` are generated from the
+  CRDs and the guides. Run `make -C docs generate skills` after you
+  edit either. `docs/AGENTS.md` covers the manual.

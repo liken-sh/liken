@@ -1,4 +1,4 @@
-//! The bus half of a screen client for one `Player`: everything except
+//! The MQTT side of a screen client for one `Player`: everything except
 //! drawing. `media-operator`'s idle screen and `library-operator`'s media
 //! browser both link it by path, so a change here reaches both clients.
 //!

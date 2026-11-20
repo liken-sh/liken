@@ -1,10 +1,14 @@
 # Working on cec
 
-This directory holds the HDMI-CEC driver: a Go binding of the Linux
-kernel's CEC API, the messages this operator sends and reads, and the
-scan and follower logic built on them. `cectest/` is a CEC bus in
-memory that answers the same ioctls, for tests. `plans/completed/09-cec.md`
-gives the design.
+This package is the HDMI-CEC driver. It contains:
+
+- a Go binding of the Linux kernel's CEC API, built on
+  `golang.org/x/sys/unix`, with no libCEC and no cgo
+- the messages that the operator sends and reads
+- the scan and the follower, which use those messages
+
+`cectest/` is an in-memory CEC bus for tests, which handles the same
+ioctls as the kernel. The design is in `plans/completed/09-cec.md`.
 
 ## The references
 
@@ -15,200 +19,170 @@ gives the design.
   explains the addresses, and the
   [CEC admin guide](https://docs.kernel.org/admin-guide/media/cec.html)
   covers the drivers.
-- `linux/cec.h` is the source of every struct layout and request
-  number in `kernel.go`. `kernel_test.go` pins each size, offset, and
+- Every struct layout and request number in `kernel.go` comes from
+  `linux/cec.h`. `kernel_test.go` checks each size, offset, and
   request number against values compiled from the header with
   `sizeof`, `offsetof`, and the `_IOR`/`_IOW`/`_IOWR` macros.
   `linux/cec-funcs.h` shows the operand layout of each message.
 - CEC is Supplement 1 of the HDMI specification. HDMI 1.3a with its
   CEC supplement is free from the
-  [HDMI specification page](https://www.hdmi.org/spec/index) after a
-  form. Later supplements are available only to HDMI adopters.
-- The first adapter is the Pulse-Eight USB-CEC adapter
-  ([product page](https://www.pulse-eight.com/p/104/usb-hdmi-cec-adapter)).
-  The kernel's `pulse8-cec` driver presents it through the CEC
-  framework, so this package does not use libCEC. The notes at the
-  top of
+  [HDMI specification page](https://www.hdmi.org/spec/index) after you
+  fill in a form. Later supplements are available only to HDMI
+  adopters.
+- The kernel's `pulse8-cec` driver makes the Pulse-Eight USB-CEC
+  adapter
+  ([product page](https://www.pulse-eight.com/p/104/usb-hdmi-cec-adapter))
+  work through the kernel's CEC framework, so this package does not
+  need libCEC for it. The notes at the top of
   [`pulse8-cec.c`](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/media/cec/usb/pulse8/pulse8-cec.c?h=v7.2)
   describe the adapter's autonomous mode.
-- [`cec-ctl`](https://www.mankier.com/1/cec-ctl),
+- Use [`cec-ctl`](https://www.mankier.com/1/cec-ctl),
   [`cec-follower`](https://www.mankier.com/1/cec-follower), and
   [`cec-compliance`](https://www.mankier.com/1/cec-compliance) from
-  [v4l-utils](https://git.linuxtv.org/v4l-utils.git) check this code
-  by hand.
+  [v4l-utils](https://git.linuxtv.org/v4l-utils.git) to check this
+  code by hand.
 
 ## The message families
 
-`message.go` groups the opcodes by family, and each group's comment
-says who sends it and what answers it. The package uses five:
+`message.go` groups the opcodes by family. The comment on each group
+says which device sends those messages and what replies to them. The
+package uses these families:
 
 - **Identity.** Give Physical Address, Give OSD Name, Give Device
-  Vendor ID, and Get CEC Version, with their reports. A scan asks each
-  device all four. `Introduce` asks one device only for the facts the
-  directory does not hold, for a device that announced itself after
-  the scan.
+  Vendor ID, and Get CEC Version, with the reports that reply to
+  them. A scan sends all four requests to each device. When a device
+  announces itself after the scan, `Introduce` sends that one device
+  only the requests whose results are not yet in the directory.
 - **Power.** Give Device Power Status and Report Power Status.
-  `ReadPower` asks one device and records the answer in the
-  directory. After two questions in a row that a device acknowledges
-  and does not answer, the directory forgets the power it held. One
-  missed answer keeps it, because a TV that wakes can miss one.
-  Between reads the directory sets the TV's power from the messages
-  that change it: a Standby to the TV or to every device, Image View
-  On and Text View On, a Routing Change, Set Stream Path, or Request
-  Active Source from the TV, and an Active Source from any device.
-  Nothing in this package asks on a timer: a question is traffic, and
-  some TVs answer traffic they did not expect by switching their own
-  input.
+  `ReadPower` requests the power of one device and records the reply
+  in the directory. When a device acknowledges two requests in a row
+  and replies to neither, the directory clears the power it recorded
+  for that device. After one missed reply the directory keeps the
+  recorded power, because a TV that is waking up can miss one.
+  Between reads, the directory updates the TV's power from the
+  messages that change it:
+  - a Standby sent to the TV or to every device
+  - Image View On and Text View On
+  - a Routing Change, Set Stream Path, or Request Active Source from
+    the TV
+  - an Active Source from any device
+
+  Nothing in this package sends a request on a timer. Every request
+  is traffic on the bus, and some TVs switch their own input when
+  they receive traffic they did not expect.
 - **One-touch play.** Image View On, Standby, and Active Source.
-  `PowerCommand` is the generic command for a TV power state: Image
-  View On for On, and Standby directed to the TV alone for Standby.
-  The node workload sends Image View On and then Active Source for its
-  `Display`'s physical address when it claims the input for a person,
-  in the wake and for a home press. It answers Request Active Source
-  and Set Stream Path with Active Source alone, and it reads every
-  Active Source and routing message the bus carries. It sends the TV
-  Inactive Source when its `Display` goes dark while the route still
-  leads there. `cectest` has a peer that claims Active Source
-  after another device's claim, the way a streaming player did in the
-  first drill.
-- **Remote control.** User Control Pressed and Released. The kernel
-  turns them into key events on the adapter's input device when the
-  claim sets passthrough, and this package never reads them.
+  `PowerCommand` builds the command for a TV power state: Image View
+  On for On, and a Standby sent to the TV alone for Standby. When the
+  node workload claims the TV's input for a person, it sends Image
+  View On and then Active Source with its `Display`'s physical
+  address. It does this when it wakes the TV and when someone presses
+  home. It replies to Request Active Source and to Set Stream Path
+  with Active Source alone. It reads every Active Source and routing
+  message on the bus. When its `Display` goes dark while the route
+  still leads to it, it sends Inactive Source to the TV. A `cectest`
+  peer with `Grabs` set claims Active Source after another device's
+  claim, as some streaming players do when the TV turns on.
+- **Remote control.** User Control Pressed and User Control Released.
+  When the claim sets passthrough, the kernel turns these messages
+  into key events on the adapter's input device. This package never
+  reads them.
 - **System Audio Control.** System Audio Mode Request, Set System
   Audio Mode, Give System Audio Mode Status, and System Audio Mode
-  Status, in `audio.go`. A scan asks the audio system at logical
-  address 5 for the mode after its other questions to that device,
-  and the directory sets the mode from each broadcast Set System Audio
-  Mode and each System Audio Mode Status. The node workload sends the
-  request in a wake whose Display passes through a receiver, with the
-  Display's physical address. HDMI-CEC 1.3a, CEC Table 25, says a
-  device that sends the request shall be able to send the volume keys,
-  so `PressVolumeKey` sends User Control Pressed for Volume Up, Volume
-  Down, or Mute and then User Control Released to the audio system.
-  Nothing in the operator calls it, because the network block sets the
-  volume. `Answer` sends a Feature Abort for a directed Set System
-  Audio Mode or System Audio Mode Status only on a bus with no audio
-  system, where the adapter never sends the request. A `cectest` peer
-  with `SystemAudio` set is an audio system that broadcasts its [On],
-  directs it to the TV alone, answers nothing, or answers the request
-  with a Feature Abort.
+  Status, in `audio.go`.
+  - A scan requests the mode from the audio system at logical
+    address 5, after its other requests to that device. The directory
+    updates the mode from each broadcast Set System Audio Mode and
+    from each System Audio Mode Status.
+  - When the node workload wakes the TV and its `Display` passes
+    through a receiver, it sends System Audio Mode Request with the
+    `Display`'s physical address.
+  - HDMI-CEC 1.3a, CEC Table 25, says that a device that sends the
+    request shall be able to send the volume keys. So
+    `PressVolumeKey` sends the audio system User Control Pressed for
+    Volume Up, Volume Down, or Mute, and then User Control Released.
+    Nothing in the operator calls it, because the receiver's network
+    protocol block sets the volume.
+  - `Answer` sends a Feature Abort for a directed Set System Audio
+    Mode or System Audio Mode Status only on a bus that has no audio
+    system. On such a bus the adapter never sends the request.
+  - A `cectest` peer with `SystemAudio` set is an audio system. Its
+    `AudioReply` sets what it does with a request. It can broadcast
+    Set System Audio Mode [On], or send it to the TV alone. It can
+    send it to the TV and leave the mode off, as when the TV rejects
+    the mode. It can send no reply, or reply to the request with a
+    Feature Abort.
 
 ## What the kernel does and what this package does
 
-The kernel answers polls to a claimed address, and Give Physical
-Address, Give OSD Name, and Get CEC Version, from what the claim
-states. It broadcasts Report Physical Address after each claim. It
-answers Give Device Vendor ID itself, and passes the request to no
-follower: with the vendor a claim states, or with a Feature Abort for
-a claim that states none, as `Claim`'s does (`cec_receive_notify` in
-[`cec-adap.c`](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/media/cec/core/cec-adap.c)).
+The kernel acknowledges polls to an address that the adapter has
+claimed. It replies to Give Physical Address, Give OSD Name, and Get
+CEC Version with the values set in the claim. It broadcasts Report
+Physical Address after each claim. It also replies to Give Device
+Vendor ID itself and does not pass that request to a follower. It
+replies with the vendor set in the claim. When the claim sets no
+vendor, as `Claim` does, it replies with a Feature Abort. See
+`cec_receive_notify` in
+[`cec-adap.c`](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/media/cec/core/cec-adap.c).
 
 The kernel sends a Feature Abort for an unsupported directed message
-only when no follower exists. The node workload is a follower, so
-`Answer` owes a Feature Abort for each directed request it does not
-support, and it answers Give Device Power Status, which the kernel
-never answers, with the power its caller states. The node workload
-states On only while a Player's session is awake on its
-`Display`, because to the TV a playback device with no picture is in
-standby (HDMI-CEC 1.3a, CEC 13.14). `cec-compliance --test-core --test-power-status
---test-system-information --test-device-osd-transfer` passes against
-`Answer` on vivid.
+only when there is no follower. The node workload is a follower, so
+`Answer` sends a Feature Abort for each directed request that it does
+not support. The kernel never replies to Give Device Power Status, so
+`Answer` replies to it with the power that its caller passes in. The
+node workload passes On only while a `Player`'s session is awake on
+its `Display`. To the TV, a playback device with no picture is in
+standby (HDMI-CEC 1.3a, CEC 13.14). `cec-compliance --test-core
+--test-power-status --test-system-information
+--test-device-osd-transfer` passes against `Answer` on vivid.
 
-`Claim` sets no `CEC_LOG_ADDRS_FL_ALLOW_UNREG_FALLBACK`, so when a
-device holds each of the playback addresses 4, 8, and 11, the kernel
-claims nothing and the node workload tries again later. HDMI-CEC
-1.3a, CEC 10.2.1, says a device should take the unregistered address
-15 then. The adapter does not, because at address 15 it could not
-answer a directed request, and its Active Source could not claim the
-input for a person: a retry that later finds a playback address free
-is worth more than a claim that can do neither.
+`Claim` does not set `CEC_LOG_ADDRS_FL_ALLOW_UNREG_FALLBACK`. So when
+other devices already use all of the playback addresses 4, 8, and 11,
+the kernel claims no address, and the node workload tries again
+later. HDMI-CEC 1.3a, CEC 10.2.1, says a device should then use the
+unregistered address 15. The adapter does not, because at address 15
+it could not reply to a directed request, and its Active Source could
+not claim the input for a person. A later retry can find a playback
+address free, and then the adapter can do both.
 
 A monitor handle must be in no-initiator mode, and the kernel allows
-it only to a process with `CAP_NET_ADMIN`. Clearing the logical
-addresses needs an initiator. So Listen takes the initiator mode,
-clears the addresses, and then becomes a monitor.
+that mode only to a process with `CAP_NET_ADMIN`. To clear the
+logical addresses, the handle must be an initiator. So Listen mode
+first sets the handle to initiator mode, clears the addresses, and
+then sets it to monitor mode.
 
-A received message carries no acknowledge bit for a message between
-two other devices, so a monitor that hears another device's poll does
-not learn whether the poll found a device. The directory counts a
-device present when it sends a message, and a scan counts it present
-when it acknowledges a poll. Only a NACK makes a scan forget a device:
-a poll that loses arbitration or meets a wire error says nothing about
-the device, so the scan keeps what it found there before.
+When a monitor receives a message between two other devices, the
+message has no acknowledge bit. So a monitor that hears another
+device's poll cannot tell whether the poll found a device. The
+directory counts a device as present when the device sends a message.
+A scan counts a device as present when it acknowledges a poll. A scan
+removes a device only on a NACK. A poll that loses arbitration or
+hits a wire error says nothing about the device, so the scan keeps
+what it found at that address before.
 
-`Answer` never answers a message from the unregistered address 15,
-because its answer would go to address 15, which is the broadcast
+`Answer` never replies to a message from the unregistered address
+15. Its reply would go to address 15, which is also the broadcast
 address, and a Feature Abort and a Report Power Status are directed
-messages. The kernel answers an Abort message for its own adapter and
-does not pass it to the follower.
+messages. The kernel itself replies to an Abort message for its own
+adapter and does not pass it to the follower.
 
-## Testing against vivid
-
-The kernel's
-[`vivid`](https://docs.kernel.org/admin-guide/media/vivid.html#cec-consumer-electronics-control)
-driver emulates a TV with HDMI inputs and sources on HDMI outputs,
-each with a real kernel CEC adapter on one bus. The `Vivid` tests in
-this package and in the operator check the code against the kernel's
-own CEC core, so `cectest` cannot stand in for them. They are a manual
-check on a Linux machine that has the `vivid` module and `v4l-utils`
-installed. They skip when no vivid adapter is open to the user, which
-is the case in CI. To run them:
-
-```sh
-# Three HDMI inputs and three HDMI outputs. Each output's adapter is
-# on the TV's bus.
-sudo modprobe vivid num_inputs=3 input_types=0x3f num_outputs=3 output_types=0x07
-
-# An output has a physical address only while an input shows it.
-sudo v4l2-ctl -d /dev/video2 -c hdmi_000_0_is_connected_to=2 \
-  -c hdmi_000_1_is_connected_to=3 -c hdmi_000_2_is_connected_to=4
-
-# The nodes are root:video 0660.
-sudo chmod 666 /dev/cec*
-
-go test -run Vivid -v ./cec/ .
-sudo modprobe -r vivid
-```
-
-With no follower on vivid's TV adapter, the kernel's CEC core answers
-Give Device Power Status with a Feature Abort, before and after an
-Image View On, so something must play the TV. Each `Vivid` test plays
-the TV itself on the capture adapter. The wake's test also plays a
-streaming player on a second output, which claims Active Source once
-after the node workload's claim, and it skips when only one output is
-connected. The test that wakes the TV can leave the TV to
-`cec-follower` from `v4l-utils` instead, which is an independent
-implementation of a TV's power states: after Image View On it reports
-Standby for about 2 seconds and ToOn for about 6 more. Start it, then
-run that test alone, because the other `Vivid` tests claim the same
-adapter:
-
-```sh
-# /dev/cec0 is the adapter named vivid-000-vid-cap0.
-cec-ctl -d0 --tv -o TV >/dev/null
-cec-follower -d0 -s -n &
-
-CEC_VIVID_TV=cec-follower go test -run TestVividTheNodeWorkloadWakesTheTV -v .
-kill %1
-```
-
-`/dev/video2` is the capture node named `vivid-000-vid-cap` under
-`/sys/devices/platform/vivid.0/video4linux`; its number depends on
-the other video devices of the machine. The monitor test needs
-`CAP_NET_ADMIN`, so an ordinary run skips it. Build the test binary
-with `go test -c ./cec/` and run it with `sudo` to include it.
-
-A vivid output adapter takes its physical address from its port and
-refuses `CEC_ADAP_S_PHYS_ADDR` with `ENOTTY`, the way any adapter on
-a video port does. `cectest` copies that for an adapter without
-`CapPhysAddr`, and the node workload then announces the port's own
+A vivid output adapter gets its physical address from its port. It
+rejects `CEC_ADAP_S_PHYS_ADDR` with `ENOTTY`, the same as any adapter
+on a video port. `cectest` does the same for an adapter without
+`CapPhysAddr`. The node workload then announces the port's own
 address and says so in its entry.
+
+## Tests against the kernel
+
+The `Vivid` tests, here and in the operator, check the code against
+the kernel's own CEC core through its `vivid` driver. They skip in
+CI. Read [`VIVID.md`](VIVID.md) before you run one or change one.
 
 ## Vendor notes
 
-No vendor-specific behavior is built yet. `plans/completed/09-cec.md` states
-the rule for adding one: take the behavior from libCEC's handler for
-that brand in
-[`src/libcec/implementations`](https://github.com/Pulse-Eight/libcec/tree/master/src/libcec/implementations),
-link the lines it follows, note it here, and copy no code, because
-libCEC's license differs from this repository's.
+The package sends the same messages to every TV brand. When a brand
+needs a behavior of its own, take it from libCEC's handler for that
+brand in
+[`src/libcec/implementations`](https://github.com/Pulse-Eight/libcec/tree/master/src/libcec/implementations).
+Link to the lines that the code follows and add a note here. Write
+the code here, and do not copy it, because libCEC's license differs
+from this repository's (`plans/completed/09-cec.md`).

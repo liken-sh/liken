@@ -42,7 +42,7 @@ disableKinds: [taxonomy, term, rss]
 # authored Markdown for agents and scripts. The two files land side
 # by side, so the Markdown twin of / is /index.md. The theme renders
 # the twin, but only when the site declares this format; without it,
-# the site builds as HTML alone (brand/README.md).
+# the site builds as HTML alone (brand/theme.md).
 outputFormats:
   markdown:
     # text/markdown is a media type Hugo already has, with the md

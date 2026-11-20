@@ -1,46 +1,56 @@
-# Working on the git CSI driver
+# Working on git-csi-driver
 
-This directory holds a Kubernetes CSI driver that mounts git repositories
-as volumes on a [`liken`](https://liken.sh/) cluster. A read-only volume is a checkout that
-follows a ref. A writeable volume is a checkout the driver commits and
-pushes for the application that writes it. The Go files and the
-manifests are the documentation, and the comments teach how the system
-works.
+`git-csi-driver` is a Go CSI driver. `README.md` says what it is for
+and describes the objects that configure a volume.
 
-@../brand/voice.md
+## How it runs
 
-The voice rules in that file govern all prose in this directory,
-comments included. The file is in `brand/`, the brand component
-at the top of the repository.
+The driver name is `git.liken.sh`, and one image runs both plugins.
 
-`plans/00-design.md` is the design, and the `plans/` directory holds the
-plans that build it. Code exists only where a plan calls for it. A plan
-states contracts and leaves the shape of the code to the person or
-agent who builds it.
+- **The node plugin** is a privileged `DaemonSet` that runs beside the
+  upstream `csi-node-driver-registrar`. It stages, publishes, fetches,
+  watches, commits, and pushes. In its store on the node, it keeps one
+  bare repository for each URL and one work tree for each writeable
+  volume. It watches each writeable work tree with inotify, and runs
+  `git status` periodically as a backstop. It also watches the
+  `PersistentVolume`s and claims of its volumes. From them it reads
+  each claim's class and each request for a pull. When a
+  `PersistentVolume` with the `Delete` reclaim policy is deleted, the
+  plugin removes its work tree.
+- **The controller plugin** is a `Deployment` with the upstream
+  `csi-resizer` and `csi-provisioner` sidecars. It validates the
+  parameters of a `VolumeAttributesClass`. It does not implement
+  `CreateVolume`. The same process receives push webhooks from a forge
+  and verifies each one with its `Secret`. It then marks for a pull
+  each read-only `PersistentVolume` that follows the pushed ref.
 
-## Errors include their source's text
+The kubelet reads a volume's credential `Secret` and sends its data in
+the stage or publish call. The node plugin keeps the credential in
+memory for the life of the volume. If the plugin restarts, it has no
+credential until the next publish call.
 
-An error that wraps a tool, a daemon socket, a bus answer, or a provider
-includes that source's own text word for word: its `stderr`, its
-response body, or its error string. The wrapped error and the status
-field or record that the failure writes both include it, so a person
-reads the cause from the log or the status without opening a shell.
+## Design
 
-## The lab
+The driver is the only process that commits. The repository is in the
+node's store, and the pod gets a bind mount of the work tree with no
+`.git` inside it. Upstream changes reach the work tree at stage,
+before the pod starts. While a pod uses the work tree, only the
+application changes it. The exception is a rebase that the driver
+applies after a rejected push. The driver never merges and never
+loses a commit. It either fast-forwards or rebases the local commits
+onto upstream. When a rebase conflicts, the driver aborts it and
+moves the volume to its side branch. A volume is only as durable as
+its last push, so every unpublish pushes, whatever the class says. A
+writeable volume commits and pushes nothing until its claim names a
+class. This gives a person time to write the ignore list before a
+commit can include a secret.
 
-Nothing in this directory is installed on a real cluster until a person
-has seen it work. `lab/` boots one `liken` machine in QEMU from the
-public release channel, and serves a git repository to it from the host.
-Every drill runs there.
+A credential is on the node's disk only while one git command runs.
+A token reaches git through a credential helper, not the command
+line, so it does not appear in the process list. Nothing in this
+directory is installed on a real cluster until a person has seen it
+work, so every drill runs in `lab/`. `lab/` boots one `liken` machine
+in QEMU and serves a git repository to it from the host.
 
-## Releases and development builds
-
-One tag releases every component of the repository whose outputs
-changed, and a push to `main` publishes a development build of each one
-that changed. This directory's `package.toml` names its images, its
-deploy directory, and the components it depends on.
-`.github/workflows/component-git-csi-driver.yaml` at the repository root is
-generated from it; run `make workflows` there after you change it. The
-`releases` skill under `.agents/skills` holds the version scheme and
-the flow. Load it before you tag, publish an image, or pin a
-development build.
+The reasons for these decisions are in `plans/`. Read the relevant
+plan before you change how something works.

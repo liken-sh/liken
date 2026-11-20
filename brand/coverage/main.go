@@ -6,10 +6,22 @@
 //
 //	go tool coverage -title <name> -out coverage.html [-root <dir>] [-label <name>] <input>...
 //
-// An input is a Go coverage profile or a Cobertura report, so a
-// component with Go and Rust code gets one page for both. The manual's
-// site and the release channel publish the page, so it is one file
-// with its stylesheet inline.
+// An input is a Go coverage profile (go test -coverprofile) or a
+// Cobertura report (cargo llvm-cov --cobertura), so a component with Go
+// and Rust code gets one page for both. The program reads the format
+// from the content of each file, so the files can have any name. For a
+// Go profile the page counts statements, the unit that go-test-coverage
+// counts, so the page and the coverage gate show the same total. For a
+// Cobertura report it counts lines. The page states the unit of every
+// number.
+//
+// The manual's site and the release channel publish the page, so it is
+// one file: it inlines the shared stylesheet, requests nothing over the
+// network, and runs no JavaScript. It starts with a summary of each
+// input, then a table of every file, then each source file with
+// numbered lines, colored to show which lines the tests ran. A site
+// that serves the page at /coverage.html sets the theme's coverage
+// parameter, and every page's footer then links to it.
 package main
 
 import (

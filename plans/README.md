@@ -1,32 +1,37 @@
 # The plans
 
-This directory holds the plans whose work spans more than one
-component. Each component keeps the plans for work inside it in its
-own `plans/` directory. The plans of the OS, and its design overview
+This directory has the plans for work that covers more than one
+component. Each component has its own `plans/` directory for work
+inside it. The plans of the OS, and its design overview
 [00-design.md](../liken/plans/00-design.md), are in
 [`liken/plans/`](../liken/plans/).
 
-Each plan gives the problem, the design, the reasons for each
-decision, and what the lab measured when the work ran. A plan's
-directory states its status:
+A plan describes the problem, the design, the reason for each
+decision, and what the lab measured when the work ran. The directory
+that a plan is in shows its status:
 
-* `completed/` holds the plans that are built.
-* `rejected/` holds the plans that were built and then removed. The
-  plan stays as the record of what came out and why.
-* `open-problems/` holds unresolved bugs and design questions. Each
-  document explains the evidence, possible remedies, and whether the
-  work needs a design decision.
-* The Markdown files at the top of a `plans/` directory are the plans
-  that are not built yet.
+* A Markdown file at the top of a `plans/` directory is a plan that
+  is not built yet.
+* `completed/` has the plans that are built.
+* `rejected/` has the plans that were built and then removed, and the
+  designs that were considered and never built. Each one stays as a
+  record of what was decided and why.
+* `open-problems/` has bugs and design questions that are not
+  resolved. Each document gives the evidence, the possible fixes, and
+  whether the work needs a design decision.
 
 A plan closes in the commit that builds it. That commit moves the
-plan to `completed/`, dates its header, and states what the lab
-measured if a drill ran. A drill that has not run yet is not a reason
-to leave a plan open, and it does not become an open problem. The
-header states which drills have not run. The built part closes, and
-any work still unbuilt becomes a new plan or an open problem.
+plan to `completed/`, adds the date to its header, and says what the
+lab measured if a drill ran.
 
-Each `plans/` directory numbers its own plans. A new plan takes the
+A drill that has not run yet is not a reason to leave a plan open,
+and it does not become an open problem. The header lists the drills
+that have not run. If part of a plan is not built, the built part
+still closes, and the rest becomes a new plan or an open problem.
+
+Each `plans/` directory numbers its own plans. A new plan gets the
 next number after the highest one in that directory and its
-subdirectories. A number never changes. An open problem has no number,
-because its implementation scope is not settled.
+subdirectories. A number never changes. An open problem has no
+number, because nobody has decided yet how much work it is.
+
+The `plans` skill in `.agents/skills` has the full procedure.

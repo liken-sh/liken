@@ -1,114 +1,105 @@
 # Working on liken
 
-`liken` is a public OS distribution. Its source files are documents as
-much as they are code, so write everything here for a reader.
+`liken/` is the OS. It contains one Go module, with a directory for
+each program, and the shell scripts, manifests, and pins that build
+the image. `README.md` explains what the OS is for and describes its
+kinds and its programs.
 
-## This is a literate project
+## How it runs
 
-This directory has very little ordinary program code. It is mostly
-shell scripts, configuration, manifests, and build automation, and these
-files are the documentation. Write them in a literate style, with
-comments that give instruction, explanation, and commentary. A reader who
-reads `liken/` from top to bottom should learn how a Linux system
-boots and how Kubernetes takes control after that.
+A machine has two boot slots, A and B, and each slot contains one
+release. An installed UEFI machine has no bootloader. `init` writes a
+boot entry for each slot, and the firmware uses the entry to start the
+kernel's EFI stub directly. A BIOS machine boots through GRUB. The
+install stick boots through systemd-boot. Then the kernel loads
+`microcode.cpio`, unpacks `boot.cpio`, and runs `init` as PID 1.
 
-The voice rules for everything the project publishes are in `brand/`,
-the brand component at the top of the repository:
+`init` loop-mounts the read-only `liken.sqfs` from slot A or slot B
+and puts a tmpfs overlay over it. It copies the deployment layer onto
+the overlay. The deployment layer is the manifests and the cluster's
+identity. Then `init` switches root. Next it starts the machine plane,
+which is the goroutines that set up what k3s needs before it can
+start: storage, the network, the clock, and the identity files. k3s is
+the only child process that `init` supervises. `init` reboots the
+machine only when `machine-operator` writes an intent file that asks
+for a reboot.
 
-@../brand/voice.md
+On a leader, k3s applies the OS's manifests from its auto-deploy
+directory. They install the CRDs, `machine-operator`,
+`cluster-operator`, and the `machine-logs` `DaemonSet`, which shows
+the host's logs as pod logs. The images of these programs are stored
+as OCI tarballs inside the OS image, so the OS runs without a pull
+from a registry.
 
-The comment rules there say to teach the domain, not the syntax. In
-`liken/`, the domain is how a system boots. Do not explain what
-`mkdir -p` does. Explain why the kernel does not mount `/proc` on its
-own, why k3s needs cgroups, and why an initramfs is a cpio archive.
+`machine-operator` is a privileged `DaemonSet` pod on each machine.
+`init` writes the facts it finds about the machine to `/run/liken`,
+and `machine-operator` reads them and writes the `Machine`'s status.
+When the spec changes, `machine-operator` applies each change that
+needs no reboot. It writes every other change to the machine's disk,
+for the next boot. It downloads the `Cluster`'s target release into
+the slot that the machine is not running from. It installs the
+release only when the `Cluster`'s catalog lists the digest of the
+release's `release.yaml`. When `cluster-operator` grants the machine's
+`Disruption`, `machine-operator` drains the node and writes the intent
+file that tells `init` to reboot. It also renews the machine's
+heartbeat `Lease`.
 
-Some explanations are too big for a comment, for example a design
-decision that spans several files, or a survey of alternatives. Put those
-explanations in a markdown document next to the thing they describe,
-organized by domain.
+`machine-operator` is also the DRA driver `liken.sh`. It lists each
+device that has a kernel driver in the node's `ResourceSlice`, and its
+kubelet plugin prepares each claim.
 
-## Errors include their source's text
+`cluster-operator` is one unprivileged `Deployment` that uses leader
+election. It reads and writes only through the Kubernetes API. It
+marks a machine `Lost` when the machine's heartbeat `Lease` is stale.
+It writes the `Cluster`'s status. It grants each `Disruption` when the
+`MachineDisruptionBudget`s allow it. It also reads the release channel
+at `releases.liken.sh` to report the newest release.
 
-An error that wraps a tool, a daemon socket, a bus answer, or a provider
-includes that source's own text word for word: its `stderr`, its
-response body, or its error string. The wrapped error and the status
-field or record that the failure writes both include it, so a person
-reads the cause from the log or the status without opening a shell.
+## Design
 
-## Commit messages
+The machine has no shell, no SSH, and no package manager. So after
+the boot, every operation goes through the Kubernetes API.
 
-Load the `commit-messages` skill under `.agents/skills` before you
-write a commit message. One rule is this component's own: when a
-commit builds a milestone, the same commit moves the plan to
-`plans/completed/` and dates its header. Do not wait for a later
-drill.
+Every goroutine in `init` runs as root in PID 1. A fatal runtime error
+in any of them ends PID 1, and then the kernel panics. So `init` runs
+a loop only when k3s cannot start without it.
 
-## Organization
+Every change to a machine goes through the same steps. The machine
+writes the change to its own disk and boots it once as a trial. If the
+boot succeeds, the machine keeps the change. If the boot fails, the
+machine goes back to the slot that booted before. Only one leader can
+be out of service at a time, because the loss of two etcd members can
+leave etcd without a majority.
 
-Organize the repository by domain, not by kind. Name each directory for
-the part of the system it is, for example the kernel, the init, or the
-image. Each directory must contain everything that domain needs: scripts,
-configuration, and documentation together. Do not create one shared
-`scripts/` directory for every domain.
+The OS publishes each machine's hardware as devices of the `liken.sh`
+driver. A device's attributes record the facts about it that no other
+layer can observe. The OS also ships the firmware that the kernel's
+drivers load. An extension operator claims a device through the
+standard DRA interfaces, the same ones that work with any other DRA
+driver. No code in the OS reads an operator's kinds. When an operator
+needs a new fact about a device, the OS adds the fact as an attribute.
+The logic of the feature stays in the operator.
 
-## The manual
+The scripts, manifests, and Go files are the documentation. Their
+comments explain how a system boots, for example why an initramfs is
+a cpio archive. The tree is organized by domain. Each directory, such
+as the one for the kernel or the one for the image, contains its own
+scripts, configuration, and notes.
 
-The docs domain is the website: the front page of liken.sh and the user
-manual under /docs/. The manual is written in ASD-STE100, plain technical
-English.
-`docs/README.md` explains the domain.
+The reasons for these decisions are in `plans/`. Read the relevant
+plan before you change how something works.
 
-When you change what an operator sees or does, evaluate whether the
-manual must change with it, and make both changes together. The cases to
-check:
+## Finding things
 
-* A `liken` CLI command or flag changes: update
-  `docs/content/docs/reference/cli.md`, and check the guides that run the
-  command.
-* An operational flow changes (install, adoption, adding machines,
-  upgrades, rollback): update the guide in
-  `docs/content/docs/guides/`.
-* The release channel's layout or artifacts change: update
-  `docs/content/docs/reference/release-channel.md`.
-* A CRD schema changes: the Machine and Cluster reference pages
-  regenerate from the schemas at build time, so the schema's own
-  descriptions are the fix. Write them knowing they become the manual.
-
-A change that only touches internals needs no manual change. The
-repository's comments describe it.
-
-## Licensing
-
-`liken`'s own code uses the MIT license, but a release also redistributes
-other projects' binaries, and several of these use the GPL or LGPL
-license. This never changes `liken`'s own license, because the components
-are aggregated, not linked. But it does require the release channel to
-ship third-party notices with the binaries and to offer each component's
-source from the same channel. The licensing domain owns both tasks: every
-release bundles its `LICENSES.md` file as an artifact, and the release
-workflow publishes its source mirror to `sources/<component>/<version>/`.
-
-Each source that `licensing/sources.sh` mirrors is an entry of the
-`pin.toml` of the domain whose binary was built from it, and that
-domain's `latest.sh --bump` writes it in the same bump that moves the
-binary. When a vendored pin changes, check `licensing/NOTICES.md` at
-the same time, and add a mirror to `licensing/sources.sh` for a new
-component whose license asks for the source. Those files explain the
-reasoning. `licensing/sources.sh --verify` downloads each source that
-a `pin.toml` names and checks it against its digest.
-
-## Version pins
-
-Every domain that vendors something pins it by version and by digest,
-and its `fetch.sh` and `latest.sh` follow the rules in "Pins and
-downloads" in the `pins` skill. `make versions` at the top of the
-repository asks every upstream what it has now and prints the answer
-beside each pin, for every component. Root plan 83 gives the rule that
-the report checks.
-
-Each pin belongs to a domain, so the `latest.sh` beside that domain's
-`fetch.sh` holds the address of its upstream. Run it alone and it reports
-its own pins. Run it with `--bump` and it writes the new version, the new
-digest, and the matching source pin.
-`plans/completed/48-check-and-update-dependency-pins.md` gives the
-reasons, and each script explains what its own upstream calls a release.
+- When you change a CRD's schema, raise its `liken.sh/schema-revision`
+  annotation. `TestTheSeededCRDsPinTheirSchemaRevision` in `init/`
+  fails when you don't. `init` applies whichever copy of a CRD has the
+  higher revision. So a machine that boots an older slot does not
+  replace the cluster's schema with an older one.
+- The ordinary lab guests have virtio devices, which need no kernel
+  module. `dev-cluster/hardware/README.md` describes a lab guest that
+  does load its storage and network modules. Milestone 32 lists what
+  only a physical machine can prove.
+- The scripts in `licensing/` write each release's `LICENSES.md` from
+  `licensing/NOTICES.md`. `licensing/sources.sh` copies the source of
+  each copyleft component to the release channel.

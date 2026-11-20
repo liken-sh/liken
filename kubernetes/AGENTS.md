@@ -1,53 +1,38 @@
-# Working on the shared Kubernetes module
+# Working on kubernetes
 
-This directory is the Go module `github.com/liken-sh/liken/kubernetes`.
-The operators import it through a `replace` directive, so a change here
-reaches every operator that imports it in the same commit. Run the
-tests of each operator that imports the package you change, as well as
-`make test` here. The source files are the documentation, and the
-comments teach how the system works.
+`kubernetes/` is the Go module `github.com/liken-sh/liken/kubernetes`,
+which the operators import. `README.md` explains what it is for and
+describes its packages.
 
-@../brand/voice.md
+## How it runs
 
-The voice rules in that file govern all prose in this directory,
-comments included.
+The module has no process of its own. It runs inside each program
+that imports it. Each operator builds against the code in this tree,
+so a change here affects every operator that imports the changed
+package, in the same commit. When you change a package, run
+`make test` here and the tests of each operator that imports the
+package.
 
-## What belongs here
+## Design
 
-A type or a function comes here when two operators need it in the same
-form. Code that only one operator uses stays in that operator, with one
-exception: a hook that cannot live outside its package, because it is
-an option of a shared function or it reads a shared type's private
-state. Such a hook comes here even for one operator, and the commit
-that adds it names the operator. The hooks of that kind now are:
+Code goes in this module when two operators need it in the same form.
+Code that only one operator uses stays in that operator. A hook that
+cannot work outside its package, such as an option of a shared
+function, is the exception: it comes here even when only one operator
+uses it. The code that the hook runs stays in the operator.
 
-- `informer.Options.ListFailed` and `Options.Transform`, for
-  `library-operator`.
-- `apiclient.ErrThrottled`, `RetryAfterSeconds`, and
-  `Client.WithWaitContext`, for `equipment-operator`.
-- `apiclient.InClusterOptions.Server` and `Timeout`,
-  `Client.WithWriteGuard`, `informer.InClusterAt`, `Options.Indexers`,
-  `Options.UnreadyOnWatchError`, and the alias `memo.Meta`, for
-  `liken`'s two operators.
+The module is split into small packages because some programs that
+import it run in many pods at once, such as the pod build of
+`library-operator`. Linking client-go more than doubles the size of
+such a binary and the memory that it uses at start.
 
-The code the hook runs, such as the transform itself, stays in the
-operator.
+## Finding things
 
-`apiclient`, `memo`, `events`, `conditions`, and `endedpods` import
-nothing from `k8s.io`, because some
-programs must not link client-go at all: the pod build of
-`library-operator` checks for it in its `Makefile`. Keep every
-client-go import in `informer` and `election`, and keep `informer` to
-`tools/cache`, `dynamic`, and `rest`. `election` links client-go's
-leader election and the typed client of the coordination group, so
-only the build of an operator that elects imports it. The pod build of `media-operator` and the node
-build of `equipment-operator` link those three, and their `Makefile`s
-fail when a build links the typed clientset, the informer factories,
-or leader election.
-
-## Watches
-
-Load the `operators` skill in `.agents/skills` before you change a
-watch, the store a pass reads, or the memo. It holds the three guards of
-a watch, the scenarios a watch must pass, and the reasons the watches
-run on client-go's reflector.
+- `make test` lists the `k8s.io` packages that `informer` and each
+  small package link. It fails when a package links a `k8s.io` package
+  outside its limit. The comments in `Makefile` explain each limit and
+  the reason for it.
+- Load the `operators` skill before you change a watch, the store
+  that a pass reads, or `memo`. The skill has the guards that each
+  watch needs, the scenarios that a watch must pass in a test, and the
+  reasons that the watches use client-go's reflector.

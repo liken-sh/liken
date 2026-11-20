@@ -32,7 +32,7 @@ params:
 # Every page renders as HTML for people and as its authored Markdown
 # for agents and scripts. The Markdown copy of / is /index.md. The
 # theme has the templates, but a theme cannot declare an output
-# format, so each site declares it here (see brand/README.md).
+# format, so each site declares it here (see brand/theme.md).
 outputFormats:
   markdown:
     mediaType: text/markdown

@@ -1,33 +1,41 @@
 # Working on media-screen
 
-This directory is the Rust crate `media-screen`, the bus half of a
-screen client. media-operator's idle screen links it from
-`media-operator/idle/`, and library-operator's media browser links it
-from `library-operator/media-browser/`, both through a path dependency.
-A change here reaches both clients in the same commit. Run `make test`
-here, and `make test-rust` in `media-operator/` and `make test` in
-`library-operator/media-browser/`, because both clients build against
-the change.
+This directory contains `media-screen`, a Rust crate. `README.md` says
+what it is for and describes its modules.
 
-@../brand/voice.md
+## How it runs
 
-The voice rules in that file govern all prose in this directory,
-comments included.
+The crate runs inside each screen client's process. `media-operator`'s
+idle screen in `media-operator/idle/` and `library-operator`'s media
+browser in `library-operator/media-browser/` both link it through a
+path dependency. So a change here reaches both clients in the same
+commit. Both clients build against the change, so run the tests of
+the crate and of both clients: `make test` here, `make test-rust` in
+`media-operator/`, and `make test` in
+`library-operator/media-browser/`.
 
-## What belongs here
+## Design
 
-A rule belongs here when both clients follow it: the fade and off
-timers, the focus check that drops a press from a controller pointed at
-another `Player`, the screen's sleep and wake, the volume level that
-`media-operator` relays, the cycle request, and the panel request. No
-volume key handling and no volume publish belong here, because
-`media-operator` alone turns a press into a level. A rule that only one
-client follows stays in that client. The crate names no window library, because each client draws
-with a toolkit of its own.
+The crate has each screen rule that both clients follow, such as the
+fade and off timers, the sleep and wake of the screen, and the focus
+check that drops a press from a controller pointed at another
+`Player`. A rule that only one client follows stays in that client.
+For example, only `media-operator` turns a volume press into a level,
+so the crate handles no volume key and publishes no volume. The crate
+depends on no window library, because each client draws with its own
+toolkit.
 
-## Dependency versions
+The crate's `Cargo.toml` pins each dependency to an exact version.
+Each client pins the same version of each dependency that it shares
+with the crate. When you bump a dependency, change every `Cargo.toml`
+that pins it in the same commit, because cargo fails to build a
+client that still pins the old version.
 
-The crate is a cargo workspace of its own, and its `Cargo.toml` pins
-each dependency to an exact version. media-operator's workspace pins
-the same versions. A bump changes both files in one commit, or cargo
-refuses the build of the idle screen.
+The reasons for these decisions are in `plans/`. Read the relevant
+plan before you change how something works.
+
+## Finding things
+
+- `src/wiring.rs` and `media-operator/wire.go` declare the same
+  environment variables, so a change to one needs the same change in
+  the other.

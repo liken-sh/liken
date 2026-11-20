@@ -9,7 +9,7 @@
  * channel, so its pages must render when liken.sh is down, for example
  * while an operator picks a release to roll back to.
  *
- * The colors come from the mark (README.md). The link green is the
+ * The colors come from the mark (mark.md). The link green is the
  * darkest green of the mark on a light page and the palest on a dark
  * one. --warm is the mark's orange, darkened on a light page so that
  * it is legible as text. The theme uses it for an HTTP method that

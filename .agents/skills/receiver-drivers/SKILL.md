@@ -1,0 +1,179 @@
+---
+name: receiver-drivers
+description: Adds or changes a setting, a settings family, a zone control, or a protocol block of a Receiver in equipment-operator, under the settings model of equipment-operator plan 14. Covers where a setting goes (spec.settings for a meaning that every brand shares, the brand's block for the rest), the tier of each field (Confirmed, Sent once, Reported, Unsupported), what a device's reply does to a field, status.settingExceptions and the SettingsConfirmed condition, when an undocumented setter can be declared, and the steps to write a driver for a new receiver brand. Use before adding or changing a receiver setting, before writing a driver for another receiver brand such as a Yamaha, an Onkyo, or an Arcam, and when reviewing a change to a driver's settings.
+---
+
+# Receiver drivers
+
+A `Receiver` has one protocol block, such as `spec.denon` or
+`spec.wiim`. Each block has a driver package in `equipment-operator/`
+that implements `equipment.Driver`. When a person replaces a
+receiver with another one, the room's setup stays the same only if
+each setting means the same thing, in the same shape, on every brand.
+So every receiver setting follows the rules below.
+[Plan 14](../../../equipment-operator/plans/14-one-settings-model-for-every-receiver.md)
+of `equipment-operator` has the reasons, the common vocabulary and its
+units, the survey of receiver protocols, and the references for a new
+brand.
+
+## What the CRD declares and what plan 14 adds
+
+Plan 14 designs fields that the CRD may not have yet. So read
+`equipment-operator/deploy/receivers-crd.yaml` before you write a
+field.
+
+The CRD declares the brand settings, `spec.denon.settings` and
+`spec.wiim.settings`, and the zone controls in `spec.zones`. For each
+declared field, the operator compares the declared value with the
+value that the receiver reports. It sends the field only when the two
+differ, and at most 3 times for one value. When the receiver does not
+report a field, the operator sends it once each time the spec changes
+that block. `status.settledSettings` records a digest of each block
+that the operator sent. So after a restart, the operator sends
+nothing for a block that nobody changed. `setSettings` and
+`setWiimSettings` in `reconcile.go` apply the blocks.
+
+Plan 14 adds these:
+
+- `spec.settings` and `status.settings` for the common families
+- `status.settingExceptions`
+- a table of fields, with the tier of each field in each driver
+- one digest for each family
+- one engine in place of `setSettings` and `setWiimSettings`
+
+When the CRD does not declare one of these yet, build the new field
+so that it can move into plan 14's design with no change of meaning.
+
+## Where a setting goes
+
+- A setting that means the same thing on every brand goes in the
+  `Receiver`'s `spec.settings`. It uses one vocabulary, with explicit
+  units, so a person learns one shape, and a new receiver keeps the
+  room's setup. Plan 14's table "The families and their units" lists
+  the families and their fields.
+- The protocol block contains the connection and the settings that
+  only that brand has. A `Receiver` has exactly one protocol block,
+  and the CEL rule `exists_one` in the CRD enforces this.
+- The status follows the same layout as the spec: `status.settings`
+  for the common values, and `status.<protocol>`, such as
+  `status.denon`, for the brand's values.
+- A plan decides which families get built. Plans 15, 17, and 21 of
+  `equipment-operator` add families. When no plan covers the family,
+  write one first, with the `plans` skill.
+
+## The tiers
+
+Each field in a driver's table has one tier. The operator learns what
+a model supports from the model itself, never from a table of models,
+because support differs by model and not only by protocol.
+
+- **Confirmed**: the receiver reports the field's value. The
+  operator compares it, sends the field when it differs, and confirms
+  the new value.
+- **Sent once**: a documented setter with no way to read the value.
+  The operator sends it once for each change of the family.
+  `status.settledSettings` keeps the operator from sending it again
+  after a restart.
+- **Reported**: a value that can be read but has no setter. It is
+  only in the status and has no spec field.
+- **Unsupported**: the model rejected the read or the command, left
+  it out of its capability document, or did not reply to it during
+  the first read.
+
+The tier in the table is the highest tier that the field can reach.
+When a unit does not report a Confirmed field's value, the operator
+sends that field once on that unit. The tier goes in the CRD field's
+description and in the reference, because it is the same for every
+unit of a protocol. The status lists only the fields whose state
+differs from their tier.
+
+## What a device's reply does
+
+A driver maps each reply of its device to one of plan 14's answer
+kinds:
+
+- **Refused**: the command does not exist on this model, such as a
+  WiiM's `unknown command`. The field is Unsupported until the next
+  connect.
+- **Not now**: the command is valid, but not in the device's current
+  state, such as a command to a zone in standby. It counts against
+  the limit of 3 sends, and it never makes a field Unsupported. A
+  driver that made such a field Unsupported would stop sending a
+  field that the model has.
+- **Silent**: the device sends no error, as a Denon does. When a
+  query has no reply by the end of the first read, the field becomes
+  Unsupported, with a reason that says so.
+
+When the device publishes a capability document, the driver reads it
+before it probes. A probe of a protocol that sends no errors takes
+the whole first read. A field that the document leaves out is
+Unsupported, and the reason names the document.
+
+## The exceptions and the condition
+
+`status.settingExceptions` lists each field whose state differs from
+its tier, with the reason. When the device sent its own text, the
+reason includes that text. When a declared field is in the list, the
+`SettingsConfirmed` condition is `False`, and the condition's message
+lists the paths of those fields.
+
+The operator never changes an undeclared field so that a declared
+field can take effect. When a declared field depends on another
+setting that the person controls, and that setting is not as the
+field needs, the field is listed as Blocked.
+
+## What can be declared
+
+- An undocumented setter can be declared only after a drill shows
+  that the receiver reports the value back. The same applies to a
+  setter that only a client library documents.
+- A command that acts once, such as a reboot or an alarm, is not a
+  setting, and it gets no spec field.
+
+## Add a setting
+
+1. Find the plan that covers the setting's family. In it, find the
+   row with the setting's setter, its read, its values, and its tier.
+2. Find where the command comes from in the driver's protocol
+   reference: `denon/AGENTS.md` or `wiim/AGENTS.md`, and the files
+   they link to. For another brand, plan 14's table "References for
+   the next protocol block" lists the documents and the client
+   libraries.
+3. Add the field to the CRD, with a description that gives the tier,
+   the values, and the units. Then run `make -C docs generate` in
+   `equipment-operator`, because the reference pages are generated
+   from the CRD.
+4. Add the field to the driver's types, its codec, and its read. Map
+   the device's replies to the answer kinds.
+5. Test it against the driver's fake peer, which replies from a real
+   device's transcript in `testdata/`. The `testing` skill describes
+   the fakes.
+6. Update the manual pages that the `operators` skill lists for a
+   change to a resource's spec or status.
+
+## Add a receiver brand
+
+1. Write a package `<protocol>/` in `equipment-operator` that
+   implements `equipment.Driver`. It imports `equipment/`, and never
+   the controller. It contains the brand's settings type, its table
+   of fields with their tiers, its codecs, and its mapping of replies
+   to the answer kinds.
+2. Write an `AGENTS.md` in the package, as `denon/AGENTS.md` and
+   `wiim/AGENTS.md` do. Put in it the protocol references, the
+   command families, and what a measured unit replied.
+3. Where the model has a capability document, read it before any
+   probe. For a protocol that does not report the model, `upnp/`
+   reads the manufacturer and the model from a UPnP device
+   description.
+4. Write a fake peer that replies from a real device's transcript in
+   `testdata/`, such as `denon/testdata/avr-x1700h.txt`. Use
+   `net.Pipe`, or an `http.Handler` on an in-memory transport.
+5. Add the block to the CRD and to its `exists_one` rule. Start the
+   driver in `startDriver` in `reconcile.go`, and add the block to
+   `declaredBlocks` in `settled.go`. Add the package to the
+   `Dockerfile`, because `TestTheDockerfileCopiesEveryGoPackage`
+   fails when the image build does not copy it.
+6. For each common field that the protocol can set or read, add a
+   row at the tier that its documents support.
+7. Prove the block on a real receiver. Until then, a setter that no
+   document describes cannot be declared.

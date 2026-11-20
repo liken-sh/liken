@@ -1,47 +1,78 @@
-# Working on the library operator
+# Working on library-operator
 
-This directory holds the media library layer of a
-[`liken`](https://liken.sh/) cluster. It
-declares libraries as Kubernetes resources, keeps a catalog of what they
-hold, and puts a media browser on the screens that
-[`media-operator`](../media-operator/) plays to.
-The documents, the manifests, and the source files are the
-documentation, and the comments teach how the system works.
+This directory contains `library-operator`, a Go Kubernetes operator
+with a media browser and video tools in Rust. `README.md` says what
+it is for and describes its kinds.
 
-@../brand/voice.md
+## How it runs
 
-The voice rules in that file govern all prose in this directory,
-comments included. The file is in `brand/`, the brand component
-at the top of the repository.
+The operator is a `Deployment` in `liken-system`. A Lease makes sure
+that only one replica acts at a time. The operator is the only
+process of this component that has a Kubernetes credential. It
+watches its own kinds, `media-operator`'s `Player`, `Play`, and
+`MediaPreferences`, `people-operator`'s `Person`, and the claims,
+volumes, pods, and `Job`s it uses. It writes every status and creates
+every pod, `Job`, and `Play`. It serves the webhook that Radarr,
+Sonarr, and Jellyfin post to, and starts a scan of the folder that
+each post names. The pods and `Job`s run the pod build of this
+program, which is the same code built with the tag `pod`.
 
-`plans/00-design.md` is the design, and the `plans/` directory holds the
-plans that build it. Code exists only where a plan calls for it. The
-plans state contracts and leave the shape of the code to the person or
-agent who builds each one.
+Each namespace has two Corrosion clusters, one for the catalog and one
+for the progress store. Each Corrosion agent stores a full SQLite copy
+of its database. The catalog pods publish a report of each `Library`
+on the bus, and the operator writes the report into the `Library`'s
+status.
 
-## Errors include their source's text
+Each `Library` runs one `Job` at a time. The `Job` scans the library
+and then enriches it, with one container for each phase, and it
+writes the `.nfo` and art files to the media volume. Some facts about
+a video need heavy processing, such as its trickplay images. For each
+of those, the `Job` publishes a list of the videos that still need
+it, and the operator starts a worker `Job` for the list. A worker
+writes only files on the volume, and the next scan of the library
+reads them into the catalog.
 
-An error that wraps a tool, a daemon socket, a bus answer, or a provider
-includes that source's own text word for word: its `stderr`, its
-response body, or its error string. The wrapped error and the status
-field or record that the failure writes both include it, so a person
-reads the cause from the log or the status without opening a shell.
+For each `Player` that hands its idle screen to this operator, a
+screen pod runs the media browser from `media-browser/`, beside one
+Corrosion agent for each cluster. The browser reads its own copy of
+the catalog and reads presses from `media-operator`'s bus. When a
+person picks a title, the browser publishes it, and the operator
+creates the `Play`.
 
-Every operation at human scale prints one line that says its cause,
-what was sent, and what came back, and names a title only by its
-catalog id through `opaqueID` or `log::opaque`.
+## Design
 
-## Releases and development builds
+The files on the media volume are the source of truth. The catalog is
+an index built from them, so if the catalog is lost, a rescan
+rebuilds it. Each phase of a `Job` and each worker writes to the
+volume, not to the catalog. The pods and `Job`s have no Kubernetes
+credential. So each fact that they report goes over the bus, and the
+operator writes it to the API server.
 
-One tag releases every component of the repository whose outputs
-changed, and a push to `main` publishes a development build of each one
-that changed. This directory's `package.toml` names its images, its
-deploy directory, and the components it depends on.
-`.github/workflows/component-library-operator.yaml` at the repository root is
-generated from it; run `make workflows` there after you change it. The
-`releases` skill under `.agents/skills` holds the version scheme and
-the flow. Load it before you tag, publish an image, or pin a
-development build.
+A log line identifies a title only by its catalog id. It never
+contains a title, a person from the credits, a path, or the size of a
+library. A media library's titles are private, and people copy log
+lines into the issues of a public repository.
 
-The operator derives its companion images from its own pod's image, so
-no other image name needs a version.
+This operator reads `media-operator`'s kinds and uses its bus and its
+contract for handing over the idle screen. `media-operator` reads
+nothing from this operator. When this operator needs a change in
+`media-operator`, a plan here describes the change and says which
+component makes it.
+
+The reasons for these decisions are in `plans/`. Read the relevant
+plan before you change how something works.
+
+## Finding things
+
+- `logcontent_test.go` checks the log line rule against the lines that
+  the `Job`s and the operator write.
+- `corrosion/schema/` and `corrosion/progress-schema/` contain the
+  schemas that every agent loads, and the Corrosion image includes
+  them.
+- `cli/facts.go` has a copy of the operator's `factVocabulary`, so
+  when you add a fact to the operator, add it there too.
+- The browser and `media-operator`'s command sidecar read the cases of
+  the subtitle rule from `media-operator/testdata/subtitle-rule.json`.
+- `docs/Makefile` writes each reference page in `GENERATED` from a CRD
+  in `deploy/`, and `make -C docs skills` writes `skills/` from the
+  guides. `make test-docs` fails when one is stale.

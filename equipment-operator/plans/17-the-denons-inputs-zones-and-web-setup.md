@@ -44,7 +44,7 @@ Denon brand fields in `spec.denon.settings` and `status.denon`.
 | `denon.quickSelect[].name` | `SSQSNZMA ?` → `SSQSNZMAQS<n> <name>`, `SSQSNZMA END` [S4] | 10443 `general` type 7 [S7] | Reported. needs D6. |
 | `denon.zone2.{hpf, channels, hdmiAudio}` | `Z2HPF?`, `Z2CS?`, `Z2HDA?` | `Z2HPFON`, `Z2CSMONO`, `Z2HDA PCM`, documented [S1] | needs D1. The X2700H has none of the three [S1]. |
 | `denon.zone2.{bass, treble, levels, autoStandby}` | `Z2PSBAS ?`, `Z2PSTRE ?`, `Z2CV?`, `Z2STBY?` | documented [S1] | Reported, see below |
-| `denon.video.{monitor, aspect, processing, resolution, resolutionHdmi}` | `VSMONI ?`, `VSASP ?`, `VSVPM ?`, `VSSC ?`, `VSSCH ?` | documented [S1] | Unsupported: no answer on port 23 (`denon/AGENTS.md:131-140`) |
+| `denon.video.{monitor, aspect, processing, resolution, resolutionHdmi}` | `VSMONI ?`, `VSASP ?`, `VSVPM ?`, `VSSC ?`, `VSSCH ?` | documented [S1] | Unsupported: no answer on port 23 (`denon/AGENTS.md`, "What is not read") |
 | `denon.picture.{mode, contrast, brightness, saturation, noiseReduction, enhancer}` | `PV?`, `PVCN ?`, `PVBR ?`, `PVST ?`, `PVDNR ?`, `PVENH ?` | documented; 000 to 100, 050 is 0 [S1] | needs D1 |
 | `denon.volume.{limit, mutingLevel, scale}` | `SSVCTZMA ?` → `SSVCTZMALIM OFF\|060\|070\|080`, `SSVCTZMAMLV MUT\|040`, `SSVCTZMADIS REL\|ABS` [S4] | same keys, verified live on an AVR-X3600H [S4] | needs D1 and D3 |
 | `denon.locks.{remote, panel}` | none | `SYREMOTE LOCK ON\|OFF`, `SYPANEL LOCK ON`, `SYPANEL+V LOCK ON`, `SYPANEL LOCK OFF`, documented [S1] | Sent once |
@@ -161,11 +161,11 @@ Plans keep their evidence, so the corrections stay here:
   sources are [S4], [S5], [S7], and [S10].
 * Plan 13 said the operator cites the CY2022 document. The code cites
   Ver.8.6.0 and the AVR-X4000 document (`denon/protocol.go:7`,
-  `denon/AGENTS.md:12-17`).
+  `denon/AGENTS.md`, "The Denon protocol").
 * Plan 13 said the AVR-X1700H reads and sets the `SSHOS` family, and
   called it measured. The receiver took one set command,
   `SSHOSCONSTS LAS`, at the value it already held
-  (`denon/AGENTS.md:91-102`). No set to a new value was measured.
+  (`denon/AGENTS.md`, "The HDMI setup"). No set to a new value was measured.
 * Plan 13 said the video controls answer as remote-key codes on
   `formiPhoneAppDirect.xml`. That endpoint passes a port-23 line through
   HTTP [S6] `const.py:625-635`, [S12]. The `RCKSK` codes are remote
@@ -181,7 +181,7 @@ Plans keep their evidence, so the corrections stay here:
 * Plan 13 said a model answers `unknown command`. A Denon sends no error
   line; it ignores a command it lacks (`denon/protocol.go:25-28`).
 * Plan 13 said the AVR-X1700H refuses port 10443, so its 10443 families
-  are unsupported. `denon/AGENTS.md:105-117` quotes the same receiver's
+  are unsupported. `denon/AGENTS.md`, "The HDMI setup", quotes the same receiver's
   web setup page, its `VideoSettings.js`. The manual reaches web control
   at `http://<address>` and lists a setup menu there [S3 p.159]. On an
   AVC-A110, port 80 redirects to HTTPS [S7]. The two records disagree,

@@ -69,6 +69,67 @@ words you would use out loud.
   read" tells the reader nothing about the model. Start with the
   model.
 
+## One fact at a time
+
+Text can follow every other rule in this file and still be slow to
+read. The usual cause is density. A dense sentence joins several
+facts with "because", "while", and "which", and it describes what a
+program does when the reader wants to know what to do. The reader
+has to take the sentence apart before they can use it.
+
+- **Give each fact its own sentence, in the order that things
+  happen.** When a sentence has more than one of "because", "while",
+  "which", and "so", split it.
+- **Use the verb for what happens.** "Holds", "reads", "names",
+  "states", "gives", "takes", "carries", and "refuses" are each
+  correct sometimes. They are also the words a writer uses when the
+  exact verb takes a moment to find, and a page full of them reads
+  like a legal text. A directory contains a file. A release includes
+  a fix. A report shows a status. A script stops with an error. A
+  file records a version. Find the verb that is true.
+- **Tell it from the reader's side.** When the reader has to act, say
+  what to do, with "you" or a command. A description of what a script
+  does leaves the reader to work out their own step.
+- **Define a term where you first use it**, in a clause, when a
+  newcomer would not know it.
+- **Write the noun.** "The snapshot's" and "the operator's own", with
+  no noun after them, send the reader back to look for it.
+
+This paragraph follows the other rules and is still hard to read:
+
+> `latest.sh --bump` refuses while `patches/` holds a patch, because
+> the newest release may hold the commit, and the patch then fails to
+> apply. It also refuses, and its row reads `held`, while the newest
+> release needs a newer libplacebo than the snapshot's, which the
+> `libplacebo` entry of `package.toml` states.
+
+The same facts, one at a time, from the reader's side:
+
+> `latest.sh --bump` stops in two cases, and each one needs a step
+> from you first.
+>
+> **A patch is in `patches/`.** Each patch is a fix from a newer mpv
+> release. If the release you are bumping to already includes the
+> fix, the patch no longer applies and the build fails. Delete each
+> patch that the new release includes.
+>
+> **The Debian snapshot's libplacebo is too old.** Each mpv release
+> needs a minimum version of libplacebo. When the snapshot does not
+> have it, `make versions` shows mpv as `held`. Move the snapshot to
+> a newer date.
+
+A definition has the same problem when it assumes the term that it
+defines. "An image that ships files of Debian packages without the
+packages is a closure on scratch, and a closure holds no
+`/var/lib/dpkg/status`" becomes "A closure is an image built
+`FROM scratch` that contains only the files a program needs, copied
+out of Debian packages. The packages are not installed, so the image
+has no `/var/lib/dpkg/status`, the file that a scanner reads to learn
+which packages an image has."
+
+The plain version is often longer in words and faster to read. Do
+not shorten a sentence at the cost of the reader's time.
+
 ## Sentences
 
 Each pattern below is common in text that a language model writes,
@@ -187,16 +248,16 @@ source file. More rules apply to comments:
 - Do not repeat the code. A comment that says what the next line
   does, a doc comment that turns the function's name into a
   sentence, and a banner such as "Step 1" give the reader nothing
-  that the code did not. Write the comment only when it holds a
-  reason, a limit, or a fact about the domain.
+  that the code did not. Write the comment only when it tells the
+  reader a reason, a limit, or a fact about the domain.
 
 ## Words
 
 - Do not write "best practices", "leverage", "comprehensive",
   "robust", "seamless", or "root cause". The list is short because
-  one of these words is a sign and not the fault. The sentence that
-  holds it usually states no fact, and a synonym does not correct
-  that. Rewrite the sentence so that it states the fact.
+  one of these words is a sign and not the fault. The sentence around
+  it usually says nothing that a reader can check, and a synonym does
+  not correct that. Rewrite the sentence so that it says the fact.
 - Do not use an em-dash. Use a period or a comma.
 - Set every technical identifier in the code face, always: a
   Kubernetes kind or API name (`PairingRequest`, `ResourceClaim`,
@@ -204,18 +265,21 @@ source file. More rules apply to comments:
   label or attribute key, a device class name, and a hostname that
   names software. The description of a field in a CRD takes the
   code face too, with backticks, because the reference page of the
-  kind is made from it. Write "the `Secret` holds the deploy key", not
-  "the secret holds the deploy key".
+  kind is made from it. Write "the `Secret` contains the deploy key",
+  not "the secret contains the deploy key".
 - Write `liken` in the code face everywhere it appears, because it
   names the code.
 
 ## Software is a machine
 
-- Software has no mind. A program reads, writes, starts, refuses,
-  and fails. Do not write that it wants, knows, thinks, learns, or
+- Software has no mind. A program reads, writes, starts, stops, and
+  fails. Do not write that it wants, knows, thinks, learns, or
   believes.
 - Software has no body. Do not write that code sits on, stands on,
   reaches into, or rides on anything.
+- These rules remove a metaphor. They do not ask for a stock verb in
+  its place. "The file sits in `/etc`" becomes "the file is in
+  `/etc`", not "`/etc` holds the file".
 
 ## Claims
 
@@ -227,7 +291,7 @@ source file. More rules apply to comments:
   under which a result was measured. Do not turn one successful test
   into a claim that an operation always succeeds.
 - **Do not count things for the reader.** "The two rules below",
-  "the one request of a `Firmware`", "three files hold the rules",
+  "the one request of a `Firmware`", "three files contain the rules",
   and "the only caller is `reconcile`" record how many things there
   were on the day of writing. The next change makes the count wrong,
   and the reader did not need it. Name the things, or say "each".

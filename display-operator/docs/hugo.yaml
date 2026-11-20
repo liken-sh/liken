@@ -28,7 +28,7 @@ disableKinds: [taxonomy, term, rss]
 
 # The theme renders each page as HTML and as its authored Markdown, for
 # agents and scripts, so the Markdown of / is /index.md. A theme cannot
-# declare output formats, so each site declares them (brand/README.md).
+# declare output formats, so each site declares them (brand/theme.md).
 outputFormats:
   markdown:
     mediaType: text/markdown

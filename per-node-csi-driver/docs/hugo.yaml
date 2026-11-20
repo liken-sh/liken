@@ -23,7 +23,7 @@ disableKinds: [taxonomy, term, rss]
 # Every page renders as HTML and also as its Markdown source, for agents
 # and scripts. The Markdown file is next to the HTML file, so the
 # Markdown of / is /index.md. The theme writes the Markdown only when
-# the site declares this format (brand/README.md).
+# the site declares this format (brand/theme.md).
 outputFormats:
   markdown:
     # With baseName index and the md suffix of Hugo's text/markdown

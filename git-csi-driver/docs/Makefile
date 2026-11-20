@@ -22,9 +22,9 @@ test:
 	go test ./...
 
 # Writes each guide as an Agent Skill, one SKILL.md per guide, into
-# ../skills, using the generator from the brand component (its README
-# describes the output). The output is committed, and the test-docs
-# target in ../Makefile fails when it is out of date.
+# ../skills, using the generator from the brand component
+# (brand/skills/main.go describes the output). The output is committed,
+# and the test-docs target in ../Makefile fails when it is out of date.
 .PHONY: skills
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills

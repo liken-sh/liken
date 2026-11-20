@@ -1,25 +1,27 @@
 # CRD schema drills
 
-Do not reason about apiextensions behavior. Drill it against the dev
-cluster. The behavior that costs the most time is the order of
-operations: **the API server prunes unknown fields and drops nulls for
-non-nullable values before CEL and schema validation run.** A rule that
-looks airtight in the schema never sees the value it was written to
-refuse.
+Do not reason about how apiextensions behaves. Test it against the dev
+cluster. The order of operations is the behavior that costs the most
+time. **The API server prunes unknown fields, and drops nulls for
+values that are not nullable, before CEL and schema validation run.**
+So a rule that looks complete in the schema never sees the value that
+it was written to reject.
 
-Two more behaviors follow from the same order:
+The same order causes these behaviors:
 
 * Only `kubectl apply` and `kubectl create` use strict decoding, so
-  only they refuse an unknown field outright.
-* `kubectl patch` warns and prunes. That can flip a zero-config map
-  value on by itself: a patch of `{replicas: 2}` against a property
-  that does not accept `replicas` lands as `{}`.
+  only they reject an unknown field outright.
+* `kubectl patch` warns and prunes. That can turn on a map value
+  that needs no configuration, though the patch did not ask for an
+  empty value. A patch of
+  `{replicas: 2}` against a property that does not accept `replicas`
+  is stored as `{}`.
 
-liken's own schema for `spec.features` came out of these experiments,
-not out of a design: a map, plus CEL, plus `nullable`, plus the
-`maxProperties` and `x-kubernetes-preserve-unknown-fields` pair. The
-first design named each feature as a property and expected the API
-server to refuse an unknown slug and a null. It did neither.
+`liken`'s own schema for `spec.features` came from these experiments,
+not from a design: a map, plus CEL, plus `nullable`, plus the pair
+`maxProperties` and `x-kubernetes-preserve-unknown-fields`. The first
+design made each feature a property, and expected the API server to
+reject an unknown slug and a null. It rejected neither.
 
 ## The drill
 
@@ -28,16 +30,16 @@ Before you commit a schema or CEL change to `machine/manifests/` or
 Use a group that can never collide with a real one, for example
 `drills.example.com`.
 
-1. Write the CRD with only the field under test, in the same shape the
-   real schema will use.
+1. Write the CRD with only the field under test, in the same shape
+   that the real schema will use.
 2. `dev-cluster/kubectl apply -f /tmp/drill-crd.yaml`
-3. Probe admission without storing anything:
+3. Test admission without storing anything:
    `dev-cluster/kubectl create --dry-run=server -f /tmp/case.yaml`
-4. Probe the paths that `apply` does not cover. Create the resource for
-   real, then send merge patches against it, and read back what the API
-   server stored. A patch is where pruning shows itself.
+4. Test the paths that `apply` does not cover. Create the resource,
+   then send merge patches against it, and read back what the API
+   server stored. A patch is where pruning shows.
 5. `dev-cluster/kubectl delete crd <name>.drills.example.com`
 
-Use this instead of a release build. A release build costs minutes and
-proves less, because it can only tell you that a whole boot worked or
-did not.
+Use this drill in place of a release build. A release build takes
+minutes and proves less, because it tells you only whether a whole
+boot worked.

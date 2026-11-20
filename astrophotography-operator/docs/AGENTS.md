@@ -1,12 +1,7 @@
-@../../brand/voice.md
+# Working on this manual
 
-# Authoring this docs domain
-
-This directory is the source of https://liken.sh/astrophotography/,
-astrophotography-operator's manual. Hugo builds it with the shared brand theme, `brand/`
-at the top of the repository.
-
-Write all site prose in Simplified Technical English (ASD-STE100). The voice
-rules imported above add what that standard does not state, and they
-govern every word this site publishes. Scan a page against them before
-you commit it.
+This directory is the source of a component's manual, which is
+published on liken.sh. Before you write or change a page here, load
+the `manuals` skill from `.agents/skills` at the top of the
+repository. It explains where each kind of page goes, which pages are
+generated, and how to check a manual.

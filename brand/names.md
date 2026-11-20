@@ -20,24 +20,24 @@ rules here add what a name needs.
   calls it a `ResourceSlice`, and the kernel calls it a "connector".
   A reader who searches the specification finds the same word in the
   code.
-- **Leave out words that state quality.** `safe`, `smart`, `simple`,
-  `robust`, `fast`, `proper`, and `enhanced` say that the author was
-  pleased with the code. When the thing has a property that a caller
+- **Leave out words that describe quality.** `safe`, `smart`,
+  `simple`, `robust`, `fast`, `proper`, and `enhanced` say that the
+  author was pleased with the code. When the thing has a property that a caller
   depends on, name the property: `writeFileAtomically`, not `safeWrite`.
-- **Leave out words that state history.** `new`, `old`, `legacy`,
+- **Leave out words that describe history.** `new`, `old`, `legacy`,
   `v2`, `temp`, `fixed`, and `refactored` describe a change. After
   the change, the name is wrong. Give the thing the name it would
   have if it had always been there. A constructor named `New` is
-  correct, because it states what the function does.
-- **Leave out words that state only the kind of code.** `Manager`,
+  correct, because it says what the function does.
+- **Leave out words that name only the kind of code.** `Manager`,
   `Handler`, `Processor`, `Helper`, `Data`, and `Info` fit any code.
   Name the operation: `Recorder` writes `Event`s, and `eventManager`
   could do anything.
 - **Put the unit in the name of a number**: `timeoutSeconds`,
-  `sizeBytes`. A Go `time.Duration` already holds its unit and needs
-  none.
+  `sizeBytes`. A Go `time.Duration` already includes its unit and
+  needs none.
 - **A boolean reads as a statement that is true or false**: `muted`,
-  `hasCodec`. State it in the positive, so that no reader must
+  `hasCodec`. Write it in the positive, so that no reader has to
   work out `!notReady`.
 - **Spell the name in full when it is far from its use.** A loop
   index is `i` and a receiver is one or two letters, as Go and Rust
@@ -48,9 +48,9 @@ rules here add what a name needs.
 ## Packages, files, and directories
 
 - **Name a package, a file, or a directory for its subject.**
-  `util`, `common`, `shared`, `helpers`, `lib`, and `misc` state
-  that the contents have no subject, and they collect code that has
-  none. Find the subject that the code belongs to. If it has none of
+  `util`, `common`, `shared`, `helpers`, `lib`, and `misc` say that
+  the contents have no subject, and code with no subject collects in
+  them. Find the subject that the code belongs to. If it has none of
   its own, put it beside its one caller.
 - **Do not repeat the package in its members.** A caller writes
   `events.Recorder` and `conditions.Set`, not `events.EventRecorder`
@@ -60,14 +60,14 @@ rules here add what a name needs.
 
 ## Tests
 
-- **The name of a test is a sentence that states the behavior.**
+- **The name of a test is a sentence that describes the behavior.**
   `TestTheCompositorStartsAgainAfterTheOperatorEndsIt` names the
   subject, what it does, and the condition. When it fails, the name
-  alone tells the reader what no longer holds. `TestCompositor`,
+  alone tells the reader what is no longer true. `TestCompositor`,
   `TestRestart2`, and `TestHandleError` tell the reader which
   function to open.
-- **State the result that the test checks.** "works", "correctly",
-  "properly", and "successfully" state no result.
+- **Name the result that the test checks.** "works", "correctly",
+  "properly", and "successfully" name no result.
   `TestParseWorksCorrectly` becomes
   `TestParseRefusesATruncatedStream`.
 - **A row of a table has a name that is a phrase for the case**: "a
@@ -85,7 +85,7 @@ any other change to an interface.
   `Player`, `Receiver`, `Library`.
 - **A field follows the Kubernetes API conventions**: lowerCamelCase,
   no abbreviation, the unit in the name.
-- **A condition type is an adjective or a past participle that states
+- **A condition type is an adjective or a past participle that says
   what was observed**: `Ready`, `Joined`, `Approved`. A type such as
   `Joining` describes work in progress, and a reader cannot tell what
   `False` means for it.

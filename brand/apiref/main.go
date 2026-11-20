@@ -8,6 +8,33 @@
 // document or this program changes. The page shares its reference
 // section with other pages, so -title and -weight set its title and
 // its place in the section's order.
+//
+// The page starts with the document's own summary, then has one
+// section for each operation, headed with the method and the path.
+// Each section lists the parameters, the responses, and the fields of
+// each response. After the operations come the component schemas, as
+// the same field tables that crdref writes for a CRD, and the
+// credentials that the document declares. The page is plain Markdown
+// with no Swagger UI and no JavaScript, and every section is a heading
+// that the manual's link check can resolve.
+//
+// A route's heading carries the method as an attribute:
+//
+//	## `GET` `/v1/widget/widgets/{name}` {data-method=GET}
+//
+// The theme draws the method as a badge from the attribute. Goldmark
+// removes the attribute before it computes the heading's id, and
+// backticks add nothing to an id, so the id is the one of the plain
+// heading "GET /v1/widget/widgets/{name}", and Hugo's table of contents
+// lists the route. A theme that draws no badge shows the method and
+// the path.
+//
+// The preamble and the postamble are hand-written files that the
+// program copies unchanged to the top and the bottom of the page. They
+// hold what an OpenAPI document has no place for, such as what the API
+// is for and a link to the manual page that explains it.
+// plans/completed/02-openapi-as-a-page.md in this component is the
+// design.
 package main
 
 import (

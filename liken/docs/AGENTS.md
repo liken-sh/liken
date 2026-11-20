@@ -1,15 +1,7 @@
-# Authoring this docs domain
+# Working on this manual
 
-@../../brand/voice.md
-
-Everything this domain publishes follows the voice rules in that file and
-ASD-STE100.
-Scan a page against the rules before you publish it.
-
-The guides in `content/docs/guides/` are written by hand. The reference
-pages for the four CRDs are generated at build time: `crdref` reads the
-schemas in `machine/manifests/machines-crd.yaml`,
-`cluster/manifests/clusters-crd.yaml`, and the two files in
-`disruption/manifests/`, so the schema descriptions are where those
-pages are edited. `README.md` explains the content model, the
-build, and the deploy path.
+This directory is the source of a component's manual, which is
+published on liken.sh. Before you write or change a page here, load
+the `manuals` skill from `.agents/skills` at the top of the
+repository. It explains where each kind of page goes, which pages are
+generated, and how to check a manual.

@@ -30,7 +30,7 @@ disableKinds: [taxonomy, term, rss]
 
 # The theme writes each page as HTML and also as its authored Markdown,
 # for agents and scripts, only when the site declares this output
-# format (brand/README.md).
+# format (brand/theme.md).
 outputFormats:
   markdown:
     # Hugo defines text/markdown with the md suffix, so the Markdown

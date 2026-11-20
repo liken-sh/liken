@@ -1,45 +1,81 @@
-# Working on the media operator
+# Working on media-operator
 
-This directory holds a media routing and playback layer for a
-[`liken`](https://liken.sh/) cluster. It declares players, plays,
-remotes, and keymaps as Kubernetes resources, and it reconciles them
-into pods that claim the hardware operators' devices. The documents, the
-manifests, and the source files are the documentation, and the comments
-teach how the system works.
+This directory contains `media-operator`, a Go Kubernetes operator
+with screen programs in Rust. `README.md` says what it is for and
+describes its kinds.
 
-@../brand/voice.md
+## How it runs
 
-The voice rules in that file govern all prose in this directory,
-comments included. The file is in `brand/`, the brand component
-at the top of the repository.
+The operator is a `Deployment` in `liken-system`. A Lease makes sure
+that only one replica acts at a time. The operator watches its own
+kinds, its pods, the `ResourceClaim`s and `ResourceSlice`s, and the
+kinds of the hardware operators. It creates the `ResourceClaim`s and
+pods that each `Player`, `Play`, and `Remote` needs, and it writes the
+status of each of its kinds. It plays no media in its own process.
 
-`plans/00-design.md` is the design, and the `plans/` directory holds the
-plans that build it. Code exists only where a plan calls for it.
+Several of the operator's pods run the pod build of this Go program.
+The pod build is the same code built with the build tag `pod`, and
+it leaves out leader election. For each `Play`, the operator creates
+a playback pod. Its `player` container runs the pod build, which
+builds the arguments for `mpv` and runs `mpv`. Its `command` sidecar
+also runs the pod build. The sidecar is the only program that writes
+to `mpv`'s IPC socket. It reads presses and commands from the bus,
+and it publishes the report of the run. Its `display` sidecar runs
+the Rust program in `display/`, which draws the on-screen display
+over the film. An idle pod runs the Rust program in `idle/`, which
+links the `media-screen` crate. Each `Remote` has a pod that runs the
+pod build and publishes each press of its controller.
 
-## Errors include their source's text
+Presses, commands, reports, and screen requests go through the
+Mosquitto broker in `deploy/bus.yaml`. A screen client from another
+component, such as `library-operator`'s media browser, reads and
+publishes the same topics. The `media-api` `Deployment` serves the
+capture of a `Player`. It muxes the screen from `display-operator`'s
+API with the sound from `audio-operator`'s API. The `DaemonSet` in
+`capabilities/` reads through libva what the media driver of each
+render node can do. It publishes a `media.liken.sh` device for each
+render node with those facts.
 
-An error that wraps a tool, a daemon socket, a bus answer, or a provider
-includes that source's own text word for word: its `stderr`, its
-response body, or its error string. The wrapped error and the status
-field or record that the failure writes both include it, so a person
-reads the cause from the log or the status without opening a shell.
+## Design
 
-Every operation a person causes, such as a press, a playback request, a
-volume change, a focus move, or an edit the operator acts on, writes one
-log line that says what triggered it, what was sent, and what came back,
-and a loop a person does not see, such as a poll or a repeat, writes none.
+The pods that the operator creates have no Kubernetes credential. The
+playback pod decodes media from the network, so it is the least
+trusted process in the system. Each pod sends its reports on the bus,
+and only the operator writes them to the API server. A press goes on
+the bus from a `Remote`'s pod to the playback pod or the idle screen,
+not through the operator. So remotes keep working while the operator
+restarts.
 
-## Releases and development builds
+The hardware operators own their devices and their kinds. To change a
+device, this operator sets the fields that the owning operator reads,
+and the owning operator applies the change to the device. This
+operator's watches of their kinds are optional, so it runs on a
+cluster that does not have them. When this operator needs a new fact
+about a device, the operator that owns the device publishes the fact,
+and this operator reads it. Claims, `ResourceSlice`s, and CDI files
+are the interfaces between this operator and `liken`.
+`library-operator` reads this operator's kinds and its bus, and this
+operator reads nothing from `library-operator`.
 
-One tag releases every component of the repository whose outputs
-changed, and a push to `main` publishes a development build of each one
-that changed. This directory's `package.toml` names its images, its
-deploy directory, and the components it depends on.
-`.github/workflows/component-media-operator.yaml` at the repository root is
-generated from it; run `make workflows` there after you change it. The
-`releases` skill under `.agents/skills` holds the version scheme and
-the flow. Load it before you tag, publish an image, or pin a
-development build.
+The reasons for these decisions are in `plans/`. Read the relevant
+plan before you change how something works.
 
-The operator derives its companion images from its own pod's image, so
-no other image name needs a version.
+## Finding things
+
+- `keycodes.go` is generated from the kernel's `input-event-codes.h`.
+  `make codes` regenerates it.
+- `openapi.json` is the OpenAPI document of `media-api`. A test fails
+  when it differs from the router, and `go generate` regenerates it.
+- `patterns/` contains the committed test patterns. `make patterns`
+  creates the missing files, and their names match those in
+  `patterns.go`.
+- `docs/Makefile` writes each reference page in `GENERATED` from a CRD
+  in `deploy/` or from `openapi.json`, and `make -C docs skills`
+  writes `skills/` from the guides. `make test-docs` fails when one is
+  stale.
+- `topics.go` builds every bus topic, and
+  `docs/content/docs/reference/bus.md` lists each topic with its
+  writer and its readers.
+- `wire.go` and `media-screen/src/wiring.rs` declare the same
+  environment variables, so a change to one needs the same change in
+  the other.

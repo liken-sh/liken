@@ -32,7 +32,7 @@ disableKinds: [taxonomy, term, rss]
 # Every page is published as HTML for people and as its authored
 # Markdown for agents and scripts, side by side, so the Markdown of / is
 # /index.md. The theme writes the Markdown only when the site declares
-# this output format (brand/README.md).
+# this output format (brand/theme.md).
 outputFormats:
   markdown:
     # Hugo already defines the media type text/markdown with the md

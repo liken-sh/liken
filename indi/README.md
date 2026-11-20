@@ -1,226 +1,88 @@
 # indi
 
-The INDI images that `observatory-operator` runs, on
-`ghcr.io/liken-sh`. [INDI](https://indilib.org/) is the device layer
-of an observatory: `indiserver` starts one process for each device
-driver and serves every device to clients such as KStars over one XML
-protocol on TCP port 7624.
+The INDI images give a [`liken`](https://liken.sh/) cluster the
+drivers for an observatory's equipment: mounts, cameras, focusers,
+filter wheels, domes, and more. The drivers come from the core of
+[INDI](https://indilib.org/) and from its third-party drivers. The
+images also include the INDI simulators and PHD2, the guider.
+`indiserver` starts one process for each device driver. It serves
+every device to clients such as KStars over one XML protocol on TCP
+port 7624.
 
-| Image | Holds |
-|---|---|
-| `indi` | `indiserver`, `socat`, every program in `indi-bin` (the core drivers, the simulators, and the tools), and `indi-shim` |
-| `indi-simulators` | the GSC star catalog that the CCD and guide simulators draw from |
-| `indi-phd2` | PHD2, the guider, as a client of an INDI server, with the GTK files it reads by name |
-| `indi-open` | the third-party drivers that link no vendor SDK |
-| `indi-zwo`, `indi-qhy`, `indi-playerone`, `indi-svbony`, `indi-atik`, `indi-fli`, `indi-sbig`, `indi-mi`, `indi-qsi`, `indi-apogee`, `indi-astroasis`, `indi-gphoto`, `indi-touptek` | one vendor SDK family each |
+This component is a pinned set of images on `ghcr.io/liken-sh`, not
+an operator. It contains the recipe of each image, and the shim that
+connects `indiserver` to a driver in another pod. It does not decide
+which driver runs where, or when. `observatory-operator` does that.
 
-Each image is a library closure on `scratch`: the programs that its
-list in `images/` names, every library the loader resolves for them,
-and the files they read by name. `indi` is about 73 MB, where Ubuntu
-with the same packages is about 1 GB. Every other image builds on
-`indi` and adds its own drivers, from under 1 MB for SBIG to 344 MB for
-the eleven ToupTek brands. Only `indi-simulators` and `indi-phd2` have
-a shell: the CCD simulator runs `gsc` through `popen()`, and PHD2's
-entrypoint is a script.
+`observatory-operator` runs these images. It starts each device's
+driver from the image that contains that driver. It starts the
+telescope's `indiserver` from `indi`, and PHD2 from `indi-phd2`
+beside the `weston` image. `firmware-operator` runs `fxload` from
+`indi-qhy` to load the firmware of a QHY camera. The entrypoint of
+the `indi` image is `indiserver`, so you can also run it with Docker
+or in a pod of your own.
 
-`indi-qhy` also holds `fxload`, the QHY firmware files in
-`/usr/lib/firmware/qhy/`, and `libqhy`'s udev rules,
-`/usr/lib/udev/rules.d/85-qhyccd.rules`. Many QHY cameras power up as
-a bare Cypress EZ-USB chip, and a `liken` machine runs no udev, so
-`firmware-operator` runs `fxload` from this image to write the
-camera's firmware into the chip. `observatory-operator` writes its
-`Firmware` objects from the rules file. Its smoke check, `smoke/qhy.sh`,
-runs `fxload` as user 1000 on a read-only root.
+## The images
+
+- `indi` contains `indiserver`, `socat`, every program of `indi-bin`
+  (the core drivers, the simulators, and the tools), and `indi-shim`.
+- Each vendor image, such as `indi-zwo` or `indi-qhy`, adds the
+  third-party drivers of one vendor SDK family. It also adds the SDK,
+  and the SDK's license file when indi-3rdparty has one. `indi-qhy`
+  also contains `fxload`, the QHY firmware files, and `libqhy`'s udev
+  rules. `observatory-operator` generates its QHY `Firmware` objects
+  from those udev rules.
+- `indi-open` adds the third-party drivers that link no vendor SDK.
+- `indi-simulators` adds the GSC star catalog. The CCD and guide
+  simulators draw their stars from it.
+- `indi-phd2` adds [PHD2](https://openphdguiding.org/). PHD2 links the
+  same `libindiclient` as the server that it connects to, and serves
+  its event API on TCP port 4400.
+
+`package.toml` lists every image. Each list in `images/` names the
+programs, libraries, and files of one image. The drivers that no
+image publishes are listed in `images/unpublished`.
+
+## How the images are built
+
+Each image is a library closure: an image built `FROM scratch` with no
+package manager. It contains only the programs that its list names,
+every library that the loader resolves for those programs, and the
+files that the programs open by name. `indi` is the base closure.
+Every other image builds on it and adds only its own files. Only
+`indi-simulators` and `indi-phd2` have a shell. The CCD simulator
+needs one because it runs `gsc` through `popen()`, and PHD2 needs one
+because its entrypoint is a script. Each image includes the copyright
+files and the dpkg records of the packages that it copied files from,
+so a scanner can list its packages.
+
+Everything installs from dated snapshots of Ubuntu, the INDI PPA, and
+the PHD2 PPA. Snapshots are needed because a PPA keeps only its
+newest build of each package. These entries record what a build
+installs:
+
+- `version` in `package.toml` is the date of the snapshots.
+- `snapshot.sha256` pins the `InRelease` file of each suite at that
+  date.
+- `[package.upstream]` lists the package versions that the date
+  installs.
+
+Every image publishes under the tag `<version>-<revision>`. CI builds
+the images only when that tag is new.
 
 ## The shim
 
 `indiserver` starts every driver as its own child process, with no
-arguments. A driver that runs in another pod needs a local program
-that stands in for it. `indi-shim` is that program: each device is a
-symbolic link to it, named for the address of the device pod's
-`Service`, such as `ccd.observatory:7625`. The shim reads the address
-from its own name, connects, and copies bytes in both directions until
-either side closes. The device pod serves its driver with
-`socat TCP-LISTEN:7625,reuseaddr EXEC:<driver>,pipes`.
-`observatory-operator/plans/completed/03-the-topology-by-hand.md` gives the
-design.
+arguments. When a driver runs in another pod, `indi-shim` takes its
+place. Each device is a symbolic link to the shim, named for the
+address of the device pod's `Service`. The shim connects to that
+address and copies bytes in both directions. In the server's pod, the
+shim also runs `indiserver`. When the server's list of devices
+changes, the shim starts and stops drivers on the running server. The
+package comments in `shim/` describe the design.
 
-In the server's pod, the shim also runs `indiserver`:
-
-```
-indi-shim serve <drivers file> <links dir> <fifo> /usr/bin/indiserver [arg...]
-```
-
-The drivers file lists one device address on each line. The shim
-makes the fifo, starts `indiserver` with `-f <fifo>`, and makes a link
-and writes `start <link>` to the fifo for each device of the file. It
-watches the file's directory with inotify, and when the file changes,
-it writes `stop <link>` for each device that left and `start <link>`
-for each device that joined. The running server keeps every other
-driver. The shim exits when `indiserver` exits, and ends `indiserver`
-on `SIGTERM`. `observatory-operator` writes the file through a
-downward API volume, and
-`observatory-operator/plans/completed/11-devices-join-a-running-server.md`
-gives the design.
-
-## PHD2
-
-`indi-phd2` runs [PHD2](https://openphdguiding.org/) from the PHD2 PPA
-(`ppa:pch/phd2`). It builds on `indi`, so PHD2 links the same
-`libindiclient` as the server it connects to. PHD2 is a wxWidgets
-program on GTK 3 with no headless mode, so it needs a Wayland
-compositor. `observatory-operator` runs the `weston` image beside it,
-headless, in the same pod. `observatory-operator` plan 09 gives the design.
-The image is 513 MB, about 440 MB more than `indi`, because PHD2 links
-OpenCV, and OpenCV links GDAL, FFmpeg, and GStreamer.
-
-The image runs as UID 1000 and reads these paths:
-
-- `/etc/phd2/PHDGuidingV2`: the whole profile, mounted as a file.
-  PHD2 rewrites its config while it runs, so the entrypoint,
-  `/usr/bin/phd2-start`, copies this file to `$HOME/.PHDGuidingV2`
-  before each start.
-- `$HOME`, which is `/home/phd2`: the config, the logs in
-  `$HOME/PHD2`, and the instance lock `$HOME/phd2.1`. The entrypoint
-  removes the lock before each start, because a lock that a crash left
-  names process 1, and PHD2 is process 1 again.
-- `$XDG_RUNTIME_DIR`, which is `/run/wayland`: the directory with the
-  compositor's socket, `$WAYLAND_DISPLAY`, which is `wayland-0`.
-  The compositor must run as the same UID, because it creates the
-  socket with no write permission for other users.
-
-PHD2 serves its event API on TCP port 4400. A modal dialog ends PHD2
-on a compositor with no `wl_seat`, so the profile must hold
-`ConfigVersion=2001`, which stops the first-light wizard, and the
-image sets no `LANG`, which stops a dialog about the locale.
-
-GTK reads files by name that no `ldd` lists: the XKB rules, fontconfig,
-the icon theme, the shared MIME database, and the compiled settings
-schemas. gdk-pixbuf decodes every icon through glycin, which runs a
-loader program in a `bwrap` sandbox. A container cannot create that
-sandbox, and glycin then runs the loader without one, so the image
-holds `bwrap` for glycin to try. The comments in `images/phd2` give
-the reason for each entry.
-
-## The version and the revision
-
-`indi` is a pinned component. Its `package.toml` states a version and
-a revision, and every image publishes under the tag
-`<version>-<revision>`, for example `20261005-1`.
-
-- The **version** is the date of the snapshots that the build installs
-  from: Ubuntu 26.04 from `snapshot.ubuntu.com`, and the INDI PPA and
-  the PHD2 PPA from `snapshot.ppa.launchpadcontent.net`. A PPA itself
-  keeps only its newest build of each package, so only a snapshot
-  builds the same files again. `snapshot.sh` points apt at the three
-  archives, and after `apt-get update` it checks the `InRelease` file
-  of each suite against its sha256 in `snapshot.sha256`. apt checks
-  the signatures against the keys in `Signed-By`, but any file that
-  the same keys once signed passes that check, so the digests bind the
-  date to its package lists.
-- The **revision** counts the changes to the recipe at one version.
-- `[package.upstream]` states the package versions that the date
-  installs. Each one is a label of every image,
-  `sh.liken.upstream.<name>`, and each smoke check fails when the image
-  holds other versions.
-
-CI builds these images only when the tag is not published yet, so the
-images build when someone bumps them, and at no other time.
-
-## Bump the snapshot
-
-`latest.sh --bump` does steps 1 to 3 for today's date in UTC.
-
-1. Choose a date, and read the versions that the PPA snapshots of that
-   date serve:
-   `https://snapshot.ppa.launchpadcontent.net/mutlaqja/ppa/ubuntu/<date>T000000Z/dists/resolute/main/binary-amd64/Packages.gz`
-   and the same path under `pch/phd2`.
-2. Set `version` to the date and `revision` to 1, and update
-   `[package.upstream]`.
-3. Replace each line of `snapshot.sha256` with the sha256 of the
-   `InRelease` file it names, at the new date: the `resolute`,
-   `resolute-updates`, and `resolute-security` suites of
-   `https://snapshot.ubuntu.com/ubuntu/<date>T000000Z/`, and the
-   `resolute` suite of each PPA snapshot. Verify each file's signature
-   first, Ubuntu's against `trust/keys/ubuntu-archive.asc` and each
-   PPA's against `mutlaqja.asc` or `pch.asc`. Launchpad signs the INDI
-   PPA's file with an older key too, which the repository does not
-   hold, so a check with `gpgv` reports one good signature and one
-   that it cannot check.
-4. Run `make workflows` at the top of the repository.
-5. Build every image with `docker buildx bake --load` and the 17
-   targets of `package.toml`, and run each image's smoke check with
-   its tag.
-6. Run `make -C observatory-operator firmware-rules`, which copies
-   `libqhy`'s udev rules from the new `indi-qhy` image and writes the
-   operator's QHY `Firmware` objects again.
-
-A new snapshot can carry a new SDK, or an SDK whose license file
-changed. Compare each SDK directory of indi-3rdparty at the commit the
-PPA built from with `sdk-licenses/`, copy each changed or new license
-file, add a `license` entry to the image's list, and update the commit
-under "The notices" below.
-
-The build fails when the new release installs a third-party driver
-that no list in `images/` names, or when a list names one that it no
-longer installs. Add a new driver to an image's list or to
-`images/unpublished`.
-
-Search the new closure for libraries that the drivers load with
-`dlopen`, which `ldd` does not list: `objdump -T` names the libraries
-that import `dlopen`, and running a driver with `LD_DEBUG=libs` names
-what it opens. The alignment math plugins and the gphoto2 plugins are
-seeds in their lists for this reason.
-
-## The lists
-
-Each file in `images/` lists the seeds of one image, one per line:
-
-- `driver <name>`: the program `/usr/bin/<name>`.
-- `package <name>`: every `indi_*` program of a package.
-- `seed <path>`: a program or a library, or every file of a directory.
-- `sdk <name>`: every file of a vendor SDK in `indi-3rdparty-libs`.
-- `data <path>`: a file or a directory, copied as it is.
-- `link <path> <target>`: a symbolic link.
-- `license <path>`: a vendor SDK's license file, from `sdk-licenses/`.
-
-## The notices
-
-Each image holds the notices that the licenses of its files ask to
-travel with them. A closure copies only what the loader resolves, so
-`closure.sh` also copies the copyright file of each Ubuntu and PPA
-package that the closure took a file from, to
-`/usr/share/doc/<package>/copyright`, and the license texts of
-`/usr/share/common-licenses`. It writes
-`/usr/share/doc/liken/<image>.packages`, which names each package, its
-version, and its source package, with the snapshots as `deb-src`
-entries, so `apt-get source` fetches the source of each one. For each
-of those packages it also writes the package's dpkg stanza to
-`/var/lib/dpkg/status.d/<package>`, with its md5sums beside it, and
-copies `/etc/os-release` and `/etc/lsb-release`, so syft and Trivy
-list the image's packages. `closure.sh` is a copy of
-`vulkan/closure.sh`, because the build context of `indi` does not
-reach `vulkan/`, and `ci pins` fails when the two differ. The shim
-links the Go standard library, so `indi` holds the Go license at
-`/usr/share/doc/go/LICENSE`.
-
-The copyright file of the PPA's `indi-3rdparty-libs` states one
-license for the whole package and names none of the vendor SDKs in
-it. `sdk-licenses/` mirrors the license file of each SDK directory in
-the [indi-3rdparty](https://github.com/indilib/indi-3rdparty)
-repository at commit `9d8aff3711efa824137123b007b97978aeac2688`, the
-newest commit of its master branch when the PPA built the packages of
-2026-10-04 that the snapshot installs. The `license` entries of
-a list copy them to `/usr/share/doc/indi-3rdparty-libs/<directory>/`.
-The directories of the QHY, Atik, Astroasis, and SVBONY SDKs, and of
-`libflipro`, hold no license file, so their images carry none from
-those directories. The repository also holds `debian/libqhy/copyright`,
-the copyright file of a Debian package of the QHY SDK, `libqhy`, which
-the snapshot of the PPA does not serve. It names QHY CCD as the
-copyright holder of that package, and `indi-qhy` holds it at
-`/usr/share/doc/indi-3rdparty-libs/debian/libqhy/copyright`, because
-the image holds the QHY SDK and its firmware files.
-
-Each smoke check runs `notices/check.sh` at the top of the repository,
-which fails when a package that a list names has no copyright file in
-the image, or when a `license` entry's file is missing.
+`observatory-operator`'s
+[plan 01](../observatory-operator/plans/completed/01-the-indi-base-image.md)
+and
+[plan 02](../observatory-operator/plans/completed/02-driver-and-simulator-images.md)
+record the design of the images and the sizes measured.

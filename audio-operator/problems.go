@@ -4,8 +4,8 @@ package main
 // error. The API mode and the capture container mode of the binary
 // write the same shape, so the API passes the capture container's
 // document to the caller with only its instance replaced. The detail
-// member holds the failing source's own text word for word, as the
-// section "Errors include their source's text" of AGENTS.md requires:
+// member holds the failing source's own text word for word, as
+// brand/messages.md requires of an error that wraps another program:
 // pw-record's stderr, an encoder's stderr, or the API server's
 // status.message.
 

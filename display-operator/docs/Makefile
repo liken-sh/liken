@@ -52,7 +52,7 @@ test: $(GENERATED)
 	go test ./...
 
 # Writes each guide as an Agent Skill, a SKILL.md in ../skills, with
-# the skills generator from the brand component, whose README
+# the skills generator in brand/skills, whose main.go
 # describes the output. The output is committed, and the test-docs
 # target in ../Makefile fails when it is out of date.
 .PHONY: skills

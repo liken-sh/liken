@@ -232,8 +232,8 @@ status:
 
 A field the protocol has no row for is listed only when it is
 declared ("the wiim protocol has no speaker layout"). A reason holds
-the device's own text where there is one, as `AGENTS.md` asks of every
-error. A declared field in the list makes `SettingsConfirmed` False
+the device's own text where there is one, as `brand/messages.md` asks
+of every error. A declared field in the list makes `SettingsConfirmed` False
 (`status.go:53-65`), and the message names the paths. The list is
 `x-kubernetes-list-type: map` with a `maxItems`, so a CEL rule on it
 stays inside the cost budget.
@@ -346,7 +346,7 @@ they are declarable. Each link resolved on 2026-10-06.
 | Protocol | Vendor document | Client code |
 |---|---|---|
 | Denon and Marantz | `denon/AGENTS.md` lists the protocol documents | [`denonavr`](https://github.com/ol-iver/denonavr); plans 15 and 17 cite the rest |
-| WiiM and LinkPlay | `wiim/AGENTS.md` lists the API documents | [`pywiim`](https://github.com/mjcumming/pywiim) |
+| WiiM and LinkPlay | `wiim/PROTOCOL.md` lists the API documents | [`pywiim`](https://github.com/mjcumming/pywiim) |
 | Yamaha YNCA | none public | [`ynca` protocol notes](https://raw.githubusercontent.com/mvdwetering/ynca/master/docs/PROTOCOL.md) |
 | Yamaha MusicCast | none public | [`aiomusiccast`](https://raw.githubusercontent.com/vigonotion/aiomusiccast/master/aiomusiccast/pyamaha.py) |
 | Onkyo, Integra, Pioneer eISCP | [ISCP command list](https://community.symcon.de/uploads/short-url/7mxbIQ7qRIghfbEQrvcrEkU57ad.pdf) | [`onkyo-eiscp`](https://github.com/miracle2k/onkyo-eiscp), [openHAB binding](https://raw.githubusercontent.com/openhab/openhab-addons/main/bundles/org.openhab.binding.onkyo/src/main/java/org/openhab/binding/onkyo/internal/handler/OnkyoHandler.java) |

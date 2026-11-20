@@ -1,57 +1,40 @@
 # astrometry
 
-`ghcr.io/liken-sh/astrometry` holds the programs that plate-solve a
-frame: `astrometry-engine` and `solve-field` from astrometry.net, and
-`source-extractor` from SourceExtractor, with every library they load,
-on `scratch`. `astrophotography-operator`'s worker image builds on it.
-The worker extracts the stars of a frame beside the frames, and the
-solver solves the star list against the index files, as
-[`astrophotography-operator` plan
-02](../astrophotography-operator/plans/completed/02-solving-and-centering.md)
-describes.
+The `astrometry` image plate-solves a frame of the sky. It finds the
+stars in the frame, and then the position on the sky that those stars
+match, so a telescope can center a target. It contains the solver of
+[astrometry.net](https://astrometry.net/) and the star extractor
+SourceExtractor, from Debian's packages.
 
-## What the image holds
+This component is a pinned image on `ghcr.io/liken-sh`, not an
+operator. It contains the programs and every library that they load.
+It contains no index files: the caller puts the index files in a
+volume, and passes the solver a configuration that names them. The
+image has no Python either. So a caller of `solve-field` must pass
+the options that stop it from running Python. `astrometry-closure.sh`
+lists those options.
 
-`astrometry-closure.sh` names the three programs as seeds, collects
-every library the loader resolves for them, and adds SourceExtractor's
-filters and its neural network from `/usr/share/source-extractor`. The
-image holds no Python and no index files. `solve-field` runs Python
-only for `--just-augment` without `--no-remove-lines` and
-`--uniformize 0`, so a caller passes both. The caller passes
-`astrometry-engine` a configuration that names the index files.
+`astrophotography-operator`'s worker image builds on this image. Its
+workers mount the volume that contains the frames, and extract the
+stars of each frame there. Its solvers solve the star lists against
+the index files of a `Solver`. The image builds from the same Debian
+snapshot as the base images, and its build scripts come from
+`vulkan/`. So when the base
+images move to a new snapshot, this image moves with them.
 
-The image holds the copyright file of each Debian package it takes
-files from, and the list `/usr/share/doc/liken/astrometry.packages`,
-as [`notices/`](../notices/) describes. astrometry.net is
-BSD-3-Clause with GPL parts, and SourceExtractor is GPL-3.0+.
+## The image
 
-`smoke/astrometry.sh` runs the image before it ships. It extracts the
-stars of a synthetic frame, builds an `.axy` with the options above,
-and solves it against a small index file of the same synthetic stars.
-`smoke/field.py` says how the frame and the index file were made.
+- `astrometry-engine` and `solve-field` from astrometry.net.
+- `source-extractor`, with its convolution filters and its neural
+  network.
+- The copyright file of each Debian package that the image copied
+  files from, and the list `/usr/share/doc/liken/astrometry.packages`,
+  as [`notices/`](../notices/) describes. astrometry.net is
+  BSD-3-Clause with GPL parts, and SourceExtractor is GPL-3.0+.
 
-## The version and the revision
+Before the image ships, `smoke/astrometry.sh` extracts the stars of a
+synthetic frame and solves them against a small index file of the
+same stars. `smoke/field.py` describes how the frame and the index
+file were made.
 
-`astrometry` is a pinned component. Its `package.toml` states a
-version and a revision, and the image publishes under the tag
-`<version>-<revision>`, for example `20260928-1`.
-
-- The **version** is the date of the Debian snapshot that the build
-  installs from, as `YYYYMMDD`. It moves with the bases on Debian,
-  because `vulkan/snapshot.sha256` holds the checksums of one date.
-- The **revision** counts the changes to the recipe at one version. It
-  starts at 1 for a new version. Any change to the build that keeps
-  the version needs the next revision: a change to the `Dockerfile`, to
-  a script, to the Debian image digest, or to `package.toml`.
-
-The build reads `snapshot.sh` and `closure.sh` from the `vulkan`
-directory, and `[depends]` names `vulkan`, so a new revision of
-`vulkan` needs a new revision here too. The `bump-components` skill
-under `.agents/skills` holds the procedure.
-
-## Build
-
-The bake file at the top of the repository builds this image, from
-the top of the repository:
-
-    docker buildx bake astrometry --load
+MIT. See [LICENSE](LICENSE).

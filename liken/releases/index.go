@@ -123,7 +123,7 @@ func Index(source string, keys []string, outDir string, out io.Writer) error {
 // stylesheet and the mark are inlined rather than linked: a channel
 // page must render whole with no request to any other site, so a
 // page here fetches nothing (the stylesheet section of
-// brand/README.md says more).
+// brand/theme.md says more).
 type page struct {
 	Title      string
 	Stylesheet template.CSS

@@ -11,9 +11,10 @@ installation that `liken` created. When a request of the teardown
 fails on each pass, the teardown stops at that stage, and the
 operator's log gives the error. A person who runs
 `kubectl describe cluster` sees no condition, reason, or `Event` that
-names the stage where the teardown stopped, or the error. The rule
-"Errors include their source's text" in `liken/AGENTS.md` asks for
-the cause in the log or the status, and here only the log has it.
+names the stage where the teardown stopped, or the error. The rule in
+`brand/messages.md` for an error that wraps another program's failure
+asks for the cause in the log or the status, and here only the log has
+it.
 
 ## The evidence
 

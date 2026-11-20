@@ -1,11 +1,7 @@
-# Authoring this docs domain
+# Working on this manual
 
-@../../brand/voice.md
-
-This directory is the source of https://liken.sh/audio/, the audio
-operator's manual. Hugo builds it with the shared brand theme, `brand/`
-at the top of the repository.
-
-Write all site prose in Simplified Technical English (ASD-STE100). The voice rules in
-that file add what the standard does not state. They govern every word
-this site publishes, so scan a page against them before you commit it.
+This directory is the source of a component's manual, which is
+published on liken.sh. Before you write or change a page here, load
+the `manuals` skill from `.agents/skills` at the top of the
+repository. It explains where each kind of page goes, which pages are
+generated, and how to check a manual.

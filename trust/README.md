@@ -1,48 +1,55 @@
 # trust
 
-The CA certificates that `liken` trusts: the Mozilla CA program's root
-certificates, as the curl project publishes them in dated snapshots at
-<https://curl.se/docs/caextract.html>. One date pins them for every
-part of the system:
+`trust` is the set of CA certificates that every part of `liken`
+uses to verify TLS. They are the root certificates of the Mozilla CA
+program, which the curl project publishes as dated snapshots at
+<https://curl.se/docs/caextract.html>. The OS and every image use the
+snapshot of one date, so changing what `liken` trusts is a single
+bump that you can review.
 
-- The OS build reads `VERSION` through `fetch.sh`, which verifies the
-  snapshot against the sha256 that curl.se publishes beside it, and
-  installs it as the machine's trust store.
-- The `trust` image on `ghcr.io/liken-sh` holds the same file at
-  `/etc/ssl/certs/ca-certificates.crt`, fetched by that checksum, and
-  its notice at `/usr/share/doc/mozilla-ca/copyright`. Mozilla's
-  certificate data is under the MPL 2.0, which requires that each copy
-  state the license. Every image that verifies TLS copies both with
-  `COPY --from=trust / /` and names `trust` in its `[depends]`.
-- The image also holds `/usr/share/doc/liken/trust.cdx.json`, a
-  CycloneDX record of the bundle that `image-sbom` writes from
-  `pin.toml` during the build. syft finds no package in the bundle
-  itself, and it copies the record's component into the SBOM of this
-  image and of every image that copies it, with the purl and the
-  license of `pin.toml`.
+`trust` pins the bundle, checks it against the sha256 that curl.se
+publishes beside it, and ships it with the notice that its license
+requires. `trust` does not choose the roots. Mozilla's CA program
+chooses them, and `trust` uses each snapshot exactly as curl
+publishes it. The smoke check, `smoke/trust.sh`, fails when the
+bundle contains a root of a compromised authority that the script
+lists, so that snapshot does not ship.
 
-`trust` is a pinned component. Its version is the snapshot's date as
-`YYYYMMDD`, and the label `sh.liken.upstream.mozilla-ca` carries the
-date as curl names it.
+The OS build and the images use the same pin. Each component that
+copies the bundle lists `trust` in the `[depends]` of its
+`package.toml`, so a bump of `trust` releases each of those
+components too. The directory also contains the signing keys that
+the bumps of more than one component check.
 
-## Bump the snapshot
+## The parts
 
-`./latest.sh` reports the pin and the newest snapshot. `./latest.sh
---bump` writes the newest one into `VERSION`, `package.toml`, and the
-`Dockerfile`. Then run `make workflows` at the top of the repository,
-raise the revision of each pinned component that copies the bundle,
-and run the smoke check. It fails when the three disagree, when the
-image's bundle differs from the checksum curl.se publishes, or when the
-bundle holds one of the roots of the compromised eMudhra intermediates
-that `smoke/trust.sh` names.
+- `VERSION` and `fetch.sh` are what the OS build uses. `fetch.sh`
+  reads the date in `VERSION` and downloads the snapshot by the URL
+  and the digest in `pin.toml`. The OS image installs the snapshot as
+  the machine's trust store.
+- The `trust` image on `ghcr.io/liken-sh` contains the same bundle at
+  `/etc/ssl/certs/ca-certificates.crt`, which is where OpenSSL,
+  GnuTLS, libcurl, and Go look for it. It also contains the notice at
+  `/usr/share/doc/mozilla-ca/copyright`. Mozilla's certificate data is
+  under the MPL 2.0, which requires each copy to include the license.
+  An image that verifies TLS copies both files with
+  `COPY --from=trust / /`.
+- `/usr/share/doc/liken/trust.cdx.json` in the image is a CycloneDX
+  record of the bundle, which `image-sbom` writes from `pin.toml`.
+  syft finds no package in the bundle itself. So syft copies the
+  component in this record into the SBOM of this image and of every
+  image that copies the bundle.
+- `keys/` contains the upstream signing keys that more than one
+  `latest.sh --bump` uses. Each of those bumps verifies a signature
+  with the key before it copies a digest into a pin.
+  [`keys/README.md`](keys/README.md) lists each key, where it comes
+  from, and the bumps that use it. No image build reads `keys/`.
 
-A snapshot removes trust as well as adding it. Read which roots left
-the bundle before you take the bump: a root that leaves is one that
-every machine and every image stops trusting.
+`trust` is a pinned component. Its version is the date of the
+snapshot as `YYYYMMDD`. The label `sh.liken.upstream.mozilla-ca`
+records the date in the format that curl uses. A new snapshot can
+remove roots as well as add them. When a root leaves the bundle,
+every machine and every image stops trusting it.
 
-## Signing keys
-
-`keys/` holds the upstream signing keys that more than one
-`latest.sh --bump` checks before it copies a digest into a pin.
-`keys/README.md` names each key, where it comes from, and the bumps
-that read it. No image build reads `keys/`.
+MIT. See [LICENSE](LICENSE). The certificate data is Mozilla's, under
+the MPL 2.0, as `copyright` says.

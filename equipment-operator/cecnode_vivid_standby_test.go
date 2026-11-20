@@ -3,7 +3,7 @@ package main
 // This test runs a standby press against the kernel's CEC core through
 // the vivid driver, with one vivid adapter acting as the TV. The node
 // workload wakes the TV, and for the press it must send exactly one
-// Standby. cec/AGENTS.md has the commands that set up vivid.
+// Standby. cec/VIVID.md has the commands that set up vivid.
 
 import (
 	"os"

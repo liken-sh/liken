@@ -95,9 +95,9 @@ serve: $(GENERATED)
 
 # The skills target emits every guide as an Agent Skill into ../skills,
 # one SKILL.md per guide, with the generator the brand component
-# publishes (its README says what the output holds). The output is
-# committed, and the test-docs target in ../Makefile fails when it is
-# stale.
+# publishes (brand/skills/main.go says what the output holds). The
+# output is committed, and the test-docs target in ../Makefile fails
+# when it is stale.
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills
 

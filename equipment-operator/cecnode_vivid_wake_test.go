@@ -2,7 +2,7 @@ package main
 
 // A wake on a vivid bus. The test acts as the TV and records what it
 // receives. A second vivid output acts as a streaming player that takes
-// the input, and the node workload must take it back. cec/AGENTS.md has
+// the input, and the node workload must take it back. cec/VIVID.md has
 // the commands that set up vivid.
 
 import (

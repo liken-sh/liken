@@ -3,7 +3,7 @@
 //
 // A manifest names each file that a pin downloads and that a release
 // or an image ships, with the facts that an SBOM needs about the file.
-// The pins skill states its form under "Pins and downloads",
+// Root AGENTS.md states its form under "Pins and downloads",
 // toolchains/pin.sh writes and reads it, and `ci pins` checks it, so
 // this reader takes each field as it is. Two SBOMs read manifests:
 // liken/releases/sbom writes the SBOM of an OS release, and image-sbom

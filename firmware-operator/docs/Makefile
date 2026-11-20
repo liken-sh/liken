@@ -46,7 +46,7 @@ $(REFERENCE)/firmwarecatalog.md: ../deploy/firmwarecatalog-crd.yaml $(CRDREF_SOU
 	$(CRDREF) -title FirmwareCatalog -weight 20 $< $@
 
 # skills writes each guide as an Agent Skill, one SKILL.md in ../skills
-# per guide. The generator is brand/skills, and brand/README.md
+# per guide. The generator is brand/skills, and its main.go
 # describes the output. The output is committed, and test-docs in ../Makefile
 # fails when it is out of date.
 .PHONY: skills

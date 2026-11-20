@@ -1,83 +1,64 @@
 # bluetooth-operator
 
-`bluetooth-operator` pairs a Bluetooth game controller with
-`kubectl` and gives it to exactly one pod. It is a Kubernetes
-[Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-driver for [`liken`](https://github.com/liken-sh/liken) clusters. It
-publishes each paired controller as a device under the driver name
-`bluetooth.liken.sh`. A pod claims one controller by its MAC address
-and gets that controller's evdev nodes, and no other input device on
-the machine.
+`bluetooth-operator` pairs Bluetooth devices through the Kubernetes
+API. It gives each paired input device, such as a game controller or
+a remote, to exactly one pod. The pod claims the device by its MAC
+address. It gets that device's input nodes, and no other input device
+on the machine. You pair with `kubectl`, so RBAC controls who can
+pair, and nobody needs a shell on a node or in a pod.
 
-You pair through the Kubernetes API. You create a `PairingRequest`,
-put the controller in pairing mode, and approve the address that the
-radio reports. Your game or emulator pod then claims that address,
-and only that pod can read the controller, because only one claim can
-hold it. The operator stores the bond's keys in a `Secret`, so after
-a pod restart or a reboot the controller reconnects when you press a
-button. You need no SSH access, no host configuration, and no shell
-in any pod.
+The operator runs `bluetoothd` for the machine's radio. When you
+create a `PairingRequest`, the operator opens a pairing window and
+pairs the device whose address you approve. It stores the keys of
+each pairing, called a bond, in a `Secret`. So a device reconnects
+after a pod restart, an upgrade, or a reboot. The operator publishes
+every paired device, whether it's connected or not. So a pod that
+claims a switched-off controller starts when you turn the controller
+on. Through this operator, a pod can claim only an input device. A
+paired speaker plays through `audio-operator`, and this operator runs
+no sound server. The operator serves one radio on each machine.
 
-The operator also publishes the media bus of each radio. A claim on
-the bus lets a pod connect a sound server to the radio's
-`bluetoothd`, and `audio-operator` claims it to play sound through
-Bluetooth speakers.
-[The media bus](https://liken.sh/bluetooth/docs/reference/devices/#the-media-bus)
-in the manual describes its attributes and how a pod receives it.
+`bluetooth-operator` is one of `liken`'s
+[extension operators for claiming hardware](https://liken.sh/docs/concepts/claiming-hardware/).
+It claims the radio that `liken` publishes, through the same public
+interfaces that any driver uses, and a cluster can run without it.
+It also publishes each radio's media bus, which is a D-Bus connection
+to that radio's `bluetoothd`. `audio-operator` claims the media bus to
+play sound to paired speakers. A `Remote` of `media-operator` can
+claim a paired controller, and `media-operator` reads the
+controller's link and battery from its `Peripheral`.
 
-## What it needs from `liken`
+## The kinds
 
-`liken`'s own DRA driver publishes the machine's Bluetooth adapter
-as a `btusb` device. This operator claims that adapter through DRA
-and uses no private interface of `liken`. Its claim, its
-`ResourceSlice`, and the CDI files it writes for the container
-runtime are the interfaces that any DRA driver uses.
+- An `Adapter` is one Bluetooth radio. The operator creates it for the
+  radio that its pod claimed. Its `spec` sets the name that the radio
+  broadcasts, Low Energy privacy, and the `btmon` trace of the radio's
+  link.
+- A `PairingRequest` opens one pairing window on one adapter. It
+  reports the devices that the radio finds, and pairs the one whose
+  address you write into `spec.device`.
+- A `Peripheral` is one paired device. It owns the `Secret` that
+  stores the device's keys. Its `status` reports the link and the
+  battery. To unpair the device, delete its `Peripheral`.
 
-The operator is one of `liken`'s optional
-[extension operators for claiming hardware](https://liken.sh/docs/concepts/claiming-hardware/),
-and it installs as an ordinary workload. The operator's pod runs
-`bluetoothd`, so the `liken` system image contains no BlueZ and no
-D-Bus.
+This `PairingRequest` opens a window of 180 seconds on the radio
+`00-11-22-33-44-55`. To pair a device that the radio finds, write its
+address into `spec.device`:
 
-## Install
+```yaml
+apiVersion: bluetooth.liken.sh/v1alpha1
+kind: PairingRequest
+metadata:
+  name: new-gamepad
+  namespace: liken-system
+spec:
+  adapter: 00-11-22-33-44-55
+  windowSeconds: 180
+```
 
-Apply the base:
-
-    kubectl apply -k deploy/
-
-The base contains the `DeviceClass` `bluetooth-adapter`, because the
-operator's own claim names it and the pod cannot start without it.
-You create the class that your workloads claim through.
-[Install the operator](docs/content/docs/guides/install.md) gives
-the YAML for `bluetooth-input`, the class to start with, and shows
-how to reference the base from your own GitOps.
-
-## The manual
-
-The manual publishes at **<https://liken.sh/bluetooth/>**. It includes:
-
-* [Install the operator](docs/content/docs/guides/install.md)
-* [Pair a controller and give it to a pod](docs/content/docs/guides/pair-a-controller.md)
-* [Devices](docs/content/docs/reference/devices.md): the published devices,
-  their attributes and taints, and the claims that select them
-
-The comments in the Go files and the manifests explain how the
-operator works and why it is built that way. [`plans/`](plans/) holds
-the design documents and the open problems.
-
-## The build
-
-    go build ./...
-    go test ./...
-    docker build -t bluetooth-operator .
-    docker build -f bluetoothd/Dockerfile -t bluetoothd .
-    docker build -f bondfetch/Dockerfile -t bluetooth-bondfetch .
-
-The images run in one pod, so a release builds and tags each of them
-from the same commit. The Kubernetes libraries and the Go version
-match the ones `liken` builds with, because both drivers register
-with the same kubelet on a node.
-
-## License
+The manual is at [liken.sh/bluetooth](https://liken.sh/bluetooth/).
+It has the install guide, the guide to pair a controller and give it
+to a pod, and a reference for the devices and each kind.
+The design documents and the open problems are in [`plans/`](plans/).
 
 MIT. See [LICENSE](LICENSE).

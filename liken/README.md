@@ -4,142 +4,96 @@
 
 **liken** *(v.)*: to represent one thing as similar to another; to compare.
 
-Homophone of *[lichen](https://en.wikipedia.org/wiki/Lichen)*: a symbiont
-of two organisms living as one, and one of the first things to colonize
-bare rock.
-
-The icon is a patch of that lichen, drawn as the polygonal plates
+Homophone of *[lichen](https://en.wikipedia.org/wiki/Lichen)*: two
+organisms living as one, and one of the first things to colonize bare
+rock. The mark is a patch of lichen, drawn as the plates
 (*[areoles](https://en.wikipedia.org/wiki/Crustose_lichen)*) that a
-crustose lichen cracks into as it grows. The
-[brand component](../brand/) explains the
-design and the biology behind it.
+crustose lichen cracks into. [`brand/mark.md`](../brand/mark.md)
+explains the design.
 
 `liken` is a small operating system that boots a machine directly into
-Kubernetes and uses Kubernetes as the service manager. **Li**nux +
-**K**ub**e**r**n**etes. The name also describes the operation: a reconciler
-makes the machine like its declared state.
+Kubernetes and uses Kubernetes as its service manager. **Li**nux +
+**K**ub**e**r**n**etes. The name also says what the system does: a
+reconciler makes each machine like the state you declared for it.
 
-## What is in the image
+You manage a cluster's machines as you manage its workloads, with
+manifests and `kubectl`. So you can keep the configuration in git and
+back up only the data volumes. Each machine installs itself, joins the
+cluster, and reports its hardware in its status. To upgrade the fleet,
+you make one edit to the `Cluster`. If a machine fails to boot the new
+release, it goes back to the release it ran before. `liken` runs on
+x86-64 machines with UEFI or BIOS firmware.
 
-The immutable image contains the full operating system: a kernel,
-`liken`'s own init (the Go program that the kernel runs as PID 1), and
-[`k3s`](https://k3s.io). It also contains a few host programs
-that a Kubernetes node cannot get from a container. These are
-the operators and log relays that run `liken` itself, `mke2fs` to format
-blank disks, the iSCSI and NFS client binaries, and a CA trust store. The
-image has no shell, no package manager, and no libc. All other software
-runs in a container.
+The OS manages everything on the machine up to and including k3s:
+the boot, the disks, the network, the clock, the cluster's identity,
+the upgrade of each machine, and the hardware, which it publishes as
+devices that a pod can claim. The image contains the Linux kernel,
+`liken`'s own init, [k3s](https://k3s.io), and the host programs that
+cannot run from a container, such as `mke2fs` and the iSCSI and NFS
+clients. It has no shell, no package manager, and no libc. Every other
+program runs in a container.
 
-## What this makes possible
+The OS is all that a cluster needs to run. It publishes a monitor or a
+sound card as a device, but it does not drive it. An extension
+operator, such as `display-operator`, is an optional workload that
+claims the device. The OS is built with the `kubernetes/` Go module,
+the pins in `toolchains/`, and the CA bundle in `trust/`, and each
+release goes to [releases.liken.sh](https://releases.liken.sh/).
 
-* **Backups are smaller.** If all configuration is in git, you back up
-  only the data volumes. You do not make a snapshot of `/etc`.
-* **Upgrades are declarative.** The `Cluster` resource holds a catalog
-  of releases and one target version. Each machine downloads the target
-  release, compares every byte against pinned digests, and writes the
-  release into the spare slot of an A/B pair. `cluster-operator` then
-  lets one machine at a time reboot, so the fleet keeps its quorum. To
-  upgrade the operating system and the kernel, you change one field.
-* **Nodes share container images.** `k3s` includes the
-  [Spegel](https://spegel.dev) registry mirror, which lets nodes send
-  images to each other directly. A node pulls an image that another
-  node already has over the LAN, so that pull works when the internet
-  connection is down.
-* **The cluster syncs itself from git.** Declare a git repository on the
-  `Cluster` resource, and the cluster syncs it with
-  [Flux](https://fluxcd.io). The repository holds the Cluster document,
-  the Machine documents, and the workloads, and the fleet converges to
-  each commit. The cluster generates its own deploy key, so no private
-  key leaves the cluster. [The GitOps
-  guide](https://liken.sh/docs/guides/gitops/) gives the steps, and
-  [plans/completed/14-gitops-from-first-boot.md](plans/completed/14-gitops-from-first-boot.md)
-  records the design.
+## The kinds
+
+- **`Cluster`** describes the fleet: the leaders, the address plan,
+  the release catalog and the target version, the registry settings,
+  and features. `flux` syncs the cluster from git from its first boot.
+- **`Machine`** describes one computer: its interfaces, the purpose
+  of each disk, its kernel modules, its sysctls, and its reboot policy.
+- **`Disruption`** asks for a turn to reboot a machine or restart k3s.
+- **`MachineDisruptionBudget`** sets how many of the machines that it
+  selects can be out of service at the same time.
+
+## The programs
+
+- **`init`** is the Go program that the kernel runs as PID 1. It
+  prepares the disks, the network, and the clock, and then starts k3s.
+- **`machine-operator`** is a privileged pod on each machine. It writes
+  the `Machine`'s status, applies its spec, and downloads the target
+  release into the boot slot that the machine does not run from. As
+  the Dynamic Resource Allocation (DRA) driver `liken.sh`, it
+  publishes the machine's devices.
+- **`cluster-operator`** writes the `Cluster`'s status, grants the
+  reboot turns, and marks a machine `Lost` when its heartbeat stops.
+- **`liken`** is the toolkit in each release. It creates the
+  cluster's identity, builds the install stick, and verifies a release.
+
+To upgrade, add the release to the catalog and set `version` to it:
+
+    spec:
+      version: "2026.12.01-001"
+      releases:
+        source: https://releases.liken.sh
+        catalog:
+          - version: "2026.12.01-001"
+            digest: sha256:<digest of the release's release.yaml>
 
 ## How liken is written
 
-liken is written to be read. The comments in the shell scripts, the
-manifests, and the Go code do more than say what a line does. They
-teach the domain: why the kernel does not mount `/proc` on its own, why
-`k3s` needs cgroups, and why an initramfs is a cpio archive. A person
-who reads `liken/` from top to bottom learns how a Linux system
-boots, and how Kubernetes takes control after that.
-
-This is why files here contain more commentary than the same files
-would contain in another project. The commentary is deliberate, and it is
-the documentation. The idea is
+The comments in the scripts, the manifests, and the Go code explain
+the domain, such as why the kernel does not mount `/proc` on its own.
+If you read `liken/` from top to bottom, you learn how a Linux system
+boots and how Kubernetes takes control after that. The idea is Knuth's
 [literate programming](https://en.wikipedia.org/wiki/Literate_programming),
-which Donald Knuth described in 1984. His original form builds the
-program and the document from one source, through a tool. liken does
-not do that. It keeps the goal, which is a repository that explains
-itself, and it uses ordinary files that run as they are.
+but in ordinary files that run as they are.
 
-An explanation that is too big for a comment goes in a markdown
-document beside the thing it describes. [`plans/`](plans/) contains the
-design overview and one document for each milestone of the OS. A plan
-that spans more than one component is in [`plans/`](../plans/) at the top
-of the repository.
+[Talos Linux](https://www.talos.dev), [k3OS](https://github.com/rancher/k3os),
+and [Kairos](https://kairos.io) also build an immutable OS for
+Kubernetes. [LinuxKit](https://github.com/linuxkit/linuxkit) and
+[Bottlerocket](https://github.com/bottlerocket-os/bottlerocket) build
+immutable hosts that run almost every program in a container.
 
-## Prior art
+The manual is at [liken.sh](https://liken.sh/).
+[GETTING-STARTED.md](GETTING-STARTED.md) takes you from a release to a
+cluster. [plans/00-design.md](plans/00-design.md) is the design.
 
-These projects explore similar ground:
-
-* [Talos Linux](https://www.talos.dev) has no `systemd`, no shell, and no
-  SSH. You manage the machine only through a gRPC API. Of the projects
-  listed here, it comes closest to this idea, and you can run it in
-  production today.
-* [k3OS](https://github.com/rancher/k3os) was Rancher's distribution,
-  built on the idea that the OS should do no more than run `k3s`. This is
-  almost the same idea as `liken`, but the project is now archived.
-* [Kairos](https://kairos.io) continues the k3OS idea: an immutable
-  meta-distribution for edge Kubernetes.
-* [LinuxKit](https://github.com/linuxkit/linuxkit) and
-  [Bottlerocket](https://github.com/bottlerocket-os/bottlerocket) are
-  minimal, immutable hosts. Almost every program on them runs in a
-  container.
-
-None of these projects syncs from git from its first boot. In each
-one, you add the git sync on top of the OS. In `liken`, the git
-repository is a feature of the `Cluster` resource, so a new cluster can
-sync from its first boot.
-
-## Status
-
-`liken` is public. The release channel,
-[releases.liken.sh](https://releases.liken.sh/), serves
-digest-verified releases, and CI publishes a new release on every
-version tag. [GETTING-STARTED.md](GETTING-STARTED.md) describes the
-path from a release to a running cluster of your own.
-
-`liken` runs on the QEMU guests of [`dev-cluster/`](dev-cluster/) and
-on physical machines. The guest in
-[`dev-cluster/hardware/`](dev-cluster/hardware/) has a SATA controller
-and a real network card. The other guests use paravirtual disks and
-network cards, which the kernel drives without loading a module, so
-they cannot show a fault in a driver that the image loads.
-[Milestone 32](plans/completed/32-hardware-support-in-the-image.md)
-lists what only a physical machine can prove.
-
-The milestones in [`plans/`](plans/) record the design of the OS:
-
-* [`plans/completed/`](plans/completed/) contains the milestones that are
-  built.
-* [`plans/rejected/`](plans/rejected/) contains the milestones that the
-  project rejected, with the reasons.
-* [`plans/open-problems/`](plans/open-problems/) records bugs and design
-  problems that are not solved.
-* The markdown files in [`plans/`](plans/) are the design overview and
-  the proposals that are not built.
-
-## License
-
-Everything in `liken/` is `liken`'s own work, under the MIT license.
-The build fetches the kernel, `k3s`, and the other vendored components
-at build time. `liken/` never commits them, so it contains no
-third-party code.
-
-A built release does redistribute those components, each under its own
-license. Every release bundles a `LICENSES.md` file that names each
-component, its license, and its copyright. The release channel also
-serves the source of every copyleft component beside the binaries built
-from it. The [`./licensing/` directory](./licensing/) explains how the
-project meets these obligations.
+MIT. See [LICENSE](LICENSE). A release also redistributes the kernel,
+k3s, and other components under their own licenses, which
+[licensing/NOTICES.md](licensing/NOTICES.md) lists.

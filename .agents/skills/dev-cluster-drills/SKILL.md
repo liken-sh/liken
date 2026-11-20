@@ -1,59 +1,77 @@
 ---
 name: dev-cluster-drills
-description: Runs, upgrades, breaks, and inspects liken's dev cluster, the QEMU fleet under dev-cluster/ whose Cluster resource is named lab. Use when a session must boot or stop lab guests, build a lab release with make release VERSION=yyyy.mm.dd-9xx, drive an upgrade or fallback drill, reach the lab with kubectl or stern, read a running machine's filesystem or disks, re-found the fleet after a reinstall, or probe a CRD schema or CEL change.
+description: Runs, upgrades, breaks, and inspects liken's dev cluster, the QEMU fleet under dev-cluster/ whose Cluster resource is named lab, and serves lab releases to the physical testbed liken-1. Use when a session must boot or stop lab guests, run a smoke drill (make smoke-uefi, smoke-bios, smoke-hardware, or smoke-emmc), build a lab release with make release VERSION=yyyy.mm.dd-9xx, serve it with make serve, roll a lab release onto liken-1 and stick-1, drive an upgrade or fallback drill, reach the lab with kubectl or stern, push a locally built image to the lab registry, boot a guest with Secure Boot keys or capsule firmware, read a running machine's filesystem or disks, re-found the fleet after a reinstall, or probe a CRD schema or CEL change.
 ---
 
 # Dev-cluster drills
 
-The dev cluster is the deployment liken develops against. Break it
-freely. It carries no work worth keeping, and
-`make -C dev-cluster clean` puts every guest back to blank disks.
+The dev cluster is the cluster that `liken` is developed against. You
+can break it freely. It runs no work worth keeping, and
+`make -C dev-cluster clean` resets every guest to blank disks.
 
-Run every command in this skill from `liken/`. Every path in it is
-relative to `liken/` unless the text names another base. A path that
-starts with `/`, such as `/run/liken/`, is on a guest.
+Run every command in this skill from `liken/`. Every path is relative
+to `liken/` unless the text gives another base. A path that starts
+with `/`, such as `/run/liken/`, is a path on a guest.
 
-Longer flows live beside this file:
+Longer procedures are in separate files. Read a file when the drill
+needs what its line describes:
 
-* Old-release baselines, deliberate-failure releases, the metal
-  hardware shape, and reading a guest's disks offline:
-  [references/cross-version-drills.md](references/cross-version-drills.md)
-* Testing a CRD schema or CEL change before you commit it:
-  [references/schema-drills.md](references/schema-drills.md)
+* [references/cross-version-drills.md](references/cross-version-drills.md):
+  old-release baselines, releases that fail on purpose, the metal
+  hardware shape, and reading a guest's disks while it is off.
+* [references/schema-drills.md](references/schema-drills.md): testing
+  a CRD schema or CEL change before you commit it.
+* [references/testbed-release.md](references/testbed-release.md):
+  serving a lab release to the testbed, `liken-1` and `stick-1`.
+* [references/lab-registry.md](references/lab-registry.md): a guest
+  that pulls an image you built on the laptop.
+* [references/firmware-guests.md](references/firmware-guests.md): a
+  guest with Secure Boot keys or capsule firmware, and the test
+  firmware catalog, for `firmware-operator` drills.
+* [references/guest-boot-faults.md](references/guest-boot-faults.md):
+  a guest that hangs after `reboot: machine restart`, and a
+  `BOOT=kernel` guest that reboots onto its old initramfs.
+* [references/inspect-a-machine.md](references/inspect-a-machine.md):
+  reading or writing a running machine's filesystem from a busybox
+  pod, enabling or removing a feature with a live patch, and
+  rebooting a machine on purpose.
 
 ## What the dev cluster is
 
-`dev-cluster/` holds five machines, `node-1` through `node-5`, each a
-QEMU guest. `dev-cluster/cluster.yaml` declares the Cluster resource
-named `lab`: `node-1`, `node-2`, and `node-3` are leaders, and
-`node-1` is the founding leader. `node-4` and `node-5` are followers.
-Every machine's `rebootPolicy` is `Auto`, so no drill in this lab
-needs `liken approve-reboot`.
+`dev-cluster/` defines five machines, `node-1` through `node-5`. Each
+one is a QEMU guest. `dev-cluster/cluster.yaml` declares the Cluster
+resource named `lab`. In it, `node-1`, `node-2`, and `node-3` are
+leaders, and `node-1` is the founding leader, the leader that creates
+the cluster. `node-4` and `node-5` are followers. Every machine's
+`rebootPolicy` is `Auto`, so no drill in this lab needs
+`liken approve-reboot`.
 
-Each guest keeps its hardware under `dev-cluster/guests/<node>/`:
-`state.qcow2` (6G), `pods.qcow2` (4G), `boot.qcow2` (4G), and, under
-UEFI, its own `OVMF_VARS.fd` firmware variable store. The directory is
-gitignored and holds no source.
+Each guest's files are in `dev-cluster/guests/<node>/`. The disks are
+`state.qcow2` (6G), `pods.qcow2` (4G), and `boot.qcow2` (4G). Under
+UEFI, the directory also has the guest's own `OVMF_VARS.fd`, its
+firmware variable store. git ignores the directory, and it contains
+no source.
 
-Each guest has two NICs. `eth0` is a QEMU user-mode uplink on
-10.0.2.0/24 with NAT, DHCP, and DNS, so a guest can pull an image from
-the internet. `eth1` is the cluster segment, a multicast socket that
-every guest joins, carrying 10.10.0.0/24. Only `node-1` forwards a
-host port: 127.0.0.1:16443 reaches its API server on 6443.
+Each guest has two network cards. `eth0` is a QEMU user-mode uplink on
+10.0.2.0/24. QEMU provides NAT, DHCP, and DNS on it, so a guest can
+pull an image from the internet. `eth1` is the cluster segment,
+10.10.0.0/24. It is a multicast socket that every guest joins. Only
+`node-1` forwards a port from the host: 127.0.0.1:16443 on the host
+connects to its API server on 6443.
 
-Defaults in `dev-cluster/Makefile`: `FIRMWARE=uefi`, `BOOT=disk`,
-`HARDWARE=virtio`, `SMP=4`, `CONSOLE=stdio`, and `MEM` 1024 on a disk
-boot or 4096 on a `BOOT=kernel` boot.
+`dev-cluster/Makefile` sets these defaults: `FIRMWARE=uefi`,
+`BOOT=disk`, `HARDWARE=virtio`, `SMP=4`, and `CONSOLE=stdio`. `MEM` is
+1024 for a disk boot and 4096 for a `BOOT=kernel` boot.
 
 ## Reach the cluster
 
-Mint the admin credential once, from `liken/`:
+Create the admin credential once, from `liken/`:
 
 ```bash
 make kubeconfig
 ```
 
-That writes `dev-cluster/identity/kubeconfig` pointed at
+This writes `dev-cluster/identity/kubeconfig`, which points at
 `https://127.0.0.1:16443`. After that, use the wrappers:
 
 ```bash
@@ -63,46 +81,50 @@ dev-cluster/kubectl get cluster lab -o yaml
 dev-cluster/stern -n liken-system liken-machine-operator
 ```
 
-The CLI passthrough reaches the same cluster and needs no wrapper:
+The `kubectl` command of the `liken` CLI passes its arguments to the
+same cluster, with no wrapper:
 
 ```bash
 cli/dist/liken kubectl -server https://127.0.0.1:16443 dev-cluster get machines
 ```
 
-## Where consoles land
+## Console output
 
 `make run` sends the guest's serial console to `stdio`, which is the
-running task's own output. It does **not** write a file. Grepping
-`dev-cluster/guests/<node>/console.log` after a plain `make run`
-reads a stale log from some earlier drill.
+output of the task that runs it. It does not write a file. If you
+grep `dev-cluster/guests/<node>/console.log` after a plain `make run`,
+you read an old log from an earlier drill.
 
-To keep a console, name the file:
+To keep a console, give a file name:
 
 ```bash
 make run NODE=node-2 CONSOLE=file:guests/node-2/console.log
 ```
 
-`dev-cluster/smoke.sh` always writes files. It keeps one pair per boot
-under `dev-cluster/guests/node-1/`: `console.log` and `qemu.log` for
-the disk boot, `install-console.log` and `install-qemu.log` for the
-install, and `report-console.log` and `report-qemu.log` for the
-hardware report. The console file is the machine's own output. The
-QEMU file is the only record of a boot that failed before the console
-produced anything.
+`dev-cluster/smoke.sh` always writes files. It writes one pair for
+each boot, in `dev-cluster/guests/node-1/`:
+
+* `console.log` and `qemu.log` for the disk boot.
+* `install-console.log` and `install-qemu.log` for the install.
+* `report-console.log` and `report-qemu.log` for the hardware report.
+
+The console file is the machine's own output. The QEMU file is the
+only record of a boot that failed before the console printed
+anything.
 
 ## Start and stop guests
 
-Start a guest from `liken/`, so make builds the artifacts first:
+Start a guest from `liken/`, so that make builds the artifacts first:
 
 ```bash
 make run NODE=node-1
 make run NODE=node-4
 ```
 
-Run each guest in its own task. Launch it under `setsid` and in the
-background, because a background wrapper sends SIGTERM to its child
-QEMU when the harness cleans up a stopped task, and that drops the
-guest:
+Run each guest in its own task, and start it in the background under
+`setsid`. Without `setsid`, the guest stops when the harness cleans
+up a stopped task, because the background wrapper then sends SIGTERM
+to its child QEMU process:
 
 ```bash
 setsid make run NODE=node-2 CONSOLE=file:guests/node-2/console.log \
@@ -110,29 +132,31 @@ setsid make run NODE=node-2 CONSOLE=file:guests/node-2/console.log \
 ```
 
 A `CONSOLE=file:` path is relative to `dev-cluster/`, whichever
-directory you start make from. The root target hands the build off to
-`make -C dev-cluster`, so the recipe always runs from there.
+directory you start make from. The root target passes the build to
+`make -C dev-cluster`, so the recipe always runs in `dev-cluster/`.
 
-**Never use `pkill -f` or `pgrep -f`.** The pattern matches the Bash
-tool's own `bash -c` wrapper, because the pattern text sits in that
-shell's own command line. The shell dies mid-command, later steps of
-`a; b && c` never run, and the exit code is 1 or 144 with output
-missing. When the pattern also matches a guest, the guest dies too and
-the failure reads as host flakiness.
+**Never use `pkill -f` or `pgrep -f`.** The pattern text is part of
+the command line of the Bash tool's own `bash -c` wrapper, so the
+pattern matches that shell. The shell is killed in the middle of the
+command. The later steps of `a; b && c` never run, the exit code is 1
+or 144, and output is missing. When the pattern also matches a guest,
+the guest is killed too, and the failure looks like a problem with
+the host.
 
-Match on `comm` instead, which the kernel truncates to 15 characters,
-so `qemu-system-x86_64` matches as `qemu-system-x86`:
+Match on the process name, `comm`, instead. The kernel truncates
+`comm` to 15 characters, so `qemu-system-x86_64` matches as
+`qemu-system-x86`:
 
 ```bash
 # every guest
 pkill -x qemu-system-x86
 
-# one guest; the bracket class keeps the calling shell out of the match
+# one guest. The bracket class keeps the calling shell out of the match.
 pgrep -x qemu-system-x86 -a | grep 'node-[2]' | awk '{print $1}' | xargs -r kill
 ```
 
-Put a timeout on anything that waits. Poll with a deadline, never with
-an unbounded loop:
+Put a timeout on anything that waits. Poll with a deadline, never
+with a loop that has no end:
 
 ```bash
 deadline=$(( $(date +%s) + 300 ))
@@ -142,156 +166,38 @@ while (( $(date +%s) < deadline )); do
 done
 ```
 
-**A guest that hangs after `reboot: machine restart` is a firmware
-fault.** The lab pins Debian's OVMF in `dev-cluster/firmware/`,
-because the host's edk2 2025.11 can read a kernel's leftover data as
-an IGVM memory map after a warm reset and loop forever in
-PciHostBridgeDxe, before systemd-boot runs. `firmware/fetch.sh` gives
-the mechanism, and `liken/plans/completed/88-disruptions.md` records the
-evidence. If a guest hangs anyway, check that its QEMU reads
-`firmware/dist/<version>/OVMF_CODE_4M.fd`, then power-cycle it: kill
-its QEMU process and `make run` it again. To read a hung guest's
-CPUs, start it with
-`QEMU_EXTRA="-qmp unix:guests/<node>/qmp,server=on,wait=off"`, a path
-relative to `dev-cluster/` because a socket path must be shorter than
-108 bytes, and send `info registers -a` over QMP.
-
-**QEMU reads `-kernel` and `-initrd` once, at process start,** and
-restores them from its own ROM cache on every guest reset. A
-`BOOT=kernel` guest that reboots comes back on the same initramfs it
-started with, even after make rebuilt the file. To deliver new code to
-such a guest, kill its QEMU process and start it again. A `BOOT=disk`
-guest does not have this problem, because it loads from its own slots.
-
-**A guest with Secure Boot keys** is for drills of
-`firmware-operator`'s database updates, which need a variable store
-that checks signatures the way a board does. Stop the guest, enroll
-Microsoft's keys in its store with Secure Boot off (liken's boot chain
-is not signed, and liken-1 runs the same way), and start it on the
-SMM build of OVMF, which `FIRMWARE=secureboot` selects with a `q35`
-machine:
-
-```bash
-make -C dev-cluster enroll-keys NODE=node-5
-setsid make -C dev-cluster run NODE=node-5 FIRMWARE=secureboot \
-  CONSOLE=file:guests/node-5/console.log </dev/null >/dev/null 2>&1 &
-```
-
-`enroll-keys` seeds `dbx` with Microsoft's signed update of
-2026-04-02 from its pinned LVFS cabinet, so fwupd reads version
-20260402 and offers the newer one, as on liken-1. A `dbx` that fwupd
-does not recognize reads no version, and no catalog release applies
-to it. The console reads `Secure boot disabled`. To
-return the guest to the plain firmware, stop it, run
-`make -C dev-cluster reset-nvram NODE=node-5`, and start it with the
-default `FIRMWARE`.
-
-**A guest with capsule firmware** is for drills of
-`firmware-operator`'s capsule updates. Debian's OVMF has no firmware
-device that fwupd can update, so `FIRMWARE=capsule` boots OVMF that
-`dev-cluster/firmware/capsule/build.sh` builds from the same edk2
-release, with one test device. The device's version is the UEFI
-variable `LabFmpVersion`, which starts at 1, and the ESRT lists it
-under the GUID `b0792605-c842-408f-adf2-edfb07638e83`. The guest keeps
-its own `OVMF_VARS.fd`, so liken's boot entries carry over and the
-guest boots from its disk as before. Build the firmware once, which
-takes a few minutes, then stop the guest and start it on the new
-firmware:
-
-```bash
-dev-cluster/firmware/capsule/build.sh
-pgrep -x qemu-system-x86 -a | grep 'node-[5]' | awk '{print $1}'
-kill <pid>
-setsid make -C dev-cluster run NODE=node-5 FIRMWARE=capsule \
-  CONSOLE=file:guests/node-5/console.log </dev/null >/dev/null 2>&1 &
-```
-
-The build is DEBUG, and QEMU saves the firmware's debug log to
-`dev-cluster/guests/<node>/ovmf-debug.log`. FmpDxe writes there why it
-refused a capsule. This firmware takes a capsule only through fwupd's
-EFI updater and `BootNext`. It refuses a capsule that sets
-`PersistAcrossReset`, which most vendor capsules do, so only the lab's
-own capsules install on it. `firmware/capsule/build.sh` gives the
-reason.
-
-`FIRMWARE=capsule-on-disk` boots the same firmware with capsule-on-disk
-support, which `CAPSULE_ON_DISK=1 firmware/capsule/build.sh` builds
-into `firmware/capsule/dist/on-disk/`. fwupd then stages a capsule as
-a file in `\EFI\UpdateCapsule` and sets a bit in `OsIndications`, with
-no boot entry and no `BootNext`. The firmware's log reads
-`capsule on disk: Success` when it took the file. Run the two builds
-one after the other: they share one edk2 tree.
-
-A change to a file that a build reads, such as `build.sh` or the
-patch, makes the next `make run` of every capsule guest build the
-firmware again. Start one capsule guest, wait for its QEMU, and only
-then start the others, or the builds collide in the edk2 tree. The
-same holds for the OS image after a change under `liken/`.
-
-**The test catalog** offers versions 2 and 3 of the test device.
-`dev-cluster/firmware/capsule/catalog.sh` builds it, and `make serve`
-shares it beside the release channel. A `FirmwareCatalog` on the lab
-names `http://10.0.2.2:8017/firmware/firmware.xml.zst`, and the
-operator reads the jcat at the same URL with `.jcat` added. fwupd
-refuses a catalog that no key in `/etc/pki/fwupd-metadata` signs, with
-`signatures were required, but none supplied`. A lab key signs this
-catalog. `catalog.sh` makes it once in
-`dev-cluster/firmware/capsule/signing/`, which git ignores, and a scan
-pod needs the certificate `signing/lab-catalog.pem` in that directory.
-Each run of `catalog.sh` signs the capsules again, so each cabinet's
-SHA-256 changes, and a `Firmware` approval that pins the old SHA-256
-no longer matches. fwupd offers only a version above the one a guest
-runs, so a guest that took version 3 needs a catalog with higher
-versions: `VERSIONS="4 5" dev-cluster/firmware/capsule/catalog.sh`.
-
-## Run an image you built on the laptop
-
-The lab registry lets the guests pull an operator image that you built
-on the laptop, with no push to ghcr.io. It is a `registry:3.0.0`
-container named `liken-lab-registry` on the laptop's `127.0.0.1:5000`.
-`dev-cluster/cluster.yaml` declares it as the `spec.registries` mirror
-for `ghcr.io` at `http://10.0.2.2:5000`, so a manifest keeps its
-`ghcr.io/liken-sh/...` image reference:
-
-```bash
-make registry
-dev-cluster/registry/push.sh observatory-operator
-dev-cluster/registry/push.sh ghcr.io/liken-sh/indi-simulators:20261005-5
-```
-
-`push.sh` takes a target of the root `docker-bake.hcl` or an image
-reference that the local docker daemon holds. It builds a target as
-`ghcr.io/liken-sh/<name>:dev` unless you set `VERSION`. ghcr.io has
-no `:dev` tag, so a pod that names one pulls only from the lab
-registry. Every other `ghcr.io` image falls back to ghcr.io when the
-lab registry lacks it or is stopped. `docker logs liken-lab-registry`
-shows each pull with the user agent `containerd`. The images stay in
-`dev-cluster/registry/storage/`, and neither `make registry-stop` nor
-`make -C dev-cluster clean` deletes them.
-
-When the build cannot resolve names, set
-`BAKE_FLAGS="--set *.network=host --allow network.host"`. This
-happens on a VPN whose DNS server answers the laptop but not its
-containers.
+`make storage` starts the lab's storage server. It is a stock Debian
+guest at 10.10.0.100 on the cluster segment. It serves an NFSv4
+export, an iSCSI LUN, and a pull-through registry that requires
+authentication. Use it for drills of the `nfs` and `iscsi` features
+and of `spec.registries`. Run it in its own task, like a node.
+`dev-cluster/storage/Makefile` has the details.
 
 ## The upgrade drill
 
-This is the full forward roll. It needs a running fleet.
+This drill moves a running fleet forward to a new release. Start the
+fleet first.
 
 **Step 1. Build a lab release.**
 
+The build takes tens of minutes, so put a timeout on it:
+
 ```bash
-make release VERSION=$(date +%Y.%m.%d)-901
+timeout 3000 make release VERSION=$(date +%Y.%m.%d)-901 \
+    > /tmp/release.log 2>&1; echo rc=$?
+grep -A2 'catalog entry' /tmp/release.log
 ```
 
-`VERSION` has no default and `make release` alone fails. The serial is
-three digits, checked by a regular expression in `releases/Makefile`
-before any build starts. Use a `-9xx` serial for a lab build. Serial
-`000` is taken by the working-tree channel the media targets bundle,
-and published releases run from `001` up, so `-9xx` collides with
-neither and is recognizable at a glance.
+`VERSION` has no default, so `make release` alone fails. The serial
+is the three digits at the end of the version. `releases/Makefile`
+checks it with a regular expression before any build starts. Use a
+`-9xx` serial for a lab build. The working-tree channel that the
+media targets bundle uses serial `000`, and published releases count
+up from `001`. So a `-9xx` serial collides with neither, and you can
+recognize it at a glance.
 
-The build ends by printing the catalog entry:
+The build ends by printing the catalog entry, and the `grep` above
+shows it:
 
 ```
 catalog entry for a Cluster's spec.releases.catalog:
@@ -299,22 +205,27 @@ catalog entry for a Cluster's spec.releases.catalog:
     digest: sha256:<64 hex digits>
 ```
 
-The digest is the sha256 of that release's `release.yaml` bytes. It is
-the start of the trust chain: the Cluster names the document, and the
-document names every artifact.
+The digest is the sha256 of the bytes of that release's
+`release.yaml`. It is the start of the trust chain. The Cluster lists
+the digest of `release.yaml`, and `release.yaml` lists the digest of
+every artifact.
 
 **Step 2. Serve the channel.**
 
+Check that no earlier `liken serve` uses the port. Then start the
+server under `setsid`, as for a guest:
+
 ```bash
-make serve
+ss -ltnp | grep ':8017' || echo free
+setsid make serve </dev/null >/tmp/serve.log 2>&1 &
 ```
 
-This serves `releases/dist` on `:8017` under the path `/releases/`.
-Guests reach the host's loopback at 10.0.2.2, so the URL from inside a
-guest is `http://10.0.2.2:8017/releases`, which is exactly the
-`spec.releases.source` that `dev-cluster/cluster.yaml` declares. Leave
-this task running. It logs every fetch, so a stalled or repeated
-download is visible as it happens.
+This serves `releases/dist` on `:8017`, under the path `/releases/`.
+A guest reaches the host's loopback address at 10.0.2.2, so the URL
+from inside a guest is `http://10.0.2.2:8017/releases`. That is the
+exact `spec.releases.source` in `dev-cluster/cluster.yaml`. Leave this
+task running. It logs every fetch, so you see a stalled or repeated
+download when it happens.
 
 **Step 3. Patch the Cluster.**
 
@@ -332,238 +243,196 @@ dev-cluster/kubectl patch cluster lab --type=merge -p '{
 }'
 ```
 
-Three rules govern this patch:
+These rules apply to the patch:
 
-* **A JSON merge patch replaces an array.** `spec.releases.catalog` is
-  an array, so resend every entry you want to keep. Dropping the entry
-  the fleet runs now strands any machine that has not moved yet.
+* **A JSON merge patch replaces an array.** `spec.releases.catalog`
+  is an array, so send every entry that you want to keep. If you drop
+  the entry of the release that the fleet runs now, you strand any
+  machine that has not moved yet.
 * **The target field is `spec.version`.** There is no
-  `spec.releases.version`. apiextensions prunes an unknown field before
-  validation, so a patch that names it reports success and changes
-  nothing.
-* **Both version fields take `yyyy.mm.dd-nnn`** and the digest takes
-  `sha256:` plus 64 hex digits. The CRD's patterns refuse a typo at
-  admission.
+  `spec.releases.version`. apiextensions prunes an unknown field
+  before validation, so a patch that sets it reports success and
+  changes nothing.
+* **Both version fields use the format `yyyy.mm.dd-nnn`**, and the
+  digest is `sha256:` followed by 64 hex digits. The CRD has a pattern
+  for each field, so the API server rejects a typo at admission.
 
 **Step 4. Watch the rollout.**
 
-Each machine's operator compares its running version
-(`status.version.liken`) against `spec.version` on every pass, and the
-pass runs every 10 seconds. The upgrade starts by itself. The
-`liken.sh/check-releases` annotation is not part of this flow: it
-forces the fleet observer to poll the channel's `channel.yaml` now,
-which fills in `status.releases.available`. Set it when the drill is
-about channel polling:
+On every pass, each machine's operator compares the running version,
+`status.version.liken`, with `spec.version`. The operator watches the
+`Cluster`, so a change to its spec starts a pass at once, and the
+upgrade starts with no other step from you. If no event arrives, a
+backstop pass runs after `backstopEvery`, 5 minutes, which is set in
+`machine-operator/backstop.go`.
+
+The `liken.sh/check-releases` annotation is not part of this flow. It
+makes the fleet observer poll the channel's `channel.yaml` at once,
+and the poll fills in `status.releases.available`. Set it when the
+drill is about channel polling:
 
 ```bash
 dev-cluster/kubectl annotate cluster lab --overwrite \
     liken.sh/check-releases="$(date -Is)"
 ```
 
-Watch the fleet move:
+Wait with a deadline, and print the machines only when a line
+changes:
 
 ```bash
-dev-cluster/kubectl get machines -w
+V=2026.08.12-901
+deadline=$(( $(date +%s) + 2400 )); last=""
+while (( $(date +%s) < deadline )); do
+    s=$(dev-cluster/kubectl get machines --no-headers 2>/dev/null)
+    [[ -n "$s" && "$s" != "$last" ]] && { date -u +%T; echo "$s"; last="$s"; }
+    dev-cluster/kubectl get machines -o json 2>/dev/null | jq -e --arg v "$V" \
+        '[.items[] | select(.status.version.liken != $v or .status.phase != "Ready")] | length == 0' \
+        >/dev/null && break
+    sleep 20
+done
 ```
 
-The cluster grants one reboot turn at a time. Each machine downloads
-the release onto its inactive slot, verifies every byte against the
-digest chain, stages the record, reboots to prove the slot, and
-promotes it.
+The cluster gives a reboot turn to one machine at a time. Each machine
+downloads the release onto its inactive slot and verifies every byte
+against the digest chain. Then it stages the record, reboots to prove
+the slot, and promotes the slot.
 
-## Fleet hygiene
+## Install and reinstall machines
 
-**Install a machine.** Run this from `liken/`, once per node,
+**Install a machine.** Run this from `liken/`, once for each node,
 before its first disk boot:
 
 ```bash
-make install NODE=node-2
+make install NODE=node-2 CONSOLE=file:guests/node-2/install-console.log
 make run NODE=node-2
 ```
 
-`make install` boots the install image through `-kernel`, claims the
-blank boot disk, copies the release into slot A, writes the firmware's
-boot chain, and powers off.
+`make install` boots the install image through `-kernel`. The install
+claims the blank boot disk, copies the release into slot A, writes the
+firmware's boot chain, and powers off.
 
-**A reinstall does not clear cluster state.** The state disk survives,
-so a follower whose disk holds etcd members from an older cluster
-incarnation never rejoins a re-founded leader. It reports "failed to
-find remote peer in cluster" forever. An old bootHome can also flip
-BootOrder back to the old proven slot right after the reinstall wrote
-the new one.
+**A reinstall does not clear cluster state.** The state disk survives
+a reinstall. A follower whose state disk has etcd members from an
+older instance of the cluster never rejoins a re-founded leader. It
+reports "failed to find remote peer in cluster" forever. Also, an old
+bootHome can set BootOrder back to the old proven slot right after the
+reinstall wrote the new one.
 
-To re-found a follower, delete its whole guest directory:
+To re-found a follower, delete its whole guest directory, and install
+it again:
 
 ```bash
 pgrep -x qemu-system-x86 -a | grep 'node-[4]' | awk '{print $1}' | xargs -r kill
 rm -rf dev-cluster/guests/node-4
-make install NODE=node-4
+make install NODE=node-4 CONSOLE=file:guests/node-4/install-console.log
 make run NODE=node-4
 ```
 
 **Keep the founding leader's disks.** `spec.endpoint` points at
-`node-1`, and the join token that brings followers back is the
-cluster's identity, not the disk's. Wiping `node-1` re-founds the whole
-cluster.
+`node-1`. The join token that lets the followers join again comes from
+the cluster's identity, not from a disk. If you wipe `node-1`, you
+re-found the whole cluster.
 
-`make -C dev-cluster clean` deletes `dev-cluster/guests/` entirely.
-That is a factory reset of all five machines, not one.
+`make -C dev-cluster clean` deletes all of `dev-cluster/guests/`. That
+is a factory reset of all five machines, not of one.
 
-**A machine heals back to `spec.version`.** The operator compares the
-running version against the target on every 10-second pass, so a
-`make install` of a dirty dev build onto a cluster that declares a
-release gets pulled back onto the proven release. To keep a dev build
-running, either declare that version in the Cluster or leave
-`spec.version` unset.
+**A machine moves back to `spec.version` by itself.** The operator
+compares the running version with the target on every pass. So if you
+`make install` a dirty dev build onto a cluster that declares a
+release, the operator moves the machine back onto the proven release.
+To keep a dev build running, declare that version in the Cluster, or
+leave `spec.version` unset.
 
-**A fresh machine has no proven system-release record.** The
-machine-operator writes the first one
-(`settleSystemReleaseLifecycle` in `machine-operator/release.go`), and
-until that record exists, no boot-order healing runs at all. A drill
-that kills a guest seconds after Ready measures nothing. Wait for the
-line in the operator's pod log:
+**A new machine has no proven system-release record.** machine-operator
+writes the first one, in `settleSystemReleaseLifecycle` in
+`machine-operator/release.go`. Until that record exists, no boot-order
+healing runs. So a drill that kills a guest seconds after it is Ready
+tests nothing. Wait for this line in the operator's pod log:
 
 ```
 recorded the running release <version> on slot <slot> as proven
 ```
 
-## Inspect a running machine
-
-**A liken machine has no shell and no SSH.** `image/oci.sh` packages
-exactly one static binary per image, so `kubectl exec` into
-`liken.sh/iscsid`, the operators, or the log relays always fails. To
-read or write a machine's filesystem, apply a busybox pod:
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: drill
-  namespace: default
-spec:
-  hostNetwork: true
-  nodeSelector: {liken.sh/machine: "true"}
-  tolerations: [{operator: Exists}]
-  containers:
-    - name: drill
-      image: busybox:1.38.0
-      command: ["sh", "-c", "sleep infinity"]
-      securityContext: {privileged: true}
-      volumeMounts:
-        - {name: dev, mountPath: /dev}
-        - {name: sbin, mountPath: /host-sbin}
-        - {name: run-liken, mountPath: /run/liken}
-  volumes:
-    - {name: dev, hostPath: {path: /dev}}
-    - {name: sbin, hostPath: {path: /sbin}}
-    - {name: run-liken, hostPath: {path: /run/liken}}
-```
-
-Each field is required for a reason:
-
-* `nodeSelector: {liken.sh/machine: "true"}` is the label every liken
-  node registers with. Without it the pod can land on a node that has
-  no liken image.
-* `tolerations: [{operator: Exists}]` schedules the pod on a cordoned
-  or not-yet-ready node, which is when a drill matters most.
-* `privileged: true` is required to read or write a raw block device.
-  Without it, `dd` against `/dev/vdc` fails silently under the device
-  cgroup.
-* `hostNetwork: true` puts the pod in the host's network namespace,
-  which is where the abstract unix socket to `iscsid` lives.
-* Host `/sbin` at `/host-sbin` runs liken's own vendored tools:
-  `/host-sbin/iscsiadm`, `/host-sbin/mount.nfs`.
-* Host `/run/liken` holds the facts tree init publishes, and
-  `/run/liken/operator/` is the operator's writable channel to init.
-
-The lab's guests reach the internet through their uplink NIC, so the
-`busybox:1.38.0` pull works with no registry mirror.
-
-**Enabling a feature on an installed machine takes a live Cluster
-patch,** not an edit to `dev-cluster/cluster.yaml`. The seed manifests
-apply only on a machine's first boot. After that, init follows the
-Cluster resource.
-
 ```bash
-dev-cluster/kubectl patch cluster lab --type=merge \
-    -p '{"spec":{"features":{"metrics-server":{},"iscsi":{}}}}'
+dev-cluster/kubectl -n liken-system logs ds/liken-machine-operator | grep 'as proven'
 ```
 
-**A merge patch merges map keys and does not replace the map.**
-`spec.features` is a map, so resending a shorter map retracts nothing
-and the retraction fails silently. Removing a feature takes an explicit
-null:
+`logs ds/...` reads the log of one pod of the `DaemonSet`. To read
+the log for one node, use the name of that node's pod, which
+`get pods -o wide` lists, in place of the `ds/` name.
 
-```bash
-dev-cluster/kubectl patch cluster lab --type=merge \
-    -p '{"spec":{"features":{"flux":null}}}'
-```
+## Common failures
 
-The same holds one level down: `{"flux":{"prune":null}}` restores one
-parameter's default. The feature vocabulary is
-`cluster/features.go`: `traefik`, `servicelb`, `metrics-server`,
-`helm`, `network-policy`, `iscsi`, `nfs`, and `flux`. A vendored
-feature converges with a k3s restart in place, and the console prints
-`liken: modules: <mod>: loaded` and then
-`liken: features: <slug>: active`.
+Each item starts with what you see, then gives the cause and what to
+do.
 
-**To reboot a machine on purpose,** write
-`/run/liken/operator/reboot-intent.yaml` from the drill pod. Only PID 1
-can shut a machine down, so the operator asks init through this file.
-**The reason value must be valid YAML.** A bare colon breaks the parse.
-A broken file still reboots the machine, but init logs "an unreadable
-reboot intent" and the reason is lost.
-
-A sysctl edit is the wrong trigger for a reboot drill. The operator
-applies sysctls live and reboots nothing.
-
-## Gotchas that waste hours
-
-* **`make` inside `dev-cluster/` does not rebuild the OS image.**
-  `make -C dev-cluster install` and `make -C dev-cluster run` boot
-  whatever `dev-cluster/image/install.cpio` already holds. A stale
-  file drills the wrong spec, silently. Build from `liken/`, or through
-  `make smoke-uefi` / `make smoke-bios` / `make smoke-hardware`.
-* **The smoke drills factory-reset `node-1`.** `dev-cluster/smoke.sh`
-  starts with `rm -rf guests/node-1`, in `dev-cluster/`. All three
-  drills use `node-1`, so a UEFI smoke wipes a BIOS-installed disk and
-  the reverse. Never run a smoke
-  drill while poking `node-1` by hand.
-* **A guest that outlives its drill holds the qcow2 write locks** and
-  stays on the multicast cluster segment. The next boot then fails to
-  open its own disks and reports that the node never became Ready,
-  which sends the reader to the machine instead of to the leftover
-  process.
-* **Resize a disk only while the machine is off.**
-  `make -C dev-cluster grow-pods NODE=node-2` resizes a live qcow2 file
-  and corrupts it if the guest is running. The same holds for
-  `grow-state`, which brings a guest that claimed the older 2G state
-  disk up to the current size, and for
-  `reset-nvram`, because QEMU writes the variable store back when the
-  guest exits.
-* **`SMOKE_DEADLINE`** (default 120 seconds) bounds only the disk
-  boot's wait for Ready. The attended boots have their own 180-second
-  bound inside `smoke.sh`.
-* **A conductor or operator fix cannot be verified by the rollout
-  that delivers it.** System pods run each node's own `:installed`
-  image, so the old release's binaries make every decision during the
-  window the fix governs. Land the fix in lab release N, roll the
-  fleet onto N, and then drill N to N+1 to watch the fixed code act.
-* **An edit to the cluster document costs a fleet reboot round.**
-  Machines converge the document by reboot, so even a field the
-  cluster operator reads live, such as `spec.disruption`, drifts
-  every machine when it changes. A drill that raises the budget and
-  restores it pays that round twice.
+* **The drill tests an older spec than your working tree, and nothing
+  warns you.** `make` inside `dev-cluster/` does not rebuild the OS
+  image. `make -C dev-cluster install` and `make -C dev-cluster run`
+  boot whatever `dev-cluster/image/install.cpio` already contains.
+  Build from `liken/`, or run a smoke drill's root target, which
+  builds the artifacts first.
+* **`node-1` is back to blank disks.** A smoke drill factory-reset it.
+  The smoke drills are `make smoke-uefi`, `make smoke-bios`,
+  `make smoke-hardware`, and `make smoke-emmc`, each run from
+  `liken/`. Each one runs `dev-cluster/smoke.sh`, which starts with
+  `rm -rf guests/node-1` in `dev-cluster/`. Each drill uses `node-1`,
+  so a UEFI smoke drill wipes a disk installed under BIOS, and the
+  reverse. Never run a smoke drill while you work on `node-1` by hand.
+  CI runs `smoke-uefi` and `smoke-bios`. `smoke-emmc` runs only on a
+  workstation, because QEMU's `emmc` device needs QEMU 9.1.
+* **A node never becomes Ready after a boot.** A guest from an earlier
+  drill is still running. It has the write locks on the qcow2 files,
+  and it is still on the multicast cluster segment. The next boot of
+  that node fails to open its own disks, and the report says only that
+  the node never became Ready, so you look at the machine and not at
+  the leftover process. List the guests with
+  `pgrep -x qemu-system-x86 -a`, and kill the leftover one by PID.
+* **A qcow2 file or a variable store is damaged after a change.**
+  `make -C dev-cluster grow-pods NODE=node-2` resizes a qcow2 file,
+  and it corrupts the file if the guest is running. The same applies
+  to `grow-state`, which enlarges a guest that claimed the older 2G
+  state disk to the current size. It also applies to `reset-nvram`,
+  because QEMU writes the variable store back when the guest exits.
+  Resize a disk or reset the variable store only while the machine is
+  off.
+* **A smoke drill stops with a timeout.** Each kind of boot has its
+  own deadline. `SMOKE_DEADLINE` (default 120 seconds) limits only
+  the time that the disk boot waits for Ready. The attended boots use
+  `HOLD_DEADLINE` (default 180 seconds), which is in `smoke.sh`.
+  `smoke-uefi`, `smoke-bios`, and `smoke-hardware` use both defaults.
+  `smoke-emmc` sets both to 420 seconds, because QEMU's `emmc` device
+  writes slowly. `dev-cluster/Makefile` gives the reason at the
+  target. Check which deadline applies to the boot that timed out.
+* **A conductor or operator fix shows no effect in the rollout that
+  delivers it.** System pods run each node's own `:installed` image.
+  So during that rollout, the binaries of the old release make every
+  decision that the fix changes. Put the fix in lab release N, roll
+  the fleet onto N, and then drill N to N+1 to see the fixed code act.
+* **Every machine reboots after an edit to the `Cluster`.** Machines
+  apply the cluster document by rebooting. A field that the cluster
+  operator reads live, such as `spec.disruption`, still marks every
+  machine as out of date when it changes. So each edit costs one
+  reboot round of the fleet, and a drill that raises the budget and
+  then restores it costs two. Allow for one round for each edit.
 
 ## Clean up
 
 You may start the dev cluster, `make serve`, and the lab registry
-whenever a test needs them. When the testing ends, stop all three:
-kill each guest's QEMU and the `liken serve` process by PID, and run
-`docker stop liken-lab-registry`. Keep them up only when the person
-asked for that.
+whenever a test needs them. When the testing ends, stop all three.
+Kill each guest's QEMU and the `liken serve` process by PID, and run
+`docker stop liken-lab-registry`. Leave them running only when the
+maintainer asked for that.
 
-Report what is still running when the drill ends: which guests, which
-`make serve`, whether `liken-lab-registry` runs, and which background
-tasks. A `liken serve` holds `:8017`, the lab registry holds `:5000`,
-and a leftover guest holds `node-N`'s disks.
+When the drill ends, report what is still running: which guests,
+which `make serve`, whether `liken-lab-registry` runs, and which
+background tasks. A `liken serve` listens on `:8017`, the lab registry
+on `:5000`, and `node-1`'s QEMU on `:16443`. A leftover guest has the
+locks on `node-N`'s disks. This check lists each of them:
+
+```bash
+pgrep -x qemu-system-x86 -a
+pgrep -x liken -a
+ss -ltnp | grep -E ':8017|:5000|:16443'
+docker ps --filter name=liken-lab-registry --format '{{.Names}}'
+```

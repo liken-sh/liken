@@ -43,8 +43,8 @@ $(REFERENCE)/people.md: ../deploy/people-crd.yaml $(CRDREF_SOURCES)
 	$(CRDREF) -title Person -weight 10 $< $@
 
 # skills writes each guide as an Agent Skill, one SKILL.md per guide,
-# into ../skills. The generator is in brand/, and its README describes
-# the output.
+# into ../skills. The generator is in brand/skills, and its main.go
+# describes the output.
 .PHONY: skills
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills

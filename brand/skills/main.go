@@ -6,9 +6,25 @@
 //
 //	go tool skills -base <baseURL> <guides dir> <out dir>
 //
+// for example:
+//
+//	go tool skills -base https://liken.sh/media/ content/docs/guides ../skills
+//
+// Every guide's front matter needs a description that says what the
+// guide does and ends with when an agent should use it. The program
+// copies the description, drops the title and the weight, turns every
+// link into a full URL under -base, and starts the skill with the
+// guide's URL and an instruction to confirm the kubectl context. Edit
+// the guide, not the skill. The program removes each directory of the
+// output that it did not write, so a renamed or deleted guide leaves no
+// skill behind, and it keeps a file at the top of the output, such as a
+// README, because a person writes that file.
+//
 // The output is committed in the component's skills/ directory, so a
 // checkout has the skills, and the component's check fails when a
-// guide changed and its skill was not generated again.
+// guide changed and its skill was not generated again. An agent loads
+// them with `claude --plugin-dir <component directory>` or
+// `npx skills add https://github.com/liken-sh/liken/tree/main/<component>`.
 // plans/completed/01-guides-as-skills.md in this component is the
 // design.
 package main

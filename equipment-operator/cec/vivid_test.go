@@ -3,7 +3,7 @@ package cec_test
 // These tests run against the kernel's CEC core through the vivid
 // driver, which emulates a TV with HDMI inputs and sources with HDMI
 // outputs, each with a kernel CEC adapter, on one bus. The tests skip
-// when this user cannot open a vivid adapter, as in CI. AGENTS.md in
+// when this user cannot open a vivid adapter, as in CI. VIVID.md in
 // this directory has the commands that set vivid up.
 
 import (

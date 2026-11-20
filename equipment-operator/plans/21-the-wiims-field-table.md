@@ -181,7 +181,7 @@ on them.
   with `StartRebootTime:1`
   ([`api/diagnostics.py`](https://github.com/mjcumming/pywiim/blob/main/pywiim/api/diagnostics.py)).
 * The two records of the Amp come from one commit, `929c4133`:
-  `wiim/AGENTS.md` says the two reads were not tried, and the test
+  `wiim/PROTOCOL.md` says the two reads were not tried, and the test
   fixtures of the same commit give `hardware: "7"` as a live shape.
   D1 settles both.
 

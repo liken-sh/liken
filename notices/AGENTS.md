@@ -1,18 +1,28 @@
 # Working on notices
 
-This directory holds the scripts that put the license notices of the
-third-party software in an image into that image. `README.md` explains
-what each script writes and why. Every image of an operator takes this
-directory as the build context `notices`, so a change to a script here
-rebuilds each of those images. Build one of them through
-`docker-bake.hcl` at the top of the repository and run its smoke check
-before you commit a change here.
+`notices` is a set of shell scripts that the image builds of other
+components run. `README.md` says what each script writes and why.
 
-@../brand/voice.md
+## How it runs
 
-The voice rules in that file govern all prose in this directory,
-comments included.
+`go.sh` and `cargo.sh` run inside a build stage of each image that
+ships a Go or a Rust program. That build gets this directory as the
+build context `notices`. `.dockerignore` sends only those two scripts
+to the build, so a change to `check.sh` or to the documentation
+rebuilds no image. `check.sh` runs outside every image. Each
+component's smoke check runs it against an image in the local Docker
+daemon.
 
-The notices of Debian and Ubuntu packages are not here. Every closure
-writes them with the `notices` function of `vulkan/closure.sh`, the
-closure library, and `indi/closure.sh` is a byte-for-byte copy of it.
+## Design
+
+The build scripts run inside the builds of other components. So a
+change to one of them affects every image with a Go or a Rust
+program. To see the effect of a change, build such an image and run
+its smoke check.
+
+The notices of Debian and Ubuntu packages are the job of the closure
+library in `vulkan`, which writes them for every closure. `check.sh`
+reads the list of packages that the library writes.
+
+The `images` skill describes the structure of each image that runs
+these scripts.

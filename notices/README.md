@@ -1,64 +1,64 @@
 # notices
 
-Every image that `liken` publishes holds third-party software: the Go
-standard library and the Go modules that an operator links, the Rust
-crates that a screen client links, and the files of Debian packages
-that a closure copies. Each license of that software permits
-redistribution on conditions. The MIT, BSD, and Apache licenses
-require that the copyright notice and the license text go with each
-copy. The GPL and the LGPL also require that the source be available.
-This directory holds the scripts that put those notices into each
-image, under `/usr/share/doc`, and the check that proves they are
-there.
+`notices` copies the license notices of the third-party software in
+an image into that image. This is how each image that `liken`
+publishes meets the conditions of the licenses of the software it
+redistributes. The MIT, BSD, and Apache licenses require the
+copyright notice and the license text to go with each copy of a
+binary. A static Go or Rust binary contains neither. The GPL and the
+LGPL also require the source to be available.
+
+The scripts here write notices under `/usr/share/doc` in the image
+for these parts of a program:
+
+- the Go standard library and the Go modules that the program links
+- the Rust standard library and the crates that the program links
+
+A check proves that an image contains them. The code of this
+repository is `liken`'s own, under its MIT license, so the scripts
+leave it out.
+
+These scripts do not write the notices of Debian and Ubuntu packages.
+The `notices` function of `vulkan/closure.sh`, the closure library,
+writes those for every closure. It also writes the list of packages
+and the `deb-src` entries that download their sources.
+
+Every image that ships a Go or a Rust program uses this directory as
+the build context `notices`, and lists `notices` in the `[depends]`
+of its `package.toml`. Those images are the operators, the CSI
+drivers, the kubectl plugins, and the screen clients. Each script
+writes to a directory that the final stage of the build copies whole,
+as in `COPY --from=build /notices /`.
 
 ## The scripts
 
-The images of the operators take this directory as the build context
-`notices`, and each one names `notices` in the `[depends]` of its
-`package.toml`.
+- `go.sh` runs in a Go build stage after the build, with the packages
+  that the build compiled. It copies the license files of the Go
+  standard library to `/usr/share/doc/go/`, and the license files of
+  each module that the program links to `/usr/share/doc/<module>/`.
+  When a module has no license file, the build fails. The script
+  leaves out the main module and each module that `go.mod` replaces
+  with a directory of the repository.
+- `cargo.sh` runs in a Rust build stage. It must run in the same
+  `RUN` as the build, because only that `RUN` mounts the crate
+  registry. It copies the notices of the standard library to
+  `/usr/share/doc/rust/`, and the license files of each crate that
+  the program links to `/usr/share/doc/<crate>-<version>/`. When a
+  crate publishes no license file, the script copies its `Cargo.toml`
+  there instead, because that file names the license and the authors.
+  The script leaves out each crate that the build uses by path.
+- `check.sh <image> [<path>...]` reads an image from the local Docker
+  daemon. It fails in two cases: when a package listed in a file in
+  `/usr/share/doc/liken/` has no copyright file in the image, and when
+  a path given after the image name is missing. Each component's
+  smoke check runs it with the files that its image must contain,
+  such as `usr/share/doc/go/LICENSE` for an image with a Go program.
 
-- `go.sh` runs in a Go build stage after the build. It copies the
-  license files of the Go standard library to `/usr/share/doc/go/`,
-  and those of each module that the binary links to
-  `/usr/share/doc/<module>/`. A module with no license file fails the
-  build.
-- `cargo.sh` runs in a Rust build stage, in the same `RUN` as the
-  build, because only that `RUN` mounts the crate registry. It copies
-  the standard library's notices to `/usr/share/doc/rust/`, and the
-  license files of each crate that the binary links to
-  `/usr/share/doc/<crate>-<version>/`. A crate that publishes no
-  license file has its `Cargo.toml` there instead, which names the
-  license and the authors.
+The usage of each script is in the comment at its top.
 
-Each script writes to a directory that the final stage copies whole,
-as in `COPY --from=build /notices /`.
+The INDI images also contain the license file of each vendor SDK in
+them, copied from `indi/sdk-licenses/`. They need these files because
+the copyright file of the `indi-3rdparty-libs` package from the INDI
+PPA does not mention any of the SDKs.
 
-Code of this repository is `liken`'s own, under its MIT license, and
-the scripts leave it out: the module itself, the modules that `go.mod`
-replaces with a directory of the repository, and the crates that a
-build takes by path.
-
-## Debian and Ubuntu packages
-
-Every closure on a Debian or Ubuntu builder writes the notices of the
-packages it took files from with the `notices` function of
-`vulkan/closure.sh`, the closure library, and not with a script here.
-`indi/closure.sh` is a copy of that file, and `ci pins` fails when the
-two differ. The function copies the copyright file of each package to
-`/usr/share/doc/<package>/copyright` and the license texts of
-`/usr/share/common-licenses`. It writes
-`/usr/share/doc/liken/<image>.packages`, which names each package, its
-version, and its source package, with the builder's snapshots as
-`deb-src` entries, so `apt-get source` fetches the source of each one.
-The INDI images also carry the license file of each vendor SDK in
-them, from `indi/sdk-licenses/`, because the copyright file of the
-PPA's `indi-3rdparty-libs` names none of the SDKs.
-
-## The check
-
-`check.sh <image> [<path>...]` reads the image from the local Docker
-daemon. It fails when a package that a list in
-`/usr/share/doc/liken/` names has no copyright file in the image, or
-when a path named after the image is missing. Each component's smoke
-check runs it with the files that its image must hold, such as
-`usr/share/doc/go/LICENSE` for an image with a Go binary.
+MIT. See [LICENSE](LICENSE).

@@ -1,31 +1,73 @@
 # git-csi-driver
 
-`git-csi-driver` mounts a git repository as a Kubernetes volume, and
-the pod sees a plain directory. The driver pulls new commits of the
-branch or tag into a read-only volume. On a writeable volume, it
-commits what the application writes and pushes it to the repository.
+`git-csi-driver` mounts a git repository as a Kubernetes volume. The
+pod sees a plain directory with no `.git` in it. A read-only volume
+follows a branch or a tag, so a pod in any namespace can read files
+from a repository, such as a tree of YAML or a static site. A
+writeable volume records the history of an application's
+configuration directory. The driver commits what the application
+writes and pushes the commits to the repository. To restore the
+configuration, bind a new claim to the same repository, and the
+application starts from the last push.
 
-The driver fits these uses:
+The driver clones, fetches, commits, and pushes. It does not create a
+repository, a branch, or a credential, and it does not merge. You
+give it a deploy key or a token in a `Secret`. When a push is
+rejected because the ref moved, the driver rebases the volume's
+commits onto the new ref and pushes again, up to three times. If the
+rebase conflicts, or the push is still rejected, the driver moves the
+volume to the side branch `<ref>.<volumeHandle>`.
+It pushes to that branch until a person merges it on the forge.
+While pushes fail, the commits stay on the node, and the volume's
+`Event`s and metrics report the failure until a push succeeds. If the
+node's disk is lost, every commit that was not pushed is lost with
+it. A writeable volume is `ReadWriteOncePod`, so only one pod writes
+it. Several applications can write to one ref through separate
+volumes, each with its own directory of the repository. The driver is
+for text that a person also reads as history. The class sets a size
+limit, and the driver leaves out each file larger than that limit. Do
+not put a database, a cache, or media on it. A submodule appears as
+an empty directory, and a Git LFS file appears as its pointer file.
 
-- **Data that a repository already holds**, such as a tree of YAML, a set
-  of templates, or a static site. Any pod in any namespace can mount it
-  as an inline volume, or through a `ReadOnlyMany` claim, and the
-  driver keeps it current with the ref.
-- **Application configuration.** Many self-hosted applications keep
-  their configuration as text in one directory and edit it through
-  their own user interface. On this driver that directory is a
-  repository, so every change has history. To restore the
-  configuration, delete the claim and create a new one on the same
-  repository. The application then starts from the last push.
+The driver runs on a `liken` cluster. It is designed to run on any
+cluster with a standard CSI setup too. On `liken`, the driver stores
+its repositories on the pod-storage partition. Its node plugin runs at
+the priority `system-node-critical`, so at shutdown the push that runs
+when each pod stops happens before the machine's network stops. In
+`library-operator`, a `Library` of franchises can read its files from
+a read-only claim of this driver.
 
-The driver defines no custom resources. A `PersistentVolume` sets the
-repository, a `VolumeAttributesClass` sets the commit and push
-policy, and a `PersistentVolumeClaim` binds the two. A read-only
-volume needs no class, and in its inline form it needs only the `csi`
-block in a pod spec.
+## The objects
 
-The manual is at [liken.sh/git](https://liken.sh/git/). The design is
-in [`plans/00-design.md`](plans/00-design.md), and the other plans are
-in [`plans/`](plans/).
+The driver defines no custom resources.
 
-`liken` is at [liken.sh](https://liken.sh/).
+- A `PersistentVolume` sets the repository and the ref in
+  `volumeAttributes`. For a private repository, it also sets the
+  credential's `Secret` in both `nodeStageSecretRef` and
+  `nodePublishSecretRef`. The `Secret` contains an SSH key under
+  `ssh-privatekey`, or a token under `token`.
+- A `VolumeAttributesClass` sets when a writeable volume commits and
+  pushes, the commit author, the size limit, and the files to ignore.
+  A writeable volume commits nothing until its claim sets a class.
+- A `PersistentVolumeClaim` binds a volume and sets its class. A
+  read-only volume needs no class. Its inline form needs only the
+  `csi` block in a pod spec.
+
+## A read-only volume
+
+```yaml
+volumes:
+  - name: data
+    csi:
+      driver: git.liken.sh
+      readOnly: true
+      volumeAttributes:
+        url: https://code.example.com/data/catalog.git
+        ref: main
+        pull: 5m
+```
+
+The manual is at [liken.sh/git](https://liken.sh/git/), and
+[`plans/00-design.md`](plans/00-design.md) is the design.
+
+MIT. See [LICENSE](LICENSE).

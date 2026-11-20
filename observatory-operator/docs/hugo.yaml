@@ -31,7 +31,7 @@ disableKinds: [taxonomy, term, rss]
 # Every page renders as HTML for people and as its Markdown source for
 # agents and scripts, so the Markdown of / is /index.md. The theme
 # writes the Markdown only when the site declares this format
-# (brand/README.md).
+# (brand/theme.md).
 outputFormats:
   markdown:
     mediaType: text/markdown

@@ -61,8 +61,8 @@ The theme supplies the page shell, the stylesheet that every page
 inlines, the nav that every liken site renders from its
 `data/nav.yaml`, and the public brand files: `/favicon.ico`,
 `/icon.svg`, and the mark under `/brand/`. The theme's `voice.md` has
-the voice rules for everything the sites publish, and `AGENTS.md` here
-imports it. The built site has no JavaScript. This site keeps only
+the voice rules for everything the sites publish, and the root
+`AGENTS.md` imports it. The built site has no JavaScript. This site keeps only
 the two llms.txt templates in its own `layouts/`, because their text
 is about this manual, and Hugo uses a site's `layouts/` before the
 theme's. A change to the theme reaches this site in the same commit.

@@ -1,52 +1,46 @@
 # ffmpeg
 
-`ghcr.io/liken-sh/ffmpeg` is the [`vaapi`](../vaapi/) image plus
-`ffmpeg` and `ffprobe` and every library they load. Its entrypoint is
-`ffmpeg`. [`mpv`](../mpv/) builds on it, and so do the images that run
-ffmpeg: the capture container of `display-operator`, the API of
-`media-operator`, and the file facts of `library-operator`.
+`ghcr.io/liken-sh/ffmpeg` is the base image for a program that runs
+`ffmpeg` or `ffprobe`. It contains both programs, every library that
+they load, and the VA-API drivers that decode on the node's GPU. Its
+entrypoint is `ffmpeg`. It is the [`vaapi`](../vaapi/) image with
+Debian's `ffmpeg` added.
 
-## What the image holds
+Apart from `ffmpeg` and `ffprobe`, the image has no program and no
+shell. It contains the libav libraries and their codecs. Put your own
+program in an image that builds on this one, and have it run
+`ffmpeg` and `ffprobe` by path.
 
-`ffmpeg-closure.sh` names the two programs as seeds, collects every
-library they load, and then leaves out every file that the images
-under this one already hold. The layer carries the libav libraries and
-their codecs, and the image decodes on the node's GPU through the
-VA-API tree under it.
+`ffmpeg` builds on `vaapi`, from the same Debian snapshot. Its layer
+contains only the files that `vaapi` and `vulkan` do not.
+[`mpv`](../mpv/) builds on `ffmpeg`. So do the images that run
+`ffmpeg` in a pod:
 
-`smoke/ffmpeg.sh` runs the image before it ships: it encodes one
+- the capture container of `display-operator`
+- the API of `media-operator`, which muxes each capture
+- the images of `library-operator` that probe a video, make its seek
+  bar images, read the text on screen at its end, and find the
+  credited people on screen
+
+## What the image contains
+
+- **`ffmpeg` and `ffprobe`**, from Debian's `ffmpeg` package.
+- **The libav libraries** and every library that they load, such as
+  the codec libraries.
+- **The record of each package**, as in `vulkan`, in
+  `/usr/share/doc/liken/ffmpeg.packages`.
+
+`smoke/ffmpeg.sh` tests the image before it publishes. It encodes one
 second of a test pattern, runs `ffprobe`, and checks that `ffmpeg`
-lists the `vaapi` hardware acceleration.
+lists the `vaapi` hardware acceleration. The CI runner has no GPU, so
+the test proves the software path and that VA-API is compiled in. A
+machine with a GPU proves that the driver loads.
 
-## The version and the revision
+The exact packages are in the `Dockerfile`. The upstream release is
+under `[package.upstream]` in `package.toml`. Every file is in the
+image's SBOM. The image publishes under the tag
+`<version>-<revision>`, where the version is the date of the Debian
+snapshot. The design of the image is in `display-operator`'s
+[plan 19](../display-operator/plans/completed/19-the-vaapi-and-ffmpeg-images.md).
 
-`ffmpeg` is a pinned component. Its `package.toml` states a version and a
-revision, and the image publishes under the tag `<version>-<revision>`,
-for example `20260928-1`.
-
-- The **version** is the date of the Debian snapshot that the build
-  installs from, as `YYYYMMDD`. Every base on Debian uses the same
-  date, so a library that two bases hold is the same file in both.
-- The **revision** counts the changes to the recipe at one version. It
-  starts at 1 for a new version. Any change to the build that keeps
-  the version needs the next revision: a change to the `Dockerfile`, to
-  a script, to the Debian image digest, or to `package.toml`.
-
-The recipe also covers the tag of each base in `[depends]`. So a new
-revision of a base under this one changes this one's recipe too, and
-this one needs a new revision in the same commit. CI fails and names
-each component that needs one. A published tag never changes.
-
-## Bump the snapshot
-
-All five bases move to a new snapshot together. The steps are in the
-[`vulkan` README](../vulkan/README.md#bump-the-snapshot), and the
-`bump-components` skill under `.agents/skills` holds the whole
-procedure.
-
-## Build
-
-The bake file at the top of the repository builds this image, from
-the top of the repository:
-
-    docker buildx bake ffmpeg --load
+MIT. See [LICENSE](LICENSE).

@@ -12,10 +12,10 @@ Contents:
 ## Old-release baselines
 
 A cross-version drill needs the fleet on an older release before the
-new one arrives. Compose the install media from a published release,
-and compose it with **that release's own bundled CLI**, not with
-`cli/dist/liken`. A release's media format is the format its own
-toolkit writes.
+new one arrives. Build the install media from a published release.
+Build it with **that release's own bundled CLI**, not with
+`cli/dist/liken`, because each release's toolkit writes the media
+format of that release.
 
 ```bash
 # 1. Download the release into a local channel directory.
@@ -32,12 +32,12 @@ chmod +x /tmp/old-liken
     dev-cluster/image/old-install.cpio
 ```
 
-An old release plus the current deployment layer is the composition
-design working as intended. The release carries no deployment, and the
-layer carries no OS.
+The media combines the old release with the current deployment layer,
+and the design allows that. The release contains no deployment, and
+the layer contains no OS.
 
-Install each node against that image. `INSTALL_CPIO` is the knob, and
-its path is relative to `dev-cluster/`:
+Install each node from that image. Set `INSTALL_CPIO` to the image's
+path, relative to `dev-cluster/`:
 
 ```bash
 make -C dev-cluster install NODE=node-1 FIRMWARE=bios \
@@ -46,124 +46,130 @@ make -C dev-cluster install NODE=node-1 FIRMWARE=bios \
 ```
 
 Use `make -C dev-cluster` here on purpose. `make install` in `liken/`
-rebuilds `dev-cluster/image/install.cpio` from the working tree first,
-which is the current build, not the old one.
+first rebuilds `dev-cluster/image/install.cpio` from the working
+tree, which gives the current build, not the old one.
 
-Machines seed only themselves, so a three-of-five fleet reports 3/3 and
-never reports Degraded. A three-leader rollout completes in roughly two
-and a half minutes, one reboot at a time.
+Each machine seeds only itself, so a fleet of three of the five
+machines reports 3/3 and never reports Degraded. A rollout of three
+leaders takes about two and a half minutes, with one reboot at a
+time.
 
 ## The lab channel at a chosen version
 
-`liken/Makefile` bundles the working tree into a release-shaped
-channel under `dev-cluster/image/channel/<version>/`. `LAB_VERSION`
-names that version and defaults to today's date with serial `000`.
-Override it on the command line to build the lab channel at a version
-of your choosing:
+`liken/Makefile` bundles the working tree into a channel with the
+layout of a release, under `dev-cluster/image/channel/<version>/`.
+`LAB_VERSION` sets that version. Its default is today's date with
+serial `000`. To build the lab channel at another version, set it on
+the command line:
 
 ```bash
 make dev-cluster/image/install.cpio LAB_VERSION=$(date +%Y.%m.%d)-901
 ```
 
-The knob is `LAB_VERSION`, not `LIKEN_VERSION`. Serve that channel
-directly when the drill is about this bundle rather than about
-`releases/dist`:
+The variable is `LAB_VERSION`, not `LIKEN_VERSION`. When the drill is
+about this bundle and not about `releases/dist`, serve the channel
+directly:
 
 ```bash
 cli/dist/liken serve dev-cluster/image/channel :8017
 ```
 
-Only one server can hold `:8017`. Stop `make serve` first.
+Only one server can listen on `:8017`. Stop `make serve` first.
 
 ## Deliberate-failure releases: the FAULT knob
 
-A blue-green upgrade system is only as good as its fallbacks, so the
-releases domain can stamp a fault into `init` at link time. Do not hand-
-build a broken bundle. Build one:
+An upgrade with two boot slots is only safe if the fallback to the
+old slot works. To test the fallback, the release build can link a
+fault into `init`. Do not build a broken bundle by hand. Build one
+with `FAULT`:
 
 ```bash
 make release VERSION=$(date +%Y.%m.%d)-902 FAULT=panic
 ```
 
-Run this from `liken/`. Its target builds the vendored
-inputs the bundle needs before it hands off to `releases/Makefile`, and
-`FAULT` reaches the sub-make on its own.
+Run this from `liken/`. The target first builds the vendored inputs
+that the bundle needs, and then passes the build to
+`releases/Makefile`. `FAULT` reaches that sub-make with no other
+step.
 
-The two faults cover the two fallback paths, and
-`init/fault.go` explains both:
+Each fault tests one fallback path, and `init/fault.go` explains
+both:
 
-* **`FAULT=panic`.** init panics at startup. PID 1 dying panics the
-  kernel. The baked `panic=10` argument reboots ten seconds later, and
-  the firmware falls back to BootOrder and the proven slot, because it
-  already consumed its one-shot BootNext. No liken code takes part in
-  the recovery, which is the whole point of this fault.
-* **`FAULT=wedge-k3s`.** The machine boots and k3s never starts, so the
-  node never joins and the operator that would promote the release
-  never runs. BootNext cannot detect this: the kernel is healthy and
-  nothing panics. The proving watchdog waits ten minutes, then reboots
-  onto the proven slot.
+* **`FAULT=panic`.** init panics at startup. When PID 1 dies, the
+  kernel panics. The built-in `panic=10` argument reboots the machine
+  ten seconds later. The firmware already used its one-shot BootNext,
+  so it falls back to BootOrder and the proven slot. No `liken` code
+  takes part in the recovery, and that is what this fault tests.
+* **`FAULT=wedge-k3s`.** The machine boots, but k3s never starts. So
+  the node never joins, and the operator that would promote the
+  release never runs. BootNext cannot detect this, because the kernel
+  is healthy and nothing panics. The proving watchdog waits ten
+  minutes, then reboots onto the proven slot.
 
-An empty `FAULT`, which every real release has, injects no fault. Only
-init carries the fault, because the drill is about a broken boot.
+An empty `FAULT` injects no fault, and every real release has an
+empty `FAULT`. Only init has the fault, because the drill is about a
+broken boot.
 
-Catalog and serve a faulted release exactly like a good one. The
-digests match, so the download verifies and the failure happens where
-the drill wants it: at boot. Watch for `RejectedLastBoot` in
-`status.boot.systemRejection`.
+Add a faulted release to the catalog and serve it exactly like a good
+one. The digests match, so the download passes verification, and the
+failure happens at boot, where the drill expects it. Watch for
+`RejectedLastBoot` in `status.boot.systemRejection`.
 
 ## Reading a guest's disks offline
 
 To inspect a machine's FAT system slots with no root and no shell,
-convert the qcow2 to raw and parse it. **The guest must be off.**
-QEMU holds the write lock while it runs, and a read of a live image is
-not a read of a consistent filesystem.
+convert the qcow2 file to raw and parse it. **The guest must be
+off.** QEMU has the write lock while it runs, and a read of a live
+image does not see a consistent filesystem.
 
 ```bash
 pgrep -x qemu-system-x86 -a | grep 'node-[1]' | awk '{print $1}' | xargs -r kill
 qemu-img convert -O raw dev-cluster/guests/node-1/boot.qcow2 /tmp/boot.raw
 ```
 
-Then parse the GPT and walk FAT32 from Python. Skip any directory entry
-whose first byte is `.`, or the walk recurses forever. A directory
-entry with a correct long name but `size=0 first_cluster=0` is the
-signature of a rename whose data never reached the medium.
+Then parse the GPT and walk FAT32 from Python. Skip each directory
+entry whose first byte is `.`, or the walk recurses forever. A
+directory entry with a correct long name but `size=0 first_cluster=0`
+is the sign of a rename whose data was never written to the disk.
 
 ## The metal hardware shape
 
-`HARDWARE=virtio` (the default) hides a whole class of faults: a virtio
-guest never loads a storage or a network module, so a driver that a
-real controller needs stays untested until a real machine boots.
+`HARDWARE=virtio` (the default) hides a whole class of faults. A
+virtio guest never loads a storage module or a network module, so a
+driver that a real controller needs is not tested until a real
+machine boots.
 
-`HARDWARE=metal` gives the shape a real machine has. The disks sit on
-an AHCI SATA controller and the guest names them `/dev/sda`,
-`/dev/sdb`, `/dev/sdc`. The network cards are e1000. Both controller
-classes ship as kernel modules, so this shape exercises the module path.
+`HARDWARE=metal` gives the guest the hardware of a real machine. The
+disks are on an AHCI SATA controller, and the guest names them
+`/dev/sda`, `/dev/sdb`, and `/dev/sdc`. The network cards are e1000.
+The drivers for both controllers are kernel modules, so this shape
+tests the module path.
 
-The parity deployment lives in `dev-cluster/hardware/`. Its
-`cluster.yaml` is a symlink to the dev cluster's, so it is the same
-cluster with the same identity, and only the machine manifest differs.
-Run it through its own drill:
+The parity deployment is in `dev-cluster/hardware/`. Its
+`cluster.yaml` is a symlink to the dev cluster's `cluster.yaml`, so
+it is the same cluster with the same identity. Only the machine
+manifest is different. Run it through its own drill:
 
 ```bash
 make smoke-hardware
 ```
 
-That drill boots the hardware report first, checks the proposal the
-report writes to the stick, installs, boots the installed disk, and
-waits for Ready.
+That drill boots the hardware report first, and checks the proposal
+that the report writes to the stick. Then it installs, boots the
+installed disk, and waits for Ready.
 
 ## The install stick and the hardware report
 
-`make install` is the lab's fast unattended path. Two targets drill
-what real hardware does instead:
+`make install` is the lab's fast unattended path. These targets test
+what happens on real hardware:
 
-* `make install-stick NODE=node-2` refreshes the node's variable store
-  to a blank vendor copy first, which is what a new machine's firmware
-  looks like. A firmware with no boot entries falls through to the
-  removable-media path, so systemd-boot's menu appears on the serial
-  console and a person picks the machine.
+* `make install-stick NODE=node-2` first resets the node's variable
+  store to a blank vendor copy, which is what a new machine's
+  firmware has. A firmware with no boot entries falls through to the
+  removable-media path. So systemd-boot's menu shows on the serial
+  console, and a person selects the machine.
 * `make -C dev-cluster reset-nvram NODE=node-2` resets one node's
-  firmware variables to the vendor defaults, which is what a firmware
-  update or a dead coin-cell battery does. The next boot then has to
-  come through the fallback loader on the proven slot, and that boot
-  has to write the entries again. Run it only while the machine is off.
+  firmware variables to the vendor defaults. A firmware update or a
+  dead coin-cell battery does the same. The next boot must then come
+  through the fallback loader on the proven slot, and that boot must
+  write the entries again. Run it only while the machine is off.

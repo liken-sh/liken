@@ -1,16 +1,49 @@
 # Working on indi
 
-This directory builds the INDI images: a pinned component, published
-under `<version>-<revision>`, that CI builds only when that tag is new.
-`README.md` explains the images, the shim, the versioning, and the
-bump. Load the `releases` and `bump-components` skills under
+`indi` is a pinned set of images. They are built from dated snapshots
+of Ubuntu, the INDI PPA, and the PHD2 PPA, and published under
+`<version>-<revision>`. `README.md` says what it is for and describes
+the images. Load the `releases` and `bump-components` skills under
 `.agents/skills` before you change the version or the revision.
 
-A change to anything that Docker sends the build, the `Dockerfile`,
-the scripts, `images/`, or the shim's source, changes the recipe and
-needs the next revision. That rebuilds all 17 images, so batch such
-changes into one revision.
+## Design
 
-`shim/` is a Go module with its own tests: `make -C shim test`. The
-smoke checks under `smoke/` need the images in the local Docker
-daemon, built through `docker-bake.hcl` at the top of the repository.
+The recipe is a hash of the bytes of every file that Docker sends to
+the build. So a change to any of those files, even to a comment,
+needs the next revision, and a new revision rebuilds every image.
+Put related changes into one revision. When only
+`observatory-operator`'s tests need a file, keep the file in that
+component, not here. `.dockerignore` lists the files that Docker
+leaves out of the build.
+
+`observatory-operator` reads this component's files and runs its
+images. It generates its map of drivers from `images/` and the tag in
+`package.toml`, and it copies `libqhy`'s udev rules out of
+`indi-qhy`. The constants at the top of
+`observatory-operator/guiderpod.go` must match the paths and the
+environment of `indi-phd2`. When you change one, change the other in
+the same commit.
+
+## SDK licenses
+
+`sdk-licenses/` is a copy of the license file of each SDK directory
+of [indi-3rdparty](https://github.com/indilib/indi-3rdparty) at
+commit `9d8aff3711efa824137123b007b97978aeac2688`. That was the newest
+commit of its master branch when the PPA built the packages of
+2026-10-04, which are the packages that the snapshot installs. The
+copyright file of the PPA's `indi-3rdparty-libs` package mentions
+none of the SDKs. So the `license` entries of the lists copy these
+files into the images. The directories of the QHY, Atik, Astroasis,
+and SVBONY SDKs, and of `libflipro`, have no license file. When a
+bump copies new license files, write the new commit here.
+
+## Finding things
+
+- The smoke checks under `smoke/` need the images in the local Docker
+  daemon, built through `docker-bake.hcl` at the top of the
+  repository. Each check runs `notices/check.sh`, and compares the
+  packages in the image with `[package.upstream]`.
+- `check-lists.sh` fails the build in three cases: a third-party
+  driver is in no list under `images/`, a driver is in more than one
+  list, or a list has a driver that `indi-3rdparty-drivers` no longer
+  installs.

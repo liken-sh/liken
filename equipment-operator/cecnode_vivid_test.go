@@ -2,7 +2,7 @@ package main
 
 // Tests of the node workload against the kernel's CEC core, using the
 // vivid driver's emulated adapters. They skip when this user cannot
-// open a vivid adapter, as in CI. cec/AGENTS.md has the commands that
+// open a vivid adapter, as in CI. cec/VIVID.md has the commands that
 // set up vivid.
 
 import (
@@ -23,7 +23,7 @@ import (
 // vividTVVariable selects what acts as the TV on vivid's capture
 // adapter. When it is unset, the test acts as the TV. When it is
 // cec-follower, the cec-follower program from v4l-utils acts as the TV,
-// and the test leaves the capture adapter alone. cec/AGENTS.md has the
+// and the test leaves the capture adapter alone. cec/VIVID.md has the
 // cec-follower command.
 const vividTVVariable = "CEC_VIVID_TV"
 

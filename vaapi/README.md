@@ -1,65 +1,41 @@
 # vaapi
 
-`ghcr.io/liken-sh/vaapi` is the [`vulkan`](../vulkan/) image plus the
-VA-API loader, the Intel media driver, and Mesa's VA driver for AMD,
-for a program that decodes video on the node's GPU. [`ffmpeg`](../ffmpeg/) builds on it.
+`ghcr.io/liken-sh/vaapi` is the base image for a program that
+decodes or encodes video on the node's GPU through VA-API. It
+contains the libraries that such a program opens: `libva`,
+`libva-drm`, Intel's media driver, and Mesa's VA driver for AMD GPUs.
+It is the [`vulkan`](../vulkan/) image with those files added, so a
+program on it can also draw with Vulkan.
 
-## What the image holds
+The image contains only libraries and their package records. It has
+no program. The Intel driver is Debian's non-free build. The free
+build leaves out each codec that uses Intel's prebuilt GPU kernels,
+such as AV1 decode on Gen12 GPUs. No program in the repository links
+the driver. libva opens it at run time, by the name that the kernel
+driver reports. The comments in the `Dockerfile` give the reasons.
 
-`vaapi-closure.sh` names four seeds: `libva.so.2`, `libva-drm.so.2`,
-`iHD_drv_video.so`, the Intel media driver, and `radeonsi_drv_video.so`,
-Mesa's VA driver for AMD. libva opens a driver by the name the kernel
-driver reports, so no program's library graph reaches it, and it is a
-seed. The script collects the seeds and every library they load, and
-then leaves out every file that the `vulkan` image already holds, so
-this image's layer carries only what the base lacks.
+`vaapi` builds on `vulkan`, from the same Debian snapshot. Its layer
+contains only the files that `vulkan` does not, so a node stores one
+copy of each library that the two images share.
+[`ffmpeg`](../ffmpeg/) builds on `vaapi`. So does the capabilities
+agent of `media-operator`, which uses libva to find out what each
+render node's driver can decode and encode.
 
-The Intel driver is Debian's `intel-media-va-driver-non-free`, from the
-snapshot's `non-free` component. Debian's free build,
-`intel-media-va-driver`, leaves out every codec whose driver path runs
-Intel's prebuilt GPU kernels. On Gen12 GPUs, Tiger Lake and Alder Lake
-among them, that includes AV1 decode, along with VC-1 decode and the
-full H.264 and HEVC encoders. The kernels are binaries without their
-source, under the same Expat license as the rest of the driver, and
-that missing source is why Debian files the package as non-free. libva
-opens the driver at run time, and no program in this repository links
-it.
+## What the image contains
 
-On Debian, Mesa's VA driver is a link into `libgallium`, which the
-`vulkan` tree does not hold. It is the largest file in this layer, 41
-MB, and the non-free Intel driver is 41 MB where the free one is 18 MB.
-The layer measured 85 MB on the snapshot of 2026-09-28, where it was
-19 MB with the free Intel driver alone.
+- **The VA-API loader**, `libva` and `libva-drm`.
+- **Intel's media driver**, `iHD_drv_video.so`, from Debian's
+  `non-free` component.
+- **Mesa's VA driver for AMD**, `radeonsi_drv_video.so`, with the
+  `libgallium` that it links.
+- **The record of each package**, as in `vulkan`, in
+  `/usr/share/doc/liken/vaapi.packages`.
 
-## The version and the revision
+The exact packages are in the `Dockerfile`. The upstream releases are
+under `[package.upstream]` in `package.toml`. Every file is in the
+image's SBOM. The image publishes under the tag
+`<version>-<revision>`, where the version is the date of the Debian
+snapshot. The design of the image is in `display-operator`'s
+[plan 19](../display-operator/plans/completed/19-the-vaapi-and-ffmpeg-images.md).
 
-`vaapi` is a pinned component. Its `package.toml` states a version and a
-revision, and the image publishes under the tag `<version>-<revision>`,
-for example `20260928-1`.
-
-- The **version** is the date of the Debian snapshot that the build
-  installs from, as `YYYYMMDD`. Every base on Debian uses the same
-  date, so a library that two bases hold is the same file in both.
-- The **revision** counts the changes to the recipe at one version. It
-  starts at 1 for a new version. Any change to the build that keeps
-  the version needs the next revision: a change to the `Dockerfile`, to
-  a script, to the Debian image digest, or to `package.toml`.
-
-The recipe also covers the tag of each base in `[depends]`. So a new
-revision of a base under this one changes this one's recipe too, and
-this one needs a new revision in the same commit. CI fails and names
-each component that needs one. A published tag never changes.
-
-## Bump the snapshot
-
-All five bases move to a new snapshot together. The steps are in the
-[`vulkan` README](../vulkan/README.md#bump-the-snapshot), and the
-`bump-components` skill under `.agents/skills` holds the whole
-procedure.
-
-## Build
-
-The bake file at the top of the repository builds this image, from
-the top of the repository:
-
-    docker buildx bake vaapi --load
+MIT. See [LICENSE](LICENSE).

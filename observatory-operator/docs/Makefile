@@ -127,8 +127,9 @@ $(REFERENCE)/receivers.md: ../deploy/receivers-crd.yaml $(CRDREF_SOURCES)
 
 # The skills target writes each guide as an Agent Skill into ../skills,
 # one SKILL.md per guide, using the generator from the brand component
-# (its README describes the output). The output is committed, and the
-# test-docs target in ../Makefile fails when it is stale.
+# (brand/skills/main.go describes the output). The output is
+# committed, and the test-docs target in ../Makefile fails when it is
+# stale.
 .PHONY: skills
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills

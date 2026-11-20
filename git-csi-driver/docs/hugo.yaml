@@ -21,7 +21,7 @@ disableKinds: [taxonomy, term, rss]
 
 # Every page is also written as its Markdown source, for agents and
 # scripts, at index.md beside index.html. The theme writes the Markdown
-# only for a site that declares this format (brand/README.md).
+# only for a site that declares this format (brand/theme.md).
 outputFormats:
   markdown:
     mediaType: text/markdown

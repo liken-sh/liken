@@ -4,7 +4,7 @@
 # check for its tools, read an upstream, download a pinned file and
 # check its digest, look up a digest in a table, print a row of the
 # `make versions` report, and write a bump into the files that hold
-# the pin. The pins skill states the rules of pins and downloads, and
+# the pin. Root AGENTS.md states the rules of pins and downloads, and
 # each rule has one implementation here, so a fix to a step reaches
 # every pin at once. `ci pins` fails a fetch.sh or a latest.sh that
 # does not source this file, or that runs curl or wget itself.

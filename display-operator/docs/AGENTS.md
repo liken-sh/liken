@@ -1,11 +1,7 @@
-# Authoring this docs domain
+# Working on this manual
 
-@../../brand/voice.md
-
-Every word this site publishes follows the voice rules in that file. The
-base under them is ASD-STE100. The rules are in the brand theme,
-`brand/` at the top of the repository, which also gives the site its
-shell.
-
-Build the site with `go tool hugo` from this directory. The output lands
-in `dist/site/`, which git ignores.
+This directory is the source of a component's manual, which is
+published on liken.sh. Before you write or change a page here, load
+the `manuals` skill from `.agents/skills` at the top of the
+repository. It explains where each kind of page goes, which pages are
+generated, and how to check a manual.

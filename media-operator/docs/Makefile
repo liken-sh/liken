@@ -56,7 +56,7 @@ test: $(GENERATED)
 	go test ./...
 
 # Writes each guide as an Agent Skill, one SKILL.md per guide, into
-# ../skills (brand/README.md describes the output). The output is
+# ../skills (brand/skills/main.go describes the output). The output is
 # committed, and the test-docs target in ../Makefile fails when it is
 # stale.
 .PHONY: skills

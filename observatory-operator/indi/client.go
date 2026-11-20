@@ -1,16 +1,3 @@
-// Package indi is a client of the INDI protocol, version 1.7, which is
-// XML over TCP, the protocol that indiserver speaks to KStars and to
-// every other client. No maintained Go client of INDI exists, so this
-// package implements one in pure Go, with no cgo.
-//
-// A Client keeps its state current from events, as the rest of the
-// repository does. Run opens the connection and sends getProperties.
-// The def*Vector messages that the server sends in reply set the
-// baseline in the Client's Store, and each later set*Vector message
-// updates it. When the connection ends, the store is emptied, and the
-// next Run fills it from a new baseline. Callers read the store,
-// subscribe to its changes, or wait for a condition on it. Nothing in
-// the package polls the server on a timer.
 package indi
 
 import (

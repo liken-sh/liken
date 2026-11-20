@@ -2,7 +2,7 @@ package main
 
 // After a wake, the test acts as the TV on a vivid bus and sends Request
 // Active Source, and the node workload must reply with Active Source.
-// cec/AGENTS.md has the commands that set up vivid.
+// cec/VIVID.md has the commands that set up vivid.
 
 import (
 	"os"

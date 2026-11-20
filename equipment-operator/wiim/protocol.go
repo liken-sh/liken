@@ -1,5 +1,5 @@
-// The WiiM control protocol. wiim/AGENTS.md lists the source of each
-// command and records which commands a live Amp answers.
+// The WiiM control protocol. wiim/PROTOCOL.md lists the source of each
+// command and records which commands a measured Amp replies to.
 
 package wiim
 

@@ -35,7 +35,7 @@ disableKinds: [taxonomy, term, rss]
 # authored Markdown for agents and scripts. The Markdown file is next
 # to the HTML file, so the Markdown version of / is /index.md. The theme
 # renders the Markdown version only when the site declares this output
-# format (see brand/README.md).
+# format (see brand/theme.md).
 outputFormats:
   markdown:
     # Hugo already defines the text/markdown media type with the md

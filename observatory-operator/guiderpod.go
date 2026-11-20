@@ -4,7 +4,9 @@ package main
 // a pod that runs PHD2 beside a headless weston, and a Service for
 // PHD2's event server. PHD2 is a GTK program with no headless mode, so
 // it draws on weston through a Wayland socket in an emptyDir that both
-// containers mount. PHD2 rewrites its config while it runs, so the
+// containers mount. weston creates the socket with no write permission
+// for other users, so both containers run as the same user. PHD2
+// rewrites its config while it runs, so the
 // image's entrypoint copies the profile from the ConfigMap into $HOME
 // before each start, and every start uses the operator's profile.
 
