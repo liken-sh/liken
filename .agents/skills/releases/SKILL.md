@@ -20,8 +20,8 @@ it checks this variable before the tag.
 ## Which section to read
 
 * **The form of a version or a tag:** "The version scheme".
-* **Which components a tag releases, and why:** "What a tag
-  releases".
+* **Which components a tag releases, and why, or whether the next tag
+  releases the OS:** "What a tag releases".
 * **Why a tag published a component or did not:** "Find what a run
   published".
 * **The version of a development build:** "Development builds".
@@ -111,6 +111,22 @@ it releases, and why. Every push to a branch that starts a run shows
 the same summary for a tag at that commit. Step 2 of the `release`
 skill reads it from the job's log before the tag.
 
+A component's previous release is not always the newest tag, because
+a tag releases only the components that changed. The OS, for
+example, can have its newest release at an older tag. So you cannot
+tell from the tags alone whether the next tag releases a component.
+To answer a question such as "will the next tag release the OS",
+read the table under "A release tag at this commit" in the summary of
+the `plan` job of the newest run on `main`. The table has a row for
+each component that publishes:
+
+- **Newest release** shows the component's newest release, or
+  `none`.
+- **Releases** shows `yes` when a tag at this commit releases the
+  component, and `no` when it does not.
+- **Why** gives the reason.
+- **Pushes** lists what the component publishes when it releases.
+
 The `record` job writes the GitHub release for the tag. The GitHub
 release lists every component and its version at that tag. When the
 tag released the OS, it also has the OS's catalog entry.
@@ -132,8 +148,8 @@ expected, or published one that you did not expect.
    skill has the command that reads it from the job's log. In a tag's
    run, the table under "The plan" has a row for each component. The
    row shows what the component publishes, its version, and why. The
-   heading "A release tag at this commit" is only in the run of a push
-   to `main`.
+   run of a tag does not print the heading "A release tag at this
+   commit". Every other run prints it.
 5. Read the section "Write access" of the same summary. It lists each
    package that the workflow cannot push to. A package in that list
    needs the Write role for `liken-sh/liken` in its settings on

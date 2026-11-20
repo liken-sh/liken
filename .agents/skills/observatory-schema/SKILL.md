@@ -112,17 +112,25 @@ defines.
 
 ## After a bump of the INDI images
 
-The `bump-components` skill bumps `indi/package.toml`. After that,
-the operator's generated files and its recorded captures must be
-updated for the new tag and the new libindi. Each `make` target here
-that runs Docker builds its image through `docker-bake.hcl` at the
-top of the repository. So these targets run on a workstation, never
-in CI. Run the steps in this order:
+The `bump-components` skill bumps `../indi/package.toml`, the file of
+the `indi` component at the top of the repository. In this section,
+a path that starts with `../indi/` is in that component. A path that
+starts with `indi/` is in `observatory-operator/indi/`, the operator's
+INDI client and its captures.
+
+After the bump, update the operator's generated files and its
+recorded captures for the new tag and the new libindi. Each `make`
+target here that runs Docker builds its image through
+`docker-bake.hcl` at the top of the repository. So these targets run
+on a workstation, never in CI. The frame header is captured by hand
+between `make captures` and `make schema`, so one `make` command
+cannot run every step. Run the steps in this order:
 
 1. `make drivers` writes the new tag into `drivers/generated.go`, the
-   map from each driver to the image that contains it. It reads
-   `indi/images/` and `indi/package.toml`. `TestTheMapIsCurrent`
-   fails when the file is stale.
+   map from each driver to the image that contains it. It reads the
+   lists in `../indi/images/`, the tag in `../indi/package.toml`, and
+   the tag of the `weston` image in `../weston/package.toml`.
+   `TestTheMapIsCurrent` fails when the file is stale.
 2. `make firmware-rules` builds `indi-qhy`, copies `libqhy`'s udev
    rules out of it into `firmware/85-qhyccd.rules`, and runs
    `make firmware`. `make firmware` writes `deploy/firmware/qhy.yaml`:
@@ -130,21 +138,28 @@ in CI. Run the steps in this order:
    the image's `fxload` loads, on the `indi-qhy` tag of
    `drivers/generated.go`. `TestTheQHYFirmwareIsCurrent` fails when
    the file is stale. Report each object that this step adds or
-   removes.
+   removes. `TestTheCommittedObjectsAreWellFormed` in
+   `firmware/generate_test.go` compares the number of objects with a
+   number written in the test. When this step adds or removes an
+   object, change that number to the count of objects in
+   `deploy/firmware/qhy.yaml`.
 3. `make captures` runs two targets. `make standard` builds the bare
    drivers of `indi/standard/bare/` against the libindi of the pinned
    snapshots, and captures each one into `indi/standard/`.
    `make transcripts` runs each simulator of `indi-simulators` through
    its script, into `indi/inditest/testdata/`.
    `TestCapturesNameThePinnedINDI` fails when a capture names an INDI
-   version other than the one in `indi/package.toml`. So the
+   version other than the one in `../indi/package.toml`. So the
    operator's tests fail until this step runs.
-4. Capture the frame header again, by hand, as the next section
-   describes.
+4. Capture the frame header again, by hand, as "The frame header"
+   below describes.
 5. Run `make schema`. It fails on each new standard property until a
    fields file gives that property a field and a description.
 6. Run `make crosscheck`. Report each new line of
    `schema/disagreements.txt`.
+7. Run `make -C docs generate skills`, because the manual's reference
+   pages are generated from the CRDs that `make schema` wrote.
+8. Run `make test`.
 
 ### The bare drivers
 
@@ -173,15 +188,65 @@ after a bump has a new keyword, the test fails until the list names
 it.
 
 `make transcripts` does not write this file. To capture it, you run
-the simulators below on one server and read the file that the driver
-saved.
-To capture it again:
+the simulators on one server and read the file that the driver saved.
+The functions of `../indi/smoke/lib.sh` run the server and set each
+property. `serve` starts `indiserver` in the image with the drivers
+that you name. `setprop` and `getprop` run `indi_setprop` and
+`indi_getprop` in the container with `docker exec`.
+`../indi/smoke/simulators.sh` uses the same functions to take a frame.
+`make transcripts` loads the `indi-simulators` image at the pinned
+tag, so run these commands after step 3:
 
-1. Run `indiserver` from the `indi-simulators` image with the
-   telescope, focuser, rotator, filter, SQM, and CCD simulators.
-2. Connect each device, and slew the mount.
-3. Write `SCOPE_INFO`, set `UPLOAD_MODE` to `UPLOAD_LOCAL`, and write
-   the one `FITS_HEADER` keyword `OBJECT`.
-4. Take an exposure of 1 s.
-5. Copy the header of the file that the driver saved into
-   `frame-header.txt`, with the trailing spaces removed.
+1. Start the telescope, focuser, rotator, filter, SQM, and CCD
+   simulators on one server:
+
+   ```sh
+   . ../indi/smoke/lib.sh
+   tag=$(sed -n 's/^version = "\(.*\)"/\1/p' ../indi/package.toml)-$(sed -n 's/^revision = \(.*\)/\1/p' ../indi/package.toml)
+   name=$(serve ghcr.io/liken-sh/indi-simulators:$tag indi_simulator_telescope \
+       indi_simulator_focus indi_simulator_rotator indi_simulator_wheel \
+       indi_simulator_sqm indi_simulator_ccd)
+   ```
+
+2. List the devices, and connect each one. The names come from the
+   drivers, such as `Telescope Simulator` and `CCD Simulator`:
+
+   ```sh
+   getprop "$name" '*.CONNECTION.CONNECT'
+   setprop "$name" "<device>.CONNECTION.CONNECT=On"
+   ```
+
+3. Unpark the mount and slew it:
+
+   ```sh
+   setprop "$name" "Telescope Simulator.TELESCOPE_PARK.UNPARK=On"
+   setprop "$name" "Telescope Simulator.ON_COORD_SET.TRACK=On"
+   setprop "$name" "Telescope Simulator.EQUATORIAL_EOD_COORD.RA;DEC=5.588;-5.39"
+   ```
+
+4. Write `SCOPE_INFO`, set `UPLOAD_MODE` to `UPLOAD_LOCAL`, and write
+   the one `FITS_HEADER` keyword `OBJECT`:
+
+   ```sh
+   setprop "$name" "CCD Simulator.SCOPE_INFO.FOCAL_LENGTH;APERTURE=400;80"
+   setprop "$name" "CCD Simulator.UPLOAD_SETTINGS.UPLOAD_DIR;UPLOAD_PREFIX=/tmp;IMAGE_XXX"
+   setprop "$name" "CCD Simulator.UPLOAD_MODE.UPLOAD_LOCAL=On"
+   setprop "$name" "CCD Simulator.FITS_HEADER.KEYWORD_NAME;KEYWORD_VALUE;KEYWORD_COMMENT=OBJECT;M42;declared"
+   ```
+
+5. When `getprop "$name" -1 'Telescope Simulator.EQUATORIAL_EOD_COORD._STATE'`
+   prints `Ok`, take an exposure of 1 s:
+
+   ```sh
+   setprop "$name" "CCD Simulator.CCD_EXPOSURE.CCD_EXPOSURE_VALUE=1"
+   ```
+
+6. Copy the header of the file that the driver saved into
+   `frame-header.txt`, with the trailing spaces removed. Then stop the
+   server:
+
+   ```sh
+   docker cp "$name:/tmp/IMAGE_001.fits" - | tar -xO | fold -w 80 \
+       | sed -n '1,/^END *$/p' | sed 's/ *$//' > indi/inditest/testdata/ccd/frame-header.txt
+   stop "$name"
+   ```

@@ -93,17 +93,29 @@ new component. `sed` changes the names in `.gitignore` and the
 Do the steps in this order, because each step reads what the step
 before it wrote.
 
-1. **The module.** Input: the sibling's `go.mod`, or its `Cargo.toml`
-   and `rust-toolchain.toml`. Write the module as
-   `github.com/liken-sh/liken/<directory>`, with the Go version of the
-   `golang` entry of `toolchains/images.toml`. Add a `replace` for each
-   module of the tree that it imports. Then run `go mod tidy`, and
-   compare each dependency's version with the siblings' versions.
-   `go mod tidy` can move a module, such as the Kubernetes modules,
-   past the version that the siblings use. Set each such module back
-   to the siblings' version. `ci pins` fails when two modules use
-   different versions of one dependency. Result: a module whose
-   versions are the same as the siblings'.
+1. **The module.** Do the item for the component's language, and skip
+   the other.
+   - **A Go module.** Input: the sibling's `go.mod`. Write the module
+     as `github.com/liken-sh/liken/<directory>`, with the Go version of
+     the `golang` entry of `toolchains/images.toml`. Add a `replace`
+     for each module of the tree that it imports. Then run
+     `go mod tidy`, and compare each dependency's version with the
+     siblings' versions. `go mod tidy` can move a module, such as the
+     Kubernetes modules, past the version that the siblings use. Set
+     each such module back to the siblings' version. `ci pins` fails
+     when two modules use different versions of one dependency.
+     Result: a module whose versions are the same as the siblings'.
+   - **A Rust crate.** Input: the sibling's `Cargo.toml` and
+     `rust-toolchain.toml`. Give each dependency the version that the
+     siblings use, because `ci pins` fails when two copies of a crate
+     disagree. Result: a crate whose versions are the same as the
+     siblings'.
+   - **A crate that other components link**, such as `media-screen`,
+     changes each consumer too: its `Cargo.toml`, its `Cargo.lock`,
+     its `Dockerfile`, and its `package.toml`. The `images` skill
+     describes each of these changes. The crate has no image of its
+     own, so the images to build before the first push are the
+     consumers' images.
 2. **The code and the tests.** Load the `operators` skill and the
    `testing` skill first. Result: `make test-go` passes, or
    `make test` for a Rust workspace. Set the floor in
@@ -233,8 +245,10 @@ sibling.
 
 The search does not find these:
 
-- **`SECURITY.md`**, section "What is in scope", for a component that
-  is not an operator and not part of the build.
+- **`SECURITY.md`**, section "What is in scope". Its first paragraph
+  names the parts of `liken` that are in scope: the operators as a
+  group, the `liken` CLI, the build, and `transect` by name. Add the
+  name of a component that none of these groups includes.
 - **A component with a coverage job and no manual**: add
   `/coverage/<name>.html` to the exceptions in
   `liken/docs/linkcheck/manual_test.go`. Add the component to "The
@@ -301,7 +315,8 @@ CI runs on the push. A check that you skip here fails on CI instead.
 7. **The image**, for a component with one: `make bases`, then
    `docker buildx bake <image> --load`, then the component's `smoke/`
    script with the image's reference. CI's images job runs the same
-   build and script.
+   build and script. For a crate that other components link, build
+   each consumer's image.
 8. **The prose**: check every comment, page, and commit message against
    `brand/voice.md`. The repository is public, so check the tree for
    details of a home cluster, as the section "Privacy" of the root

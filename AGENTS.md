@@ -89,9 +89,15 @@ inotify watch followed by one look at the directory, and to a CEC
 receive loop followed by one scan of the bus.
 
 Use a timer only as a clock: a time-to-live, a deadline, or the age
-of a certificate. A timer that reads state again to look for a change
-is a defect. If a component needs a long resync as a backstop, put a
-comment at the timer that says which failure it covers.
+of a certificate. A timer that reads state again to look for a
+change is a defect when the source has an event to subscribe to.
+
+A timer that reads state is correct in two cases, and each needs a
+comment at the timer. A long resync can be a backstop for a
+subscription, and its comment says which failure it covers. Some
+sources publish no event at all, such as a file behind an HTTP URL.
+A timer is then the only way to see a change, and its comment says
+why no event exists.
 
 ## Conditions, Events, and log lines
 

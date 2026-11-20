@@ -220,10 +220,17 @@ The rule and the reasons are in root plan 78. In short:
 
 ## Timers and devices
 
-- **Name what a kept timer covers.** A backstop tick needs a comment
-  at the timer. The comment names each failure that the tick covers,
-  and why no event covers it. A timer that is a clock (a deadline, a
-  TTL, a backoff, a heartbeat) needs only a correct comment.
+- **Name what a kept timer covers.** The section "Keep state current
+  with events" of the root `AGENTS.md` has the rule. A timer that is a
+  clock (a deadline, a TTL, a backoff, a heartbeat) needs only a
+  correct comment. A timer that reads state again needs a comment at
+  the timer, in one of these cases:
+  - A backstop tick for a subscription. The comment names each
+    failure that the tick covers, and why no event covers it.
+  - A source that publishes no event, such as a file behind an HTTP
+    URL. The timer is the only way to see a change, and the comment
+    says why the source has no event. `people-operator`, which reads
+    each picture source again on a timer, is in this case.
 - **Traffic to a device is a cost even when it is cheap.** A TV
   switched its input while an operator scanned its CEC bus each
   minute. Send a device a query only when a person's action or an

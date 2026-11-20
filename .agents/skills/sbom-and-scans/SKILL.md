@@ -21,6 +21,8 @@ records are made from is in the `pins` skill.
 * **Rehearse the signing of a lab release:** the end of "The OS
   release's SBOM and signatures".
 * **Open alerts, a CVE, or a change to a scan:** "Vulnerability scans".
+* **Decide what to do with one alert, or clear it:** "Answer a
+  finding".
 
 ## Image attestations and signatures
 
@@ -313,15 +315,23 @@ the run's commit. `ci/templates/sarif.tmpl` sets these two inputs.
   lists the images and the versions for this scan and for the
   scheduled one.
 
-To scan on a workstation, you need docker and `jq`. Scan the tree
-after `make all`, and then scan a release:
+To scan on a workstation, you need docker and `jq`. Run the commands
+from `liken/`. Each command reproduces the alerts of one category:
 
-```sh
-cd liken
-make vulnerabilities
-go run ./cli sbom -json 2026.11.10-001 >sbom.cdx.json
-releases/sbom/vulnerabilities.sh sbom.cdx.json
-```
+- `make vulnerabilities`, after `make all`, scans what your tree
+  builds. It reproduces the alerts of `grype/liken`.
+- The scan of a release's SBOM reproduces the alerts of
+  `grype/liken-release`. Use the version of the newest release on the
+  channel, which `cd ci && go run . scans` prints:
+
+  ```sh
+  go run ./cli sbom -json 2026.11.10-001 >sbom.cdx.json
+  releases/sbom/vulnerabilities.sh sbom.cdx.json
+  ```
+
+A scan of the tree does not reproduce an alert of the release
+category, because the tree can have pins that are newer than the
+release.
 
 To scan one image the way a publish job does, run Trivy at the
 `trivyVersion` in `ci/trivy.go`. `toolchains/images.toml` does not pin
@@ -335,3 +345,42 @@ docker run --rm "aquasec/trivy:$version" image --scanners vuln --ignore-unfixed 
 The scan does not match `linux-firmware`, which NVD does not list. It
 also does not match the iptables programs of `k3s-root-xtables`,
 whose entry records the version of k3s-root.
+
+## Answer a finding
+
+No finding fails a build, so a person decides what to do with each
+alert. Ask these questions in order. Stop at the first answer that
+tells you what clears the alert.
+
+1. **What does the alert say?** Read it in full by its number, which
+   is the last part of its URL in the Security tab:
+   `gh api repos/liken-sh/liken/code-scanning/alerts/<number>`. The
+   output shows the rule, its severity, the category, the path, and
+   the message, which names the package and its version.
+2. **Which category is it in?** An alert in `grype/liken-release`
+   with no match in `grype/liken` is a finding that `main` already
+   fixed. The next release that includes the fix clears it.
+3. **Did the scanner match the right product and version?** Compare
+   the alert's package and version with the entry's `cpe` in the
+   pin's `pin.toml`. When the CPE names the wrong product or version,
+   correct it in the `pin.toml` and in the `set_pin` call of the pin's
+   `latest.sh`, because each bump writes the CPE again.
+4. **Is the finding false for every release?** An example is an NVD
+   record whose version range has no upper limit, or a flaw on a
+   platform that `liken` does not build for. Add an entry to
+   `liken/releases/sbom/grype.yaml`, with a comment and a `reason`.
+   The comments in that file show the form. Code scanning does not
+   show a finding that the file drops, so the reason must be one that
+   a reviewer can check.
+5. **Does a newer release of the upstream include the fix?** Run the
+   pin's `latest.sh` with no argument. When the pin is behind, bump it
+   with the `bump-components` skill.
+6. **Is the pin current, with no fix upstream?** Do nothing. The
+   alert stays open until upstream releases a fix, and no one
+   dismisses it. A module that k3s links is an example: `liken`
+   ships the k3s release as k3s built it.
+
+What else the project could do with a finding that no bump clears,
+such as a check that fails a build, is not decided.
+`plans/open-problems/what-a-vulnerability-finding-does-to-a-build.md`
+records the decisions so far and the ideas that are not built.

@@ -168,6 +168,15 @@ same count again, and compare the failures before and after.
   `equipment-operator/denon/pipenetwork_test.go` returns
   `ECONNREFUSED` for an address where no fake listens, the way a
   closed port does.
+- **A server that the code under test runs**, such as a metrics
+  endpoint. Give it a `net.Listener` whose `Accept` returns the server
+  end of a `net.Pipe`, and give the test's client a dial that returns
+  the other end. A listener on a real socket stops the bubble's clock.
+  `kubernetes/apiservertest` has such a listener, but does not export
+  it. So each component that needs one has a small `pipeListener` in
+  a test file, such as `media-operator/pipelistener_test.go`. Copy it
+  into the component's tests. To find the others, run
+  `git grep -n 'Accept() (net.Conn' -- '*_test.go'`.
 - **Model the peer from a transcript.** Record a real device once,
   and keep the transcript in `testdata/`.
   `equipment-operator/denon/testdata/avr-x1700h.txt` contains the

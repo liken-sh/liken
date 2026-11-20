@@ -25,8 +25,8 @@ does the build of each image that ships a pinned file.
 ## The parts
 
 - **`images.toml`** pins each outside image. The `[build]` table
-  holds the images that a build starts from, copies from, or runs as a
-  tool, each with a tag and a digest. The `[run]` table holds the
+  lists the images that a build starts from, copies from, or runs as a
+  tool, each with a tag and a digest. The `[run]` table lists the
   images that a manifest, a guide, a skill, or a test names by tag.
   The comments in the file give the reasons.
 - **`pin.sh`** is the shell library that every `fetch.sh` and

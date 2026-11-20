@@ -55,7 +55,8 @@ changed that detail were in other directories.
    `<number>-<subject-in-words>.md`.
 3. Start with the title `# <number>, <Title>`, and then a header
    paragraph with the date and the status: "Proposed on 2026-11-10.
-   Nothing is built." Older plans have other forms, so do not copy
+   Nothing is built." Each date in a header is the date of the commit
+   that makes the change. Older plans have other forms, so do not copy
    one of them. The OS's plans say "Milestone" and the number first:
    "Milestone 95. Proposed on 2026-11-10. Nothing is built."
 4. Describe the problem, the design, the alternatives that were set
@@ -69,7 +70,8 @@ changed that detail were in other directories.
 
 When the maintainer asks for a stub, write only the header and the
 problem, and say so in the header: "Proposed on 2026-11-10,
-as a stub." A later session writes the design.
+as a stub." A stub has no design. It can name the open questions in a
+sentence or two. A later session writes the design.
 
 A component's code exists only where a plan calls for it, so write
 the plan before the code. A small fix that a test reproduces and that
@@ -129,11 +131,16 @@ as in the steps above.
 ## Open problems
 
 An open problem has no number, because its scope is not settled. Its
-file name describes the problem in words.
+file name describes the problem in words, as a sentence about what
+goes wrong: `a-moved-monitor-is-published-on-two-connectors.md`.
 
 - Write one only for a problem that a person or CI can hit. For a
   bug, write the failing test first. When the fix needs no design
   decision, fix the bug and write no document.
+- When the maintainer asks you to record a suspected bug, write the
+  test first. When the test fails, write the document. When no test
+  fails and the code shows no fault, write no document. Tell the
+  maintainer which tests you wrote and what you found in the code.
 - When the fix needs a decision from the maintainer, the document
   records the evidence: the test's setup, its assertion, and the line
   where it fails. It also lists the possible remedies and the question
@@ -141,9 +148,29 @@ file name describes the problem in words.
 - Delete the document with `git rm` in the commit that fixes the
   problem, and describe the fix in the commit message. Do not move it
   to `completed/`.
+- A document can list several faults of one kind, such as
+  `audio-operator/plans/open-problems/tests-that-wait-on-the-wall-clock-or-open-real-sockets.md`.
+  The commit that fixes one fault removes its item from the list. The
+  commit that fixes the last fault deletes the document.
 - When no test or real use shows the problem, delete the document.
   Read the code for the fault first, because one failed attempt to
   reproduce a race does not show that the race is absent.
+
+Write an open problem in this form:
+
+- The title, `# <The problem as a sentence>`.
+- A first paragraph with the status and the dates: "Open bug,
+  recorded on 2026-11-18. A unit test reproduced it on 2026-11-19."
+  Write "Open problem" for a fault that is not a bug in the code,
+  such as a test that waits on the wall clock.
+- A paragraph or two on what goes wrong, with the function and the
+  file of each step.
+- `## Evidence`: the lines of code that show the fault, as a list.
+- `## The reproduction`: the test's setup and its assertion, the
+  failure output in a code block, and the sentence "The test is not
+  in the tree, because a failing test cannot land on `main`."
+- `## What a fix has to decide`: the question for the maintainer
+  first, then the possible remedies.
 
 ## Change a plan that exists
 

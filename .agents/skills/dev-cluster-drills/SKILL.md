@@ -30,9 +30,27 @@ and ask the maintainer whether the lab is in use.
   stop guests", and "Install and reinstall machines".
 * **An upgrade drill onto a lab release**: "The upgrade drill".
 * **A guest that you must watch boot**: "Console output".
-* **A drill that fails in a way you do not expect**: "Common
-  failures".
+* **A drill that fails in a way you do not expect**:
+  [references/common-failures.md](references/common-failures.md).
 * **The end of every drill**: "Clean up".
+
+To choose the drills for a change before you push, find what the
+change touches:
+
+* **You changed the install or the first boot from disk**, such as
+  the boot chain that the install writes: run `make smoke-uefi` and
+  `make smoke-bios`. Each one proves a first boot under one firmware.
+* **You changed how a machine stages a release, boots it once on
+  trial, or promotes it**, such as how init picks the boot slot: run
+  "The upgrade drill".
+* **You changed the fallback to the proven slot**: run the
+  upgrade drill onto a release built with `FAULT`, as the section on
+  deliberate-failure releases in
+  [references/cross-version-drills.md](references/cross-version-drills.md)
+  describes. Each value of `FAULT` proves one fallback path.
+
+A change to how init picks the boot slot touches all three, so run
+each of them.
 * **An older published release as the baseline, a release that fails
   on purpose, the metal hardware shape, or a guest's disks while it is
   off**: [references/cross-version-drills.md](references/cross-version-drills.md).
@@ -205,7 +223,12 @@ describes, and then continue at step 1.
 1. Make the kubeconfig, as "Reach the cluster" describes.
 2. Install each machine and start it, as "Install and reinstall
    machines" and "Start and stop guests" describe. Start `node-1`
-   first, because it founds the cluster.
+   first, because it founds the cluster. A drill on `node-1` alone is
+   valid. Each machine adds only its own `Machine` to the cluster, so
+   the rollout counts only the machines that you start. The smoke
+   drills boot `node-1` alone. Start `node-2` and `node-3` too when
+   the change is about the datastore that several leaders share,
+   because `leaders` in `dev-cluster/cluster.yaml` names them.
 3. Wait with a deadline until every machine is Ready, with the loop
    in "Start and stop guests".
 4. Find the baseline's catalog entry. The tree build's release
@@ -366,6 +389,15 @@ grep 'liken: installed to slot' dev-cluster/guests/node-2/install-console.log
 An install that failed prints `liken: the install did not finish`
 and powers off too.
 
+**Install and run under BIOS.** The install writes the boot chain of
+the firmware that it boots under. So set the same `FIRMWARE` on
+`make install` and on every `make run` of that machine:
+
+```bash
+make install NODE=node-2 FIRMWARE=bios CONSOLE=file:guests/node-2/install-console.log
+make run NODE=node-2 FIRMWARE=bios
+```
+
 **A reinstall does not clear cluster state.** The state disk survives
 a reinstall. A follower whose state disk has etcd members from an
 older instance of the cluster never rejoins a re-founded leader. It
@@ -415,61 +447,6 @@ dev-cluster/kubectl -n liken-system logs ds/liken-machine-operator | grep 'as pr
 `logs ds/...` reads the log of one pod of the `DaemonSet`. To read
 the log for one node, use the name of that node's pod, which
 `get pods -o wide` lists, in place of the `ds/` name.
-
-## Common failures
-
-Each item starts with what you see, then gives the cause and what to
-do.
-
-* **The drill tests an older spec than your working tree, and nothing
-  warns you.** `make` inside `dev-cluster/` does not rebuild the OS
-  image. `make -C dev-cluster install` and `make -C dev-cluster run`
-  boot whatever `dev-cluster/image/install.cpio` already contains.
-  Build from `liken/`, or run a smoke drill's root target, which
-  builds the artifacts first.
-* **`node-1` is back to blank disks.** A smoke drill factory-reset it.
-  The smoke drills are the `smoke-*` targets of `liken/Makefile`,
-  each run from `liken/`. Each one runs `dev-cluster/smoke.sh`, which
-  starts with `rm -rf guests/node-1` in `dev-cluster/`. Each drill
-  uses `node-1`, so a UEFI smoke drill wipes a disk installed under
-  BIOS, and the reverse. Never run a smoke drill while you work on
-  `node-1` by hand. CI runs `smoke-uefi` and `smoke-bios`.
-  `smoke-emmc` runs only on a workstation, because QEMU's `emmc`
-  device needs QEMU 9.1.
-* **A node never becomes Ready after a boot.** A guest from an earlier
-  drill is still running. It has the write locks on the qcow2 files,
-  and it is still on the multicast cluster segment. The next boot of
-  that node fails to open its own disks, and the report says only that
-  the node never became Ready, so you look at the machine and not at
-  the leftover process. List the guests with
-  `pgrep -x qemu-system-x86 -a`, and kill the leftover one by PID.
-* **A qcow2 file or a variable store is damaged after a change.**
-  `make -C dev-cluster grow-pods NODE=node-2` resizes a qcow2 file,
-  and it corrupts the file if the guest is running. The same applies
-  to `grow-state`, which enlarges a guest's state disk to
-  `STATE_SIZE`. It also applies to `reset-nvram`,
-  because QEMU writes the variable store back when the guest exits.
-  Resize a disk or reset the variable store only while the machine is
-  off.
-* **A smoke drill stops with a timeout.** Each kind of boot has its
-  own deadline, in seconds. `SMOKE_DEADLINE` limits only the time
-  that the disk boot waits for Ready. The attended boots use
-  `HOLD_DEADLINE`. `dev-cluster/smoke.sh` sets the default of each,
-  and the failure message gives the number of seconds that ran out. A target
-  of `dev-cluster/Makefile` can set larger values, as `smoke-emmc`
-  does because QEMU's `emmc` device writes slowly. Check which
-  deadline applies to the boot that timed out.
-* **A conductor or operator fix shows no effect in the rollout that
-  delivers it.** System pods run each node's own `:installed` image.
-  So during that rollout, the binaries of the old release make every
-  decision that the fix changes. Put the fix in lab release N, roll
-  the fleet onto N, and then drill N to N+1 to see the fixed code act.
-* **Every machine reboots after an edit to the `Cluster`.** Machines
-  apply the cluster document by rebooting. A field that the cluster
-  operator reads live, such as `spec.disruption`, still marks every
-  machine as out of date when it changes. So each edit costs one
-  reboot round of the fleet, and a drill that raises the budget and
-  then restores it costs two. Allow for one round for each edit.
 
 ## Clean up
 

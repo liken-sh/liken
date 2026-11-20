@@ -57,8 +57,8 @@ gh run view <run id> -R liken-sh/liken --job "$job" --log |
   grep -A45 "A release tag at this commit"
 ```
 
-This heading is in the run of a push to `main`. The run of a tag does
-not print it. To see what a tag's own run published, read the table
+Every run prints this heading except the run of a tag. To see what a
+tag's own run published, read the table
 under "The plan" in that run's plan job, which has a row for each
 component with what it publishes, its version, and why.
 
@@ -93,22 +93,74 @@ highest one it prints, or `001` when it prints nothing.
    (`timeout 3600 gh run watch <id> -R liken-sh/liken --exit-status`).
    The run takes much longer when no cached artifact of the OS's
    programs exists, because buildroot must then build them.
-4. Push nothing to `main` until the tag's run is green. A new push
-   does not cancel the tag's run, but its development builds race the
-   release's pushes.
-5. If the run fails, do not retag. Read the failure with
-   `gh run view <id> -R liken-sh/liken --log-failed`.
-   - If the cause is outside the repository, such as a 5xx from a
-     registry or a network fault, report it. Then run the failed jobs
-     again on the same tag: `gh run rerun <id> -R liken-sh/liken
-     --failed`. A published version never changes, so the rerun
-     pushes only what the failed run did not push.
-   - If the cause is in the repository, stop and report. The fix is a
-     commit on `main` and a new tag with the next serial.
-   - If you cannot tell which it is, such as a smoke drill that
-     failed once, report what the log shows and ask.
+4. While the tag's run is in progress, push nothing to `main`. A new
+   push does not cancel the tag's run, but its development builds race
+   the release's pushes. After the run ends, a fix can go to `main`.
 
-## 5. Verify
+## 5. Repair a failed run
+
+Do not retag. Read the failure with
+`gh run view <id> -R liken-sh/liken --log-failed`, and sort each
+failed job into one of these cases:
+
+- **The cause is outside the repository**, such as a 5xx from a
+  registry or the channel, or a network fault. Report it, and run the
+  job again on the same tag.
+- **The cause is in the repository.** Report it. Do not run the job
+  again, because it fails the same way. The fix is a commit on `main`
+  after the run ends, and the next tag, with the next serial, releases
+  the component. A failed label check of an image is in this case.
+  "What an image says about itself" in the `releases` skill explains
+  the check and the labels that it compares.
+- **You cannot tell**, such as a smoke drill that failed once. Report
+  what the log shows, and ask.
+
+To run every failed job of the run again, use
+`gh run rerun <id> -R liken-sh/liken --failed`. When one job failed
+outside the repository and another failed in it, run only the first
+one again. Find its job id with
+`gh run view <id> -R liken-sh/liken --json jobs --jq '.jobs[] | select(.conclusion == "failure") | [.databaseId, .name] | @tsv'`,
+and then run `gh run rerun --job <job id> -R liken-sh/liken`.
+
+A rerun of an image's publish job pushes nothing for an image whose
+tag is already on ghcr.io, because a published version never changes.
+It checks that image's labels and signs it. It builds and pushes each
+image that the failed run did not push.
+
+A rerun of the OS's publish job works only when the failure came
+before the upload of `release.yaml`. `liken/releases/publish.sh`
+uploads in this order:
+
+1. The corresponding sources, under `sources/`.
+2. The artifacts, the signature bundles, and `coverage.html`, under
+   `<version>/`.
+3. `<version>/release.yaml`.
+4. `channel.yaml`, which names the newest release, and
+   `favicon.ico`.
+5. A fetch of `release.yaml` from the channel, which it compares with
+   the built file, and a check that `channel.yaml` names this release.
+6. `<version>/notes.md`.
+7. The index pages.
+
+The script stops at its start with "release `<version>` is already
+published; releases are immutable" when `release.yaml` is on the
+channel. To find which side of that upload the failure was on, look
+in the log for the upload of `release.yaml` to
+`s3://releases.liken.sh/<version>/release.yaml`, or run
+`curl -fsI https://releases.liken.sh/<version>/release.yaml`.
+
+- **`release.yaml` is not on the channel.** Run the job again. The
+  sources step skips each file that the channel already has, and the
+  artifacts are uploaded again.
+- **`release.yaml` is on the channel.** The release exists, and a
+  `Cluster` can adopt it by its digest, but a rerun stops at the
+  guard. The publish of the next release writes `channel.yaml` and
+  every index page again, so a failure in step 4 or 7 is repaired by
+  the next tag. Until then, `channel.yaml` does not name this release
+  when step 4 failed. No step writes `notes.md` of this version again.
+  Report which step failed, and ask the maintainer.
+
+## 6. Verify
 
 1. `gh release view <version> -R liken-sh/liken` shows the GitHub
    release for the tag. It lists every component and its version.
@@ -125,7 +177,7 @@ highest one it prints, or `001` when it prints nothing.
    and `liken verify image ghcr.io/liken-sh/<image>:<version>` for an
    image. The `sbom-and-scans` skill explains what each one checks.
 
-## 6. Report
+## 7. Report
 
 Give the maintainer the version, the components it released, and the
 catalog entry if the OS released.

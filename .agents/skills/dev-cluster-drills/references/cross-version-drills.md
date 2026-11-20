@@ -112,8 +112,14 @@ broken boot.
 
 Add a faulted release to the catalog and serve it exactly like a good
 one. The digests match, so the download passes verification, and the
-failure happens at boot, where the drill expects it. Watch for
-`RejectedLastBoot` in `status.boot.systemRejection`.
+failure happens at boot, where the drill expects it. When the machine
+falls back, two things change on its `Machine`:
+
+* The condition `VersionConverged` becomes `False` with the reason
+  `RejectedLastBoot`.
+* The field `status.boot.systemRejection` records the fallback, with
+  the `hash` of the rejected release record, a `reason`, and
+  `rejectedAt`.
 
 ## Reading a guest's disks offline
 

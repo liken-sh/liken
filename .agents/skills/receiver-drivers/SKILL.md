@@ -182,14 +182,29 @@ field needs, the field is listed as Blocked.
 
 ## Add a receiver brand
 
+Follow the newest driver as the model, because it has each part that
+the controller expects of a driver. Each driver has a plan in
+`equipment-operator/plans/completed/` whose title names the driver,
+such as `06-wiim-driver.md`. The plan with the highest number is the
+newest driver:
+
+```sh
+ls equipment-operator/plans/completed/ | grep -i driver
+```
+
+Read that driver's package, its plan, and each file of the controller
+that names it: `grep -n -i <protocol> equipment-operator/*.go`.
+
 1. Write a package `<protocol>/` in `equipment-operator` that
    implements `equipment.Driver`. It imports `equipment/`, and never
    the controller. It contains the brand's settings type, its table
-   of fields, such as `settingsTable` in `denon/settings.go`, its codecs, and its mapping of replies
-   to the answer kinds.
-2. Write an `AGENTS.md` in the package, as `denon/AGENTS.md` does.
-   Put in it the protocol references, the
-   command families, and what a measured unit replied.
+   of fields, such as `settingsTable` in `denon/settings.go`, its
+   codecs, its status type, and its mapping of replies to the answer
+   kinds.
+2. Write an `AGENTS.md` in the package, as `wiim/AGENTS.md` does.
+   Put in it the protocol references, the command families, the
+   command behind each status field, and what a measured unit
+   replied.
 3. Where the model has a capability document, read it before any
    probe. For a protocol that does not report the model, `upnp/`
    reads the manufacturer and the model from a UPnP device
@@ -197,12 +212,34 @@ field needs, the field is listed as Blocked.
 4. Write a fake peer that replies from a real device's transcript in
    `testdata/`, such as `denon/testdata/avr-x1700h.txt`. Use
    `net.Pipe`, or an `http.Handler` on an in-memory transport.
-5. Add the block to the CRD and to its `exists_one` rule. Start the
-   driver in `startDriver` in `reconcile.go`, and add the block to
-   `declaredBlocks` in `settled.go`. Add the package to the
-   `Dockerfile`, because `TestTheDockerfileCopiesEveryGoPackage`
+5. Add the protocol block to `api.go`. The block is a type
+   `<Brand>Protocol`, such as `WiimProtocol`, with the device's
+   identity, its address, and its `Settings`, and a field of that type
+   in `ReceiverSpec`. Add the status block `status.<protocol>`, such
+   as `status.wiim`, as a field of `ReceiverStatus` whose type is the
+   package's status type. Then set it in `buildReceiverStatus` and
+   `protocolName` in `status.go`.
+6. Add the block to the CRD and to its `exists_one` rule. Start the
+   driver in `startDriver` in `reconcile.go`, and apply its settings
+   block with a method of `receiverUnit`, such as `setWiimSettings`.
+   Add the block to `declaredBlocks` in `settled.go`. Add the package
+   to the `Dockerfile`, because `TestTheDockerfileCopiesEveryGoPackage`
    fails when the image build does not copy it.
-6. For each common field that the protocol can set or read, add a
-   row at the tier that its documents support.
-7. Prove the block on a real receiver. Until then, a setter that no
+7. Decide whether the operator discovers the device. Only the WiiM
+   driver has discovery. `discovery.go` calls `wiim.Discover`, which
+   searches with mDNS and SSDP, and keeps the current address of each
+   device by its UUID. It creates a `Receiver` with the label
+   `equipment.liken.sh/discovered` for each device that no `Receiver`
+   names. So a driver needs two things for discovery: an identity in
+   its block that the device reports, such as `spec.wiim.uuid`, and a
+   search that returns that identity with an address. `discovery.go`
+   names only `wiim` types, so a second brand that discovers changes
+   it. A driver with no discovery, such as `denon/`, takes a declared
+   `address`, and the operator resolves a host name.
+8. Read `deploy/receivers-crd.yaml` for `spec.settings`, as the first
+   step of "Add a setting" does. When the CRD has `spec.settings` with
+   a family, add a row at the tier that the protocol's documents
+   support for each field of that family that the protocol can set
+   or read. When it does not, put each setting in the brand's block.
+9. Prove the block on a real receiver. Until then, a setter that no
    document describes cannot be declared.

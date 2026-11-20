@@ -1,6 +1,6 @@
 ---
 name: open-work
-description: Surveys every open plan and open problem in the repository, checks each one against the code and git history for whether it is still open and whether its facts are still true, reports the result as one table per component, and picks a line of work. Covers the completion check, the fact check, the verification of each finding before it is reported, the housekeeping commit that closes built plans and corrects stale facts, and the failures that past surveys made. Use when the maintainer asks what is open, what's left, what's next, for the backlog, to audit or interrogate the plans and problems, or to choose work for the day. To write or close one plan, use the plans skill.
+description: Surveys every open plan and open problem in the repository, checks each one against the code and git history for whether it is still open and whether its facts are still true, reports what can close, what is partly built, the facts that are wrong, and the overlaps, and picks a line of work. Covers the completion check, the fact check, the verification of each finding before it is reported, the housekeeping commit that closes built plans and corrects stale facts, and the failures that past surveys made. Use when the maintainer asks what is open, what's left, what's next, for the backlog, to audit or interrogate the plans and problems, or to choose work for the day. To write or close one plan, use the plans skill.
 ---
 
 Survey the open work, check each document against the code, and
@@ -12,9 +12,17 @@ If that context names components, asks only for a short reminder, or
 asks for a pick under a constraint (such as "not the OS" or "nothing
 that needs my input"), follow it in place of the defaults below.
 
-A request that only asks what is open ends with the report of
-section 5. Sections 6 and 7 apply only when the maintainer asks for a
-pick, or agrees to the housekeeping commit.
+Each kind of request ends at a different section:
+
+- **A reminder.** The request asks to be reminded, or for a quick
+  list, such as "remind me what's open". Stop after section 1.
+- **A question about what is open.** The request asks what is open or
+  what is left, in the whole repository or in one component, such as
+  "what's left open in `display-operator`?". Check each document, and
+  end with the report of section 5.
+- **A pick.** The request asks what to work on next. Go on to section
+  6. Section 7 applies only when the maintainer agrees to the
+  housekeeping commit.
 
 **Core principle: a plan's text is a claim, not a fact. Every verdict
 and every stale fact in the report cites a commit hash or a
@@ -61,8 +69,8 @@ uses the directory of each plan to show what is open. Do not report
 such an item as open. When the maintainer asks for ideas, you can
 name it as a candidate that needs a plan first.
 
-For a short reminder ("what's open?"), stop here and give one line per
-document from its header. Say that the list comes from the headers and
+For a reminder, stop here and give one line per document from its
+header. Say that the list comes from the headers and
 is not checked.
 
 ## 2. Check each document
@@ -168,9 +176,12 @@ which can close, and which have wrong facts. Then:
    the other leaves out.
 5. **The pick**, when the maintainer asked for one.
 
-When a component has nothing open, say that nothing is open. Then
-list what you checked: the directories, the searches of the root
-plans and the OS's plans, and any design document that you read.
+For a component, report open plans and open problems separately. A
+component can have no open plan and several open problems. When it
+has no open plan, say so, and still list each open problem with its
+verdict. When it has neither, say that nothing is open. In both
+cases, list what you checked: the directories, the searches of the
+root plans and the OS's plans, and any design document that you read.
 Then give each fact that you found to be wrong, with the document,
 the claim, and the truth with its `file:line`.
 

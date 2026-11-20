@@ -30,7 +30,10 @@ base images, are in the `releases` skill. No Dockerfile writes a
   and "The recipe of a pinned component". The rules of the download
   and its `pin.toml` are in the `pins` skill.
 * **A Go program:** "Go programs".
-* **A Rust program:** "Rust binaries".
+* **A Rust program:** "Rust binaries". For a program added to an
+  image that exists, or a crate in a workspace, also read "Add a Rust
+  program to an image". For a crate of another component, read "Link
+  a crate of another component".
 * **Files copied out of Debian or Ubuntu packages:** "Closures".
 * **A static program from another project:** "Static programs".
 * **Add an image to a component:** "A new image in a component".
@@ -203,6 +206,59 @@ Rust image: each image uses `toolchains/` as the build context
 `fetch.sh`. `cd ci && go run . pins -root ..` fails on a Dockerfile
 that runs `cargo build`.
 
+### Add a Rust program to an image
+
+`media-operator/Dockerfile.screen` and `media-operator/package.toml`
+show each of these steps.
+
+- **The build context `toolchains`.** A build context is declared in
+  the `contexts` of the image's `[[outputs.images]]` entry in
+  `package.toml`. When the image gets its first Rust program, add
+  `toolchains = "toolchains"` there. `media-operator-player`, for
+  example, has no such context.
+- **The other members of the workspace.** A Cargo workspace is a set
+  of crates, its members, with one `Cargo.toml` at the top and one
+  `Cargo.lock`. cargo loads the manifest of every member, even when
+  the build names only one with `-p`. So a Dockerfile that builds a
+  member copies the `Cargo.toml` of each other member, and writes a
+  stub `src/main.rs` or `src/lib.rs` for it in the dependency stage.
+  When you add a member, add these lines to each Dockerfile that
+  builds a member of the same workspace, not only to the Dockerfile
+  of the new member.
+- **The ignore file of the Dockerfile.** A Dockerfile can have its own
+  ignore file, `<Dockerfile>.dockerignore`, beside it. In this
+  repository, that file is usually an allowlist: it excludes `*` and
+  then names each path that the build may read, as
+  `media-operator/Dockerfile.player.dockerignore` does. Add each new
+  path to it, such as the new member's `Cargo.toml` and `src/`.
+  Otherwise the build does not see the files.
+
+### Link a crate of another component
+
+A crate can depend on a crate of another component by a relative
+path, as `media-operator/idle` and `library-operator/media-browser`
+depend on `media-screen`. The build context of the Dockerfile does not
+include the other component, so the Dockerfile copies the crate from a
+build context. `media-operator/Dockerfile.screen` and
+`library-operator/media-browser/Dockerfile` show each step:
+
+1. In `package.toml`, add the context to the image's `contexts`, as
+   `media-screen = "media-screen"`.
+2. In `package.toml`, add the component to `components` under
+   `[depends]`. Then a change to the crate counts as a change to the
+   consumer, and CI builds the consumer's images again.
+3. In the dependency stage of the Dockerfile, copy the crate's
+   `Cargo.toml` to the same path relative to `/src` that the crate has
+   relative to the consumer, and write a stub `src/lib.rs` for it:
+   `COPY --from=media-screen Cargo.toml /media-screen/`.
+4. In the build stage, copy the crate's source over the stub, and
+   `touch` it so that cargo compiles it again:
+   `COPY --from=media-screen src/ /media-screen/src/`.
+5. Build the consumer once on your workstation, and commit its
+   `Cargo.lock`. The consumer's `Cargo.lock` records the crate and
+   its dependencies, and the image builds with `--locked`, which fails
+   when the lock file needs a change.
+
 ## Closures
 
 A closure is an image built `FROM scratch` that contains only the
@@ -353,6 +409,14 @@ The plugin depends on these things outside the Dockerfile:
   `GOOS` and `GOARCH`, so the build needs no emulation. The last stage
   is `distroless` with the `trust` component copied in, because the
   plugin calls HTTPS APIs.
+- **The test.** `cli/` is a Go package of the component's module. The
+  component's `make test-go` fails on a package that has no test
+  file, because such a package adds nothing to the coverage profile.
+  So the plugin needs at least one `_test.go` file in `cli/`.
+- **The module.** Run `go mod tidy` in the component's directory after
+  you write the plugin, so that `go.mod` and `go.sum` list what the
+  plugin imports. `make test-go` runs `go mod tidy -diff`, and fails
+  when they do not.
 
 "The operator plugins" in `liken/docs/content/docs/reference/cli.md`
 describes how a person installs and runs a plugin. Its list "These

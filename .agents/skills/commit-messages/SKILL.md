@@ -32,6 +32,13 @@ retry completes". "Fix bug", "Update publish.go", and "Improve error
 handling" describe no behavior, so a reader of `git log --oneline`
 learns nothing from them.
 
+A commit that moves a pin to a newer release starts with "Move", the
+pin, and the version: "Move <pin> to <version>". For a snapshot,
+give its date: "Move the bases to the Debian snapshot of <date>".
+When the bump fixes a known fault, add the reason, as in "Move the
+kernel to <version> to fix <CVE id>". Name several pins in one line
+when one commit moves them together.
+
 ## The body
 
 After one blank line, the body gives the reason in one or two short

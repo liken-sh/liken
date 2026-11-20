@@ -45,9 +45,11 @@ in the hold column of its report row, as for every hold. A major
 version that waits for a pass of its own stays behind, with every
 fault that upstream has already fixed.
 
-Step 1 runs at the top of the repository. The commands of steps 2
-to 4 run from `liken/`, and their paths are relative to `liken/`.
-Steps 5 and later work at the top of the repository.
+Step 1 runs at the top of the repository. In steps 2 to 4, a command
+runs from `liken/`, and its paths are relative to `liken/`, unless
+the step says that it runs at the top of the repository, as
+`make workflows` and `make versions` do. Steps 5 and later work at
+the top of the repository.
 
 ## 1. Pull the report
 
@@ -78,26 +80,20 @@ The state of a row is the first of these that applies:
 4. `behind` when pinned and latest differ.
 5. `current` otherwise.
 
+The report can show a pin as `current` when the maintainer says that
+it is behind. Some pins follow a channel that lags the upstream
+project. For example, `liken/kernel/latest.sh` follows Canonical's
+mainline builds, which come some days after kernel.org tags a
+release. When this happens, read the header comment of the pin's
+`latest.sh` to learn what the pin follows. Then tell the maintainer
+what the report shows and why, before you change anything.
+
 The steps below cover each pin whose bump needs more than its
 `--bump` and the build that its `next:` line names. Any other row,
 such as a Terraform provider of `liken.sh/latest.sh`, needs only
-those two. These scripts need a step that no section below gives:
-
-- **`liken/dev-cluster/firmware/capsule/latest.sh`** reports edk2
-  and the Ubuntu snapshot of the builder of the lab's capsule
-  firmware. Each move changes the compiler that builds the firmware,
-  so the script has no `--bump`. Edit `build.sh` or the `Dockerfile`
-  by hand, and boot the lab with `FIRMWARE=capsule`. Do the same
-  after a move of the `ubuntu` entry of `toolchains/images.toml`.
-- **`liken/releases/sbom/schema/latest.sh`** writes the CycloneDX
-  schema files that the SBOM of the OS release is checked against. A
-  new minor version changes the `specVersion` that the SBOM declares,
-  so run `make -C liken test-go` after the bump.
-- **`liken/verify/latest.sh`** writes Sigstore's trusted root, which
-  `liken verify` and `liken sbom` check every signature against. The
-  bump reads the root through Sigstore's TUF repository with the
-  pinned cosign, so it needs docker. Read its diff for each key that
-  was added or removed.
+those two. Some scripts need a step that no section below gives.
+[`references/pins-with-a-manual-step.md`](references/pins-with-a-manual-step.md)
+lists them, such as `liken/verify/latest.sh`.
 
 ## 2. Bump
 
@@ -112,33 +108,13 @@ after another, in one background task. Follow these rules:
    `userland/latest.sh --bump kmod` or
    `linux-firmware/latest.sh --bump wireless-regdb`.
 3. The static programs in `userland/` follow buildroot's `master`
-   branch.
-
-   - Run `userland/latest.sh --bump`. It moves buildroot to the tip
-     of `master`, and writes the same commit and digest into
-     `bluetooth-operator/bluetoothd/Dockerfile`. It also deletes each
-     line of `userland/versions.mk` whose version the new recipe
-     already meets.
-   - A program row that still shows `behind` then needs a bump by
-     name, such as `userland/latest.sh --bump tzdata`. For a program
-     whose recipe is one of buildroot's own, the bump sets the newer
-     version in `versions.mk`, and writes its `.hash` file under
-     `userland/patches/`.
-   - When a bump sets a newer version in `versions.mk`, read
-     [`references/buildroot-patches.md`](references/buildroot-patches.md).
-     The patches of buildroot's recipe can fail to apply to the new
-     version, and that file says how to mark each one as held.
-   - For a program whose recipe is in the tree, under
-     `userland/iscsi/` or `userland/bluetooth/`, the bump writes the
-     version into the recipe, and the line of the tarball into the
-     recipe's `.hash` file.
-   - When the `buildroot` row of `toolchains/latest.sh` shows `behind`
-     after the move, run `../toolchains/latest.sh --bump buildroot`.
-   - A buildroot bump can move every library and the compiler. So the
-     bump is not done until `make -C userland` builds. The first build
-     after a buildroot bump compiles the cross-compiler again. The
-     compiler cache in `userland/cache/ccache/` makes the builds after
-     it faster.
+   branch. When a row of `userland/latest.sh` shows `behind`, read
+   [`references/userland.md`](references/userland.md) for the bump
+   and the build that proves it. When a bump sets a newer version in
+   `userland/versions.mk`, also read
+   [`references/buildroot-patches.md`](references/buildroot-patches.md).
+   The patches of buildroot's recipe can fail to apply to the new
+   version, and that file says how to mark each one as held.
 4. Bump `k3s` before `xtables`. The xtables pin follows the k3s-root
    release that the pinned k3s names as `VERSION_ROOT`. So
    `xtables/latest.sh` reads `k3s/VERSION`, and it reports xtables as
@@ -170,9 +146,12 @@ These bumps need more care:
 - **A k3s minor bump** is a Kubernetes minor bump. It can remove an
   API version that a workload still uses, so read the upstream
   release notes before you take one.
-- **A kernel bump.** Before you take one, check memory and
-  `plans/open-problems/` for items tied to the current kernel, such
-  as a workaround that should be tested again on the next kernel.
+- **A kernel bump.** Before you take one, search the repository for
+  items tied to the current kernel, such as a workaround that should
+  be tested again on the next kernel. Search the open problems with
+  `git grep -l -i kernel -- ':(glob)**/plans/open-problems/**'`, and
+  the source for a comment that names a kernel version with
+  `git grep -n -i -E 'kernel v?[0-9]+\.[0-9]+' -- ':!*.md'`.
 - **A Flux bump.** `flux/latest.sh --bump` also runs
   `ci/latest.sh --bump fluxcd/flux2`, which writes the commit of the
   flux action into `ci/actions.go`. The generated workflows name that
@@ -202,12 +181,15 @@ the first boot on real hardware are its first real test.
 
 ## 4. Verify
 
-1. Run `make versions` again. Every row must show `current` or
-   `held`.
+1. Run `make versions` again, at the top of the repository. Every row
+   must show `current` or `held`.
 2. Run `make workflows` at the top of the repository after any bump.
    It reads only the tree, so it changes nothing when no generated
    file depends on the pin.
-3. Run `git diff --stat`. Each of these files appears only when the
+3. Run `cd ci && go run . pins -root ..` at the top of the repository
+   after any bump. It fails when two copies of a pin disagree, or
+   when an `ADD --checksum` has a digest that no manifest lists.
+4. Run `git diff --stat`. Each of these files appears only when the
    bump changes it:
    - `VERSION` files, `pin.toml` files, digests in `fetch.sh`, and
      `toolchains/images.toml`
@@ -220,18 +202,20 @@ the first boot on real hardware are its first real test.
      its tag, as step 5c says
 
    Any other file needs a reason in the report.
-4. Run `make all` for a pass, or the build that a single bump's
-   `next:` line names, such as `make kernel`. A changelog does not
-   show breakage in configure or in the toolchain, and a bump that
+5. Run `make all` in `liken/` for a pass, or the build that a single
+   bump's `next:` line names, such as `make kernel`. A changelog does
+   not show breakage in configure or in the toolchain, and a bump that
    does not build is not done. The programs that `userland` compiles
    from source against musl break most often. A new configure check
    or a dropped default there is invisible until the build runs.
-5. Run `make smoke-uefi` and `make smoke-bios` after `make all`, and
-   after a bump that changes how a machine boots, such as the kernel,
-   a boot loader, the firmware, or `userland`. A boot to Ready proves
-   that the parts still assemble into a working machine. The BIOS
-   boot proves a `grub` bump, because the core image of GRUB must
-   still fit in the `biosBoot` partition.
+6. Run `make smoke-uefi` and `make smoke-bios` in `liken/` after
+   `make all`, and after a bump that changes how a machine boots, such
+   as the kernel, a boot loader, the firmware, or `userland`. A boot to
+   Ready proves that the parts still assemble into a working machine.
+   The BIOS boot proves a `grub` bump, because the core image of GRUB
+   must still fit in the `biosBoot` partition. The `dev-cluster-drills`
+   skill says how to run the drills and how to stop the lab after
+   them.
 
 ## 5. The base images
 

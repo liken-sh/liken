@@ -16,6 +16,7 @@ both are in root plan 83.
 
 * **Every pin, before you add or change one:** "Every pin stays
   current" and "The rules of a download".
+* **Add a pin:** "Where a pin goes" first.
 * **Write a `latest.sh` or a `fetch.sh`:** "Write a `latest.sh` or a
   `fetch.sh`", and `references/pin-library.md`.
 * **Fetch a file into an image:** "The manifest", up to the paragraph
@@ -101,6 +102,24 @@ even of a comment, can require a new revision. "The bake file and the
 base images" in the `images` skill has the rule, and the check to run
 before a push.
 
+## Where a pin goes
+
+Before you write a pin, decide which form it has. The form
+depends on what downloads the file.
+
+- **A Dockerfile downloads the file with `ADD --checksum`.** Put the
+  `pin.toml` and the `latest.sh` in the directory of that Dockerfile.
+  The pin has no `fetch.sh` and no `VERSION`, because the Dockerfile
+  downloads the file. `weston/` is an example.
+- **The OS build downloads the file.** Make a directory under
+  `liken/` for the pin, with a `VERSION`, a `fetch.sh`, a `latest.sh`,
+  and a `pin.toml`. `liken/hwdata/` is an example. Other files of
+  `liken/` also name the pin, such as the `hwdata` target and the
+  `HWDATA_VERSION` variable in `liken/Makefile`. To find each place
+  that your pin must be added to, search for the name of a similar
+  pin outside its own directory:
+  `git grep -n hwdata -- liken ':!liken/hwdata'`.
+
 ## Write a `latest.sh` or a `fetch.sh`
 
 **The library.** Every `fetch.sh` and `latest.sh` sources
@@ -166,8 +185,11 @@ the bump on a copy in the session's scratch directory:
 4. Make the copy fail too, for example with one of the conditions
    under which the script says that it stops. Check that it stops
    with its message.
-5. Run `shellcheck -x` on the script, `prek run --files` on the new
-   files, and `cd ci && go run . pins -root ..`.
+5. Run `prek run --files <script> <other new files>` from the
+   component's directory. The component's shellcheck hook runs
+   `shellcheck -x` from a prebuilt binary, so this works on a
+   workstation that has no `shellcheck` on its `PATH`. Then run
+   `cd ci && go run . pins -root ..` at the top of the repository.
 
 ## The manifest
 

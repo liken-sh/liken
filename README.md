@@ -52,7 +52,7 @@ it is for and links to its manual on [liken.sh](https://liken.sh/).
 ## Astronomy
 
 - [`observatory-operator/`](observatory-operator/) runs a telescope's
-  equipment through INDI and PHD2 while a `Reservation` holds it.
+  equipment through INDI and PHD2 for the time of a `Reservation`.
 - [`astrophotography-operator/`](astrophotography-operator/) images
   the targets that you declare, through `observatory-operator`.
 - [`indi/`](indi/) builds the INDI images: `indiserver` with the core

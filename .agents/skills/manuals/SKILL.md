@@ -88,7 +88,7 @@ each kind of change:
 | A file added to or removed from `deploy/kustomization.yaml` | Every file list in the install guide: the install from raw URLs, the GitOps example, and the removal steps |
 | A container, a `Deployment`, or a `DaemonSet` added or removed | The install guide's description of what runs, and the pin of a development build, which lists every image |
 | A metric added, renamed, or removed | `reference/metrics.md`. A dashboard panel or an alert rule in the component's `deploy/monitoring/` can also need the metric: see "Metrics" in the `operators` skill |
-| A flag of the operator or of the `kubectl liken` plugin | The guide that runs the command |
+| A flag of the operator or of the `kubectl liken` plugin | The guide that runs the command. When the change adds or removes a plugin, or changes a verb or flag that the page shows, also update "The operator plugins" in `liken/docs/content/docs/reference/cli.md`, which lists the domains that ship a plugin and gives examples of their verbs |
 | A printer column, a condition, or the reason of an `Event` | Each sample of `kubectl get` or `kubectl describe` output that shows it, where a page has one |
 | A behavior that the operator adds on its own and that a person can see, such as a recovery or a retry | The guide that a reader opens when the behavior surprises them |
 | A field or a topic removed from the message bus or the API | Every page of another component that mentions it |
@@ -103,6 +103,12 @@ For the OS, in `liken/docs/`:
 | A flow that a person follows: install, adoption, adding machines, upgrades, rollback | The guide of that flow in `content/docs/guides/` |
 | The layout or the artifacts of the release channel | `content/docs/reference/release-channel.md` |
 | The schema of a CRD | The descriptions in the schema, from which the reference page is generated |
+
+A change can add a member to a set that the manual names on several
+pages, such as a receiver brand of `equipment-operator`. Search the
+component's `docs/content/` and `README.md` for the name of a member
+that exists, as in `grep -rn Denon docs/content README.md`. Then
+update each page that lists the set.
 
 A change that a person cannot see needs no change to the manual. The
 comments in the source describe it.

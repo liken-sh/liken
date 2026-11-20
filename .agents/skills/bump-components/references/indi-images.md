@@ -59,8 +59,9 @@ that the closure starts from, together with everything they load.
 
 Then follow the section "After a bump of the INDI images" of the
 `observatory-schema` skill. It runs
-`make -C observatory-operator drivers firmware-rules captures schema crosscheck`
-in order, with the frame header that you capture by hand.
+`make -C observatory-operator drivers firmware-rules captures`. Then
+you capture the frame header by hand. Then it runs
+`make -C observatory-operator schema crosscheck`.
 
 - Report each object that `firmware-rules` adds to or removes from
   `deploy/firmware/qhy.yaml`. A new object is a new QHY camera that
