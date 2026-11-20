@@ -1,16 +1,38 @@
 # transect
 
-`transect` is a live, read-only map of a Kubernetes cluster for the
-people who run it.  It draws the cluster as nested layers, from the
+Agents build and tune things in your cluster all day, and it changes
+faster than you can keep up with.  `transect` is living documentation
+for that cluster.  It reads what is registered and running, so what it
+shows you is true now.
+
+When you come back to a system, `transect` shows how it works now.  It
+names the patterns in your workloads, such as a work queue or a
+pipeline, so you recognize a model that you already know and do not
+have to read every part.  It shows what is out of place: what nothing
+uses, what nothing explains, and what differs from its peers.  It shows
+where a system does not work.
+
+The cluster does not record everything, such as why a thing exists.
+The people and agents who build things add that knowledge, and
+`transect` checks each of their claims against the running cluster as
+the cluster changes.  A claim that stops being true shows as wrong.
+
+## The proof of concept
+
+The code in this directory is a proof of concept of that idea, and the
+design of the rest is in progress.  It is a live, read-only map of a
+Kubernetes cluster.  It draws the cluster as nested layers, from the
 whole cluster down to one container, and the relationships between
 them: what runs on which machine, where each workload keeps its data,
 which pod has claimed which device, which source each object reconciles from,
 and what depends on what.  The map is gray where things are healthy,
-so only a problem is colored.
+so only a problem is colored.  It shows the descriptions that people
+write, each marked with its source.  It names no patterns, and it does
+not report what is out of place.
 
 `transect` changes nothing in the cluster.  It reads the Kubernetes API
 and Prometheus, and a directory of its own resources for facts that
-neither of those provides.  The design is in
+neither of those provides.  The design of the proof of concept is in
 [plans/00-design.md](plans/00-design.md).
 
 ## What it shows
