@@ -3,8 +3,12 @@
 This directory is `transect`, a live, read-only map of a Kubernetes
 cluster: its layers, the relationships between its parts, and their
 health.  It is a component of the `liken` repository.  Read
-[plans/00-design.md](plans/00-design.md) before you change anything,
-because it records every decision made so far.
+[plans/00-design.md](plans/00-design.md) before you change anything.
+It is the product design: who `transect` is for, the questions it
+answers, and the positions that new work must agree with.  The code is
+a proof of concept that was built before that design, and
+[plans/completed/00-proof-of-concept-design.md](plans/completed/00-proof-of-concept-design.md)
+records every decision behind it.
 
 @../brand/voice.md
 
@@ -37,7 +41,7 @@ which a test loads.
   healthy.
 - The runtime makes no language model calls.  Every sentence is a
   template or stored text; see "Deterministic at runtime" in the
-  design.
+  design of the proof of concept.
 - `transect` writes nothing to a cluster except status on its own
   resources.
 
