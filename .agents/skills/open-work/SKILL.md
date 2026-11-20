@@ -118,8 +118,8 @@ Before a finding goes into the report, check it yourself with one
 `grep` or one read:
 
 - "Function X does not exist": `grep -rn "func.*X\b"` across the
-  component. A survey once reported `screenOf` missing while it was in
-  `media-operator/screen.go`.
+  component. A survey once reported a function missing while it was
+  in `media-operator/screen.go`.
 - "Field X is read-only" or "the spec field is Y": read the CRD
   schema and print the path from the root of the schema to the field.
   A survey once reported `spec.denon.settings.hdmi.passThrough` as a

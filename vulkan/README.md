@@ -19,8 +19,8 @@ The image has no compositor and no video driver. `weston` and `vaapi`
 add those.
 
 `vulkan` is the lowest base image. [`vaapi`](../vaapi/) and
-[`weston`](../weston/) build on it, and [`ffmpeg`](../ffmpeg/) and
-[`mpv`](../mpv/) build on `vaapi`. The screens of the operators, such
+[`weston`](../weston/) build on it, [`ffmpeg`](../ffmpeg/) builds on
+`vaapi`, and [`mpv`](../mpv/) builds on `ffmpeg`. The screens of the operators, such
 as the idle screen of `media-operator`, build on `vulkan` or on an
 image above it. Find each image that uses it by its `FROM vulkan`
 line.

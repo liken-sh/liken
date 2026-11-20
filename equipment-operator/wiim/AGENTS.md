@@ -165,6 +165,6 @@ client at a time (`plans/00-design.md`, "The Service front").
 The driver reports `Address`, the address that discovery found, and
 the controller writes it to `status.address`. This is not
 `status.wiim.network.address`, which is the address that the device
-reports for its own interface. Because no `spec` field declares the
-address, a person reads `status.address` to see where an amp has
-moved to.
+reports for its own interface. The `address` of the spec is optional
+and only a hint, so a person reads `status.address` to see where an
+amp has moved to.

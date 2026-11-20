@@ -88,8 +88,8 @@ of the component. Use one of these:
 * `gh release view <tag> -R liken-sh/liken` lists each component and
   its version at that tag. A component that the tag did not release
   shows the version of its earlier release.
-* `cd ci && go run . scans` prints each published image at the version
-  that a cluster pulls. For a tracked component, that is its newest
+* `cd ci && go run . scans -root ..` prints each published image at
+  the version that a cluster pulls. For a tracked component, that is its newest
   published version, which can be a development build. For a pinned
   component, it is the pinned tag.
 
@@ -301,8 +301,8 @@ the run's commit. `ci/templates/sarif.tmpl` sets these two inputs.
 * **Every third day.** `ci/` generates `.github/workflows/scan.yaml`
   from `ci/templates/scan.yaml.tmpl`. The workflow runs on every third
   day of the month, on the schedule that the template's `cron` line
-  sets and its comment explains, and on a manual dispatch. `go run . scans` in `ci/` lists
-  every published image at the version that a cluster pulls, and the
+  sets and its comment explains, and on a manual dispatch.
+  `go run . scans -root ..` in `ci/` lists every published image at the version that a cluster pulls, and the
   newest OS release on the channel. The `trivy` job scans each image.
   The `liken` job fetches the release's SBOM with `liken sbom -json`,
   which checks its signature. Then the job scans the SBOM with grype
@@ -325,7 +325,7 @@ from `liken/`. Each command reproduces the alerts of one category:
   CLI first when they are out of date.
 - The scan of a release's SBOM reproduces the alerts of
   `grype/liken-release`. Use the version of the newest release on the
-  channel, which `cd ci && go run . scans` prints:
+  channel, which `cd ci && go run . scans -root ..` prints:
 
   ```sh
   go run ./cli sbom -json 2026.11.10-001 >sbom.cdx.json

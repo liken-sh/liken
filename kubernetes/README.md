@@ -21,8 +21,8 @@ Kubernetes project maintains.
 ## The packages
 
 - **`apiclient`** sends each read and write to the API server as one
-  HTTPS request. It uses only `net/http` and `encoding/json`, and no
-  package from `k8s.io`.
+  HTTPS request. It uses the Go standard library, and no package
+  from `k8s.io`.
 - **`memo`** records the `resourceVersion` of each object that an
   operator wrote or read. While the watch's copy of the object has a
   different version from the recorded one, a pass reads the object
