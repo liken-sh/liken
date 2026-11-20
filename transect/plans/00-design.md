@@ -105,6 +105,32 @@ its structure.
 The list was settled on 2026-11-20.  What makes parts "of the same
 sort" is open.
 
+## Signals
+
+`transect` correlates signals.  Each source describes the same system
+in its own terms: Prometheus has a series with labels, a trace store
+has spans with the names of services, and the Kubernetes API has an
+`Event` on an object.  `transect` holds which part or relation each
+signal is about, so a metric, a span, a log line, and a condition that
+came from different sources are present together on the part that they
+describe, where they are of most use to a person or an agent who is
+learning how the system behaves.
+
+`transect` does nothing else with a signal:
+
+- **It does not judge a signal.**  An alert has the judgement of
+  Alertmanager, and a condition has the judgement of the operator that
+  wrote it.  `transect` passes each one on with its source.  It sets no
+  threshold of its own.
+- **It does not keep a signal.**  The sources hold the history, and
+  `transect` shows what they say now.
+
+A stated expectation can use a signal.  "Work that goes in comes out"
+is checked with a metric, and that check is exact because somebody
+stated the expectation.
+
+Settled on 2026-11-20.
+
 ## Patterns
 
 A pattern is a named set of expectations.  To call a group of workloads
