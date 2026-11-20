@@ -73,7 +73,8 @@ cosign pushes the signature to the image's own ghcr.io repository, as
 an OCI referrer of the digest. On a registry with no referrers API, it
 uses the tag `sha256-<digest>` instead. Only the publish job of a
 component with images and the OS's publish job have
-`id-token: write`. A dry run builds the same attestations and signs
+`id-token: write`, among the jobs that build or publish. The `site`
+job of `ci.yaml` has it too, for its deploy to GitHub Pages. A dry run builds the same attestations and signs
 nothing.
 
 If the signing fails, the publish fails. This happens before `:latest`

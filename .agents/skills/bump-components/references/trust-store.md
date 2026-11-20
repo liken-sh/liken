@@ -8,6 +8,8 @@ from the `trust` image. `make versions` reports it as `trust`.
 Its `--bump` writes these:
 
 - the new date, into `VERSION`
+- the digest of the snapshot, into `pin.toml`, which
+  `trust/fetch.sh` reads
 - the version of the image and its `[package.upstream]`, into
   `package.toml`
 - the snapshot and its published checksum, into the `Dockerfile`

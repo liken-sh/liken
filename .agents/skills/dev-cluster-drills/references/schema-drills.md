@@ -1,7 +1,7 @@
 # CRD schema drills
 
-Do not reason about how apiextensions behaves. Test it against the dev
-cluster. The order of operations is the behavior that costs the most
+Test how apiextensions treats a schema against the dev cluster before
+you rely on it. The order of operations is the behavior that costs the most
 time. **The API server prunes unknown fields, and drops nulls for
 values that are not nullable, before CEL and schema validation run.**
 So a rule that looks complete in the schema never sees the value that
@@ -25,8 +25,9 @@ reject an unknown slug and a null. It rejected neither.
 
 ## The drill
 
-Before you commit a schema or CEL change to `machine/manifests/` or
-`cluster/manifests/`, prove it on a throwaway CRD in a scratch group.
+Before you commit a schema or CEL change to a CRD, such as one in
+`machine/manifests/`, `cluster/manifests/`, or a component's
+`deploy/`, prove it on a throwaway CRD in a scratch group.
 Use a group that can never collide with a real one, for example
 `drills.example.com`.
 

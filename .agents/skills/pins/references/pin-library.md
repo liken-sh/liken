@@ -21,13 +21,15 @@ its line.
   the file matches, it moves the file into place. Use `--resume` for
   a large file. The digest is the one that the script pins, and an
   empty digest stops the fetch.
-- **`fetch_pinned [--resume] <entry> <version> <path>`** fetches the
-  file that an entry of the `pin.toml` beside the script lists,
-  through `fetch_verified`. It stops when the entry has another
+- **`fetch_pinned [--resume] <entry> <version> <path> [<manifest>]`**
+  fetches the file that an entry of a `pin.toml` lists, through
+  `fetch_verified`. The manifest is the one beside the script, unless
+  the call names another. It stops when the entry has another
   version than the one that the fetch builds.
 - **`pin_value <entry> <field> [<manifest>]`** prints one field of a
-  manifest. **`set_pin <entry> <version> <url> <sha256> <purl>`**
-  writes a bump into one entry. **`generic_purl`, `github_purl`, and
+  manifest. **`set_pin <entry> <version> <url> <sha256> <purl>
+  [<cpe>]`** writes a bump into one entry. **`cpe_version
+  <version>`** prints the upstream part of a version, for a CPE. **`generic_purl`, `github_purl`, and
   `deb_purl`** print the purl of each kind.
 - **`fetch_file`** downloads a file whose digest is not yet in the
   repository, such as a checksum file or a signature.

@@ -140,7 +140,9 @@ after another, in one background task. Follow these rules:
 Each bump prints a `next:` line that names the make target that
 rebuilds its domain. Run the line from the pin's own directory. For
 example, `liken/kernel/latest.sh` prints `make -C .. kernel`, which
-you run in `liken/kernel/`. `make all` covers those targets. One target
+you run in `liken/kernel/`. `make all` covers those targets, except
+`docs`: `liken/docs/latest.sh` prints `make -C .. docs`, and `all`
+does not build the site. One target
 needs care: `make storage` is not a build. It starts the lab's
 storage guest under QEMU, and it runs in the foreground for the whole
 life of the guest. So never chain it before another target.
@@ -172,8 +174,10 @@ Read the changelogs for every bump. Do it for a bump that clears a
 vulnerability finding too, because a release that fixes one advisory
 can also change behavior or break compatibility.
 
-Dispatch research agents in parallel, with a few components for
-each. Each agent reads the real release notes on the web. It reports
+For a pass over many pins, dispatch research agents in parallel, with
+a few components for each. For a request that names one pin, read
+its release notes in the session. Each reader reads the real release
+notes on the web. It reports
 breaking changes, changes of behavior, CVE fixes, regressions that
 people reported against the new tag, and anything that matters on a
 machine with 1GB of memory. Give each agent the entries for its
@@ -209,8 +213,9 @@ the first boot on real hardware are its first real test.
      its tag, as step 5c says
 
    Any other file needs a reason in the report.
-5. Run `make all` in `liken/` for a pass, or the build that a single
-   bump's `next:` line names, such as `make kernel`. A changelog does
+5. Run `make all` in `liken/` for a pass, and `make docs` there when
+   Hugo moved, or the build that a single bump's `next:` line names,
+   such as `make kernel`. A changelog does
    not show breakage in configure or in the toolchain, and a bump that
    does not build is not done. The programs that `userland` compiles
    from source against musl break most often. A new configure check

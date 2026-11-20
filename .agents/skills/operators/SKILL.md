@@ -80,9 +80,14 @@ first. The guards cover those decisions, in that order.
 
 ## Scenarios every watch loop must pass
 
-Test a loop against a scripted fake API server that can keep a stream
-open, respond slowly, and cut a connection. Each row gives a scenario
-and the correct result.
+Each row gives a scenario and the correct result for a watch loop.
+Every operator watches through client-go's reflector, which gives a
+different result in some rows, as `references/client-go-watch.md`
+lists. Use the table to review how an operator uses the reflector,
+and test only its handlers, as that reference describes. A loop that
+the project writes itself needs a test of each row against a
+scripted fake API server that can keep a stream open, respond
+slowly, and cut a connection.
 
 | Scenario | Correct result |
 |---|---|

@@ -139,12 +139,14 @@ program.
 An operator uses Kubernetes through the `kubernetes/` module, and no
 component uses controller-runtime or kubebuilder. CRDs are written by
 hand, unless the component's `AGENTS.md` says that a generator writes
-them. A `deploy/` base sets its namespace with a
-`NamespaceTransformer` in `unsetOnly` mode. A Rust dependency is
+them. The `deploy/` base of an operator or a CSI driver sets its
+namespace with a `NamespaceTransformer` in `unsetOnly` mode. A Rust
+dependency is
 pinned to an exact version, as in `=0.25.1`, and `ci pins` fails when
 two Go modules or two crates use different versions of the same
-dependency. In each component, `make test` runs the checks that CI
-runs.
+dependency. In each component whose `Makefile` has a `test` target,
+`make test` runs the checks that CI runs. A component's
+`package.toml` names the command of each CI job.
 
 ## Branches and landing
 

@@ -67,8 +67,9 @@ publishes the adapter as a device, and `display-operator` owns the
 
 ## Finding things
 
-- Each protocol package, such as `cec/` or `denon/`, has its own
+- The protocol packages `cec/`, `denon/`, and `wiim/` each have an
   `AGENTS.md` with the protocol reference and the notes on real
-  devices. It loads when you work in that directory.
+  devices. It loads when you work in that directory. `upnp/` has
+  none.
 - Load the `receiver-drivers` skill under `.agents/skills` before you
   add a receiver setting or a receiver brand.

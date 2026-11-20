@@ -48,7 +48,8 @@ reason.
 - **A hold** is a pin that must stay back. Its row in the report
   gives the reason. A comment alone does not count as a hold.
 
-Every pin has a `latest.sh` beside it. `make versions`, at the top of
+Each pin has a `latest.sh` beside it, with the exception that "The
+rules of a download" names. `make versions`, at the top of
 the repository, runs all of them and prints one table. The format of
 a row is in the `bump-components` skill.
 
@@ -83,7 +84,9 @@ reviews the commit has reviewed what every later build downloads.
 - **Every pin has a `latest.sh`.** Every `VERSION`, every `fetch.sh`,
   and every Dockerfile that downloads has a `latest.sh` in its
   directory or above it. The `latest.sh` is executable. So no pin
-  can fall behind without the report showing it.
+  can fall behind without the report showing it. The exception is a
+  pin of large binary files that a person pushes with `push.sh`,
+  which "Where a pin goes" describes.
 - **A GitHub Action is pinned to a commit.** Every `uses:` names the
   commit of a release, as in `actions/checkout@<commit> # <release>`,
   because the owner of an action can move a tag to other code. The
@@ -96,9 +99,10 @@ reviews the commit has reviewed what every later build downloads.
   builds a static PIE for `-static`, so a check with file(1) accepts
   both phrases: `grep -qE "statically linked|static-pie linked"`.
 
-A file under `toolchains/`, such as `pin.sh` or `manifest/`, can be
-in the build context of a pinned component. So an edit of that file,
-even of a comment, can require a new revision. "The bake file and the
+A file under `toolchains/manifest/` is in the build context
+`manifest` of some pinned components, such as `weston`. So an edit of
+that file, even of a comment, requires a new revision of each of
+them. "The bake file and the
 base images" in the `images` skill has the rule, and the check to run
 before a push.
 
@@ -380,8 +384,9 @@ when a commit or a digest there differs from the pins of
 
 ## The check
 
-`cd ci && go run . pins -root ..` runs `ci/fetches.go` and
-`ci/manifests.go`, which match the scripts, the manifests, the
+`cd ci && go run . pins -root ..` runs the checks in `ci/pins.go`,
+`ci/fetches.go`, `ci/manifests.go`, `ci/actions.go`, and
+`ci/buildkit.go`, which match the scripts, the manifests, the
 Dockerfiles, and the workflows against the rules above. CI runs it
 on every push. The pins hook of the root `.pre-commit-config.yaml`
 runs it on each commit that changes a file that the hook's `files`

@@ -36,8 +36,10 @@ machine's heartbeat `Lease`, and `cluster-operator` marks the machine
 
 `cluster-operator` changes the cluster only through the Kubernetes
 API. It grants each `Disruption` when the `MachineDisruptionBudget`s
-allow it. Its one other connection is to the release channel at
-`releases.liken.sh`, which it reads to report the newest release.
+allow it. Its one other connection is to the release source that
+`spec.releases.source` of the `Cluster` names, such as
+`releases.liken.sh`. It reads the channel there to report the newest
+release, and it makes no connection while the field is empty.
 
 ## Design
 

@@ -93,13 +93,14 @@ the fake server of `watch_test.go`.
 `WakeOnAnotherWritersChange` is for an object whose status the pass
 writes and another writer also changes.
 
-- **One informer for each collection.** Build a `cache.ListWatch`
-  whose `ListWithContextFunc` and `WatchFuncWithContext` call the
-  dynamic client, and set the label selector in both. Pass it to
-  `cache.NewInformerWithOptions` with `&unstructured.Unstructured{}` as
-  the object type. Run it with `RunWithContext`, which returns after
-  the last handler call. Pass a `Transform` that removes
-  `metadata.managedFields`.
+- **One informer for each collection.** Call `informer.Start` once
+  for each collection, with a `Source` that names the resource and
+  its selectors. `Start` builds the `cache.ListWatch` on the dynamic
+  client, runs `cache.NewInformerWithOptions`, and removes
+  `metadata.managedFields` before it stores an object. Set
+  `Options.Transform` only to drop other fields that no pass reads.
+  The CSI drivers build their informer themselves
+  (`git-csi-driver/listwatch.go`).
 - **Convert, and report what does not convert.** A handler receives an
   `*unstructured.Unstructured`. For an object that was deleted while
   the watch was down, it receives a `cache.DeletedFinalStateUnknown`
@@ -114,9 +115,10 @@ writes and another writer also changes.
   makes one wake. Sometimes the pass can read a collection before the
   informer's first read does. Then the watch also wakes the pass once
   when the informer has synced, so that an edit between the two reads
-  is not lost. Wait on `HasSyncedChecker().Done()`, not on
-  `WaitForCacheSync`, which polls. Join that goroutine before the
-  channel closes.
+  is not lost. Set `Options.Synced` to wake the pass. `Start` runs it
+  once, after the first read is in the store. Wait on
+  `Collection.Done` before you close a channel that a handler or
+  `Synced` sends on.
 - **Filter the operator's own status writes.** `UpdateFunc` receives
   the informer's previous copy and the new copy. Wake only when
   `metadata.generation`, `metadata.deletionTimestamp`, or
@@ -129,7 +131,8 @@ writes and another writer also changes.
 - **Restart a watch whose selector changes.** A selector is fixed for
   the life of an informer. When the source of the selector changes,
   such as the address of the radio that the pass reads, cancel the
-  informer's context. Wait until `RunWithContext` has returned, and
+  informer's context. Wait until the old `Collection`'s `Done`
+  closes, and
   start a new informer with the new selector (`followPeripherals` in
   `editwatch.go`).
 - **Follow one object by name with `informer.WatchOne`.** It selects

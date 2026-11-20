@@ -37,12 +37,13 @@ plan is in the `plans` skill. Read both first.
 ## 1. List the open documents
 
 ```sh
-for d in $(find . -type d -name plans -not -path '*/node_modules/*'); do
-  ls "$d" | grep -v -e completed -e rejected -e open-problems \
-    -e README.md -e 00-design.md | sed "s|^|$d/|"
-done
-find . -path '*/plans/open-problems/*.md' -not -path '*/node_modules/*'
+git ls-files -- '*plans/*.md' | grep -v -e /completed/ -e /rejected/ \
+  -e /open-problems/ -e /README.md -e /00-design.md
+git ls-files -- '*plans/open-problems/*.md'
 ```
+
+`git ls-files` lists tracked files only, so the copies of the
+repository in `.worktrees/` are not in the list.
 
 For one component, list only that component's `plans/`. Then search
 the root plans and the OS's plans for the component's name, because a
