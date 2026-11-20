@@ -33,15 +33,15 @@ driver names. They have no records in the zone.
   TLS for a custom domain finds the bucket by its name. The channel is
   not on one of the cluster's machines, because the machines upgrade
   from it, and it must stay available when any of them is gone. Linode
-  has no ACME service. So each month,
-  `.github/workflows/releases-cert.yaml` gets a Let's Encrypt
-  certificate with a DNS-01 challenge on this zone, and uploads the
-  certificate to the bucket.
+  serves the bucket over HTTPS with a certificate that you upload. So
+  each month, `.github/workflows/releases-cert.yaml` gets a Let's
+  Encrypt certificate with a DNS-01 challenge on this zone, and
+  uploads the certificate to the bucket.
 - **The website's names.** GitHub Pages serves liken.sh. The apex of
   a zone cannot be a CNAME. So the apex has A and AAAA records with
   the Pages addresses that GitHub publishes, and `www` is a CNAME to
-  the organization's Pages hostname. GitHub issues the site's
-  certificate.
+  the organization's Pages hostname. This Terraform makes no
+  certificate for the site, because GitHub Pages issues it.
 - **The repositories.** `repositories.tf` has one entry for each
   repository of the organization. When an entry names a repository
   that does not exist, Terraform creates it. `prevent_destroy` stops

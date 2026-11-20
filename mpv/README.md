@@ -20,10 +20,11 @@ The comment above the build in the `Dockerfile` gives the reason for
 each option that the build turns off.
 
 The image builds `mpv` from its release, not from Debian's package.
-So it can use a new upstream release before sid packages it, or an
-upstream commit that no release includes yet. Every library that
-`mpv` links comes from the same Debian snapshot as the other base
-images.
+So it can use a new upstream release before sid, Debian's development
+suite, packages it, or an upstream commit that no release includes.
+Every library that `mpv` links comes from the same dated snapshot of
+Debian's archive as the other base images, as [`vulkan`](../vulkan/)
+explains.
 
 `mpv` builds on `ffmpeg`. Its layer contains only the files that the
 images below it do not. The player image of `media-operator` builds

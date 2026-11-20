@@ -32,9 +32,10 @@ commit of its master branch when the PPA built the packages of
 2026-10-04, which are the packages that the snapshot installs. The
 copyright file of the PPA's `indi-3rdparty-libs` package mentions
 none of the SDKs. So the `license` entries of the lists copy these
-files into the images. The directories of the QHY, Atik, Astroasis,
-and SVBONY SDKs, and of `libflipro`, have no license file. When a
-bump copies new license files, write the new commit here.
+files into the images. At that commit, the directories of the QHY,
+Atik, Astroasis, and SVBONY SDKs, and of `libflipro`, had no license
+file. When a bump copies new license files, write the new commit
+here.
 
 ## Finding things
 

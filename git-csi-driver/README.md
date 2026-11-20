@@ -16,8 +16,9 @@ give it a deploy key or a token in a `Secret`. When a push is
 rejected because the ref moved, the driver rebases the volume's
 commits onto the new ref and pushes again, up to three times. If the
 rebase conflicts, or the push is still rejected, the driver moves the
-volume to the side branch `<ref>.<volumeHandle>`.
-It pushes to that branch until a person merges it on the forge.
+volume to the side branch `<ref>.<volumeHandle>`, where
+`volumeHandle` is the ID of the volume in its `PersistentVolume`. It
+pushes to that branch until a person merges it on the forge.
 While pushes fail, the commits stay on the node, and the volume's
 `Event`s and metrics report the failure until a push succeeds. If the
 node's disk is lost, every commit that was not pushed is lost with
@@ -29,13 +30,15 @@ limit, and the driver leaves out each file larger than that limit. Do
 not put a database, a cache, or media on it. A submodule appears as
 an empty directory, and a Git LFS file appears as its pointer file.
 
-The driver runs on a `liken` cluster. It is designed to run on any
-cluster with a standard CSI setup too. On `liken`, the driver stores
-its repositories on the pod-storage partition. Its node plugin runs at
-the priority `system-node-critical`, so at shutdown the push that runs
-when each pod stops happens before the machine's network stops. In
-`library-operator`, a `Library` of franchises can read its files from
-a read-only claim of this driver.
+The driver runs on a `liken` cluster, where it stores its
+repositories on the pod-storage partition. The design also fits
+another cluster whose kubelet uses the standard CSI paths under
+`/var/lib/kubelet`. On such a cluster, change the store path
+`/var/lib/liken/pod-storage/git-csi` in `deploy/node.yaml`. The
+driver's node plugin runs at the priority `system-node-critical`, so
+at shutdown the push that runs when each pod stops happens before the
+machine's network stops. In `library-operator`, a `Library` of
+franchises can read its files from a read-only claim of this driver.
 
 ## The objects
 

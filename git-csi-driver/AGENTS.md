@@ -8,10 +8,13 @@ and describes the objects that configure a volume.
 The driver name is `git.liken.sh`, and one image runs the node plugin
 and the controller plugin.
 
-The node plugin runs on every node and owns the store on that node:
-one bare repository for each URL and one work tree for each writeable
-volume. It stages and publishes each volume, and it fetches, commits,
-and pushes. It watches each writeable work tree with inotify, and runs
+The node plugin runs on every node and owns the store, its directory
+on that node. The store contains one bare repository for each URL and
+one work tree for each writeable volume. A work tree is the checkout
+that a pod mounts. In CSI, to stage a volume is to prepare it on a
+node, and to publish it is to mount it into one pod. The plugin
+stages and publishes each volume, and it fetches, commits, and
+pushes. It watches each writeable work tree with inotify, and runs
 `git status` on a timer as a backstop. It also watches the
 `PersistentVolume`s and claims of its volumes, and reads from them
 each claim's class and each request for a pull. When a
@@ -35,9 +38,11 @@ credential until the next publish call.
 
 The driver is the only process that commits. The repository is in the
 node's store, and the pod gets a bind mount of the work tree with no
-`.git` inside it. Upstream changes reach the work tree at stage,
-before the pod starts. While a pod uses the work tree, only the
-application changes it. The exception is a rebase that the driver
+`.git` inside it. While the pod runs, the driver moves the tree of a
+read-only volume to each new commit of its ref, unless the volume's
+`pull` is `never`. Upstream changes reach a writeable volume's work
+tree at stage, before the pod starts. While a pod uses the work tree,
+only the application changes it. The exception is a rebase that the driver
 applies after a rejected push. The driver never merges and never
 loses a commit. It either fast-forwards or rebases the local commits
 onto upstream. When a rebase conflicts, the driver aborts it and

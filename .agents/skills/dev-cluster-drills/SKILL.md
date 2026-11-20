@@ -33,24 +33,6 @@ and ask the maintainer whether the lab is in use.
 * **A drill that fails in a way you do not expect**:
   [references/common-failures.md](references/common-failures.md).
 * **The end of every drill**: "Clean up".
-
-To choose the drills for a change before you push, find what the
-change touches:
-
-* **You changed the install or the first boot from disk**, such as
-  the boot chain that the install writes: run `make smoke-uefi` and
-  `make smoke-bios`. Each one proves a first boot under one firmware.
-* **You changed how a machine stages a release, boots it once on
-  trial, or promotes it**, such as how init picks the boot slot: run
-  "The upgrade drill".
-* **You changed the fallback to the proven slot**: run the
-  upgrade drill onto a release built with `FAULT`, as the section on
-  deliberate-failure releases in
-  [references/cross-version-drills.md](references/cross-version-drills.md)
-  describes. Each value of `FAULT` proves one fallback path.
-
-A change to how init picks the boot slot touches all three, so run
-each of them.
 * **An older published release as the baseline, a release that fails
   on purpose, the metal hardware shape, or a guest's disks while it is
   off**: [references/cross-version-drills.md](references/cross-version-drills.md).
@@ -69,6 +51,26 @@ each of them.
 * **A running machine's filesystem from a busybox pod, a feature
   enabled or removed with a live patch, or a reboot on purpose**:
   [references/inspect-a-machine.md](references/inspect-a-machine.md).
+
+To choose the drills for a change before you push, find what the
+change touches:
+
+* **You changed the install or the first boot from disk**, such as
+  the boot chain that the install writes: run `make smoke-uefi` and
+  `make smoke-bios`. Each one proves a first boot under one firmware.
+* **You changed how a machine stages a release, boots it once on
+  trial, or promotes it**: run "The upgrade drill".
+* **You changed the fallback to the proven slot**: run the
+  upgrade drill onto a release built with `FAULT`, as the section on
+  deliberate-failure releases in
+  [references/cross-version-drills.md](references/cross-version-drills.md)
+  describes. Each value of `FAULT` proves one fallback path.
+* **You changed how `init` picks the boot slot**: run all three. `init`
+  chooses the slot with different code under each firmware:
+  `liken/init/grubcfg.go` under BIOS and `liken/init/bootentries.go`
+  under UEFI. So run the upgrade drill and the fallback drill under
+  each firmware. For BIOS, set `FIRMWARE=bios` on `make install` and
+  on each `make run`, as "Install and reinstall machines" shows.
 
 ## What the dev cluster is
 

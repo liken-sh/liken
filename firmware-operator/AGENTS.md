@@ -17,17 +17,19 @@ device runs in a short-lived pod that the operator creates on the
 device's machine:
 
 - **An upload pod** runs an upload rule's image and command, with a
-  `ResourceClaim` on the one bare device.
+  `ResourceClaim` on one bare device. A bare device waits for the
+  host to load its firmware.
 - **A scan pod** runs fwupd against a catalog's file. It is privileged
   and has no claim, because fwupd reads many devices. It only reads.
 - **A rehearsal pod** runs an approved install against copies of the
   machine's firmware state, and records what the install would write.
 - **An apply pod** prepares before the machine drains. When the pod is
   ready, the operator asks `machine-operator` for a held reboot turn
-  through a `Disruption`. A held turn drains the machine and then
-  waits for the operator before the reboot. While the machine is
-  drained, the operator signals the pod to write. Then the operator
-  lets the reboot go ahead.
+  through a `Disruption`. A reboot turn is the time that
+  `machine-operator` gives one machine to drain and reboot. A held turn
+  drains the machine and then waits for the operator before the reboot.
+  While the machine is drained, the operator signals the pod to write.
+  Then the operator lets the reboot go ahead.
 
 The scan, rehearsal, and apply programs print their result as one
 line of JSON at the end of the pod's log, and the operator reads it
@@ -37,11 +39,12 @@ machine's `ResourceSlice`.
 
 ## Design
 
-A scan installs nothing. An install needs three things, in this
-order: a person approves one release and pins it to its cabinet by
-digest, a rehearsal on that machine passes, and the machine gets its
-held reboot turn. A Secure Boot database update is written while no
-workload runs on the machine, and it takes effect at the next boot.
+A scan installs nothing. An install needs these steps, in this order.
+A person approves one release and pins its cabinet, the release's
+`.cab` file, by digest. A rehearsal on that machine passes. Then the
+machine gets its held reboot turn. A Secure Boot database update is written
+while no workload runs on the machine, and it takes effect at the next
+boot.
 
 After the kubelet ends an upload pod or an apply pod, the operator
 does not run it again. The kubelet can end such a pod at a node

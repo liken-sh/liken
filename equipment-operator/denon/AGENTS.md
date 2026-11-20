@@ -67,13 +67,13 @@ a change. After the driver sends a command in either family, it sends
 `SSHOS ?` or `VSAUDIO ?`, so the status shows the value that the
 receiver reports in either case.
 
-Where each word comes from:
+The keys and words of this section come from these sources:
 
 - Measured on an AVR-X1700H on a home cluster on 2026-09-26: every
   key of both families, read with `VSAUDIO ?` and `SSHOS ?`, and the
-  words `AMP`, `LAS`, `POS`, `ALL`, `ON`, and `OFF`. The only set command sent to
-  the receiver was `SSHOSCONSTS LAS`, which set it to the value it
-  already had.
+  words `AMP`, `LAS`, `POS`, `ALL`, `ON`, and `OFF`. The only set
+  command sent to the receiver was `SSHOSCONSTS LAS`, which set it to
+  the value it already had.
 - Denon's documents: `VSAUDIO AMP` and `VSAUDIO TV`, in the AVR-X4000
   document and the FY21 and FY23 protocol spreadsheets.
 - The receiver's web setup page, in its `VideoSettings.js`: the sets

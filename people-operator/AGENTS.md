@@ -6,8 +6,9 @@ it is for and describes its kind.
 ## How it runs
 
 The operator is one unprivileged `Deployment` in `liken-system`, with
-leader election. It watches every `Person` and its own baker pods, and
-it writes the status of each `Person`.
+leader election. It watches every `Person` and its own baker pods,
+the pods that read a picture from a mount and make its thumbnail. It
+writes the status of each `Person`.
 
 The operator reads an `https://`, `http://`, or `data:` picture in its
 own process. Only the kubelet can mount an NFS export or a claim. So
@@ -33,7 +34,8 @@ No HTTP URL, NFS file, or file on a claim has a change feed to watch.
 So the operator reads each source again on a timer, except a `data:`
 URI. Each read is a conditional GET, or a comparison of the file's
 modification time and size, so an unchanged picture causes no status
-write. An annotation on the `Person` asks for a read at once.
+write. A new value of the annotation `people.liken.sh/check-avatar`
+on the `Person` makes the operator read the picture at once.
 
 `people-operator` reads no other operator's resources. An operator
 that refers to a `Person` depends on this CRD and on nothing else in

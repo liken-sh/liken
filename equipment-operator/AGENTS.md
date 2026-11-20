@@ -12,12 +12,14 @@ compiled with the build tag `node`. Each workload runs one of them.
   pod on the overlay network gets no reply to an mDNS or SSDP search.
   Only one copy is active at a time, under a Lease. It keeps a
   connection open to each receiver in the receiver's own protocol,
-  such as TCP to a Denon or HTTPS with UPnP events to a WiiM. It writes the `Receiver` status.
-  It also writes the `CECBus` and `Television` status, which it works
-  out from the adapters' reports, the `Display` objects, and the
+  such as TCP to a Denon or HTTPS with UPnP events to a WiiM. It
+  writes the `Receiver` status. It also writes the rest of the
+  `CECBus` status and the `Television` status, which it works out
+  from the adapters' reports, the `Display` objects, and the
   `Receiver` objects.
-- **The `cec` `DaemonSet`** runs a pod on each node, and that pod
-  claims the node's USB-CEC adapter. The pod has the adapter open and
+- **The `cec` `DaemonSet`** runs a pod on each node, and that pod claims
+  the node's USB-CEC adapter. When no `CECBus` names the pod's machine,
+  the pod creates one in `Listen` mode. The pod has the adapter open and
   sends every CEC message. It writes its adapter's report into the
   `CECBus` status. It writes the result of each command it sends into
   the `Television` status.

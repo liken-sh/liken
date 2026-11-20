@@ -318,8 +318,10 @@ the run's commit. `ci/templates/sarif.tmpl` sets these two inputs.
 To scan on a workstation, you need docker and `jq`. Run the commands
 from `liken/`. Each command reproduces the alerts of one category:
 
-- `make vulnerabilities`, after `make all`, scans what your tree
-  builds. It reproduces the alerts of `grype/liken`.
+- `make vulnerabilities` scans what your tree builds. It reproduces
+  the alerts of `grype/liken`. The target depends on the `image` and
+  `cli` targets in `liken/Makefile`, so it builds the image and the
+  CLI first when they are out of date.
 - The scan of a release's SBOM reproduces the alerts of
   `grype/liken-release`. Use the version of the newest release on the
   channel, which `cd ci && go run . scans` prints:
@@ -356,7 +358,13 @@ tells you what clears the alert.
    is the last part of its URL in the Security tab:
    `gh api repos/liken-sh/liken/code-scanning/alerts/<number>`. The
    output shows the rule, its severity, the category, the path, and
-   the message, which names the package and its version.
+   the message, which names the package and its version. The path
+   tells you how the scanner found the package. A path to a program,
+   such as `bin/k3s`, means that grype matched a Go module that the
+   program links. The path `sbom.cdx.json` means that grype matched a
+   component that a `pin.toml` or buildroot names, such as a kernel
+   that it matched by the `cpe` of its `pin.toml` entry. The comment at the end of
+   `liken/releases/sbom/vulnerabilities.sh` gives this rule.
 2. **Which category is it in?** An alert in `grype/liken-release`
    with no match in `grype/liken` is a finding that `main` already
    fixed. The next release that includes the fix clears it.

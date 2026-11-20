@@ -11,8 +11,9 @@ shell. It contains the libav libraries and their codecs. Put your own
 program in an image that builds on this one, and have it run
 `ffmpeg` and `ffprobe` by path.
 
-`ffmpeg` builds on `vaapi`, from the same Debian snapshot. Its layer
-contains only the files that `vaapi` and `vulkan` do not.
+`ffmpeg` builds on `vaapi`, from the same dated snapshot of Debian's
+archive, which [`vulkan`](../vulkan/) explains. Its layer contains
+only the files that `vaapi` and `vulkan` do not.
 [`mpv`](../mpv/) builds on `ffmpeg`. So does each image that runs
 `ffmpeg` in a pod, such as the capture container of
 `display-operator`. Find each one by its `FROM ffmpeg` line.

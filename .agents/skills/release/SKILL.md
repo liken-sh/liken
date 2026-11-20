@@ -109,9 +109,16 @@ failed job into one of these cases:
 - **The cause is in the repository.** Report it. Do not run the job
   again, because it fails the same way. The fix is a commit on `main`
   after the run ends, and the next tag, with the next serial, releases
-  the component. A failed label check of an image is in this case.
-  "What an image says about itself" in the `releases` skill explains
-  the check and the labels that it compares.
+  the component. A label check that fails with `the labels of the
+  pushed <image> differ from the labels the publish wrote` is in this
+  case. "What an image says about itself" in the `releases` skill
+  explains the check and the labels that it compares.
+- **A label check could not read the image.** `checkLabels` in
+  `ci/imagemeta.go` fails with `reading the labels of <image>` when
+  the registry did not answer, and with `the registry has no image at
+  <image>` when the pushed digest was still missing after the retries.
+  Each is a fault of the registry, so the cause is outside the
+  repository, as in the first case.
 - **You cannot tell**, such as a smoke drill that failed once. Report
   what the log shows, and ask.
 

@@ -33,20 +33,23 @@ image's SBOM.
 
 ## The scripts that other images use
 
-Every closure on a Debian builder in the repository gets this
-directory as the build context `builder`, for these scripts:
+An image that installs from snapshot.debian.org gets this directory
+as the build context `builder`, for these scripts:
 
 - `closure.sh` is the closure library. It collects the files that a
   program loads, and writes the notices and the dpkg records of the
   packages they came from. It also deletes from a tree each file that
-  the base image below it already contains. `indi/closure.sh` is a
-  copy of it.
+  the base image below it already contains. The bases, `astrometry`,
+  `git-csi-driver`, `audio-operator`, and `transect` use it.
+  `indi/closure.sh` is a copy of it. The inference closures of
+  `library-operator` use their own `inference-closure.sh`.
 - `snapshot.sh` configures apt to install from one day of
   snapshot.debian.org. It checks each `InRelease` file against its
-  sha256 in `snapshot.sha256`.
-- `latest.sh` reports the snapshot date of every image that installs
-  from snapshot.debian.org. `latest.sh --bump` moves them all to the
-  newest date.
+  sha256 in `snapshot.sha256`. An image of another component passes
+  the version of `vulkan` as the date.
+- `latest.sh` reports the snapshot date of the bases and `astrometry`,
+  and the upstream releases in the newest snapshot. `latest.sh --bump`
+  moves those images to the newest date.
 
 The image publishes under the tag `<version>-<revision>`, where the
 version is the date of the snapshot. The reasons for sid are in root

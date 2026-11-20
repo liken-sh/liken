@@ -18,9 +18,11 @@ new mode, the operator rewrites the file and restarts the compositor.
 The containers share one process namespace, so the operator can send
 the compositor a signal.
 
-Weston loads the layout module of the `weston` component. The module
-opens one Wayland socket for each prepared claim, and the window of
-the consumer pod connects to that socket. The operator tells the
+Weston loads the layout module, a Weston plugin that the `weston`
+component builds. The module opens one Wayland socket for each
+prepared claim. A claim is prepared when the kubelet has asked the
+operator to set it up for a pod on the node. The window of the
+consumer pod connects to that socket. The operator tells the
 module where to place each window over a private control socket.
 
 The `operator` container reads the card's modes and each monitor's

@@ -144,7 +144,9 @@ goes wrong: `a-moved-monitor-is-published-on-two-connectors.md`.
 - When the fix needs a decision from the maintainer, the document
   records the evidence: the test's setup, its assertion, and the line
   where it fails. It also lists the possible remedies and the question
-  to decide. Do not commit the failing test.
+  to decide. Copy the test's setup, its assertion, and its failure
+  output into the document. Then delete the test file, so that the
+  test is in no commit.
 - Delete the document with `git rm` in the commit that fixes the
   problem, and describe the fix in the commit message. Do not move it
   to `completed/`.

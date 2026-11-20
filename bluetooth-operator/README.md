@@ -16,7 +16,8 @@ every paired device, whether it's connected or not. So a pod that
 claims a switched-off controller starts when you turn the controller
 on. Through this operator, a pod can claim only an input device. A
 paired speaker plays through `audio-operator`, and this operator runs
-no sound server. The operator serves one radio on each machine.
+no sound server. The operator's pod claims one radio on its node. On
+a node with a second radio, the second radio publishes no device.
 
 `bluetooth-operator` is one of `liken`'s
 [extension operators for claiming hardware](https://liken.sh/docs/concepts/claiming-hardware/).

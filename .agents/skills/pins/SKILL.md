@@ -119,6 +119,19 @@ depends on what downloads the file.
   that your pin must be added to, search for the name of a similar
   pin outside its own directory:
   `git grep -n hwdata -- liken ':!liken/hwdata'`.
+- **An image needs large binary files, such as model weights.** The
+  files stay out of the repository's history. A person runs
+  `push.sh`, which downloads each file from its `url` in `pin.toml`,
+  checks it against `models.sha256`, and pushes the files to a
+  registry as one OCI artifact. The Dockerfile pulls the artifact by
+  the digest in the file `digest`, and checks each file against
+  `models.sha256`. `library-operator/titles/models/` and
+  `library-operator/appearances/models/` are examples. To add a file,
+  add its entry to `pin.toml`, its `fetch` line and its argument to
+  `oras push` in `push.sh`, and its sum to `models.sha256`. Then push,
+  and write the digest that `push.sh` prints into `digest`. The pin
+  has no `latest.sh`, because its files come from one commit of each
+  upstream project, as the header of `pin.toml` says.
 
 ## Write a `latest.sh` or a `fetch.sh`
 

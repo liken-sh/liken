@@ -24,9 +24,10 @@ each copy in bytes. It does not report when a new copy has caught up,
 because only the workload can tell that, through its readiness probe.
 
 The driver runs on a `liken` cluster, where it stores the copies on
-the pod-storage partition. It is designed to run on a cluster that is
-not `liken` too, when the kubelet uses the standard paths under
-`/var/lib/kubelet`. When a `library-operator` `Catalog` uses a storage
+the pod-storage partition. The design also fits another cluster whose
+kubelet uses the standard paths under `/var/lib/kubelet`. On such a
+cluster, change the store path `/var/lib/liken/pod-storage/per-node`
+in `deploy/node.yaml`. When a `library-operator` `Catalog` uses a storage
 class of this driver, `library-operator` creates the volumes and runs
 more than one copy of the catalog.
 

@@ -329,6 +329,16 @@ floor assumes Go 1.27.2 or later. Go 1.27.1 and earlier count a basic
 block once for each piece that comments split it into
 (golang/go#80974), so they report higher coverage.
 
+A Rust crate's floor is a variable in the component's `Makefile`,
+such as `COVERAGE_FLOOR` in `media-screen/Makefile`. The test target
+runs the tests under `cargo llvm-cov` and fails when line coverage is
+under the floor (`--fail-under-lines`). In a workspace, one
+instrumented run builds every crate. Then a `cargo llvm-cov report -p
+<crate>` line checks each crate against its own floor, as the target
+`test-rust` in `media-operator/Makefile` shows. A member that you add
+to a workspace needs its own floor variable and its own `report -p`
+lines in that target. Without them, no gate checks its coverage.
+
 ## What a test never does
 
 - Start a container, pull an image, or call `docker`.

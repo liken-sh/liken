@@ -33,8 +33,9 @@ The CRD declares the settings of each brand in its block, such as
 declared field, the operator compares the declared value with the
 value that the receiver reports. It sends the field only when the two
 differ, and at most 3 times for one value (`sendLimit` in
-`send_budget.go`). When the receiver does not report a field, the operator sends it once each time the spec changes
-that block. `status.settledSettings` records a digest of each block
+`send_budget.go`). When the receiver does not report a field, the
+operator sends it once each time the spec changes that block.
+`status.settledSettings` records a digest of each block
 that the operator sent. So after a restart, the operator sends
 nothing for a block that nobody changed. A method of `receiverUnit` in
 `reconcile.go` applies each block, such as `setSettings` for the
@@ -74,16 +75,16 @@ builds it.
 
 ## The tiers
 
-Plan 14 gives each field one tier. In `denon/`, `settingsTable` in `settings.go` joins one list of
-`settingSpec` for each family, such as `toneSettings` in
-`settings_tone.go`. A `settingSpec` has the field's id, the function
-that builds its command, and the function that copies it, and no
-tier. When a driver's table records no tier, write the tier of a
-field in the description of its CRD field.
+Plan 14 gives each field one tier. In `denon/`, `settingsTable` in
+`settings.go` joins one list of `settingSpec` for each family, such
+as `toneSettings` in `settings_tone.go`. A `settingSpec` has the
+field's id, the function that builds its command, and the function
+that copies it, and no tier. When a driver's table records no tier,
+write the tier of a field in the description of its CRD field.
 
-The operator learns what
-a model supports from the model itself, never from a table of models,
-because support differs by model and not only by protocol.
+The operator learns what a model supports from the model itself,
+never from a table of models, because support differs by model and
+not only by protocol.
 
 - **Confirmed**: the receiver reports the field's value. The
   operator compares it, sends the field when it differs, and confirms
@@ -166,8 +167,8 @@ field needs, the field is listed as Blocked.
 3. Find where the command comes from in the driver's protocol
    reference: the `AGENTS.md` of the driver's package, such as
    `denon/AGENTS.md`, and the files it links to. For another brand,
-   plan 14's table "References for the next protocol block" lists the documents and the client
-   libraries.
+   plan 14's table "References for the next protocol block" lists
+   the documents and the client libraries.
 4. Add the field to the CRD, with a description that gives the tier,
    the values, and the units. Then run `make -C docs generate` in
    `equipment-operator`, because the reference pages are generated
@@ -192,8 +193,18 @@ newest driver:
 ls equipment-operator/plans/completed/ | grep -i driver
 ```
 
-Read that driver's package, its plan, and each file of the controller
-that names it: `grep -n -i <protocol> equipment-operator/*.go`.
+Read that driver's package and its plan. Then find each other file
+that names the driver. Search the component's Go files for the name
+of the newest brand, ignoring case, and leave out the brand's own
+package:
+
+```sh
+cd equipment-operator && git grep -n -i wiim -- '*.go' ':!wiim/'
+```
+
+Read each hit. Each hit in a file that is not a test is a place that
+your brand needs too, such as a comparison in `status.go` or the
+metrics in `metrics_wiim.go`.
 
 1. Write a package `<protocol>/` in `equipment-operator` that
    implements `equipment.Driver`. It imports `equipment/`, and never

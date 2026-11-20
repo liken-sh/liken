@@ -7,8 +7,8 @@ you control it with Kubernetes resources. The
 [`audio-operator`](https://liken.sh/audio/), and
 [`bluetooth-operator`](https://liken.sh/bluetooth/) publish each
 display, speaker, and controller as a device that a pod can claim.
-`media-operator` groups those devices into units and runs playback on
-them.
+`media-operator` groups those devices into `Player`s and runs
+playback on them.
 
 A `Play` lists its media by URI. An `https://` URI streams the media.
 An `nfs://` URI mounts an NFS export. A
@@ -31,9 +31,9 @@ person picks.
 
 The operator defines these resources:
 
-- A `Player` is one unit of equipment in one place, such as a lone
-  speaker, a TV with its surround pair, or a gaming TV with its
-  controllers.
+- A `Player` is the screens, speakers, and controllers in one place
+  that play together, such as a lone speaker, a TV with its surround
+  pair, or a gaming TV with its controllers.
 - A `Play` is one run of media on a `Player`, such as a film, an album,
   or a season of episodes in order. It works like a `Job`: create it to
   start playback and delete it to stop. `kubectl get plays` lists what
@@ -53,9 +53,10 @@ that controls `mpv` and connects to the message bus, and a sidecar that
 draws the on-screen display. Each `Remote` has its own pod, which
 publishes each button press to the message bus under the kernel's name
 for the key. Each program that reads the presses maps those names to
-its own actions. The operator's capabilities agent publishes what each
-GPU can decode, encode, and scale as `media.liken.sh` devices, so a
-claim can select, for example, a GPU that decodes 10-bit HEVC.
+its own actions. A `DaemonSet` of the operator asks the media driver
+of each GPU what it can decode, encode, and scale. It publishes those
+facts as `media.liken.sh` devices, so a claim can select, for
+example, a GPU that decodes 10-bit HEVC.
 
 This `Play` plays a film from an NFS export on the `Player` named
 `studio`, from ten minutes in:

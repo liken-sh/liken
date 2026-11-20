@@ -30,8 +30,8 @@ the upgrade of each machine, and the hardware, which it publishes as
 devices that a pod can claim. The image contains the Linux kernel,
 `liken`'s own init, [k3s](https://k3s.io), and the host programs that
 cannot run from a container, such as `mke2fs` and the iSCSI and NFS
-clients. It has no shell, no package manager, and no libc. Every other
-program runs in a container.
+clients. It has no shell, no package manager, no shared C library,
+and no dynamic loader. Every other program runs in a container.
 
 The OS is all that a cluster needs to run. It publishes a monitor or a
 sound card as a device, but it does not drive it. An extension

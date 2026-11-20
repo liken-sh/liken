@@ -10,11 +10,14 @@ only workload. The plugin makes each pod's copy, so it must run on
 every node where a pod can run. A `liken` node registers with taints,
 so the plugin tolerates every taint.
 
-To publish a volume, the plugin runs `mkdir` for the copy and
-bind-mounts the copy onto the pod's target path. The node's store
-contains each copy, and a record of each target path where a copy is
-published. The plugin watches the `PersistentVolume`s of this driver,
-and it removes a copy when no `PersistentVolume` has its handle. It
+The kubelet asks the plugin to publish a volume, which in CSI means
+to mount it into one pod. To publish, the plugin runs `mkdir` for the
+copy and bind-mounts the copy onto the pod's target path. The node's
+store, the plugin's directory on the node, contains each copy and a
+record of each target path where a copy is published. The plugin
+watches the `PersistentVolume`s of this driver. It removes a copy
+when no `PersistentVolume` has its handle, the `volumeHandle` that
+names the copy's directory. It
 posts a `Warning` `Event` on the pod for each handle that it rejects
 and each mount that fails.
 

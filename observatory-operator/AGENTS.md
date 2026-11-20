@@ -43,8 +43,9 @@ from one telescope to another only between sessions.
 
 `astrophotography-operator` depends on this component. This component
 does not depend on it. `astrophotography-operator` imports the
-`observatory`, `indi`, and `phd2` packages, so those packages import
-only the standard library and `kubernetes/conditions`. A change to an
+`observatory`, `indi`, and `phd2` packages. So those packages import
+only the standard library, `kubernetes/conditions`, and each other,
+and nothing else of this operator. A change to an
 exported name or a behavior of one of those packages also runs
 `astrophotography-operator`'s tests.
 
@@ -72,8 +73,8 @@ does not include the `Firmware`s for the bare QHY chips, because the
   procedures and `drivers/generated.go`. The comment above each target
   in the `Makefile` names the file that it writes. A test fails when a
   generated file is stale.
-- A mount reports its position several times a second. So
-  `cost_test.go` fails when an INDI or PHD2 reading wakes anything
-  more than the status writer, the lock relay, and a wait for a value.
+- A mount reports its position several times a second, so the work
+  for one reading must stay small. `cost_test.go` measures that work
+  and fails when a reading costs more than its limit.
 - Most tests use `examples/simulators.yaml` as their inventory, so a
   change to the example changes those tests.

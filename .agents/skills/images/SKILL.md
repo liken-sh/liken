@@ -224,7 +224,14 @@ show each of these steps.
   stub `src/main.rs` or `src/lib.rs` for it in the dependency stage.
   When you add a member, add these lines to each Dockerfile that
   builds a member of the same workspace, not only to the Dockerfile
-  of the new member.
+  of the new member. When another member depends on a crate of
+  another component by path, the Dockerfile also copies that crate's
+  `Cargo.toml` from its build context, and the image needs that
+  context, even when the program that you add does not use the crate.
+  `media-operator/idle` depends on `media-screen`, so the build of
+  `media-display` in `media-operator/Dockerfile.screen` copies the
+  manifest of `media-screen` too. "Link a crate of another component"
+  gives the steps.
 - **The ignore file of the Dockerfile.** A Dockerfile can have its own
   ignore file, `<Dockerfile>.dockerignore`, beside it. In this
   repository, that file is usually an allowlist: it excludes `*` and
@@ -269,10 +276,11 @@ packages an image has. Without a package record, syft writes an SBOM
 that lists almost none of the image's packages, and Trivy finds no
 package to match against an advisory.
 
-The closure library, `vulkan/closure.sh`, writes those records. Every
-closure on a Debian or Ubuntu builder sources the library through a
-build context, and calls `collect` and then `notices`. No closure
-writes its own ldd walk or its own copy of the notices.
+The closure library, `vulkan/closure.sh`, writes those records. A
+closure that copies files from packages installed on its builder
+sources the library through a build context, and calls `collect` and
+then `notices`. Such a closure writes no ldd walk and no copy of the
+notices of its own.
 
 For each package that a file in the closure came from, `notices`
 writes two files:

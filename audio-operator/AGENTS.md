@@ -9,7 +9,8 @@ describes its kinds.
 One `audio-operator` pod runs on each node that has a sound card. Its
 claim takes every device whose attribute `sound.liken.sh/supportsSound`
 is true: each sound card that `liken` publishes, and the media bus
-that `bluetooth-operator` publishes for a Bluetooth radio. The comments in
+that `bluetooth-operator` publishes for a Bluetooth radio. The media
+bus is a D-Bus connection to the radio's `bluetoothd`. The comments in
 `deploy/operator.yaml` give the order in which the containers start,
 and the reason for it.
 
@@ -34,8 +35,8 @@ checks authentication and authorization, reads `status.node` of the
 `Sink` or `Source`, and forwards the request to the `capture`
 container on that node. `capture` records from PipeWire's socket with
 `pw-record`, encodes the sound, and streams it back. `audio-api` posts
-a `Captured` `Event` on the `Sink` or `Source` for each tap, which is
-one capture request. Neither `audio-api` nor `capture` stores any
+a `Captured` `Event` on the `Sink` or `Source` for each capture
+request. Neither `audio-api` nor `capture` stores any
 sound.
 
 ## Design

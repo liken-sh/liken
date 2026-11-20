@@ -246,9 +246,12 @@ sibling.
 The search does not find these:
 
 - **`SECURITY.md`**, section "What is in scope". Its first paragraph
-  names the parts of `liken` that are in scope: the operators as a
-  group, the `liken` CLI, the build, and `transect` by name. Add the
-  name of a component that none of these groups includes.
+  says that `liken`'s own code is in scope, and lists the init, the
+  `liken` CLI, the operators that run on a machine, `transect`, the
+  build, and the release workflow. Add the name of a component that
+  runs on its own and is in none of these groups. A library, such as
+  a crate that only other components link, needs no entry. Its code
+  is in scope as part of each component that links it.
 - **A component with a coverage job and no manual**: add
   `/coverage/<name>.html` to the exceptions in
   `liken/docs/linkcheck/manual_test.go`. Add the component to "The

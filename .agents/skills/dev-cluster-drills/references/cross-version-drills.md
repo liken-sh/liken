@@ -121,6 +121,16 @@ falls back, two things change on its `Machine`:
   the `hash` of the rejected release record, a `reason`, and
   `rejectedAt`.
 
+The drill ends when the machine is back on the version that worked.
+The wait loop of "The upgrade drill" waits for the faulted release, so
+it runs to its deadline. Read the condition and the field instead:
+
+```bash
+dev-cluster/kubectl get machine node-2 -o json | jq '{
+    converged: (.status.conditions[] | select(.type == "VersionConverged")),
+    rejection: .status.boot.systemRejection}'
+```
+
 ## Reading a guest's disks offline
 
 To inspect a machine's FAT system slots with no root and no shell,

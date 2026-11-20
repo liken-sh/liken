@@ -86,7 +86,9 @@ project. For example, `liken/kernel/latest.sh` follows Canonical's
 mainline builds, which come some days after kernel.org tags a
 release. When this happens, read the header comment of the pin's
 `latest.sh` to learn what the pin follows. Then tell the maintainer
-what the report shows and why, before you change anything.
+what the report shows and why. Then stop. `--bump` moves a pin only
+to the version that its `latest.sh` reports, so there is nothing to
+bump.
 
 The steps below cover each pin whose bump needs more than its
 `--bump` and the build that its `next:` line names. Any other row,
@@ -136,7 +138,9 @@ after another, in one background task. Follow these rules:
    requires the source needs a mirror in `liken/licensing/sources.sh`.
 
 Each bump prints a `next:` line that names the make target that
-rebuilds its domain. `make all` covers those targets. One target
+rebuilds its domain. Run the line from the pin's own directory. For
+example, `liken/kernel/latest.sh` prints `make -C .. kernel`, which
+you run in `liken/kernel/`. `make all` covers those targets. One target
 needs care: `make storage` is not a build. It starts the lab's
 storage guest under QEMU, and it runs in the foreground for the whole
 life of the guest. So never chain it before another target.
@@ -151,7 +155,10 @@ These bumps need more care:
   be tested again on the next kernel. Search the open problems with
   `git grep -l -i kernel -- ':(glob)**/plans/open-problems/**'`, and
   the source for a comment that names a kernel version with
-  `git grep -n -i -E 'kernel v?[0-9]+\.[0-9]+' -- ':!*.md'`.
+  `git grep -n -i -E '(kernel|linux) v?[0-9]+\.[0-9]+' -- ':!*.md'`.
+  The search finds comments such as "Linux 7.3.1" in
+  `bluetooth-operator/bluetoothd/rescan/main.go` and "kernel 7.1.5" in
+  `liken/image/stick.go`.
 - **A Flux bump.** `flux/latest.sh --bump` also runs
   `ci/latest.sh --bump fluxcd/flux2`, which writes the commit of the
   flux action into `ci/actions.go`. The generated workflows name that

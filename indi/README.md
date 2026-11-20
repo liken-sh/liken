@@ -51,12 +51,14 @@ every library that the loader resolves for those programs, and the
 files that the programs open by name. `indi` is the base closure.
 Every other image builds on it and adds only its own files. An image
 has a shell only when one of its programs needs one. For example, the
-CCD simulator in `indi-simulators` runs `gsc` through `popen()`. Each image includes the copyright
-files and the dpkg records of the packages that it copied files from,
-so a scanner can list its packages.
+CCD simulator in `indi-simulators` runs `gsc` through `popen()`. Each
+image includes the copyright files and the dpkg records of the
+packages that it copied files from, so a scanner can list its
+packages.
 
 Everything installs from dated snapshots of Ubuntu, the INDI PPA, and
-the PHD2 PPA. Snapshots are needed because a PPA keeps only its
+the PHD2 PPA. A snapshot is a copy of an archive as it was on one
+day. Snapshots are needed because a PPA keeps only its
 newest build of each package. These entries record what a build
 installs:
 

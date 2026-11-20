@@ -15,10 +15,10 @@ folder that each post names. The pods and `Job`s run the pod build of
 this program, which is the same code built with the tag `pod`.
 
 Each namespace has a Corrosion cluster for the catalog and another
-for the progress store. Each Corrosion agent stores a full SQLite copy
-of its database. The catalog pods publish a report of each `Library`
-on the bus, and the operator writes the report into the `Library`'s
-status.
+for the progress store, the database of each person's progress in
+each title. Each Corrosion agent stores a full SQLite copy of its
+database. The catalog pods publish a report of each `Library` on the
+bus, and the operator writes the report into the `Library`'s status.
 
 Each `Library` runs one `Job` at a time. The `Job` scans the library
 and then enriches it, with one container for each phase, and it

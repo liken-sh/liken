@@ -206,7 +206,12 @@ tag, so run these commands after step 3:
    name=$(serve ghcr.io/liken-sh/indi-simulators:$tag indi_simulator_telescope \
        indi_simulator_focus indi_simulator_rotator indi_simulator_wheel \
        indi_simulator_sqm indi_simulator_ccd)
+   sleep 2
    ```
+
+   The drivers need time to start before they answer. The `sleep`
+   lines in these steps are the waits that
+   `../indi/smoke/simulators.sh` uses.
 
 2. List the devices, and connect each one. The names come from the
    drivers, such as `Telescope Simulator` and `CCD Simulator`:
@@ -214,6 +219,7 @@ tag, so run these commands after step 3:
    ```sh
    getprop "$name" '*.CONNECTION.CONNECT'
    setprop "$name" "<device>.CONNECTION.CONNECT=On"
+   sleep 2
    ```
 
 3. Unpark the mount and slew it:
@@ -234,11 +240,16 @@ tag, so run these commands after step 3:
    setprop "$name" "CCD Simulator.FITS_HEADER.KEYWORD_NAME;KEYWORD_VALUE;KEYWORD_COMMENT=OBJECT;M42;declared"
    ```
 
-5. When `getprop "$name" -1 'Telescope Simulator.EQUATORIAL_EOD_COORD._STATE'`
-   prints `Ok`, take an exposure of 1 s:
+5. Wait until the slew ends, for at most 30 s. Then take an exposure
+   of 1 s, and wait for the driver to save the file:
 
    ```sh
+   for _ in $(seq 30); do
+       sleep 1
+       [ "$(getprop "$name" -1 'Telescope Simulator.EQUATORIAL_EOD_COORD._STATE')" = Ok ] && break
+   done
    setprop "$name" "CCD Simulator.CCD_EXPOSURE.CCD_EXPOSURE_VALUE=1"
+   sleep 6
    ```
 
 6. Copy the header of the file that the driver saved into

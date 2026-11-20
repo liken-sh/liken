@@ -6,15 +6,16 @@ upstream release, every library and driver that Weston loads,
 `liken`'s modules for it, and programs that diagnose a screen. Its
 entrypoint is `weston`.
 
-The build turns on only the features that `display-operator` uses:
-the DRM and headless backends, the GL renderer, and the ivi-shell.
-The image also contains the EGL and GBM loaders and Mesa's DRI
-drivers, which the GL renderer uses to draw. The image builds Weston
-from its release, not from Debian's package, so it can use a point
-release with a fix before sid packages it. The `Dockerfile` explains
-which fix. Every library that Weston links comes from the same Debian
-snapshot as the other base images. A program that draws on the screen
-runs in its own pod and connects to the compositor's socket.
+The build turns on only the features that `display-operator` uses: the
+DRM and headless backends, the GL renderer, and the ivi-shell. The image
+also contains the EGL and GBM loaders and Mesa's DRI drivers, which the
+GL renderer uses to draw. The image builds Weston from its release, not
+from Debian's package, so it can use a point release with a fix before
+sid, Debian's development suite, packages it. The `Dockerfile` explains
+which fix. Every library that Weston links comes from the same dated
+snapshot of snapshot.debian.org as the other base images, as
+[`vulkan`](../vulkan/) explains. A program that draws on the screen runs
+in its own pod and connects to the compositor's socket.
 
 `weston` builds on [`vulkan`](../vulkan/). Its layer contains only
 the files that `vulkan` does not, so a node that runs the compositor
@@ -32,11 +33,15 @@ downloads it.
   listens for monitor hotplug events on udevd's netlink group. A
   `liken` machine runs no udevd, so the shim makes Weston listen on
   the kernel's netlink group instead.
-- **The layout controller**, in `layout/`, an ivi-shell module. It opens one Wayland socket for each claim. It also opens a
-  control socket, which `display-operator` uses to place, fade, and
-  move each window. Inside a claim's region, one client of the claim
-  can arrange the claim's surfaces through `liken_arrangement_v1`, a
-  protocol that the controller implements. The protocol is defined in
+- **The layout controller**, in `layout/`, an ivi-shell module. It opens
+  one Wayland socket for each claim, the `ResourceClaim` through which a
+  pod gets a screen. It also opens a control socket, which
+  `display-operator` uses to place, fade, and move each window. A
+  claim's region is the rectangle of the screen that `display-operator`
+  gives the claim. Inside it, one client of the claim can arrange the
+  claim's surfaces, which means to set the position, size, and opacity
+  of each one. It does this through `liken_arrangement_v1`, a protocol
+  that the controller implements. The protocol is defined in
   `layout/liken-arrangement-v1.xml`.
 - **The diagnostic programs**, such as `wayland-info`, which lists
   every global that the compositor advertises, and

@@ -9,8 +9,9 @@ The generated workflows run `ci`. Read `.github/workflows/ci.yaml`,
 `scan.yaml`, and a component's workflow to see which job runs which
 command. The `plan` job runs `plan` and `bases`, and every later job
 of the run uses their outputs. Every command reads the tree, and some
-also query ghcr.io and the release channel. Only `publish` and
-`record` write outside the tree.
+also query ghcr.io and the release channel. Only `publish`, which
+pushes images, and `record`, which writes the GitHub release, change
+anything outside the machine that runs them.
 
 ## Design
 
@@ -25,13 +26,14 @@ The workflows are static files, not a matrix that a script computes.
 So GitHub draws the dependency graph of each run, and a skipped job
 shows which component did not change.
 
-A pinned component's published tag is never overwritten. `bases`
-treats the tag as current when the tag's recipe label equals the
-recipe of the tree. The recipe is a hash of the files that the
-component's images are built from, and it does not cover the
-generator. So when you change the generator in a way that changes
-what a build makes, or that changes the labels that `publish` writes
-on a pinned image, raise the recipe format. A new recipe format
+A pinned component, such as a base image, publishes under a tag of
+its version and revision, and that tag is never overwritten. The
+recipe is a hash of the files that the component's images are built
+from. It does not cover the generator. `bases` treats the tag as
+current when the tag's recipe label equals the recipe of the tree. So
+when you change the generator in a way that changes what a build
+makes, or that changes the labels that `publish` writes on a pinned
+image, raise the recipe format. A new recipe format
 changes the recipe of every pinned component.
 
 ## Finding things

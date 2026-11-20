@@ -14,17 +14,20 @@ operator that imports the package.
 ## Design
 
 Code goes in this module when two operators need it in the same form.
-Code that only one operator uses stays in that operator. A hook that
-cannot work outside its package, such as an option of a shared
-function, is the exception: it comes here even when only one operator
-uses it. The code that the hook runs stays in the operator.
+Code that only one operator uses stays in that operator. A hook is a
+point where a shared function calls code that its caller supplies,
+such as an option of the function. A hook cannot work outside its
+package, so it comes here even when only one operator uses it. The
+code that the hook runs stays in the operator.
 
 The module is split into small packages because some programs that
-import it run in many pods at once, such as the pod build of
-`library-operator`. Linking client-go more than doubles the size of
-such a binary and the memory that it uses at start. So `make test`
-fails when a small package links a `k8s.io` package outside its
-limit, and the comments in `Makefile` give each limit and its reason.
+import it run in many pods at once. An example is the pod build of
+`library-operator`, the program that each of its pods and `Job`s runs.
+The small packages link no `k8s.io` package, or only small parts of
+client-go, so such a program stays small. `make test` fails when a small
+package links a `k8s.io` package outside its limit. The comments in
+`Makefile` give each limit and its reason.
 
 Load the `operators` skill before you change a watch, the store that
-a pass reads, or `memo`.
+a reconcile pass reads, or `memo`. A reconcile pass is one run of an
+operator's loop that compares the declared state with the cluster.

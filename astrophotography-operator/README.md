@@ -3,12 +3,13 @@
 `astrophotography-operator` takes the pictures that you ask for on a
 telescope of a [`liken`](https://liken.sh/) cluster. You declare a
 `Target`: an object, its coordinates, and the frames that you want of
-it, such as sixty five-minute frames of M42 through each of three
-filters. When you reserve a telescope for the operator, it chooses a
-target and slews to it. It centers the target with a plate solve,
-guides and dithers with PHD2, and takes the frames. A target can take
-many nights. Its status counts, for each sequence, the frames that are
-archived and the frames that are still to move.
+it, such as five-minute frames of M42 through each of your filters.
+When you reserve a telescope for the operator, it chooses a target
+and slews to it. It centers the target with a plate solve, guides and
+dithers with PHD2, and takes the frames. A target can take many
+nights. Its status counts, for each sequence, the frames that are
+archived and the frames that wait to be copied from the camera to
+the archive.
 
 The operator chooses an eligible target that is above the
 telescope's horizon. The manual's page on targets gives the rules of

@@ -34,19 +34,26 @@ lists the digest of the release's `release.yaml`. It renews the
 machine's heartbeat `Lease`, and `cluster-operator` marks the machine
 `Lost` when the `Lease` is stale.
 
-`cluster-operator` reads and writes only through the Kubernetes API.
-It grants each `Disruption` when the `MachineDisruptionBudget`s allow
-it, and it reads the release channel at `releases.liken.sh` to report
-the newest release.
+`cluster-operator` changes the cluster only through the Kubernetes
+API. It grants each `Disruption` when the `MachineDisruptionBudget`s
+allow it. Its one other connection is to the release channel at
+`releases.liken.sh`, which it reads to report the newest release.
 
 ## Design
 
-Every goroutine in `init` runs as root in PID 1. A fatal runtime error
-in any of them ends PID 1, and then the kernel panics. So `init` runs
-a loop only when k3s cannot start without it.
+Each component of `init` runs as a goroutine in PID 1, as root.
+`init` restarts a component that returns an error or panics. It
+cannot catch a fatal runtime error, such as concurrent map access or
+running out of memory. That error ends PID 1, and then the kernel
+panics. The project accepts this because the root filesystem is in
+RAM, `init` verifies manifests before it trusts them, and a reboot
+returns the machine to a known state. A component belongs in a child
+process when it parses untrusted input from the network, needs fewer
+privileges than PID 1, or must not take the machine down when it
+fails. The comment at the top of `init/components.go` has the rule.
 
-The OS publishes each machine's hardware as devices of the `liken.sh`
-DRA driver. A device's attributes record the facts about it that no
+`machine-operator` serves the `liken.sh` DRA driver, which publishes
+each machine's hardware as devices. A device's attributes record the facts about it that no
 other layer can observe. An extension operator claims a device
 through the standard DRA interfaces, the same ones that work with any
 other DRA driver. No code in the OS reads an operator's kinds. When
@@ -62,8 +69,7 @@ an attribute, and the logic of the feature stays in the operator.
   replace the cluster's schema with an older one.
 - The ordinary lab guests have virtio devices, which need no kernel
   module. `dev-cluster/hardware/README.md` describes a lab guest that
-  does load its storage and network modules. Milestone 32 lists what
-  only a physical machine can prove.
+  does load its storage and network modules.
 - The scripts in `licensing/` write each release's `LICENSES.md` from
   `licensing/NOTICES.md`. `licensing/sources.sh` copies the source of
   each copyleft component to the release channel.

@@ -8,9 +8,9 @@ says what it is for and describes its kinds.
 The operator is one `Deployment` in `liken-system`. Only the pod that
 has the `Lease` acts. Of the `Reservation`s, it watches only those
 whose holder is `astrophotography-operator`. For each of those
-reservations that is `Ready`, the operator connects to the
-telescope's INDI server as one more client. When the telescope has
-a `Guider`, it also connects to PHD2's event server. Through those
+reservations whose `status.phase` is `Ready`, the operator connects
+to the telescope's INDI server as one more client. When the telescope
+has a `Guider`, it also connects to PHD2's event server. Through those
 connections, it runs the night.
 
 The operator's other modes run from the image

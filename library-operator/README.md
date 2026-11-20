@@ -16,8 +16,8 @@ providers that you list, and writes them beside the media as the
 the images for the seek bar, finds the credited people on screen,
 finds where the end titles start, and records each person's progress
 in each title. A webhook, such as one from Sonarr, makes the operator
-rescan the folder that the webhook names. The files on the
-volume are the source of truth. The operator reads and writes the
+rescan the folder that the webhook names. The files on the volume
+are the source of truth. The operator reads and writes the
 media, the `.nfo` files, and the art. The catalog is an index built
 from those files, so the operator can rebuild it from them at any
 time. The operator does not play media or control the equipment. It
@@ -44,11 +44,11 @@ The operator defines these resources:
   such as films, or a checkout of franchise files that show the films
   and series of one story in story order. It lists the providers to ask,
   in order, and the work to run on its videos.
-- A `Catalog` is the namespace's shared catalog. It creates the pods
-  that store the catalog of record, the copies that every other
-  agent syncs from. It sets the size of every claim that stores a
-  copy. It can also name a Jellyfin server, and progress then syncs
-  with that server in both directions.
+- A `Catalog` is the namespace's shared catalog. It creates the catalog
+  pods. They store the durable copy of the catalog, which every screen
+  and `Job` copies from. It sets the size of every claim that stores a
+  copy. It can also name a Jellyfin server, and progress then syncs with
+  that server in both directions.
 - A `MetadataProvider` is one account with one metadata provider, such
   as TMDb, with the `Secret` that contains its key.
 
@@ -70,6 +70,7 @@ spec:
 ```
 
 The manual is at [liken.sh/library](https://liken.sh/library/). It
-has the install guide, the guides, and a reference for each resource. [`plans/00-design.md`](plans/00-design.md) is the design.
+has the install guide, the guides, and a reference for each resource.
+[`plans/00-design.md`](plans/00-design.md) is the design.
 
 MIT. See [LICENSE](LICENSE).

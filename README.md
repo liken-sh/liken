@@ -17,10 +17,9 @@ publishes each machine's hardware as devices that a pod can claim.
 All other software runs in containers. The OS, with the operators
 that manage the machines and the cluster, is in [`liken/`](liken/).
 
-Each operator is optional, and you install it like any other
-manifest. An operator claims a device that the OS publishes and
-offers pods something more specific, such as one monitor output or
-one speaker. A cluster runs fine without any of them.
+Each operator is optional, and you install it like any other manifest.
+An operator claims a device that the OS publishes and offers pods
+something more specific, such as one monitor output or one speaker.
 
 Each top-level directory is one component. Its `README.md` says what
 it is for and links to its manual on [liken.sh](https://liken.sh/).
