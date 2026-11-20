@@ -338,6 +338,33 @@ understand, as answers to the questions above.
 
 Settled on 2026-11-20.
 
+## The surroundings
+
+A service often depends on a thing outside the cluster: a scanner that
+writes files to a share, a forge that sends webhooks, a storage
+server, a person.  A view of the service is incomplete without it,
+because the part inside that serves it has no reason without it.
+
+The owner of the cluster declares each outside thing, by name, in the
+manifests.  The declaration is a claim.  The cluster cannot confirm
+that a scanner exists, so the claim shows who stated it and when, and
+a view draws an outside thing differently from a part that the cluster
+confirms.
+
+An outside thing belongs in a view when a part inside the cluster
+exists because of it.  That test tells an owner what to declare, and
+it keeps the surroundings from becoming a map of a whole network.  It
+also gives the reader a loose end to notice: a part that faces outside
+the cluster, such as a `Service` that takes connections from the local
+network, with no declared thing at the other end.
+
+An agent drew a scanner in the third case from the name of a
+`NetworkPolicy` alone.  The guess was right, and the drawing did not
+mark it as a guess.  A declared thing replaces that guess with a
+statement that has an author.
+
+Settled on 2026-11-20.
+
 ## A pattern view
 
 The unit of the product is a pattern view: a model that its authors
@@ -612,8 +639,6 @@ served.
 
 - Who may write a claim.  That depends on where knowledge is stored,
   which the design settles last.
-- What counts as the cluster's surroundings, such as a storage server,
-  a forge, an identity provider, and the devices on a bus.
 - Which ideas of the proof of concept carry over.  The candidates are
   places that keep their position from one visit to the next, a mark on
   each fact that states its source, and the elevations from the cluster
