@@ -61,7 +61,7 @@ syft copies each record's components into the image's SBOM, with the
 purl, the CPE, and the license from the record. It sets the record's
 path as their `sourceInfo`. An image that copies another image's tree,
 such as with `COPY --from=trust / /`, copies that image's record too.
-The rule is in "Pins and downloads" in the `pins` skill.
+The rule is in "The manifest" in the `pins` skill.
 
 After the push, the publish job runs cosign, from the image that
 `toolchains/images.toml` pins. cosign signs the digest of the index
