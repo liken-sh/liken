@@ -263,6 +263,22 @@ claim is checked or shows its age.
 This is a constraint, and the proof of concept kept it.  The maintainer
 confirmed it for new work on 2026-11-20.
 
+## Disagreement
+
+`transect` shows every claim and every expectation with its author,
+and that includes the ones that conflict.  It does not choose between
+them, and it has no rule of precedence.  It compares what it observes
+in the cluster with each one, and shows where the cluster meets it and
+where the cluster does not.
+
+A disagreement is a fact that the reader needs.  When the author of an
+operator states one thing about a system and an agent states another,
+a rule that picks one hides the other.  Each claim already shows
+whether the cluster confirms it or how old it is, so the reader has
+what they need to weigh one against the other.
+
+Settled on 2026-11-20.
+
 ## Who writes the knowledge
 
 The people who know a fact write it: the author of an operator, the
@@ -336,7 +352,8 @@ served.
 
 ## Open positions
 
-- Who may state what, and whose claim holds when two disagree.
+- Who may write a claim.  That depends on where knowledge is stored,
+  which the design settles last.
 - What counts as the cluster's surroundings, such as a storage server,
   a forge, an identity provider, and the devices on a bus.
 - Which ideas of the proof of concept carry over.  The candidates are
