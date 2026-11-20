@@ -338,6 +338,32 @@ understand, as answers to the questions above.
 
 Settled on 2026-11-20.
 
+## A pattern view
+
+The unit of the product is a pattern view: a model that its authors
+stated, with the running cluster laid against it.  The cases below
+found the same parts in each view that worked:
+
+- **A name** for the model, such as "pipeline" or "interactions, in
+  order".
+- **The model as stated:** the stages and what each waits for, or the
+  participants and what each asks of the next.
+- **The cluster laid against it:** which part has which role now, and
+  which role has no part.
+- **A reading on each role or step,** from the signal that names it.
+  A step that no signal names shows that it has none.
+- **The source of each kind of fact.**
+
+The form of the drawing changes with the pattern, and these parts stay
+the same.  So a reader learns once how to read any pattern view, and
+learns each form once.
+
+A pattern view shows where instrumentation is missing.  In each case
+the most useful reading was on the step where work can stop, and each
+case had a step with no signal.
+
+Settled on 2026-11-20.
+
 ## The walk `Job`, through the primitives
 
 This section tests the primitives against the first case.  Its facts
@@ -509,6 +535,49 @@ interactions among services is a claim of the same kind.
   claim gives the steps that every event takes.  The steps that one
   event took are a trace, and traces are a source of signals that is
   not designed.
+
+## The web application, through the primitives
+
+This section tests the primitives against the third case, an
+application of the common shape on a home cluster: web pods, worker
+pods, a scheduler, a store that is the queue and the cache, and a
+database that an operator keeps.  Another project wrote the
+application.  Its facts were read from the cluster on 2026-11-20.
+
+It is several patterns over the same parts:
+
+- **Requests.**  An `Ingress` sends requests to the web pods, which
+  read and write the database and the cache.
+- **A work queue.**  The web pods, a pod that watches a directory for
+  new files, and the scheduler put tasks on a list in the store.  The
+  worker pods take them, and call helper services to convert files.
+- **A primary with replicas.**  The store has a primary and replicas
+  that follow it.  The database has a primary and no replica.
+
+What the case showed:
+
+- **One part has a role in each of several patterns.**  The same store
+  is the queue of the work queue, the cache of the requests, and a
+  primary with replicas of its own.  The design keeps one view for
+  each pattern, and the part appears in each under the role it has
+  there.
+- **A relation can be hidden in a `Secret`.**  The pods read the
+  database's address from a `Secret`, and `transect` reads no
+  `Secret`.  So no object that it reads joins the web pods to the
+  database, and a claim must.
+- **An owner has stated expectations already, as alerts.**  The
+  cluster's owner alerts when more than a set count of tasks wait on
+  the queue.  That rule is a convention in another form, and it names
+  the signal for the queue's backlog.
+- **Knowledge can belong to a framework.**  Which process produces
+  tasks, which one takes them, and which list is the queue are facts
+  of the task framework that the application uses.  A claim at that
+  level fits each application that uses the framework.
+- **A stack and the one that stands apart did their work.**  The
+  workers are alike, and one of them had restarted while the others
+  had not.
+- **A role with no part appeared again.**  The database's pattern has
+  replicas, and this one has none.
 
 ## The order of the design
 
