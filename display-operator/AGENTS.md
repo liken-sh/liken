@@ -6,33 +6,36 @@ and describes its kinds.
 
 ## How it runs
 
-The `display-operator` `DaemonSet` runs one pod on each node, except a
-node with the label `display.liken.sh/display: none`. The pod claims
-the graphics card's primary node, its render node, and its i2c buses
-from `liken`. Its containers share one process namespace, so the
-operator can send signals to the compositor.
+One `display-operator` pod runs on each node. It claims the graphics
+card's primary node, its render node, and its i2c buses from `liken`.
 
-- `declare` is an init container. It writes `weston.ini` with the
-  mode that each `Display` sets.
-- `weston` runs the compositor. The compositor opens the card first
-  and becomes its DRM master, the one process that can set modes and
-  show frames on the card. It loads the layout module. The module
-  opens one Wayland socket for each prepared claim, and it places each
-  window where the operator tells it over a private control socket.
-- `operator` serves DRA to the kubelet and publishes each output. It
-  reads the card's modes and each monitor's EDID, sends each panel's
-  settings over DDC/CI, and writes the status of each `Display` on its
-  node. To apply a mode, it rewrites `weston.ini` and restarts the
-  compositor, because Weston reads the file only when it starts.
-- `capture` reads frames from the layout module's capture socket and
-  encodes them on the render node.
+The compositor in the `weston` container owns the card. It opens the
+card first and becomes its DRM master, the one process that can set
+modes and show frames on the card. Weston reads its modes from
+`weston.ini` only when it starts. So the `declare` init container
+writes the file from each `Display` before Weston starts. To apply a
+new mode, the operator rewrites the file and restarts the compositor.
+The containers share one process namespace, so the operator can send
+the compositor a signal.
 
-The `display-api` `Deployment` serves the capture API for the whole
-cluster. It forwards each request to the `capture` container on the
-node of the `Display`. `media-operator` claims outputs for its
-`Player`s, and it sets the override of a `Display` for its idle
-screen. `equipment-operator` reads the HDMI physical address of a
-`Display`.
+Weston loads the layout module of the `weston` component. The module
+opens one Wayland socket for each prepared claim, and the window of
+the consumer pod connects to that socket. The operator tells the
+module where to place each window over a private control socket.
+
+The `operator` container reads the card's modes and each monitor's
+EDID, and sends each panel's settings over DDC/CI on the i2c buses.
+It serves DRA to the kubelet, publishes each output, and writes the
+status of each `Display` on its node.
+
+A capture request goes to the `display-api` `Deployment`, which
+forwards it to the `capture` container on the node of the `Display`.
+`capture` reads frames from the layout module's capture socket,
+encodes them on the render node, and streams them back.
+
+`media-operator` claims outputs for its `Player`s, and it sets the
+override of a `Display` for its idle screen. `equipment-operator`
+reads the HDMI physical address of a `Display`.
 
 ## Design
 
@@ -58,17 +61,11 @@ is named by the monitor's identity. `audio-operator` builds the same
 identity from the monitor's ELD, so that a claim can pair a screen
 with its speakers.
 
-The reasons for these decisions are in `plans/`. Read the relevant
-plan before you change how something works.
-
 ## Finding things
 
-- `docs/content/docs/reference/displays.md`, `layouts.md`,
-  `openapi.json`, and `routes.md` are generated from `deploy/`, the
-  text in `docs/crdref/` and `docs/apiref/`, and the operator's
-  router. `make -C docs generate` regenerates them, and
-  `make -C docs skills` regenerates `skills/` from the guides.
-  `make test` fails when either is out of date.
+- `docs/content/docs/reference/openapi.json` and `routes.md` are
+  generated from the operator's router, with text from
+  `docs/apiref/`.
 - `smoke/display-capture.sh` checks that the `display-capture` image
   runs `/usr/bin/ffmpeg`, which is the path that the capture container
   calls.

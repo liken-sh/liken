@@ -10,16 +10,17 @@ guides and dithers with PHD2, and takes the frames. A target can take
 many nights. Its status counts, for each sequence, the frames that are
 archived and the frames that are still to move.
 
-The operator chooses the eligible target with the highest priority
-that is above the telescope's horizon. It drives the equipment through
-the telescope's INDI server and PHD2. Then it moves each frame to the
+The operator chooses an eligible target that is above the
+telescope's horizon. The manual's page on targets gives the rules of
+that choice. The operator drives the equipment through the
+telescope's INDI server and PHD2. Then it moves each frame to the
 target's archive, which is a volume claim that you choose, such as a
 network share. The operator names each frame the way the target asks.
 It checks the frame's SHA-256 after the copy, and records the frame in
 a catalog of JSON lines beside the frames. A frame in the archive
-never changes. The operator does not reserve a telescope on its own,
-take the moon or twilight into account, grade frames, take
-calibration frames, or stack frames.
+never changes. The operator does not stack or develop frames, because
+the archive is where other tools take them over. The plans for more
+work, such as calibration frames, are in [`plans/`](plans/).
 
 The operator works on a telescope that
 [`observatory-operator`](../observatory-operator/) runs. It acts only
@@ -44,10 +45,9 @@ or without this operator.
   names the claim of its index files, and the operator runs one
   solver pod for it.
 
-The operator also runs two other workloads. A worker beside each
-reservation's outbox finds the stars of a centering frame. A
-promotion `Job` moves a target's frames from the outbox to the
-archive.
+The operator also runs a worker beside each reservation's outbox,
+which finds the stars of a centering frame, and a promotion `Job`,
+which moves a target's frames from the outbox to the archive.
 
 ## An example
 

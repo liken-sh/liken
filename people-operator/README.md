@@ -13,22 +13,20 @@ or mounts the picture itself. The operator writes only the status of
 each `Person`. Other operators store their own data about a person in
 their own resources, and `people-operator` reads none of it. A
 `Person` can also record a Linux uid in `spec.uid` and a login at an
-outside OIDC identity provider in `spec.identity`. No component reads
-either field. The operator doesn't issue logins or assign uids.
+outside OIDC identity provider in `spec.identity`. `people-operator`
+reads neither field, and it doesn't issue logins or assign uids.
 
 The operator depends on no other component, and on nothing that only
-`liken` provides. A `Play` of [`media-operator`](../media-operator/)
-lists the people who watched it as its owner references.
-[`library-operator`](../library-operator/) records how far each person
-got in what they watch, and deletes that record when the `Person` is
-deleted.
+`liken` provides. Other operators refer to a `Person` from their own
+resources. For example, a `Play` of
+[`media-operator`](../media-operator/) lists the people who watched it
+as its owner references.
 
 ## The kind
 
 - A `Person` is one person, cluster-scoped. `spec.avatar` is the URI
-  of their picture: an `https://` or `http://` URL, a `data:` URI, a
-  file on an NFS export (`nfs://`), or a file on a claim
-  (`claim://<namespace>/<claim>/<path>`). The condition `AvatarReady`
+  of their picture, such as an `https://` URL or a file on a claim.
+  The manual's reference gives each scheme. The condition `AvatarReady`
   says whether the thumbnail was made from the current `spec.avatar`.
 
 ## A person

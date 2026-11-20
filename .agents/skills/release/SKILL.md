@@ -1,6 +1,6 @@
 ---
 name: release
-description: Cuts a liken release - the checks before the tag, what the tag will release, the version, the tag, the watch of the publish run, a rerun of a job that failed outside the repository, and the verification of the channel. Use when the maintainer says /release or asks to cut, tag, publish, or ship a liken release, and when a release tag's run fails. To roll a release onto a cluster, follow that cluster's own procedure after this one.
+description: Cuts a liken release - the checks before the tag, what the tag will release, the version, the tag, the watch of the publish run, a rerun of a job that failed outside the repository, and the verification of the channel. Use when the maintainer says /release or asks to cut, tag, publish, or ship a liken release, and when a release tag's run fails. This is the procedure. For the version scheme, which components a tag releases and why, and the other rules of versions and publishing, the releases skill is the reference. To roll a release onto a cluster, follow that cluster's own procedure after this one.
 ---
 
 Cut a release of the `liken` repository. One tag releases every
@@ -57,15 +57,15 @@ release without one of them, say that a tag cannot do that, and ask.
 
 ## 3. Pick the version
 
-The format is CalVer: `yyyy.mm.dd-nnn`. The tag is the bare version
-with no prefix, for example `2026.10.02-001`. The date is the
-workstation's local date. `nnn` counts the releases within one day,
-starting at `001`. Run `git tag -l "$(date +%Y.%m.%d)-*"` and use the
-next number. Tags are lightweight, not annotated.
+The version is `yyyy.mm.dd-nnn`, as "The version scheme" in the
+`releases` skill defines it, for example `2026.10.02-001`. Run
+`git tag -l "$(date +%Y.%m.%d)-*"` and use the next serial after the
+highest one it prints, or `001` when it prints nothing.
 
 ## 4. Tag and publish
 
-1. `git tag <version> <commit>` and `git push origin <version>`.
+1. `git tag <version> <commit>` and `git push origin <version>`. The
+   tag is lightweight, with no `-a`.
 2. The tag starts a `ci` run. Each component that releases runs its
    checks, builds its images, and publishes. The OS's publish job
    builds the release, runs the UEFI smoke drill, and publishes to
@@ -73,9 +73,12 @@ next number. Tags are lightweight, not annotated.
    release for the tag.
 3. Watch the run to completion with a bounded background watch
    (`timeout 3600 gh run watch <id> -R liken-sh/liken --exit-status`).
-   A run takes about 10 minutes. It takes about 40 when buildroot must
-   build the OS's programs because no cached artifact exists.
-4. If the run fails, do not retag. Read the failure with
+   The run takes much longer when no cached artifact of the OS's
+   programs exists, because buildroot must then build them.
+4. Push nothing to `main` until the tag's run is green. A new push
+   does not cancel the tag's run, but its development builds race the
+   release's pushes.
+5. If the run fails, do not retag. Read the failure with
    `gh run view <id> -R liken-sh/liken --log-failed`.
    - If the cause is outside the repository, such as a 5xx from a
      registry or a network fault, report it. Then run the failed jobs
@@ -94,6 +97,8 @@ next number. Tags are lightweight, not annotated.
    sha256, and compare it with the digest in the GitHub release. The
    two must match exactly. The catalog entry pins the release by this
    digest.
+3. To check the signatures of the release's files and of a published
+   image, use the commands in the `sbom-and-scans` skill.
 
 ## 6. Report
 

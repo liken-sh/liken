@@ -6,15 +6,10 @@ says what it is for and describes its kinds.
 ## How it runs
 
 The operator is one `Deployment` in `liken-system`. Only the pod that
-has the `Lease` acts. The operator watches these objects:
-
-- the `Target`s and `Solver`s
-- the `Reservation`s whose holder is `astrophotography-operator`
-- the kinds of `observatory-operator` that it reads
-- the objects that it creates
-
-For each of its reservations that is `Ready`, the operator connects to
-the telescope's INDI server as one more client. When the telescope has
+has the `Lease` acts. Of the `Reservation`s, it watches only those
+whose holder is `astrophotography-operator`. For each of those
+reservations that is `Ready`, the operator connects to the
+telescope's INDI server as one more client. When the telescope has
 a `Guider`, it also connects to PHD2's event server. Through those
 connections, it runs the night.
 
@@ -32,8 +27,7 @@ built on the `astrometry` image:
 Only the operator connects to the worker and the solver. It copies
 each star list from the worker to the solver. So the star list
 travels over the network between nodes, and the frame does not. The
-operator writes each target's progress into the
-target's status.
+operator writes each target's progress into the target's status.
 
 ## Design
 
@@ -54,9 +48,6 @@ packages also runs this component's tests. It reads only what
 `observatory-operator` publishes for a reservation's holder.
 `observatory-operator/AGENTS.md` describes the contract between them.
 
-The reasons for these decisions are in `plans/`. Read the relevant
-plan before you change how something works.
-
 ## Finding things
 
 - `deploy/` contains the CRDs of `Target` and `Solver`, which are
@@ -69,6 +60,3 @@ plan before you change how something works.
 - `astrophotography/example_test.go` checks
   `examples/first-session.yaml` against both operators' CRDs, the Go
   types, and its own references.
-- The manual's reference pages and `skills/` are generated from the
-  CRDs and the guides. Run `make -C docs generate skills` after you
-  edit either. `docs/AGENTS.md` covers the manual.

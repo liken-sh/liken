@@ -31,11 +31,10 @@ fails when the client stops handling one of them.
 
 - `inditest/testdata/` contains the bytes that a real `indiserver`
   sent with one simulator behind it, for each simulator that a kind
-  runs: `baseline.xml`, `connect.xml`, `disconnect.xml`, and more
-  steps for the focuser and the dome. `capture.SimulatorScript` in
-  `capture/` records the message that each file replies to.
-  `replay_test.go` serves the files to a client. A client that sends
-  a wrong message gets no reply.
+  runs, in one file for each step, such as `connect.xml`.
+  `capture.SimulatorScript` in `capture/` records the message that
+  each file replies to. `replay_test.go` serves the files to a
+  client. A client that sends a wrong message gets no reply.
 - `standard/` contains the captures of the standard properties of
   each INDI interface, made from the bare drivers in
   `standard/bare/`.

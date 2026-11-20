@@ -25,36 +25,28 @@ and the `deb-src` entries that download their sources.
 
 Every image that ships a Go or a Rust program uses this directory as
 the build context `notices`, and lists `notices` in the `[depends]`
-of its `package.toml`. Those images are the operators, the CSI
-drivers, the kubectl plugins, and the screen clients. Each script
+of its `package.toml`, such as each operator and each CSI driver.
+Each script
 writes to a directory that the final stage of the build copies whole,
 as in `COPY --from=build /notices /`.
 
 ## The scripts
 
-- `go.sh` runs in a Go build stage after the build, with the packages
-  that the build compiled. It copies the license files of the Go
-  standard library to `/usr/share/doc/go/`, and the license files of
-  each module that the program links to `/usr/share/doc/<module>/`.
-  When a module has no license file, the build fails. The script
-  leaves out the main module and each module that `go.mod` replaces
-  with a directory of the repository.
-- `cargo.sh` runs in a Rust build stage. It must run in the same
-  `RUN` as the build, because only that `RUN` mounts the crate
-  registry. It copies the notices of the standard library to
-  `/usr/share/doc/rust/`, and the license files of each crate that
-  the program links to `/usr/share/doc/<crate>-<version>/`. When a
-  crate publishes no license file, the script copies its `Cargo.toml`
-  there instead, because that file names the license and the authors.
-  The script leaves out each crate that the build uses by path.
-- `check.sh <image> [<path>...]` reads an image from the local Docker
-  daemon. It fails in two cases: when a package listed in a file in
-  `/usr/share/doc/liken/` has no copyright file in the image, and when
-  a path given after the image name is missing. Each component's
-  smoke check runs it with the files that its image must contain,
-  such as `usr/share/doc/go/LICENSE` for an image with a Go program.
+- `go.sh` runs in a Go build stage after the build, and writes the
+  license files of the Go standard library and of each module that the
+  program links. When a module has no license file, the build fails.
+- `cargo.sh` runs in a Rust build stage, in the same `RUN` as the
+  build, because only that `RUN` mounts the crate registry. It writes
+  the license files of the Rust standard library and of each crate
+  that the program links. When a crate publishes no license file, the
+  script copies its `Cargo.toml`, because that file names the license
+  and the authors.
+- `check.sh` reads an image from the local Docker daemon, and fails
+  when a notice that the image must contain is missing. Each
+  component's smoke check runs it.
 
-The usage of each script is in the comment at its top.
+The comment at the top of each script gives its usage, the paths it
+writes, and what it leaves out.
 
 The INDI images also contain the license file of each vendor SDK in
 them, copied from `indi/sdk-licenses/`. They need these files because

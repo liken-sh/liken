@@ -32,40 +32,10 @@ every `MV` line. The driver reports it as the zone's `volumeMax`. The
 operator does not act on it, because the limit changes with the
 volume.
 
-The driver reports volume in half steps, two for each unit on the
-receiver's display.
+## The state
 
-The driver also reports the address that it used to reach the
-receiver. That is the remote address of the open connection. Until a
-dial connects, it is the declared address, resolved before the dial.
-The controller writes it to
-`status.address`.
-
-## The state and the snapshot
-
-The driver reads the receiver into its own state. The state has one
-entry per zone, the settings for the whole unit, the tone and
-Audyssey settings, the audio settings, the HDMI setup, and the
-channel volumes. `equipment.State` contains the reachability and the
-zones, which every driver reports. `ProtocolStatus` contains the
-rest. The controller writes it to `status.denon`, in this shape (the
-values are examples):
-
-```json
-{
-  "system": {"power": "On", "eco": "auto", "dimmer": "bright", "autoStandby": "off", "speakerPreset": 1, "audioInputMode": "hdmi", "videoSelect": "off", "bluetoothTransmitter": "off", "bluetoothOutput": "speakers"},
-  "tone": {"control": false, "bass": 0, "treble": 0},
-  "audyssey": {"multeq": "reference", "dynamicEq": true, "referenceLevelOffset": 0, "dynamicVolume": "off", "loudnessManagement": true},
-  "audio": {"drc": "off", "lfe": 0, "effect": 0, "delay": 0, "audioDelay": 0, "subwoofer": true, "restorer": "off", "graphicEq": "off", "headphoneEq": "off", "speakerVirtualizer": true, "dialogEnhancer": "off"},
-  "hdmi": {"audioOut": "avr", "passThrough": true, "passThroughSource": "last", "rcSourceSelect": "powerOnAndSource", "control": true, "arc": false, "tvAudioSwitching": false, "powerOffControl": "all", "powerSaving": false},
-  "channelVolumes": {"FL": 0, "FR": 0, "C": 0, "SW": 0}
-}
-```
-
-The tone and channel values are in the units the display shows, so
-the wire value 50 appears as 0. The LFE level is in negative
-decibels. The power is `On` or `Standby`. Every power value that this
-operator reads and writes uses these same PascalCase words.
+`Settings` in `settings.go` is the shape of `status.denon`. The
+comments in `protocol.go` give the units of each wire value.
 
 The main zone's power comes from `ZM` when a model reports it, and
 from `PW` otherwise. A model with a second zone reports it with `Z2`
@@ -86,17 +56,8 @@ menu, and no Denon document lists it. An AVR-X1700H replies to
 line. The driver sends `VSAUDIO ?` and `SSHOS ?` each time it
 connects.
 
-| Field | Key | Words |
-|---|---|---|
-| `audioOut` | `VSAUDIO` | `AMP` is `avr`, `TV` is `tv` |
-| `passThrough` | `SSHOSPAS` | `ON`, `OFF` |
-| `passThroughSource` | `SSHOSCONSTS` | `LAS` is `last`, `HD1` to `HD7` are `hdmi1` to `hdmi7` |
-| `rcSourceSelect` | `SSHOSRSS` | `POS` is `powerOnAndSource`, `SSO` is `sourceSelectOnly` |
-| `control` | `SSHOSCON` | `ON`, `OFF` |
-| `arc` | `SSHOSCONARC` | `ON`, `OFF` |
-| `tvAudioSwitching` | `SSHOSTAS` | `ON`, `OFF` |
-| `powerOffControl` | `SSHOSCONPOF` | `ALL` is `all`, `VID` is `video`, `OFF` is `off` |
-| `powerSaving` | `SSHOSCONPSV` | `ON`, `OFF` |
+`settings_hdmi.go` maps each field of `status.denon.hdmi` to its key
+and its words.
 
 A set command is the key, a space, and the word, the same as the line
 that the receiver reports. The receiver accepted `SSHOSCONSTS LAS` and
@@ -109,8 +70,8 @@ receiver reports in either case.
 Where each word comes from:
 
 - Measured on an AVR-X1700H on a home cluster on 2026-09-26: every
-  key above, read with `VSAUDIO ?` and `SSHOS ?`, and the words `AMP`,
-  `LAS`, `POS`, `ALL`, `ON`, and `OFF`. The only set command sent to
+  key of both families, read with `VSAUDIO ?` and `SSHOS ?`, and the
+  words `AMP`, `LAS`, `POS`, `ALL`, `ON`, and `OFF`. The only set command sent to
   the receiver was `SSHOSCONSTS LAS`, which set it to the value it
   already had.
 - Denon's documents: `VSAUDIO AMP` and `VSAUDIO TV`, in the AVR-X4000

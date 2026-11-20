@@ -8,7 +8,7 @@ Contents:
 * Serve the channel
 * Fetch the release through the laptop's address
 * Point the testbed's `Cluster` at the release
-* Wait for both machines
+* Wait for every machine
 * Return the testbed to the public channel
 
 The physical testbed, `liken-1` and `stick-1`, can install a lab
@@ -95,7 +95,7 @@ show before you start the next one.
    `spec.version`, and both version fields use the format
    `yyyy.mm.dd-nnn`.
 
-6. **Wait for both machines.** Each machine downloads the release,
+6. **Wait for every machine.** Each machine downloads the release,
    reboots in its turn, and proves the new slot. Wait with a deadline,
    and print the machines only when a line changes:
 

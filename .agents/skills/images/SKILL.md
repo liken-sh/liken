@@ -24,8 +24,20 @@ base images, are in the `releases` skill. No Dockerfile writes a
 
 Every image is built through `docker-bake.hcl`, on a workstation and
 in CI. The bake target has the same name as the image. From the top
-of the repository, you run
-`docker buildx bake media-operator-player --load`.
+of the repository, run `make bases` first, and then bake:
+
+```sh
+make bases
+docker buildx bake media-operator-player --load
+```
+
+Without `make bases`, bake builds each base from its own directory,
+and installs the packages of the base from snapshot.debian.org again
+instead of pulling the published base. After you change a `FROM`
+line, run `make workflows` at the top of the repository. `ci/`
+generates `docker-bake.hcl` and the workflows from the `FROM` lines,
+and CI fails when the generated files differ from what the generator
+writes.
 
 A Dockerfile that builds on a base image of the repository names the
 base by its bare name, as in `FROM mpv`. No Dockerfile names a
@@ -53,16 +65,6 @@ snapshot.debian.org again. A commit that raises the revision of a
 base builds the new base from the tree, and builds the images on top
 of it from the tree too, until the new tag of the base is published.
 The reasons are in root plan 89.
-
-Run `make bases` before you run bake on your workstation. Without the
-override file, bake builds each base from its own directory, so the
-build installs the packages of the base from snapshot.debian.org
-again instead of pulling the published base.
-
-After you change a `FROM` line, run `make workflows` at the top of the
-repository. `ci/` generates `docker-bake.hcl` and the workflows from
-the `FROM` lines, and CI fails when the generated files differ from
-what the generator writes.
 
 ### The recipe of a pinned component
 
@@ -242,9 +244,8 @@ installs the packages that Alpine has on the day of the build.
   pull fails. Only CI on `main` pushes a tag.
 - **A program that buildroot builds only with shared libraries.** When
   buildroot's recipe builds a program only with shared libraries, a
-  recipe in the tree builds it static. `iscsi/` has the recipes for
-  open-iscsi and libkmod, and `bluetooth/` has the recipe for BlueZ. A
-  patch to a project's source must be one that upstream can accept,
+  recipe in the tree builds it static, such as the recipe of
+  open-iscsi in `iscsi/`. A patch to a project's source must be one that upstream can accept,
   such as a build definition that respects meson's `default_library`.
 - **The pin of buildroot.** buildroot is pinned to a commit on its
   `master` branch in `liken/userland/VERSION`. Its builder is the
@@ -268,10 +269,8 @@ installs the packages that Alpine has on the day of the build.
   release and drop the patch.
 - **The build trees in a Dockerfile.** A Dockerfile stage that runs
   buildroot deletes its build trees in the same `RUN` that builds,
-  before the layer is committed.
-  `bluetooth-operator/bluetoothd/Dockerfile` deletes `build`, `host`,
-  `staging`, `per-package`, `images`, `legal-info/sources`, and
-  `legal-info/host-sources`. CI writes its layer cache with
+  before the layer is committed, as
+  `bluetooth-operator/bluetoothd/Dockerfile` does. CI writes its layer cache with
   `mode=max`, which also pushes the layers of the intermediate stages.
   In a CI run of 2026-11-03, a stage that kept buildroot's output
   pushed the cross-compiler, the build tree of every package, and the

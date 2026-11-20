@@ -26,9 +26,10 @@ setsid make -C dev-cluster run NODE=node-5 FIRMWARE=secureboot \
   CONSOLE=file:guests/node-5/console.log </dev/null >/dev/null 2>&1 &
 ```
 
-`enroll-keys` seeds `dbx` with Microsoft's signed update of
-2026-04-02, from its pinned LVFS cabinet. So fwupd reports the
-version 20260402 and offers the newer one, as on liken-1. When fwupd
+`enroll-keys` seeds `dbx` with an older signed update from
+Microsoft, from the LVFS cabinet that `DBX_SEED` in
+`dev-cluster/Makefile` pins. So fwupd reports the version of that
+update and offers a newer one, as on liken-1. When fwupd
 does not recognize a `dbx`, it reports no version, and no catalog
 release applies to it. The console shows `Secure boot disabled`.
 
@@ -85,8 +86,8 @@ same applies to the OS image after a change under `liken/`.
 
 ## The test catalog
 
-The test catalog offers versions 2 and 3 of the test device.
-`dev-cluster/firmware/capsule/catalog.sh` builds it, and `make serve`
+The test catalog offers versions of the test device, 2 and 3 by
+default. `dev-cluster/firmware/capsule/catalog.sh` builds it, and `make serve`
 serves it next to the release channel. A `FirmwareCatalog` on the lab
 points at `http://10.0.2.2:8017/firmware/firmware.xml.zst`. The
 operator reads the jcat from the same URL with `.jcat` added.

@@ -1,6 +1,6 @@
 ---
 name: dev-cluster-drills
-description: Runs, upgrades, breaks, and inspects liken's dev cluster, the QEMU fleet under dev-cluster/ whose Cluster resource is named lab, and serves lab releases to the physical testbed liken-1. Use when a session must boot or stop lab guests, run a smoke drill (make smoke-uefi, smoke-bios, smoke-hardware, or smoke-emmc), build a lab release with make release VERSION=yyyy.mm.dd-9xx, serve it with make serve, roll a lab release onto liken-1 and stick-1, drive an upgrade or fallback drill, reach the lab with kubectl or stern, push a locally built image to the lab registry, boot a guest with Secure Boot keys or capsule firmware, read a running machine's filesystem or disks, re-found the fleet after a reinstall, or probe a CRD schema or CEL change.
+description: Runs, upgrades, breaks, and inspects liken's dev cluster, the QEMU fleet under dev-cluster/ whose Cluster resource is named lab, and serves lab releases to the physical testbed liken-1. Use when a session must boot or stop lab guests, run a smoke drill such as make smoke-uefi or make smoke-bios, build a lab release with make release VERSION=yyyy.mm.dd-9xx, serve it with make serve, roll a lab release onto liken-1 and stick-1, drive an upgrade or fallback drill, reach the lab with kubectl or stern, push a locally built image to the lab registry, boot a guest with Secure Boot keys or capsule firmware, read a running machine's filesystem or disks, re-found the fleet after a reinstall, or probe a CRD schema or CEL change.
 ---
 
 # Dev-cluster drills
@@ -38,30 +38,31 @@ needs what its line describes:
 
 ## What the dev cluster is
 
-`dev-cluster/` defines five machines, `node-1` through `node-5`. Each
-one is a QEMU guest. `dev-cluster/cluster.yaml` declares the Cluster
-resource named `lab`. In it, `node-1`, `node-2`, and `node-3` are
-leaders, and `node-1` is the founding leader, the leader that creates
-the cluster. `node-4` and `node-5` are followers. Every machine's
+`dev-cluster/` defines the machines `node-1` through `node-5`, and
+each one is a QEMU guest. `dev-cluster/cluster.yaml` declares the
+Cluster resource named `lab`. Its `leaders` list names the leaders,
+and each other machine is a follower. `node-1` is the founding
+leader, the leader that creates the cluster. Every machine's
 `rebootPolicy` is `Auto`, so no drill in this lab needs
 `liken approve-reboot`.
 
-Each guest's files are in `dev-cluster/guests/<node>/`. The disks are
-`state.qcow2` (6G), `pods.qcow2` (4G), and `boot.qcow2` (4G). Under
-UEFI, the directory also has the guest's own `OVMF_VARS.fd`, its
-firmware variable store. git ignores the directory, and it contains
-no source.
+Each guest's files are in `dev-cluster/guests/<node>/`: the disks
+`state.qcow2`, `pods.qcow2`, and `boot.qcow2`, whose sizes
+`dev-cluster/Makefile` sets. Under UEFI, the directory also has the
+guest's own `OVMF_VARS.fd`, its firmware variable store. git ignores
+the directory, and it contains no source.
 
 Each guest has two network cards. `eth0` is a QEMU user-mode uplink on
 10.0.2.0/24. QEMU provides NAT, DHCP, and DNS on it, so a guest can
 pull an image from the internet. `eth1` is the cluster segment,
 10.10.0.0/24. It is a multicast socket that every guest joins. Only
 `node-1` forwards a port from the host: 127.0.0.1:16443 on the host
-connects to its API server on 6443.
+connects to its API server on 6443. `API_FORWARD` in
+`dev-cluster/Makefile` sets the forward.
 
-`dev-cluster/Makefile` sets these defaults: `FIRMWARE=uefi`,
-`BOOT=disk`, `HARDWARE=virtio`, `SMP=4`, and `CONSOLE=stdio`. `MEM` is
-1024 for a disk boot and 4096 for a `BOOT=kernel` boot.
+`dev-cluster/Makefile` sets the defaults of `FIRMWARE`, `BOOT`,
+`HARDWARE`, `SMP`, `MEM`, and `CONSOLE`. A guest boots under UEFI from
+its own disk, with virtio hardware, unless you set one of them.
 
 ## Reach the cluster
 
@@ -201,7 +202,7 @@ shows it:
 
 ```
 catalog entry for a Cluster's spec.releases.catalog:
-  - version: 2026.08.12-901
+  - version: <yyyy.mm.dd>-901
     digest: sha256:<64 hex digits>
 ```
 
@@ -220,7 +221,8 @@ ss -ltnp | grep ':8017' || echo free
 setsid make serve </dev/null >/tmp/serve.log 2>&1 &
 ```
 
-This serves `releases/dist` on `:8017`, under the path `/releases/`.
+This serves `releases/dist` on `:8017`, the default port of
+`liken serve`, under the path `/releases/`.
 A guest reaches the host's loopback address at 10.0.2.2, so the URL
 from inside a guest is `http://10.0.2.2:8017/releases`. That is the
 exact `spec.releases.source` in `dev-cluster/cluster.yaml`. Leave this
@@ -232,11 +234,11 @@ download when it happens.
 ```bash
 dev-cluster/kubectl patch cluster lab --type=merge -p '{
   "spec": {
-    "version": "2026.08.12-901",
+    "version": "<new version>",
     "releases": {
       "catalog": [
-        {"version": "2026.08.11-901", "digest": "sha256:<old>"},
-        {"version": "2026.08.12-901", "digest": "sha256:<new>"}
+        {"version": "<old version>", "digest": "sha256:<old>"},
+        {"version": "<new version>", "digest": "sha256:<new>"}
       ]
     }
   }
@@ -280,7 +282,7 @@ Wait with a deadline, and print the machines only when a line
 changes:
 
 ```bash
-V=2026.08.12-901
+V=<new version>
 deadline=$(( $(date +%s) + 2400 )); last=""
 while (( $(date +%s) < deadline )); do
     s=$(dev-cluster/kubectl get machines --no-headers 2>/dev/null)
@@ -334,7 +336,7 @@ the cluster's identity, not from a disk. If you wipe `node-1`, you
 re-found the whole cluster.
 
 `make -C dev-cluster clean` deletes all of `dev-cluster/guests/`. That
-is a factory reset of all five machines, not of one.
+is a factory reset of every machine, not of one.
 
 **A machine moves back to `spec.version` by itself.** The operator
 compares the running version with the target on every pass. So if you
@@ -373,14 +375,14 @@ do.
   Build from `liken/`, or run a smoke drill's root target, which
   builds the artifacts first.
 * **`node-1` is back to blank disks.** A smoke drill factory-reset it.
-  The smoke drills are `make smoke-uefi`, `make smoke-bios`,
-  `make smoke-hardware`, and `make smoke-emmc`, each run from
-  `liken/`. Each one runs `dev-cluster/smoke.sh`, which starts with
-  `rm -rf guests/node-1` in `dev-cluster/`. Each drill uses `node-1`,
-  so a UEFI smoke drill wipes a disk installed under BIOS, and the
-  reverse. Never run a smoke drill while you work on `node-1` by hand.
-  CI runs `smoke-uefi` and `smoke-bios`. `smoke-emmc` runs only on a
-  workstation, because QEMU's `emmc` device needs QEMU 9.1.
+  The smoke drills are the `smoke-*` targets of `liken/Makefile`,
+  each run from `liken/`. Each one runs `dev-cluster/smoke.sh`, which
+  starts with `rm -rf guests/node-1` in `dev-cluster/`. Each drill
+  uses `node-1`, so a UEFI smoke drill wipes a disk installed under
+  BIOS, and the reverse. Never run a smoke drill while you work on
+  `node-1` by hand. CI runs `smoke-uefi` and `smoke-bios`.
+  `smoke-emmc` runs only on a workstation, because QEMU's `emmc`
+  device needs QEMU 9.1.
 * **A node never becomes Ready after a boot.** A guest from an earlier
   drill is still running. It has the write locks on the qcow2 files,
   and it is still on the multicast cluster segment. The next boot of
@@ -391,19 +393,19 @@ do.
 * **A qcow2 file or a variable store is damaged after a change.**
   `make -C dev-cluster grow-pods NODE=node-2` resizes a qcow2 file,
   and it corrupts the file if the guest is running. The same applies
-  to `grow-state`, which enlarges a guest that claimed the older 2G
-  state disk to the current size. It also applies to `reset-nvram`,
+  to `grow-state`, which enlarges a guest's state disk to
+  `STATE_SIZE`. It also applies to `reset-nvram`,
   because QEMU writes the variable store back when the guest exits.
   Resize a disk or reset the variable store only while the machine is
   off.
 * **A smoke drill stops with a timeout.** Each kind of boot has its
-  own deadline. `SMOKE_DEADLINE` (default 120 seconds) limits only
-  the time that the disk boot waits for Ready. The attended boots use
-  `HOLD_DEADLINE` (default 180 seconds), which is in `smoke.sh`.
-  `smoke-uefi`, `smoke-bios`, and `smoke-hardware` use both defaults.
-  `smoke-emmc` sets both to 420 seconds, because QEMU's `emmc` device
-  writes slowly. `dev-cluster/Makefile` gives the reason at the
-  target. Check which deadline applies to the boot that timed out.
+  own deadline, in seconds. `SMOKE_DEADLINE` limits only the time
+  that the disk boot waits for Ready. The attended boots use
+  `HOLD_DEADLINE`. `dev-cluster/smoke.sh` sets the default of each,
+  and the failure message gives the number of seconds that ran out. A target
+  of `dev-cluster/Makefile` can set larger values, as `smoke-emmc`
+  does because QEMU's `emmc` device writes slowly. Check which
+  deadline applies to the boot that timed out.
 * **A conductor or operator fix shows no effect in the rollout that
   delivers it.** System pods run each node's own `:installed` image.
   So during that rollout, the binaries of the old release make every
@@ -419,7 +421,7 @@ do.
 ## Clean up
 
 You may start the dev cluster, `make serve`, and the lab registry
-whenever a test needs them. When the testing ends, stop all three.
+whenever a test needs them. When the testing ends, stop each of them.
 Kill each guest's QEMU and the `liken serve` process by PID, and run
 `docker stop liken-lab-registry`. Leave them running only when the
 maintainer asked for that.
@@ -427,7 +429,9 @@ maintainer asked for that.
 When the drill ends, report what is still running: which guests,
 which `make serve`, whether `liken-lab-registry` runs, and which
 background tasks. A `liken serve` listens on `:8017`, the lab registry
-on `:5000`, and `node-1`'s QEMU on `:16443`. A leftover guest has the
+on `:5000`, and `node-1`'s QEMU on `:16443`. The `registry` target
+and `API_FORWARD` in `dev-cluster/Makefile` set the last two. A
+leftover guest has the
 locks on `node-N`'s disks. This check lists each of them:
 
 ```bash

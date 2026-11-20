@@ -27,7 +27,7 @@ not in a test.
   plumbing in the test body. Give several cases as a table with
   `t.Run`, not as a loop with conditions (`ci/recipe_test.go`).
 - **Push setup into fixtures and builders.** A builder reads as the
-  thing it builds. `cecRoom` in `equipment-operator/cecnode_test.go`
+  thing it builds. `fakeCECBus` in `equipment-operator/cecnode_test.go`
   declares a TV and a receiver in two lines. `managedObjects` in
   `bluetooth-operator/bluez_test.go` chains `adapter`, `device`, and
   `battery` into the response that BlueZ sends. `writeTree` in `ci/`
@@ -122,9 +122,8 @@ same count again, and compare the failures before and after.
   the client `server.Client()`, or the server as its
   `http.RoundTripper`, with `apiservertest.Host` as its address. Every
   metadata provider and media server in `library-operator` is faked
-  this way: `tmdb_test.go`, `peertube_test.go`, and
-  `fakejellyfin_test.go`. Respond with the provider's real responses,
-  saved as fixtures in `testdata/` (`library-operator/testdata/`).
+  this way, such as `library-operator/tmdb_test.go`. Respond with the
+  provider's real responses, saved as fixtures in `testdata/` (`library-operator/testdata/`).
 - **A TCP peer.** Give the client a `Dial` function, and give each
   dial one end of a `net.Pipe`, with the fake on the other end.
   `equipment-operator/denon/pipenetwork_test.go` returns
@@ -150,27 +149,20 @@ same count again, and compare the failures before and after.
 Serve the fake through `kubernetes/apiservertest`, and point client-go
 at `server.Config()`. The fake is a handler. It is a scripted handler
 when the test controls each response, or a small stateful one that
-stores collections. `astrophotography-operator`,
-`firmware-operator`, `observatory-operator`, and `people-operator`
-each have their own in `fakeapi_test.go`, and `liken/kubernetes/fakeapi`
-serves the tests of `liken`'s operators. None of them is a model of
-the API server, so a test that needs a selector scripts its handler.
+stores collections. An operator that needs its own has it in
+`fakeapi_test.go`, such as `observatory-operator/fakeapi_test.go`.
+`liken/kubernetes/fakeapi` serves the tests of the operators of
+`liken`. None of them is a model of the API server, so a test that
+needs a selector scripts its handler.
 A test of optimistic concurrency calls `CheckVersions` on
 `liken/kubernetes/fakeapi`. After that call, the fake returns `409`
 for a stale update, and keeps the version unchanged for an update that
 changes nothing (`liken/cluster-operator/pausedleader_test.go`).
 
-Packages of the `kubernetes` module fake the parts that the operators
-share:
-
-- **`kubernetes/events/eventstest`** sits in front of a fake API
-  server and records each `Event` that a component posts. The
-  `operators` skill, under "Conditions and Events", says how a test
-  uses it.
-- **`kubernetes/election/electiontest`** is a fake API server that
-  stores one `Lease`. Like the real API server, it rejects the create
-  of a `Lease` that exists, and an update from a stale
-  `resourceVersion`. So a leader election can run in a bubble.
+The `kubernetes` module has a fake beside each shared package that a
+test needs, such as `kubernetes/events/eventstest`, which records each
+`Event` that a component posts. The `operators` skill, under
+"Conditions and Events", tells you how a test uses it.
 
 Test the operator's handlers through the real reflector, and leave the
 reflector's own faults to upstream. The `operators` skill describes,
@@ -185,6 +177,15 @@ the order in which the API server prunes and validates, so drill it
 Fake a device at the narrowest interface that the code calls, and keep
 the protocol above that interface real.
 
+Look for an existing fake before you write one. A package that other
+packages test against has its fake in a package named
+`<package>test` beside it, such as `liken/machine/supplicanttest`
+for the `wpa_supplicant` control socket. An operator's own fakes are
+in files named `fake*_test.go` in its package, such as
+`observatory-operator/fakejobs_test.go`, which completes each `Job`.
+The doc comment of each fake says what it fakes. The entries below
+are the fakes that those names do not show, and the methods to copy.
+
 - **CEC.** `equipment-operator/cec/cectest` implements `cec.Handle`,
   the kernel's CEC ioctls, on a `cectest.Bus` in memory. For the calls
   that the repository makes, it responds the way the kernel's CEC core
@@ -197,49 +198,22 @@ the protocol above that interface real.
   `audio-operator/testdata/`, and give the parser the fixture as an
   `io.Reader` (`decodeGraphs` in `audio-operator/pwmonitor_test.go`).
   Some tests put a script named `pw-dump` on `PATH`, such as
-  `stubPWDump` and `stubProbeDump`. Such a test runs a real process
-  and waits on the wall clock.
-  `audio-operator/plans/open-problems/tests-that-wait-on-the-wall-clock-or-open-real-sockets.md`
-  records those tests as breaks of the rules here. It also describes
-  the decision that a fix needs: a seam where the code starts a
-  process, such as a function field that returns a fake command. That
-  decision is still open.
+  `stubPWDump`. Such a test runs a real process and waits on the wall
+  clock, so it breaks the rules here. A fix needs a seam where the
+  code starts a process, such as a function field that returns a fake
+  command. `audio-operator/plans/open-problems/` records those tests
+  while they remain.
 - **Monitors.** Save each real monitor's EDID and modes in
   `display-operator/testdata/`, and parse them in the test.
-- **`wpa_supplicant`.** `liken/machine/supplicanttest` serves a fake
-  control socket. So the clients in `init` and `machine-operator` run
-  the real datagram transport with no radio and no supplicant.
-- **Media files with tags.** `media-operator/edl/edltest` writes media
-  files with known ID3 tags, for the tests of the packages that read
-  tags.
-- **INDI.** `observatory-operator/indi/inditest` is a fake
-  `indiserver` on `net.Pipe`. It uses only the standard library, so a
-  test of another component can import it without importing anything
-  else from `observatory-operator`. Each fake driver replays the
-  transcripts that a real `indiserver` sent with one simulator behind
-  it. It first defines what its baseline transcript defines. When a
-  client connects the driver, it adds what its connect transcript
-  defines. It responds to every other change with the values that the
-  client sent. A test can hold, refuse, or move a property, set its
-  state, report a value, or send a message. The operator's
-  `fakeindi_test.go` runs one such server for each server pod, with a
-  driver for each device pod that is Ready. `fakelocks_test.go` gives
-  the fake mount and dome the lock policies of INDI's base classes.
-  `fakevariants_test.go` joins the transcripts of several simulators
-  into one driver, such as a Flip-Flat that serves a `DustCap` and a
-  `FlatPanel`.
-- **PHD2.** `observatory-operator/phd2/phd2test` is a fake PHD2 event
-  server on `net.Pipe`, built from the transcript of a real PHD2. It
-  responds to the guiding methods with PHD2's own events and errors.
-  When a test asks, it keeps a settle pending or fails it.
-  `fakeguider_test.go` in `observatory-operator` starts a new fake,
-  with nothing connected, for each guider pod that is Ready. The tests of
-  `astrophotography-operator` use the same package.
-- **The kubelet and the Job controller.** The fake API server of
+- **INDI and PHD2.** `observatory-operator/indi/inditest` and
+  `observatory-operator/phd2/phd2test` are fake servers on `net.Pipe`
+  that replay the transcripts of a real `indiserver` and a real PHD2.
+  The tests of `astrophotography-operator` import them too.
+  `inditest` imports only the standard library, so that import adds
+  nothing else from `observatory-operator`. Keep it that way.
+- **The kubelet.** The fake API server of
   `observatory-operator/fakeapi_test.go` makes each pod that it creates
   Ready at once, unless a test keeps the pod Pending.
-  `fakejobs_test.go` completes each `Job` at once, unless a test keeps
-  the `Job` running or makes it fail.
 
 Some tests use a real kernel interface, such as `/dev/uinput` in
 `bluetooth-operator/uinput_test.go`, or the `vivid` CEC adapters in
@@ -253,7 +227,7 @@ workstation to measure the same number.
 
 - **Next to its first user.** Put a fixture or a builder directly
   above the first test that uses it, in the same file
-  (`cecRoom` in `equipment-operator/cecnode_test.go`).
+  (`sleepingRoom` in `equipment-operator/cecnode_screen_test.go`).
 - **Shared only with a second user.** A helper moves to its own test
   file when a second test file needs it.
   `equipment-operator/assert_test.go` has the assertions that every
@@ -270,29 +244,23 @@ workstation to measure the same number.
 ## The coverage gate
 
 The `go` job in a component's `package.toml` runs the gate. In most
-components, the job runs `make test-go`. That target does these steps:
-
-1. Checks `gofmt`.
-2. Runs `go mod tidy -diff`.
-3. Fails on any package with no test file (`UNTESTED_PACKAGES`).
-4. Runs `go vet`.
-5. Runs the tests once with `-race -covermode=atomic`.
-6. Checks the profile against `.testcoverage.yml` with
-   `go-test-coverage`.
-
-A package with no test file writes nothing to the profile, so the gate
-would never count it. `UNTESTED_PACKAGES` closes that gap. For a new
+components, the job runs `make test-go`. Read the target in the
+component's `Makefile` for its steps. It checks formatting and
+`go mod tidy`, runs `go vet`, runs the tests once with `-race`, and
+checks the coverage profile against `.testcoverage.yml`. It also fails
+on any package with no test file (`UNTESTED_PACKAGES`), because such a
+package writes nothing to the profile, and the gate would never count
+it. For a new
 component, copy the target and the config from a sibling component,
 such as `bluetooth-operator/`.
 
 The jobs differ in these components:
 
 - **`kubernetes/` and `ci/`** run `make test`, which runs the same
-  steps. In `kubernetes/`, it also fails when `apiclient`, `memo`,
-  `events`, `conditions`, or `endedpods` links a `k8s.io` package. It
-  also fails when `informer` links the typed clientset, the informer
-  factories, or leader election. These checks exist because small
-  programs import those packages.
+  steps. In `kubernetes/`, it also fails when a package that small
+  programs import links a large `k8s.io` package. The comments at
+  `PLAIN_K8S` and `INFORMER_HEAVY` in `kubernetes/Makefile` name the
+  packages and the reasons.
 - **`observatory-operator`** splits its tests across shards. Every
   test of the operator's package starts the whole operator against the
   fake API server, and `-race` makes each test slow. `package.toml`

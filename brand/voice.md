@@ -105,8 +105,8 @@ This paragraph follows the other rules and is still hard to read:
 
 The same facts, one at a time, from the reader's side:
 
-> `latest.sh --bump` stops in two cases, and each one needs a step
-> from you first.
+> `latest.sh --bump` stops in each of these cases, and each one needs
+> a step from you first.
 >
 > **A patch is in `patches/`.** Each patch is a fix from a newer mpv
 > release. If the release you are bumping to already includes the

@@ -5,24 +5,26 @@ and describes the objects that configure a volume.
 
 ## How it runs
 
-The driver name is `git.liken.sh`, and one image runs both plugins.
+The driver name is `git.liken.sh`, and one image runs the node plugin
+and the controller plugin.
 
-- **The node plugin** is a privileged `DaemonSet` that runs beside the
-  upstream `csi-node-driver-registrar`. It stages, publishes, fetches,
-  watches, commits, and pushes. In its store on the node, it keeps one
-  bare repository for each URL and one work tree for each writeable
-  volume. It watches each writeable work tree with inotify, and runs
-  `git status` periodically as a backstop. It also watches the
-  `PersistentVolume`s and claims of its volumes. From them it reads
-  each claim's class and each request for a pull. When a
-  `PersistentVolume` with the `Delete` reclaim policy is deleted, the
-  plugin removes its work tree.
-- **The controller plugin** is a `Deployment` with the upstream
-  `csi-resizer` and `csi-provisioner` sidecars. It validates the
-  parameters of a `VolumeAttributesClass`. It does not implement
-  `CreateVolume`. The same process receives push webhooks from a forge
-  and verifies each one with its `Secret`. It then marks for a pull
-  each read-only `PersistentVolume` that follows the pushed ref.
+The node plugin runs on every node and owns the store on that node:
+one bare repository for each URL and one work tree for each writeable
+volume. It stages and publishes each volume, and it fetches, commits,
+and pushes. It watches each writeable work tree with inotify, and runs
+`git status` on a timer as a backstop. It also watches the
+`PersistentVolume`s and claims of its volumes, and reads from them
+each claim's class and each request for a pull. When a
+`PersistentVolume` with the `Delete` reclaim policy is deleted, the
+plugin removes its work tree.
+
+The controller plugin validates the parameters of a
+`VolumeAttributesClass`. It does not implement `CreateVolume`. The
+same process receives push webhooks from a forge and verifies each one
+with its `Secret`. It then writes the annotation
+`git.liken.sh/pull-requested-at` on each read-only `PersistentVolume`
+that follows the pushed ref. The node plugin of the volume's node
+reads the annotation and fetches.
 
 The kubelet reads a volume's credential `Secret` and sends its data in
 the stage or publish call. The node plugin keeps the credential in
@@ -51,6 +53,3 @@ line, so it does not appear in the process list. Nothing in this
 directory is installed on a real cluster until a person has seen it
 work, so every drill runs in `lab/`. `lab/` boots one `liken` machine
 in QEMU and serves a git repository to it from the host.
-
-The reasons for these decisions are in `plans/`. Read the relevant
-plan before you change how something works.

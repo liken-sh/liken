@@ -58,27 +58,20 @@ holder, and this operator records nothing about them.
 The INDI images are built from `indi/` at the top of the repository.
 A change to any file there changes the recipe of every INDI image.
 So the bare drivers, which capture the standard INDI properties, are
-in this component, in `indi/standard/bare/`. The base in `deploy/`
+in this component's `indi/standard/bare/`, not in the top-level
+`indi/`. The base in `deploy/`
 does not include the `Firmware`s for the bare QHY chips, because the
 `Firmware` CRD comes from `firmware-operator`.
-
-The reasons for these decisions are in `plans/`. Read the relevant
-plan before you change how something works.
 
 ## Finding things
 
 - Load the `observatory-schema` skill under `.agents/skills` before
   you change a kind, a CRD, a template, or a fields file, and after a
   bump of the INDI images.
-- Some files are generated. Each one has a command that writes it
-  again, and a test that fails when the file is stale:
-  - The CRDs of the kinds with procedures, and
-    `observatory/generated_*.go`: `make schema`.
-  - `drivers/generated.go`: `make drivers`.
-  - `deploy/firmware/qhy.yaml`: `make firmware`.
-
-  `make -C docs generate skills` writes the manual's reference pages
-  and `skills/`.
+- Some files are generated, such as the CRDs of the kinds with
+  procedures and `drivers/generated.go`. The comment above each target
+  in the `Makefile` names the file that it writes. A test fails when a
+  generated file is stale.
 - A mount reports its position several times a second. So
   `cost_test.go` fails when an INDI or PHD2 reading wakes anything
   more than the status writer, the lock relay, and a wait for a value.

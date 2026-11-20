@@ -29,9 +29,8 @@ remote to the `Sink`.
 
 ## The kinds
 
-- A `Sink` is one playback endpoint: an HDMI or DisplayPort output,
-  the analog jack, the playback side of a USB card, or a Bluetooth
-  speaker. Its `spec` sets the volume, the mute, the card's own
+- A `Sink` is one playback endpoint, such as a monitor's HDMI
+  output. Its `spec` sets the volume, the mute, the card's own
   controls, the channel layout, and how many claims can share the
   endpoint. Its `status` reports what the card declares and what the
   operator last read from it.
@@ -54,8 +53,7 @@ spec:
 ```
 
 The manual is at [liken.sh/audio](https://liken.sh/audio/). It has the
-install guide, the guides to play, record, and set an endpoint's
-volume, and a reference for the devices, the kinds, and the API.
+install guide, the guides, and a reference for each kind.
 The design documents and the open problems are in [`plans/`](plans/).
 
 MIT. See [LICENSE](LICENSE).

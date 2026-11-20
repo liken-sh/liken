@@ -13,11 +13,9 @@ draw with any toolkit.
 
 `media-operator` passes the broker address, the topics, and the
 timers to the client in environment variables, and the crate reads
-them with `Wiring::from_environment`. Each of these clients links the
-crate by path, so they follow the same rules:
-
-- `media-operator`'s idle screen, in `media-operator/idle/`
-- `library-operator`'s media browser, in `library-operator/media-browser/`
+them with `Wiring::from_environment`. Each client links the crate by
+path, so every client follows the same rules. For example,
+`library-operator`'s media browser is a client.
 
 ## The modules
 

@@ -11,9 +11,8 @@ library.
 - PHD2 sends `AppState` only to a new connection. So the client works
   out the state from the events that imply one, and asks for the
   state again after a stop.
-- `phd2test` replies to the methods that guide: `set_exposure`,
-  `loop`, `find_star`, `guide`, and `dither`. Its events and error
-  messages come from `src/event_server.cpp` and `src/phdcontrol.cpp`
+- `phd2test` replies to the methods that guiding uses. Its events and
+  error messages come from `src/event_server.cpp` and `src/phdcontrol.cpp`
   in `OpenPHDGuiding/phd2`, and from the transcript in `testdata/`
   that a real PHD2 sent.
 

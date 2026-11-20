@@ -22,27 +22,25 @@ Plan 14 designs fields that the CRD may not have yet. So read
 `equipment-operator/deploy/receivers-crd.yaml` before you write a
 field.
 
-The CRD declares the brand settings, `spec.denon.settings` and
-`spec.wiim.settings`, and the zone controls in `spec.zones`. For each
+The CRD declares the settings of each brand in its block, such as
+`spec.denon.settings`, and the zone controls in `spec.zones`. For each
 declared field, the operator compares the declared value with the
 value that the receiver reports. It sends the field only when the two
-differ, and at most 3 times for one value. When the receiver does not
-report a field, the operator sends it once each time the spec changes
+differ, and at most 3 times for one value (`sendLimit` in
+`send_budget.go`). When the receiver does not report a field, the operator sends it once each time the spec changes
 that block. `status.settledSettings` records a digest of each block
 that the operator sent. So after a restart, the operator sends
-nothing for a block that nobody changed. `setSettings` and
-`setWiimSettings` in `reconcile.go` apply the blocks.
+nothing for a block that nobody changed. A method of `receiverUnit` in
+`reconcile.go` applies each block, such as `setSettings` for the
+Denon block.
 
-Plan 14 adds these:
-
-- `spec.settings` and `status.settings` for the common families
-- `status.settingExceptions`
-- a table of fields, with the tier of each field in each driver
-- one digest for each family
-- one engine in place of `setSettings` and `setWiimSettings`
-
-When the CRD does not declare one of these yet, build the new field
-so that it can move into plan 14's design with no change of meaning.
+Plan 14 also designs `spec.settings` and `status.settings` for the
+common families, `status.settingExceptions`, a table of fields with
+the tier of each field in each driver, one digest for each family,
+and one engine that applies every block. Read the CRD to learn which
+of these exist. When the CRD does not declare one yet, build the new
+field so that it can move into plan 14's design with no change of
+meaning.
 
 ## Where a setting goes
 
@@ -57,9 +55,9 @@ so that it can move into plan 14's design with no change of meaning.
 - The status follows the same layout as the spec: `status.settings`
   for the common values, and `status.<protocol>`, such as
   `status.denon`, for the brand's values.
-- A plan decides which families get built. Plans 15, 17, and 21 of
-  `equipment-operator` add families. When no plan covers the family,
-  write one first, with the `plans` skill.
+- A plan decides which families get built. Look in
+  `equipment-operator/plans/` for the plan that adds the family. When
+  no plan covers the family, write one first, with the `plans` skill.
 
 ## The tiers
 
@@ -135,9 +133,9 @@ field needs, the field is listed as Blocked.
 1. Find the plan that covers the setting's family. In it, find the
    row with the setting's setter, its read, its values, and its tier.
 2. Find where the command comes from in the driver's protocol
-   reference: `denon/AGENTS.md` or `wiim/AGENTS.md`, and the files
-   they link to. For another brand, plan 14's table "References for
-   the next protocol block" lists the documents and the client
+   reference: the `AGENTS.md` of the driver's package, such as
+   `denon/AGENTS.md`, and the files it links to. For another brand,
+   plan 14's table "References for the next protocol block" lists the documents and the client
    libraries.
 3. Add the field to the CRD, with a description that gives the tier,
    the values, and the units. Then run `make -C docs generate` in
@@ -148,7 +146,7 @@ field needs, the field is listed as Blocked.
 5. Test it against the driver's fake peer, which replies from a real
    device's transcript in `testdata/`. The `testing` skill describes
    the fakes.
-6. Update the manual pages that the `operators` skill lists for a
+6. Update the manual pages that the `manuals` skill lists for a
    change to a resource's spec or status.
 
 ## Add a receiver brand
@@ -158,8 +156,8 @@ field needs, the field is listed as Blocked.
    the controller. It contains the brand's settings type, its table
    of fields with their tiers, its codecs, and its mapping of replies
    to the answer kinds.
-2. Write an `AGENTS.md` in the package, as `denon/AGENTS.md` and
-   `wiim/AGENTS.md` do. Put in it the protocol references, the
+2. Write an `AGENTS.md` in the package, as `denon/AGENTS.md` does.
+   Put in it the protocol references, the
    command families, and what a measured unit replied.
 3. Where the model has a capability document, read it before any
    probe. For a protocol that does not report the model, `upnp/`

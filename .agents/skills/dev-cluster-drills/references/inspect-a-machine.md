@@ -88,8 +88,7 @@ dev-cluster/kubectl patch cluster lab --type=merge \
 
 The same rule applies one level down: `{"flux":{"prune":null}}`
 restores the default of one parameter. `cluster/features.go` lists
-the features: `traefik`, `servicelb`, `metrics-server`, `helm`,
-`network-policy`, `iscsi`, `nfs`, and `flux`. A vendored feature takes
+the features. A vendored feature takes
 effect when k3s restarts in place. The console prints
 `liken: modules: <mod>: loaded` and then
 `liken: features: <slug>: active`.

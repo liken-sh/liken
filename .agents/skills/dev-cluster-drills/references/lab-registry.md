@@ -3,16 +3,16 @@
 Run every command here from `liken/`, as in `SKILL.md`.
 
 The lab registry lets the guests pull an operator image that you built
-on the laptop, with no push to ghcr.io. It is a `registry:3.0.0`
-container named `liken-lab-registry`, on the laptop's
-`127.0.0.1:5000`. `dev-cluster/cluster.yaml` declares it as the
+on the laptop, with no push to ghcr.io. It is a container named
+`liken-lab-registry`, on the laptop's `127.0.0.1:5000`.
+`REGISTRY_IMAGE` in `dev-cluster/Makefile` names its image. `dev-cluster/cluster.yaml` declares it as the
 `spec.registries` mirror for `ghcr.io`, at `http://10.0.2.2:5000`. So
 a manifest keeps its `ghcr.io/liken-sh/...` image reference:
 
 ```bash
 make registry
 dev-cluster/registry/push.sh observatory-operator
-dev-cluster/registry/push.sh ghcr.io/liken-sh/indi-simulators:20261005-5
+dev-cluster/registry/push.sh ghcr.io/liken-sh/indi-simulators:<version>-<revision>
 ```
 
 `push.sh` accepts a target of the root `docker-bake.hcl`, or the

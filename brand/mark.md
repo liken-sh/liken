@@ -48,13 +48,13 @@ pattern suggests a colony that is still spreading into bare rock.
 The greens come from crustose lichens on stone, from deep moss to
 pale sage. The orange tile comes from *Xanthoria*.
 
-| Swatch | Hex | Name |
-| --- | --- | --- |
-| Deep moss | `#4a5d3a` | the darkest green |
-| Mid sage | `#6e8352` | the middle green |
-| Light sage | `#93a877` | |
-| Pale sage | `#b4c49a` | the lightest green |
-| Xanthoria | `#e0872f` | the orange tile |
+| Name | Hex |
+| --- | --- |
+| Deep moss | `#4a5d3a` |
+| Mid sage | `#6e8352` |
+| Light sage | `#93a877` |
+| Pale sage | `#b4c49a` |
+| Xanthoria | `#e0872f` |
 
 The mark has a transparent background, so it works on both light
 and dark surfaces. Every tile is one flat color with no gradient or
@@ -68,25 +68,14 @@ shade of each in the light and the dark scheme.
 ## The files
 
 `liken.svg` is the original, and every other image of the mark is
-made from it. `make` writes the other files, and they are committed
-to the repository too. So you can use a favicon or an avatar without
-installing a rasterizer, and a site that uses the theme serves them
-with no build step:
-
-* `liken.svg`: the original, for any use at any size.
-* `favicon.ico`: a raster image at 16, 32, and 48 pixels, for the
-  browser tab, for browsers that cannot use the SVG file that the
-  sites also serve.
-* `liken.png`: a transparent raster image of 1024 pixels. Use it for
-  a GitHub organization avatar or anywhere else that needs a raster
-  image.
-* `static/` and `assets/`: the copies that the theme serves, at the
-  URLs that the pages link to. The comments in the `Makefile`
-  explain each one.
-
-To make these files again you need `rsvg-convert` (from librsvg) and
-ImageMagick. Edit `liken.svg`, run `make`, and commit the files that
-change.
+made from it, such as `favicon.ico` and the raster `liken.png` for a
+GitHub avatar. `make` writes those images and the copies in `static/`
+and `assets/` that the theme serves. The generated files are committed
+too, so you can use a favicon or an avatar without installing a
+rasterizer, and a site that uses the theme serves them with no build
+step. To change the mark, edit `liken.svg`, run `make`, and commit the
+files that change. The comments in the `Makefile` list each file and
+the tools that `make` needs.
 
 [`motion.md`](motion.md) has the rules for the mark in motion.
 

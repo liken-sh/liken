@@ -13,5 +13,7 @@ at the package's patch step.
    that says where the release includes it.
 3. Report each patch that the bump drops.
 
-`userland/buildroot.sh` stops buildroot from applying a held patch,
-and still applies every other patch, as `zic` needs.
+`userland/buildroot.sh` stops buildroot from applying each patch that
+a `held` file names, and buildroot applies every other patch of the
+recipe. A package with no `held` file, such as `zic`, gets every
+patch of its recipe.

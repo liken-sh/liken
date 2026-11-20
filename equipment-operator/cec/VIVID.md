@@ -32,6 +32,12 @@ sudo modprobe -r vivid
 `/sys/devices/platform/vivid.0/video4linux`. Its number depends on
 the other video devices on the machine.
 
+A vivid output adapter gets its physical address from its port. It
+rejects `CEC_ADAP_S_PHYS_ADDR` with `ENOTTY`, the same as any adapter
+on a video port. `cectest` does the same for an adapter without
+`CapPhysAddr`. The node workload then announces the port's own
+address and says so in its entry.
+
 The monitor test needs `CAP_NET_ADMIN`, so an ordinary run skips it.
 To include it, build the test binary with `go test -c ./cec/` and run
 the binary with `sudo`.

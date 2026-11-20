@@ -74,13 +74,12 @@ the release channel in `liken/releases/page.html.tmpl`.
 
 ## The nav and the sidebar
 
-`data/nav.yaml` lists the entries of the top nav, in order. Every
-site shows the same labels from this file. "liken", "operators",
-"releases", and "devlog" have absolute URLs, so they go to the same
-page from every site, and you change one of them in this file only.
-"repository" links to the URL that the site sets in
-`params.repository`. A site that does not set `params.repository`
-shows no "repository" entry.
+`data/nav.yaml` lists the entries of the top nav, in order, and
+every site shows the same entries from this file. An entry with an
+absolute URL goes to the same page from every site, so you change it
+in this file only. The "repository" entry links to the URL that the
+site sets in `params.repository`. A site that does not set
+`params.repository` shows no "repository" entry.
 
 The nav has no entry for the site's manual, because the sidebar
 shows it. When a site has a `/docs` section, every page, the front
@@ -116,19 +115,12 @@ does for its `llms.txt` outputs.
 
 Do not copy `baseof.html` to change one part of the page. It is
 split into partials under `layouts/_partials/`, each with a default,
-and a site overrides only the partial it changes:
-
-* `head.html` is empty in the theme. A site uses it to add style
-  rules or `link` elements at the end of the `head`.
-* `nav.html` is the top nav, built from `data/nav.yaml`.
-* `aside.html` is the sidebar. The default shows the manual's page
-  tree, and the page gets the two-column manual layout whenever this
-  partial renders anything.
-* `crumbs.html` is the breadcrumb trail.
-* `footer.html` is the footer.
-
-The devlog overrides `head.html`, `aside.html`, `crumbs.html`, and
-`footer.html`, and does not copy `baseof.html`.
+and a site overrides only the partial it changes. For example,
+`head.html` is empty in the theme, and a site overrides it to add
+style rules or `link` elements at the end of the `head`. The comment
+at the top of each partial says what it draws and when a site
+overrides it. The devlog, which is in its own repository, overrides
+several partials and does not copy `baseof.html`.
 
 Each heading of a route reference page has its HTTP method in a
 `data-method` attribute. The theme draws the method as a badge, in

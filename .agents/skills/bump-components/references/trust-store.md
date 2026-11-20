@@ -12,10 +12,10 @@ Its `--bump` writes these:
   `package.toml`
 - the snapshot and its published checksum, into the `Dockerfile`
 
-Then run `make workflows` at the top of the repository, and raise the
-revision of `indi`, which is the only pinned component that copies
-the bundle. The tracked components that copy it are released because
-their `[depends]` lists `trust`.
+Then run `make workflows` at the top of the repository. Raise the
+revision of each pinned component whose `[depends]` lists `trust`,
+such as `indi`. A tracked component whose `[depends]` lists `trust`
+is released with no other step.
 
 A new snapshot can remove certificates from the bundle as well as add
 them. Read what was removed before you take the bump.

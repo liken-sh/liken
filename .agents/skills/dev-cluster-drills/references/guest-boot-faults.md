@@ -6,8 +6,9 @@ Run every command here from `liken/`, as in `SKILL.md`. A path in a
 ## A guest that hangs after `reboot: machine restart`
 
 When a guest hangs after `reboot: machine restart`, the fault is in
-the firmware. The host's edk2 2025.11 can read data that a kernel
-left in memory as an IGVM memory map after a warm reset. It then
+the firmware. Some edk2 releases, which
+`dev-cluster/firmware/fetch.sh` names, read data that a kernel left
+in memory as an IGVM memory map after a warm reset. It then
 loops forever in PciHostBridgeDxe, before systemd-boot runs. So the
 lab pins Debian's OVMF in `dev-cluster/firmware/`.
 `dev-cluster/firmware/fetch.sh` explains the mechanism, and

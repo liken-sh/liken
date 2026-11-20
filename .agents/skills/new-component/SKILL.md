@@ -12,13 +12,12 @@ like its siblings builds, tests, and publishes on its first push to
 `main`. A component that is set up differently fails on that push, or
 it passes and then behaves differently from every other component.
 
-The sections "Go components" and "Rust components" of the root
-`AGENTS.md` set the layout of a component: the module, the program,
-`deploy/`, `docs/`, and `make test`. This skill gives the order of the
-work, and the files outside the directory that a new component
-changes. Each subject has its own skill, and this skill says which one
-to load at the step that needs it: `plans`, `operators`, `testing`,
-`images`, `pins`, `manuals`, `releases`, and `commit-messages`.
+The section "Code layout" of the root `AGENTS.md` sets the layout of
+a component: the module, the program, `deploy/`, and `make test`.
+This skill gives the order of the work, and the files outside the
+directory that a new component changes. Each subject has its own
+skill, and this skill names the one to load at the step that needs
+it.
 
 ## Design it with the maintainer first
 
@@ -56,8 +55,8 @@ copied the `LICENSE` and `.pre-commit-config.yaml` of
 `people-operator`, and changed the names in its `.gitignore` and
 `Makefile` with `sed`.
 
-- **A Go operator with its own kinds**: `people-operator`, the
-  smallest. It has one `Deployment` with leader election, watches
+- **A Go operator with its own kinds**: `people-operator`, which is
+  small. It has one `Deployment` with leader election, watches
   through `kubernetes/informer`, and creates and follows short-lived
   pods. It has a fake API server in `fakeapi_test.go`, a manual with a
   generated reference page, and `deploy_test.go` for the base.
@@ -186,17 +185,12 @@ list that does not include the component. `make workflows` writes some
 of the lists, and you write the others.
 
 `make workflows` at the top of the repository runs
-`cd ci && go run . generate -root ..`. That command writes these files
+`cd ci && go run . generate -root ..`. That command writes the files
+of `.github/workflows/`, `docker-bake.hcl`, and `.github/dependabot.yml`
 from every `package.toml`, every `FROM` line, and every `go.mod` and
-`Cargo.lock`:
-
-- `.github/workflows/ci.yaml`, with the component's check job and
-  publish job
-- `.github/workflows/component-<name>.yaml`
-- `.github/workflows/scan.yaml`, which lists an image only after its
-  first publish
-- `docker-bake.hcl`
-- `.github/dependabot.yml`
+`Cargo.lock`. The component gets its own
+`.github/workflows/component-<name>.yaml`. `scan.yaml` lists an image
+only after its first publish.
 
 Edit these by hand:
 
@@ -230,7 +224,11 @@ edit in them:
   shows the manual. `cd ci && go run . sites -root ..` reads the
   prefix of each manual from its `package.toml`, and `make docs` and
   `make site` build each one.
-- No file in `ci/` and no test of `ci` mentions a component by name.
+- The checks in `ci/` find each component through its
+  `package.toml`. A new component needs an entry in `ci/` only in a
+  list of exceptions, such as `unmanifested` and
+  `unmanifestedDownloads` in `ci/manifests.go`, and only when the
+  `pins` skill says that a download of the component needs one.
 - `versions.sh` finds each `latest.sh` in the tree, so `make versions`
   reports the pins of the new component with no edit.
 
@@ -263,9 +261,9 @@ passed.
    `cd ci && go run . generate -root .. -check`, which prints that
    every generated file is current. A second `make workflows` changes
    nothing.
-4. **The checks of CI's `graph` job**, from `ci/`:
-   `go run . pins -root ..`, `go run . deps -root ..`,
-   `go run . namespaces -root ..`, and `go run . selectors -root ..`.
+4. **The checks of CI's `graph` job**: run each `go run .` step of
+   the `graph` job in `.github/workflows/ci.yaml`, from `ci/`, such as
+   `go run . pins -root ..` and `go run . deps -root ..`.
 5. **The tests of `ci`**: `cd ci && go test ./...`. They read files
    from the whole repository, such as each `Makefile`, which must
    declare `.DELETE_ON_ERROR:`.

@@ -19,15 +19,16 @@ format of that release.
 
 ```bash
 # 1. Download the release into a local channel directory.
-cli/dist/liken fetch https://releases.liken.sh 2026.07.31-001 /tmp/oldchannel
+old=<an older published version>
+cli/dist/liken fetch https://releases.liken.sh "$old" /tmp/oldchannel
 
 # 2. Take that release's own toolkit. The bundled binary ships
 #    without the execute bit.
-cp /tmp/oldchannel/2026.07.31-001/liken /tmp/old-liken
+cp "/tmp/oldchannel/$old/liken" /tmp/old-liken
 chmod +x /tmp/old-liken
 
 # 3. Compose media from the old release and the lab's current layer.
-/tmp/old-liken media /tmp/oldchannel/2026.07.31-001 \
+/tmp/old-liken media "/tmp/oldchannel/$old" \
     dev-cluster/image/deployment.cpio \
     dev-cluster/image/old-install.cpio
 ```
@@ -49,10 +50,9 @@ Use `make -C dev-cluster` here on purpose. `make install` in `liken/`
 first rebuilds `dev-cluster/image/install.cpio` from the working
 tree, which gives the current build, not the old one.
 
-Each machine seeds only itself, so a fleet of three of the five
-machines reports 3/3 and never reports Degraded. A rollout of three
-leaders takes about two and a half minutes, with one reboot at a
-time.
+Each machine seeds only itself. So a fleet that runs only some of
+the machines counts only those, as in 3/3, and never reports
+Degraded.
 
 ## The lab channel at a chosen version
 
@@ -93,7 +93,7 @@ that the bundle needs, and then passes the build to
 step.
 
 Each fault tests one fallback path, and `init/fault.go` explains
-both:
+each one:
 
 * **`FAULT=panic`.** init panics at startup. When PID 1 dies, the
   kernel panics. The built-in `panic=10` argument reboots the machine

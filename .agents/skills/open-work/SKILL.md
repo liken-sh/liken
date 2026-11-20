@@ -19,14 +19,8 @@ checked.** Past surveys repeated a claim from a plan without checking
 it, kept built plans open for days, and reported functions as missing
 when they had only moved.
 
-The conventions are in `plans/README.md`. Read it first. In short:
-
-- A Markdown file at the top of a `plans/` directory is a plan that is
-  not built.
-- `open-problems/` contains unresolved bugs and design questions.
-- `completed/` contains built plans.
-- `rejected/` contains plans that were built and then removed, and
-  designs that were considered and never built.
+The conventions are in `plans/README.md`, and the procedure for one
+plan is in the `plans` skill. Read both first.
 
 ## 1. List the open documents
 
@@ -39,10 +33,9 @@ find . -path '*/plans/open-problems/*.md' -not -path '*/node_modules/*'
 ```
 
 `00-design.md` is a component's design overview, and `README.md` is an
-index, so neither is open work. Plan numbers repeat across
-components, and `liken/plans/` calls its plans milestones. So always
-name a plan with its component: "library-operator plan 84", "root
-plan 85", "liken milestone 89".
+index, so neither is open work. Name each plan with its component,
+as the `plans` skill says, because plan numbers repeat across
+components.
 
 For a short reminder ("what's open?"), stop here and give one line per
 document from its header. Say that the list comes from the headers and
@@ -83,9 +76,8 @@ function and its file, a field and where it is in the schema, a
 version, a base image, a default, a link. Compare each claim with the
 code as it is now.
 
-A drill that has not run never keeps a plan open, and it never
-becomes an open problem. The plan closes, and its header lists the
-drills that have not run.
+A drill that has not run never keeps a plan open. The rule is in
+"Close a plan in the commit that builds it" in the `plans` skill.
 
 ## 3. Verify the findings before you report them
 
@@ -94,8 +86,8 @@ Before a finding goes into the report, check it yourself with one
 `grep` or one read:
 
 - "Function X does not exist": `grep -rn "func.*X\b"` across the
-  component. A survey once reported `screenOf` missing while it was at
-  `media-operator/screen.go:307`.
+  component. A survey once reported `screenOf` missing while it was in
+  `media-operator/screen.go`.
 - "Field X is read-only" or "the spec field is Y": read the CRD
   schema and print the path from the root of the schema to the field.
   A survey once reported `spec.denon.settings.hdmi.passThrough` as a
@@ -118,7 +110,7 @@ trust the agents.
 - **The work was built under another component's plan.** The steps of
   a root plan are built by component plans, and a problem in one
   component can be fixed in another. Root plan 74's header said "Not
-  built" while 17 observatory-operator plans had built mode 1. Search
+  built" while plans of `observatory-operator` had built its mode 1. Search
   the whole repository for the mechanism, not only the component that
   owns the document.
 - **A plan's claim was repeated as a fact.** Plan 66's survey of
@@ -172,23 +164,14 @@ Then wait for the maintainer to confirm.
 When the maintainer agrees, make one commit for all of the
 housekeeping, separate from the work of the day:
 
-- **A built plan closes.** `git mv` it to `completed/`. Date its
-  header, and say what it built and where the remaining work
-  continues. Each unbuilt part goes to a plan that already covers it,
-  or to a new open problem in the component that owns it.
+- **A built plan closes.** Follow "Close a plan in the commit that
+  builds it" in the `plans` skill, including the search for links
+  before and after the move.
 - **Two documents that describe one problem become one.** Merge them
   into one document, and remove the other with `git rm`. Fix the
   links to the removed document the same way as for a move.
-- **Fix the links.** Before the move, run `grep -rn "<file name>"`
-  across the whole repository, including code comments, YAML,
-  `AGENTS.md`, and other plans, and update each hit. In the moved
-  file, fix every relative link for its new depth. After the move,
-  grep again and expect no hit on the old path.
-- **Correct the stale facts.** In a plan, correct a path, a function,
-  a link, or a sentence about the system today, and add a dated
-  status paragraph for a part that is built. Do not rewrite a
-  proposal, a decision, or a measurement. Follow the rewriting rules
-  of `brand/voice.md`.
+- **Correct the stale facts.** Follow "Change a plan that exists" in
+  the `plans` skill.
 - **Write a correction that stays true.** Do not replace one specific
   version, count, or file and line with another, because the new
   value goes out of date again. Say what is true in general and where
@@ -200,4 +183,4 @@ housekeeping, separate from the work of the day:
   in the commit message.
 
 The commit message says what the survey found and why each document
-changed. It does not list the files.
+changed. Load the `commit-messages` skill before you write it.

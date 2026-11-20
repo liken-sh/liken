@@ -1,6 +1,6 @@
 ---
 name: operators
-description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the three guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, conditions and the Events they post, timers, device traffic, the node label that keeps a device DaemonSet off a node, the replacement of a pod that the kubelet ended, the order of preference between Linux, Kubernetes, and code of the project's own, where an operator runs and where its workloads run, and the decision to watch through client-go, with references for the code of a watch and of a read from the cache. Use when writing or reviewing an operator's watch, informer, reconcile pass, read of a watched kind, status write, condition, Event, backstop, timer, device polling, wait for a socket, replaced pod, device DaemonSet, RBAC, or deploy base, and before committing any change to an operator or a CSI driver.
+description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, conditions and the Events they post, timers, device traffic, the node label that keeps a device DaemonSet off a node, the replacement of a pod that the kubelet ended, the order of preference between Linux, Kubernetes, and code of the project's own, where an operator runs and where its workloads run, and the decision to watch through client-go, with references for the code of a watch and of a read from the cache. Use when writing or reviewing an operator's watch, informer, reconcile pass, read of a watched kind, status write, condition, Event, backstop, timer, device polling, wait for a socket, replaced pod, device DaemonSet, RBAC, or deploy base, and before committing any change to an operator or a CSI driver.
 ---
 
 # Writing and reviewing operators
@@ -11,14 +11,14 @@ read the whole state once. When the watch fails, open it again and
 read the whole state again. A timer is correct only as a clock. This
 skill has the detail that an operator needs to follow that rule.
 
-In 2026-09, reviews of seven hand-written watch loops found the same
+In 2026-09, reviews of the hand-written watch loops found the same
 faults again and again. Each loop needed several rounds of review
 before it met the guards below. So the organization chose client-go's
 reflector for every operator (see "Decision: every watch runs on
 client-go"). Read this skill before you write, change, or review a
 watch, and check the watch against every guard and scenario here.
 
-## The three guards of a watch loop
+## The guards of a watch loop
 
 A watch loop first lists the collection, and the list returns a
 `resourceVersion`. Then the loop opens a watch from that version. The
@@ -144,7 +144,9 @@ The rule and the reasons are in root plan 78. In short:
   seconds apart, and it patches the count of a repeat within 10
   minutes. A nil recorder posts nothing. An `Event` about a
   cluster-scoped object goes in the `default` namespace. Grant
-  `create` and `patch` on `events`.
+  `create` and `patch` on `events`. The numbers are the constants
+  `attempts` and `retryWait` in `kubernetes/events/recorder.go`, and
+  `window` in `series.go`.
 - **The shutdown.** The recorder writes from its own goroutine, so the
   last write of an elected operator can be an `Event`. Pass
   `events.New` a context that outlives the last pass, such as
@@ -195,12 +197,10 @@ The rule and the reasons are in root plan 78. In short:
   socket. So it does not miss a socket created between the two steps.
   `AGENTS.md` gives this pattern under "Keep state current with
   events". A loop that tries to connect, sleeps, and tries again is a
-  timer that reads state again. These records list the loops that
-  remain: `wireplumber-polls-for-the-pipewire-socket.md` in
-  `audio-operator/plans/open-problems/` and
-  `the-idle-screen-polls-for-the-compositor-socket.md` in
-  `media-operator/plans/open-problems/`. For an example of a directory
-  watched with inotify, see `volumeSwaps` in
+  timer that reads state again. A loop of this kind that remains has a
+  record in its component's `plans/open-problems/`, such as
+  `wireplumber-polls-for-the-pipewire-socket.md` in `audio-operator`.
+  For an example of a directory watched with inotify, see `volumeSwaps` in
   `audio-operator/volumeswaps.go`.
 
 ## A pod that the kubelet ended
@@ -270,10 +270,10 @@ affinity:
 ```
 
 - **The key.** Use one key for each kind of hardware, in the
-  operator's own API group, with the value `none`. The keys in use are
-  `bluetooth.liken.sh/bluetooth`, `equipment.liken.sh/cec`,
-  `audio.liken.sh/sound-card`, and `display.liken.sh/display`. A new
-  `DaemonSet` gets a new key of the same form.
+  operator's own API group, with the value `none`, such as
+  `audio.liken.sh/sound-card`. A new `DaemonSet` gets a new key of the
+  same form. To see the keys in use, search the `deploy/` manifests
+  for `operator: NotIn`.
 - **The default.** `NotIn` also matches a node that has no such label,
   as the Kubernetes page on set-based requirements says. So with no
   label, the `DaemonSet` makes a pod on every node, and the claim
@@ -294,9 +294,9 @@ affinity:
   with `kubectl label node`, and `liken` leaves in place a label that
   it did not declare. When the label changes, the `DaemonSet`
   controller deletes or adds the pod.
-- **The test.** A test in the repository reads the `DaemonSet` from
-  `deploy/` and checks that it has the one term with its key
-  (`nodeaffinity_test.go`).
+- **The test.** A test in the operator reads the `DaemonSet` from
+  `deploy/` and checks that it has the one term with its key, such as
+  `audio-operator/nodeaffinity_test.go`.
 - **The guide.** The install guide has the section "Keep the pods off
   nodes with no ...", in the same words as the guides of the other
   operators.
@@ -345,10 +345,10 @@ wrote. That loop met the guards exactly and used no more memory, but
 the project would have had to maintain the loop, its fake API server,
 and a release that every operator must take.
 
-Every operator now watches through `kubernetes/informer`, in the Go
+Every operator watches through `kubernetes/informer`, in the Go
 module `kubernetes/` at the top of the repository. That module also
 has the client, the reads of a store, and the memo.
-`liken/kubernetes/watch` has what `liken`'s two operators add: the
+`liken/kubernetes/watch` has what the operators of `liken` add: the
 wake handlers and the reads of a store. The CSI drivers run
 client-go's informer with the typed clientset
 (`git-csi-driver/listwatch.go`, `per-node-csi-driver/sweep.go`).

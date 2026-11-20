@@ -6,25 +6,22 @@ describes its kinds.
 
 ## How it runs
 
-The operator is a `Deployment` in `liken-system`. A Lease makes sure
-that only one replica acts at a time. The operator watches its own
-kinds, its pods, the `ResourceClaim`s and `ResourceSlice`s, and the
-kinds of the hardware operators. It creates the `ResourceClaim`s and
-pods that each `Player`, `Play`, and `Remote` needs, and it writes the
-status of each of its kinds. It plays no media in its own process.
+The operator is a `Deployment`, and a Lease makes sure that only one
+replica acts at a time. It creates the `ResourceClaim`s and pods that
+each `Player`, `Play`, and `Remote` needs, and it writes the status of
+each of its kinds. It plays no media in its own process.
 
 Several of the operator's pods run the pod build of this Go program.
 The pod build is the same code built with the build tag `pod`, and
 it leaves out leader election. For each `Play`, the operator creates
-a playback pod. Its `player` container runs the pod build, which
-builds the arguments for `mpv` and runs `mpv`. Its `command` sidecar
-also runs the pod build. The sidecar is the only program that writes
-to `mpv`'s IPC socket. It reads presses and commands from the bus,
-and it publishes the report of the run. Its `display` sidecar runs
-the Rust program in `display/`, which draws the on-screen display
-over the film. An idle pod runs the Rust program in `idle/`, which
-links the `media-screen` crate. Each `Remote` has a pod that runs the
-pod build and publishes each press of its controller.
+a playback pod. In that pod, the `player` container builds the
+arguments for `mpv` and runs `mpv`. The `command` sidecar is the only
+program that writes to `mpv`'s IPC socket. It reads presses and
+commands from the bus, and it publishes the report of the run. The
+`display` sidecar runs the Rust program in `display/`, which draws
+the on-screen display over the film. An idle pod runs the Rust
+program in `idle/`, which links the `media-screen` crate. The pod of
+each `Remote` publishes each press of its controller.
 
 Presses, commands, reports, and screen requests go through the
 Mosquitto broker in `deploy/bus.yaml`. A screen client from another
@@ -57,22 +54,16 @@ are the interfaces between this operator and `liken`.
 `library-operator` reads this operator's kinds and its bus, and this
 operator reads nothing from `library-operator`.
 
-The reasons for these decisions are in `plans/`. Read the relevant
-plan before you change how something works.
-
 ## Finding things
 
 - `keycodes.go` is generated from the kernel's `input-event-codes.h`.
   `make codes` regenerates it.
 - `openapi.json` is the OpenAPI document of `media-api`. A test fails
   when it differs from the router, and `go generate` regenerates it.
+  `docs/Makefile` generates the route reference from it.
 - `patterns/` contains the committed test patterns. `make patterns`
   creates the missing files, and their names match those in
   `patterns.go`.
-- `docs/Makefile` writes each reference page in `GENERATED` from a CRD
-  in `deploy/` or from `openapi.json`, and `make -C docs skills`
-  writes `skills/` from the guides. `make test-docs` fails when one is
-  stale.
 - `topics.go` builds every bus topic, and
   `docs/content/docs/reference/bus.md` lists each topic with its
   writer and its readers.

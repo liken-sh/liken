@@ -5,13 +5,10 @@ for and describes the objects that declare a volume.
 
 ## How it runs
 
-The driver name is `per-node.liken.sh`. The node plugin is the only
-workload. It is a `DaemonSet` in `liken-system` that tolerates every
-taint. A `liken` node registers with taints, and the plugin must run
-on every node where a pod can run, because the plugin makes the pod's
-copy. The plugin's driver container is privileged so that it can make
-the bind mount. It runs beside the upstream
-`csi-node-driver-registrar`.
+The driver name is `per-node.liken.sh`, and the node plugin is its
+only workload. The plugin makes each pod's copy, so it must run on
+every node where a pod can run. A `liken` node registers with taints,
+so the plugin tolerates every taint.
 
 To publish a volume, the plugin runs `mkdir` for the copy and
 bind-mounts the copy onto the pod's target path. The node's store
@@ -19,9 +16,7 @@ contains each copy, and a record of each target path where a copy is
 published. The plugin watches the `PersistentVolume`s of this driver,
 and it removes a copy when no `PersistentVolume` has its handle. It
 posts a `Warning` `Event` on the pod for each handle that it rejects
-and each mount that fails. It serves the size of each copy in bytes
-as a metric. Its RBAC lets it read and watch `PersistentVolume`s and
-write `Event`s, and nothing else.
+and each mount that fails.
 
 ## Design
 
@@ -44,6 +39,3 @@ change the owner of every file in a large database at each start.
 Nothing in this directory is installed on a real cluster until a
 person has seen it work, so every drill runs in `lab/`. `lab/` boots
 one `liken` machine in QEMU from the public release channel.
-
-The reasons for these decisions are in `plans/`. Read the relevant
-plan before you change how something works.

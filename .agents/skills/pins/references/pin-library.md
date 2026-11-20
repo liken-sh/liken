@@ -3,7 +3,9 @@
 Every `fetch.sh` and `latest.sh` sources `toolchains/pin.sh`, which
 has one implementation of each step of a pin. The comment above each
 function in `pin.sh` gives its arguments and the reason for its
-behavior.
+behavior. The list below groups the functions that a script calls.
+`grep -n '^[a-z_]*()' toolchains/pin.sh` lists every function, with
+its line.
 
 - **`require_tools`** stops when a tool is missing. **`fail`** stops
   with a message that names the script.

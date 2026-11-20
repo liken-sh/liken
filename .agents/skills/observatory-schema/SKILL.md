@@ -7,12 +7,12 @@ description: Changes the schema of observatory-operator's observatory.liken.sh r
 
 Each kind of `observatory.liken.sh` has a Go type in
 `observatory-operator/observatory/` and a CRD in
-`observatory-operator/deploy/`. The CRDs of `OpticalTube`,
-`OpticalTrain`, `Guider`, `Reservation`, and `Horizon` are written by
-hand. `schema/` generates the CRD of each other kind. Those are the
-kinds with procedures. They share parts, and the generator gives each
-shared part one source. Run the commands below from
-`observatory-operator/`.
+`observatory-operator/deploy/`. `schema/` generates the CRD of each
+kind with procedures, from its template
+`schema/<plural>-crd.yaml.tmpl`. Those CRDs share parts, and the
+generator gives each shared part one source. A CRD with no template
+is written by hand, such as the CRD of `Reservation`. Run the
+commands below from `observatory-operator/`.
 
 ## The sources of a generated CRD
 
@@ -24,7 +24,7 @@ shared part one source. Run the commands below from
   procedure schema: `spec.activation`, `spec.deactivation`,
   `spec.triggers`, and `status.procedures`.
 - `fitskeywords.yaml.tmpl` has `spec.fitsKeywords`, which the
-  `Observatory`, the `Telescope`, and the `Camera` include. The
+  templates of several kinds include, such as the `Camera`'s. The
   field's rule rejects the keywords that the camera's driver writes
   itself. The generator writes the names of those keywords from
   `observatory/fitskeywords.go`, which is the only list of them. The
@@ -160,7 +160,8 @@ after a bump has a new keyword, the test fails until the list names
 it.
 
 `make transcripts` does not write this file. To capture it, you run
-six simulators on one server and read the file that the driver saved.
+the simulators below on one server and read the file that the driver
+saved.
 To capture it again:
 
 1. Run `indiserver` from the `indi-simulators` image with the

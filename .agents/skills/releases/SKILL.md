@@ -1,6 +1,6 @@
 ---
 name: releases
-description: How the components of the liken repository version and release. Covers the CalVer scheme, the one release tag, which components a tag publishes, the development builds on main, the pinned base images, the labels and annotations that a publish writes on an image, pinning a development build, and the liken OS channel publish. Use when tagging, publishing an image, pinning a development build, or reasoning about a component's version. To verify a published image or a release file, or to read an SBOM or a vulnerability scan, use the sbom-and-scans skill.
+description: Reference for how the components of the liken repository version and release. Covers the CalVer scheme, the one release tag, which components a tag publishes and why, which checks a run runs, the development builds on main, the pinned components and their revisions, the labels and annotations that a publish writes on an image, pinning a component or a development build in a Flux OCIRepository, and the liken OS channel. Use when reasoning about a component's version or why a tag released it, when changing what a publish writes or what a run selects, when publishing an image, or when pinning a development build. To cut, tag, or ship a release, use the release skill, which is the procedure. To verify a published image or a release file, or to read an SBOM or a vulnerability scan, use the sbom-and-scans skill.
 ---
 
 # Releases and development builds
@@ -13,23 +13,24 @@ decides what each run publishes.
 
 **Publishing needs the repository variable `PUBLISH` set to `true`.**
 Without it, a tag or a push to `main` runs its checks and pushes
-nothing. Check it with `gh variable get PUBLISH -R liken-sh/liken`. If
-it is not `true`, stop and tell the maintainer. Do not push a tag.
+nothing. `gh variable get PUBLISH -R liken-sh/liken` prints the
+value. The `release` skill is the procedure that cuts a release, and
+it checks this variable before the tag.
 
 ## The version scheme
 
 CalVer, `yyyy.mm.dd-nnn`:
 
-* `yyyy.mm.dd` is the day of the release.
+* `yyyy.mm.dd` is the day of the release, in the workstation's local
+  date.
 * `nnn` is a three-digit serial within that day, starting at `001`.
-  Run `git tag -l "$(date +%Y.%m.%d)-*"` and use the next number.
 * The tag is the bare version, with no `v` prefix. It is lightweight,
   not annotated.
 
 The tags that the components brought from their own repositories have
 the component's name as a prefix, such as
 `display-operator/2026.09.27-001`. These tags are history. Nothing
-creates a prefixed tag now, and the release workflow does not run for
+creates a prefixed tag, and the release workflow does not run for
 one. The OS's tags before `2026.08.18-002` have a `v` prefix.
 
 `corrosion` is outside this repository. It uses the same CalVer scheme
@@ -60,18 +61,16 @@ component's paths from that tag to the tagged commit:
 A component's paths are its own directory and the directory of every
 component that its `package.toml` lists in `[depends]`, through the
 whole dependency graph. Some paths at the top of a component are not
-part of any output: `docs/`, `plans/`, `AGENTS.md`, `README.md`,
-`skills/`, `smoke/`, `.pre-commit-config.yaml`, `.testcoverage.yml`,
-and `.gitignore`. Go tests and `testdata/` are not part of an output
-either. A change to them does not release the component. A
-`.dockerignore` is an input, because it decides which files an
-image's build receives.
+part of any output, such as `docs/`, `plans/`, `README.md`, and
+`smoke/`. `notOutputs` in `ci/graph.go` lists them. Go tests and
+`testdata/` are not part of an output either. A change to them does
+not release the component. A `.dockerignore` is an input, because it
+decides which files an image's build receives.
 
 A component's `package.toml` can list more such paths in `exclude`
 under `[outputs]`. `liken` excludes `deploy/monitoring/`, because a
 fleet fetches it by git and the channel contains no part of it.
-`brand` excludes its prose: `voice.md`, `motion.md`,
-`editing-prompt.md`, `mark.md`, and `theme.md`.
+`brand` excludes the files of its prose.
 
 A change to a `package.toml` that touches only its `[[jobs]]` or its
 `exclude` paths runs the component's checks and releases nothing. The
@@ -92,7 +91,8 @@ repository, it is `<component>/<version>`.
 
 The plan job's summary on the run page lists each component, whether
 it releases, and why. Every push to a branch that starts a run shows
-the same summary for a tag at that commit, so read it before you tag.
+the same summary for a tag at that commit. Step 2 of the `release`
+skill reads it from the job's log before the tag.
 
 The `record` job writes the GitHub release for the tag. The GitHub
 release lists every component and its version at that tag. When the
@@ -151,10 +151,10 @@ the jobs and image builds that run for each component, and why.
 
 ## Pinned components
 
-The pinned components are the base images `vulkan`, `vaapi`, `ffmpeg`,
-`mpv`, and `weston`, the INDI images of `indi`, and the CA bundle of
-`trust`. A pinned component's `package.toml` sets a `version` and a
-`revision`. The component publishes under its own tag,
+A pinned component is one whose `package.toml` sets a `version` and a
+`revision` under `[package]`. The base images, such as `mpv`, are
+pinned components, and so are the INDI images of `indi` and the CA
+bundle of `trust`. The component publishes under its own tag,
 `<version>-<revision>`, such as `20260928-1`, which never looks like a
 release version. The version of a base is the date of the snapshot
 that it installs from.
@@ -169,7 +169,7 @@ itself" describes.
 
 A base installs from a dated snapshot of Debian sid. `indi` installs
 from dated snapshots of Ubuntu, the INDI PPA, and the PHD2 PPA. CI
-builds its 17 images only when its tag is new. `astrometry` is the
+builds the images of `indi` only when its tag is new. `astrometry` is the
 plate solver that `astrophotography-operator` runs. It is pinned on
 the Debian snapshot of the bases and moves with them. `trust` pins the
 CA bundle that the OS build uses, and that every image that verifies
@@ -299,8 +299,8 @@ image's `FROM` chain through the tree. The image writes every label
 key that any image of the repository in that chain writes. A key that
 the image does not own gets the value `""`. For example,
 `media-operator-player` is built on `mpv`. It writes `sh.liken.recipe`
-and each `sh.liken.upstream.<name>` of `mpv`, `ffmpeg`, `vaapi`, and
-`vulkan` as `""`. `mpv` writes the upstream keys of the bases under it
+and each `sh.liken.upstream.<name>` of `mpv` and of each base under
+`mpv` as `""`. `mpv` writes the upstream keys of the bases under it
 as `""`.
 
 After the push and before it signs, the publish reads the labels of
@@ -379,11 +379,6 @@ A tag releases the OS when any of its paths changed since its previous
 release, whatever the tag was meant for. An OS release reboots every
 machine in a fleet that follows releases.
 
-## Rules
-
-* Pushing the tag is the release. Every step after it is verification.
-* Do not tag a commit that CI has not passed on `main`.
-* Push nothing to `main` until the tag's run is green. A new push does
-  not cancel the tag's run, but its development builds race the
-  release's pushes.
-* Do not retag a release whose run failed. Stop and report.
+The rules of a release session, such as when to tag, what to do while
+the tag's run is in progress, and what to do when it fails, are in the
+`release` skill.

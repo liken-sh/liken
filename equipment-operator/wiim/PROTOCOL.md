@@ -1,26 +1,27 @@
 # The WiiM protocol reference
 
-This file lists the WiiM models and the commands of the LinkPlay
-HTTP API, with how far to trust each source of a command. It records
-what a measured WiiM Amp replies to, and it links the outside
-documents. `AGENTS.md` in this directory covers what you need for
-every change to the driver.
+This file lists the commands of the LinkPlay HTTP API, with how far
+to trust each source of a command. It records what measured devices
+reply to, and it links the outside documents. `AGENTS.md` in this
+directory covers what you need for every change to the driver.
+
+- The models
+- The sources of the commands
+- The reads
+- The transport and level writes
+- The input writes
+- The other families
+- The event subscriptions
+- A measured WiiM Amp
+- The UPnP descriptions
+- The references
 
 ## The models
 
-The amps:
-
-| Model | Power into 4 ohm | Notes |
-| --- | --- | --- |
-| WiiM Amp | 120 W per channel | HDMI ARC, optical, line-in, USB-A, sub out, Ethernet |
-| WiiM Amp Pro | 120 W per channel | ESS ES9038Q2M, Wi-Fi 6E, no display |
-| WiiM Amp Ultra | 200 W per channel | dual TPA3255, 3.5-inch screen, HDMI ARC with Dolby Digital |
-| WiiM CI MOD A80 | not stated | rack model for the custom-install line |
-
-The streamers and speakers are not amps, but they reply to the same
-API: WiiM Mini, WiiM Pro, WiiM Pro Plus, WiiM Ultra, WiiM Sound, and
-WiiM Sound Lite. The WiiM Ultra is a streamer and preamp with an HDMI
-ARC input and a phono stage, and it has no power amplifier.
+WiiM's amps, streamers, and speakers, such as the WiiM Amp, the WiiM
+Pro, and the WiiM Sound, reply to the same API. The WiiM Ultra is a
+streamer and preamp with an HDMI ARC input and a phono stage, and it
+has no power amplifier.
 
 The WiiM Vibelink Amp is an analog power amplifier with no network
 port. No protocol reaches it, so the operator cannot control it.
@@ -31,7 +32,7 @@ amp over optical, line-in, or USB audio, not over HDMI.
 
 ## The sources of the commands
 
-Three outside documents list these commands, and some are more
+These outside documents list the commands, and some are more
 trustworthy than others:
 
 - WiiM's own HTTP API document, version 1.2, lists the playback,
@@ -44,7 +45,7 @@ trustworthy than others:
 - `cvdlinden/wiim-httpapi`'s `openapi.json` lists the most commands,
   including the device name, the band-level and LV2 equalizer, the
   volume ceiling, and the subwoofer controls. It is the least
-  trustworthy of the three.
+  trustworthy of these documents.
 
 Each family below says which document it comes from.
 
@@ -235,6 +236,24 @@ replies without a token. So on this firmware the block only reports a
 capability, and it does not restrict the API.
 
 ## The UPnP descriptions
+
+Every LinkPlay device serves a UPnP description over plain HTTP at
+`/description.xml`, on the port in its mDNS `SRV` record. The mDNS TXT
+records do not include the model. So the `modelName` in the
+description tells a WiiM apart from another brand on the LinkPlay
+platform. When discovery cannot read the description, it decides from
+the `project` field of `getStatusEx`, such as `WiiM_Amp_4layer`.
+`status.model` comes from the `modelName`. When the description read
+fails, `status.model` stays empty and `status.wiim.device.model`
+keeps the project name.
+
+The manufacturer does not identify a WiiM, because LinkPlay makes
+devices that other brands sell. A `PlayQueue:1` service in the
+description shows that a device is a LinkPlay device. The `SERVER`
+header does not, because LinkPlay and many unrelated devices send the
+same generic string.
+
+The measured devices:
 
 | Device | `manufacturer` | `modelName` | `modelNumber` |
 | --- | --- | --- | --- |

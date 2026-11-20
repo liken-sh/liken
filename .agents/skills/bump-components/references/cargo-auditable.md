@@ -11,9 +11,10 @@ project does not sign the release file or the `.sha256` file.
 
 Then build each image whose Dockerfile runs `cargo auditable build`.
 Check that syft still lists the crates of one of them: this command
-must print a number greater than 0.
+must print a number greater than 0. `<syft>` is the `syft` entry of
+`toolchains/images.toml`.
 `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
-anchore/syft:v1.55.0 <image> -o json -q | jq '[.artifacts[] |
+<syft> <image> -o json -q | jq '[.artifacts[] |
 select(.type == "rust-crate")] | length'`
 
 The Rust images are tracked components, so no revision changes.

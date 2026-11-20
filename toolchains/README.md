@@ -24,18 +24,14 @@ does the build of each image that ships a pinned file.
 
 ## The parts
 
-- **`images.toml`** pins each outside image. The `[build]` table lists
-  the images that a Dockerfile starts from or copies from, such as
-  `golang` and `debian`. It also lists the tools that CI runs as
-  images, such as `cosign` and `grype`. Each of these entries has a
-  tag and a digest. The `[run]` table lists the images that a
-  manifest, a guide, a skill, or a test refers to. Each of these
-  entries has only a tag.
+- **`images.toml`** pins each outside image. The `[build]` table
+  holds the images that a build starts from, copies from, or runs as a
+  tool, each with a tag and a digest. The `[run]` table holds the
+  images that a manifest, a guide, a skill, or a test names by tag.
+  The comments in the file give the reasons.
 - **`pin.sh`** is the shell library that every `fetch.sh` and
-  `latest.sh` sources. Its functions check that the needed tools are
-  installed, download a pinned file and check its digest, print a row
-  of the `make versions` report, and write a bump into the files that
-  record the pin.
+  `latest.sh` sources. The comment at the top of the file lists its
+  steps and how a script sources it.
 - **`latest.sh`** compares each image in `images.toml`, the Go and Rust
   toolchains, and the Go modules and Rust crates of every `go.mod` and
   `Cargo.toml` with their upstreams, and reports the result.
@@ -43,8 +39,7 @@ does the build of each image that ships a pinned file.
   runs it, so that the binary records the crates it links.
 - **`manifest/`** is the Go module that reads a `pin.toml` and returns
   each entry as a CycloneDX component. Its command `image-sbom` writes
-  the file `/usr/share/doc/liken/<image>.cdx.json` into an image, and
-  syft reads that file.
+  that record into an image, and syft reads it.
 
 The `pins` skill has the rules for a pin and for a download. Root
 plan 83 sets the rule that each pin follows the newest upstream

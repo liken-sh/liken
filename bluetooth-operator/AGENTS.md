@@ -6,36 +6,32 @@ and describes its kinds.
 
 ## How it runs
 
-The `bluetooth-operator` `DaemonSet` runs one pod on each node, except
-a node with the label `bluetooth.liken.sh/bluetooth: none`. The pod
-claims the radio that `liken` publishes for the `btusb` driver,
-through the `DeviceClass` `bluetooth-adapter`. The pod runs in the
-host's network namespace, because the kernel opens `AF_BLUETOOTH`
-sockets only there.
+One `bluetooth-operator` pod runs on each node that has a radio. Its
+claim takes the radio that `liken` publishes for the `btusb` driver.
+The pod runs in the host's network namespace, because the kernel
+opens `AF_BLUETOOTH` sockets only there.
 
-- `bondfetch` is an init container. It reads the `Secret`s labelled
-  with the adapter's address. From them it writes BlueZ's bond tree,
-  the directory of files where BlueZ stores each bond, and the radio's
-  identity key. It runs first because BlueZ reads these files only
-  when it starts.
-- `btmon` and `rescan` are native sidecars that start before
-  `bluetoothd`. `btmon` traces the link when a trace is requested.
-  `rescan` turns the passive scan back on, so that a bonded Low Energy
-  remote can reconnect.
-- `bluetoothd` is a native sidecar. It runs a private `dbus-daemon`
-  and `bluetoothd`, and it puts the bus socket in a host path.
-- `operator` is a client of that bus. It serves DRA to the kubelet,
-  and it publishes each paired device and the media bus. For each
-  controller, it copies the controller's input events into a `uinput`
-  device. So the device nodes of a claim stay the same while the
-  controller sleeps and reconnects. It writes the status of each
-  `Adapter`, `Peripheral`, and `PairingRequest`. When BlueZ changes
-  its bond tree, the operator copies the change back to the bond's
-  `Secret`.
+`bluetoothd` owns the radio. Its container also runs a private
+`dbus-daemon`, and puts the socket of that bus in a host path. The
+`operator` container is a client of the bus, and so is the WirePlumber
+of `audio-operator`, which claims the bus as the media bus device.
 
-`audio-operator` claims the media bus and connects its WirePlumber to
-the `bluetoothd` in this pod. `media-operator` reads each
-`Peripheral`.
+The `Secret`s labelled with the adapter's address are the record of
+each bond and of the radio's identity key. BlueZ reads its bond tree,
+the directory of files where BlueZ stores each bond, only when it
+starts. So the `bondfetch` init container writes the tree from the
+`Secret`s before `bluetoothd` starts. When BlueZ changes the tree, the
+operator copies the change back to the bond's `Secret`.
+
+The operator serves DRA to the kubelet, and publishes each paired
+device and the media bus. It copies each controller's input events
+into a `uinput` device, so the device nodes of a claim stay the same while
+the controller sleeps and reconnects. The operator writes the status
+of each `Adapter`, `Peripheral`, and `PairingRequest`, and
+`media-operator` reads each `Peripheral`. The `rescan` sidecar turns
+the passive scan back on, so a bonded Low Energy remote can
+reconnect. The `btmon` sidecar traces the link only when a trace is
+requested.
 
 ## Design
 
@@ -59,17 +55,8 @@ This operator runs no sound server. `audio-operator` publishes each
 paired speaker as a sound output. It finds the media bus through the
 device attribute and the CDI spec that this operator writes.
 
-The reasons for these decisions are in `plans/`. Read the relevant
-plan before you change how something works.
-
 ## Finding things
 
-- The reference pages `docs/content/docs/reference/adapters.md`,
-  `peripherals.md`, and `pairingrequests.md` are generated from
-  `deploy/crds.yaml` and the text in `docs/crdref/`.
-  `make -C docs generate` regenerates them, and `make -C docs skills`
-  regenerates `skills/` from the guides. `make test` fails when either
-  is out of date.
 - `bluetoothd/rescan/main.go` describes the kernel faults that the
   `rescan` container works around, and when you can delete the
   container.

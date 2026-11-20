@@ -7,16 +7,14 @@ Operators build their reconcile passes on these packages, without
 controller-runtime. The packages are small, so a program that must
 stay small links only the packages that it uses.
 
-The module contains the code that operators need in the same form:
-the API client, the watch stores, the record of the versions that an
-operator wrote, the `Event` recorder, the condition type, the leader
-election, and the fakes that tests use. It defines no resource of its
-own and no reconcile loop. Each operator has its own types and its own
+The module contains the code that each operator needs in the same
+form, and the fakes that tests use. It defines no resource of its own
+and no reconcile loop. Each operator has its own types and its own
 logic.
 
-Every operator, both CSI drivers, and the OS's `machine-operator` and
-`cluster-operator` import the module through a `replace` directive. So
-each one builds against the code in this tree. The module is not
+Each operator and CSI driver, and the OS's `machine-operator` and
+`cluster-operator`, import the module through a `replace` directive in
+their `go.mod`. So each one builds against the code in this tree. The module is not
 published. The watches use client-go's reflector, which the upstream
 Kubernetes project maintains.
 

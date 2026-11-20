@@ -5,14 +5,14 @@ what it is for and describes its kinds.
 
 ## How it runs
 
-The image contains two builds of the program, and each workload runs
-one of them.
+The image contains two builds of the program. The node build is
+compiled with the build tag `node`. Each workload runs one of them.
 
 - **The `Deployment`** runs on the host network. It has to, because a
   pod on the overlay network gets no reply to an mDNS or SSDP search.
-  Only one copy is active at a time, under a Lease. It keeps the
-  connection open to each receiver: over TCP to a Denon, and over
-  HTTPS with UPnP events to a WiiM. It writes the `Receiver` status.
+  Only one copy is active at a time, under a Lease. It keeps a
+  connection open to each receiver in the receiver's own protocol,
+  such as TCP to a Denon or HTTPS with UPnP events to a WiiM. It writes the `Receiver` status.
   It also writes the `CECBus` and `Television` status, which it works
   out from the adapters' reports, the `Display` objects, and the
   `Receiver` objects.
@@ -63,14 +63,10 @@ equipment and every fact that the equipment reports. `liken`
 publishes the adapter as a device, and `display-operator` owns the
 `Display`.
 
-The reasons for these decisions are in `plans/`. Read the relevant
-plan before you change how something works.
-
 ## Finding things
 
-- `cec/AGENTS.md`, `denon/AGENTS.md`, and `wiim/AGENTS.md` have the
-  protocol references and device notes for each driver.
-- `make -C docs generate` writes the reference pages from the CRDs in
-  `deploy/`. `make -C docs skills` writes `skills/` from the guides.
+- Each protocol package, such as `cec/` or `denon/`, has its own
+  `AGENTS.md` with the protocol reference and the notes on real
+  devices. It loads when you work in that directory.
 - Load the `receiver-drivers` skill under `.agents/skills` before you
   add a receiver setting or a receiver brand.

@@ -3,53 +3,38 @@
 `ghcr.io/liken-sh/vulkan` is the base image for a program that draws
 with Vulkan on a Wayland compositor. It contains the libraries that
 such a program opens at run time: the Vulkan loader, Mesa's Vulkan
-drivers for Intel and AMD GPUs, the Wayland client library, and
-`xkbcommon`. It also contains the data files that those libraries
-open by name, such as the keymaps. A Vulkan client builds on this
-image and adds only its own binary.
+drivers for Intel and AMD GPUs, and the Wayland client libraries. It
+also contains the data files that those libraries open by name, such
+as the keymaps and the time zone database. A Vulkan client builds on
+this image and adds only its own binary.
 
 The image is a library closure. A closure is an image built
 `FROM scratch` that contains only the files a program needs, copied
-out of Debian packages. This one contains the files that the
-libraries above load and read, and nothing else, so it has no shell
-and no package manager. Every file comes from the Debian packages of
-one dated snapshot of sid. For each of those packages, the image also
-includes its copyright file and its dpkg record. syft and Trivy read
-those records, so they can list the packages of this image and of
-every image built on it. The image has no compositor and no video
-driver. `weston` and `vaapi` add those.
+out of Debian packages. This one has no shell and no package manager.
+Every file comes from the Debian packages of one dated snapshot of
+sid. For each of those packages, the image also includes its copyright
+file and its dpkg record. syft and Trivy read those records, so they
+can list the packages of this image and of every image built on it.
+The image has no compositor and no video driver. `weston` and `vaapi`
+add those.
 
 `vulkan` is the lowest base image. [`vaapi`](../vaapi/) and
 [`weston`](../weston/) build on it, and [`ffmpeg`](../ffmpeg/) and
-[`mpv`](../mpv/) build on `vaapi`. The idle screen and the display
-of `media-operator`, and the media browser of `library-operator`,
-build on `vulkan` directly.
+[`mpv`](../mpv/) build on `vaapi`. The screens of the operators, such
+as the idle screen of `media-operator`, build on `vulkan` or on an
+image above it. Find each image that uses it by its `FROM vulkan`
+line.
 
-This directory also contains the scripts that every closure on a
-Debian builder in the repository uses. Those builds get the
-directory as the build context `builder`.
-
-## What the image contains
-
-- **The Vulkan stack**: the loader, Mesa's Intel and AMD drivers,
-  their ICD files, and Mesa's `drirc`. Debian ships every Mesa Vulkan
-  driver in one package, and the closure copies only these two. The
-  AMD driver links LLVM, so LLVM is in the image. The comments in
-  `vulkan-closure.sh` give the reasons.
-- **The Wayland client libraries**: `libwayland-client` and
-  `libxkbcommon`, and the keymap data under `/usr/share/X11/xkb`.
-- **The time zone database**, for a client that shows a clock.
-- **The record of each package**: its copyright file, its stanza under
-  `/var/lib/dpkg/status.d/`, and a line in
-  `/usr/share/doc/liken/vulkan.packages`. That file lists the
-  snapshot as a `deb-src` entry, so `apt-get source` can download the
-  source of each package.
-
-The list of packages is in the `Dockerfile`. The upstream releases
-are under `[package.upstream]` in `package.toml` and in the image's
-`sh.liken.upstream.*` labels. Every file is in the image's SBOM.
+The `Dockerfile` names the packages, and `vulkan-closure.sh` names
+the files that the closure copies from them, with the reasons. The
+upstream releases are under `[package.upstream]` in `package.toml` and
+in the image's `sh.liken.upstream.*` labels. Every file is in the
+image's SBOM.
 
 ## The scripts that other images use
+
+Every closure on a Debian builder in the repository gets this
+directory as the build context `builder`, for these scripts:
 
 - `closure.sh` is the closure library. It collects the files that a
   program loads, and writes the notices and the dpkg records of the

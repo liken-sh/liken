@@ -5,10 +5,9 @@ it is for and describes its kinds.
 
 ## How it runs
 
-The operator is one unprivileged `Deployment` in `liken-system`, with
-leader election. It watches every `Firmware`, every `FirmwareCatalog`,
-every `ResourceSlice` of the driver `liken.sh`, every `Machine`, the
-`Disruption`s that it created, and its own pods. For each catalog, it
+The operator is one unprivileged `Deployment` for the cluster, with
+leader election. It learns of each machine's devices from the
+`ResourceSlice`s of the driver `liken.sh`. For each catalog, it
 downloads the jcat, which lists the catalog's file and its SHA-256,
 and then the file itself, both over HTTPS. It writes the status of
 each `Firmware` and `FirmwareCatalog`.
@@ -58,9 +57,6 @@ belongs to this operator, including vendor firmware and vendor tools.
 When this operator needs a new fact about a device, the OS publishes
 the fact as an attribute in the machine's `ResourceSlice`, and this
 operator reads it from there.
-
-The reasons for these decisions are in `plans/`. Read the relevant
-plan before you change how something works.
 
 ## Finding things
 

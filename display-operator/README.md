@@ -67,9 +67,7 @@ spec:
 ```
 
 The manual is at [liken.sh/display](https://liken.sh/display/). It
-has the install guide, the guides to put a window on a screen, to
-share a screen with a `Layout`, and to take a screenshot, and a
-reference for the devices, each kind, and the API.
+has the install guide, the guides, and a reference for each kind.
 The design documents and the open problems are in [`plans/`](plans/).
 
 MIT. See [LICENSE](LICENSE).

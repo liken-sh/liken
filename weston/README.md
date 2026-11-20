@@ -26,33 +26,30 @@ downloads it.
 
 ## What the image contains
 
-- **Weston**, with the DRM and headless backends, the GL renderer, and
-  the ivi-shell.
-- **The hotplug shim**, `hotplug/udev-kernel-group.c`, a library that
+- **Weston**, with the features above.
+- **The hotplug shim**, in `hotplug/`, a library that
   `display-operator` preloads into the compositor. Weston normally
   listens for monitor hotplug events on udevd's netlink group. A
   `liken` machine runs no udevd, so the shim makes Weston listen on
   the kernel's netlink group instead.
-- **The layout controller**, `layout/liken-layout.c`, an ivi-shell
-  module. It opens one Wayland socket for each claim. It also opens a
+- **The layout controller**, in `layout/`, an ivi-shell module. It opens one Wayland socket for each claim. It also opens a
   control socket, which `display-operator` uses to place, fade, and
   move each window. Inside a claim's region, one client of the claim
   can arrange the claim's surfaces through `liken_arrangement_v1`, a
   protocol that the controller implements. The protocol is defined in
   `layout/liken-arrangement-v1.xml`.
-- **The diagnostic programs**: `wayland-info`, which lists every
-  global that the compositor advertises, `ddcutil`, which reads a
-  panel's capabilities over i2c, and `liken-arrange-drill`, which
-  arranges a claim's surfaces by hand. The image has no shell, so
-  you run each one by name with `kubectl exec`.
-- **The record of each package**, as in `vulkan`, in
-  `/usr/share/doc/liken/weston.packages`, and
-  `/usr/share/doc/liken/weston.cdx.json`, a CycloneDX record of the
-  release tarball. syft copies that record into the image's SBOM.
+- **The diagnostic programs**, such as `wayland-info`, which lists
+  every global that the compositor advertises, and
+  `liken-arrange-drill`, which arranges a claim's surfaces by hand.
+  The image has no shell, so you run each one by name with
+  `kubectl exec`. The `Dockerfile` names each one.
+- **The record of each package**, as in `vulkan`, and a CycloneDX
+  record of the release tarball, `weston.cdx.json`. syft copies that
+  record into the image's SBOM.
 
-`smoke/weston.sh` starts the image headless before it publishes. It
-checks that the GL renderer, the ivi-shell, and the layout controller
-load.
+CI runs `smoke/weston.sh` on the image before it publishes. The
+script starts the compositor headless and checks that the GL
+renderer, the ivi-shell, and the layout controller load.
 
 ## Arrange a claim by hand
 

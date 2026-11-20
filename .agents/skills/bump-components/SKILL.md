@@ -34,9 +34,9 @@ in the hold column of its report row, as for every hold. A major
 version that waits for a pass of its own stays behind, with every
 fault that upstream has already fixed.
 
-Run `make versions` at the top of the repository. The commands of
-steps 2 to 4 run from `liken/`, and their paths are relative to
-`liken/`. Steps 5 and later work at the top of the repository.
+Step 1 runs at the top of the repository. The commands of steps 2
+to 4 run from `liken/`, and their paths are relative to `liken/`.
+Steps 5 and later work at the top of the repository.
 
 ## 1. Pull the report
 
@@ -67,27 +67,26 @@ The state of a row is the first of these that applies:
 4. `behind` when pinned and latest differ.
 5. `current` otherwise.
 
-A new `latest.sh` starts with a header comment. The header says what
-the script pins, where the bytes come from, which channel it reads,
-and why.
+The steps below cover each pin whose bump needs more than its
+`--bump` and the build that its `next:` line names. Any other row,
+such as a Terraform provider of `liken.sh/latest.sh`, needs only
+those two. These scripts need a step that no section below gives:
 
-The report has these sources:
-
-| Script | Pins |
-|---|---|
-| `liken/<domain>/latest.sh` | the OS domains, steps 2 to 4 |
-| `liken/dev-cluster/firmware/capsule/latest.sh` | edk2, and the Ubuntu snapshot of the builder of the lab's capsule firmware, which builds on the `ubuntu` entry of `toolchains/images.toml`. Each move changes the compiler that builds the firmware, so the script has no `--bump`. Edit `build.sh` or the `Dockerfile` by hand, and boot the lab with `FIRMWARE=capsule`. Do the same after a move of the `ubuntu` entry |
-| `liken/releases/sbom/schema/latest.sh` | the CycloneDX schema that `liken/releases/sbom` checks the SBOM of the OS release against. The bump writes the schema files of the newest release of the specification. A new minor version changes the `specVersion` that the SBOM declares, so run `make -C liken test-go` after the bump |
-| `liken/verify/latest.sh` | Sigstore's trusted root, which `liken verify` and `liken sbom` check every signature against. The bump gets the root through Sigstore's TUF repository with the pinned cosign, so it needs docker. Its diff shows each key that was added or removed |
-| `toolchains/latest.sh` | each image in `toolchains/images.toml`, Go and Rust, and each Go module and crate that is behind |
-| `toolchains/cargo-auditable/latest.sh` | cargo-auditable, which every Rust image builds with, step 5c |
-| `vulkan/latest.sh` | the Debian snapshot of the bases and `astrometry`, step 5 |
-| `indi/latest.sh` | the snapshots of Ubuntu and the two PPAs, step 5a |
-| `trust/latest.sh` | the CA bundle, step 5b |
-| `bluetooth-operator/bluetoothd/latest.sh` | the buildroot commit that the bluetoothd image builds with, which follows `liken/userland/VERSION`, step 5e |
-| `library-operator/latest.sh` | OpenVINO, Intel's compute-runtime, gmmlib, and the graphics compiler in the appearances image, step 5e |
-| `ci/latest.sh` | the GitHub Actions, prek, and the hook revisions |
-| `liken.sh/latest.sh` | the Terraform providers |
+- **`liken/dev-cluster/firmware/capsule/latest.sh`** reports edk2
+  and the Ubuntu snapshot of the builder of the lab's capsule
+  firmware. Each move changes the compiler that builds the firmware,
+  so the script has no `--bump`. Edit `build.sh` or the `Dockerfile`
+  by hand, and boot the lab with `FIRMWARE=capsule`. Do the same
+  after a move of the `ubuntu` entry of `toolchains/images.toml`.
+- **`liken/releases/sbom/schema/latest.sh`** writes the CycloneDX
+  schema files that the SBOM of the OS release is checked against. A
+  new minor version changes the `specVersion` that the SBOM declares,
+  so run `make -C liken test-go` after the bump.
+- **`liken/verify/latest.sh`** writes Sigstore's trusted root, which
+  `liken verify` and `liken sbom` check every signature against. The
+  bump reads the root through Sigstore's TUF repository with the
+  pinned cosign, so it needs docker. Read its diff for each key that
+  was added or removed.
 
 ## 2. Bump
 
@@ -118,13 +117,10 @@ after another, in one background task. Follow these rules:
      [`references/buildroot-patches.md`](references/buildroot-patches.md).
      The patches of buildroot's recipe can fail to apply to the new
      version, and that file says how to mark each one as held.
-   - util-linux, a library that `mke2fs` and `mount.nfs` link, has a
-     row of its own in the report. `--bump util-linux` sets its
-     version and its series.
-   - The recipes of open-iscsi, kmod, and BlueZ are in
-     `userland/iscsi/` and `userland/bluetooth/`. For each of them,
-     the bump writes the version into the recipe, and the line of the
-     tarball into the recipe's `.hash` file.
+   - For a program whose recipe is in the tree, under
+     `userland/iscsi/` or `userland/bluetooth/`, the bump writes the
+     version into the recipe, and the line of the tarball into the
+     recipe's `.hash` file.
    - When the `buildroot` row of `toolchains/latest.sh` shows `behind`
      after the move, run `../toolchains/latest.sh --bump buildroot`.
    - A buildroot bump can move every library and the compiler. So the
@@ -215,15 +211,15 @@ the first boot on real hardware are its first real test.
 
 ## 5. The base images
 
-The base images are `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`.
-They are pinned components at the top of the repository. The
+The base images, such as `vulkan` and `mpv`, are pinned components at
+the top of the repository. The root `README.md` names them. The
 `package.toml` of each one sets a `version`, a `revision`, and the
 date of the snapshot.debian.org archive that it installs from, as
 `YYYYMMDD`. Each one publishes under the tag `<version>-<revision>`.
 `vulkan/latest.sh` reports their snapshot date, and each
 `[package.upstream]` entry, against the newest snapshot of sid.
 
-**A new snapshot.** All five bases move together, because a library
+**A new snapshot.** Every base moves together, because a library
 that two bases include must be the same file in both.
 `vulkan/latest.sh --bump` writes these:
 
@@ -245,7 +241,7 @@ because sid accepts uploads every day. Compare the package versions
 with the old snapshot, and report the ones that moved.
 
 The suite is sid, Debian unstable, so a new date can bring a new
-major release of Mesa, ffmpeg, mpv, or Weston. Read the upstream
+major release of a library such as Mesa or ffmpeg. Read the upstream
 release notes of each major release that moved, as in step 3. Roll
 the development builds out to the `liken-1` testbed before any other
 cluster takes them. The reasons for sid are in root plan 82.
@@ -253,7 +249,7 @@ cluster takes them. The reasons for sid are in root plan 82.
 `astrometry`, the plate solver, is not a base. But it installs from
 the same snapshot through `vulkan/snapshot.sh`, and
 `vulkan/snapshot.sha256` has the checksums of only one date. So it
-moves with the five bases: its `version`, `revision`, digest, and
+moves with the bases: its `version`, `revision`, digest, and
 `[package.upstream]` change in the same commit.
 
 **The upstream entries.** A pinned version is a date. So each base's
@@ -277,21 +273,16 @@ in its build context, the digest of each image from outside the
 repository that it starts from, and the tag of each component in its
 `[depends]`. A change to any of them at the same version needs the
 next revision.
+
 The rule cascades. The tag of a base is in the recipe of every pinned
 component above it. So a new revision of `ffmpeg` changes the recipe
 of `mpv`, and `mpv` needs a new revision in the same commit. Walk the
-graph up from each base that changed, and raise the revision of every
-pinned component that depends on it, directly or through another
-base:
-
-* `vulkan` raises `vaapi`, `ffmpeg`, `mpv`, `weston`, and `astrometry`.
-* `vaapi` raises `ffmpeg` and `mpv`.
-* `ffmpeg` raises `mpv`.
-* `mpv`, `weston`, and `astrometry` raise nothing.
-
-A new snapshot sets every revision to 1, so it needs no cascade. When
-CI fails with "the recipe of N pinned components changed with no new
-revision", the message names each component to raise.
+graph up from each base that changed, through the `[depends]` of each
+`package.toml`. Raise the revision of every pinned component that
+depends on the base, directly or through another base. A new snapshot
+sets every revision to 1, so it needs no cascade. When CI fails with
+"the recipe of N pinned components changed with no new revision", the
+message names each component to raise.
 
 A recipe also covers the build contexts from other directories, and
 the images from outside the repository, such as `toolchains/manifest`
@@ -315,13 +306,6 @@ revision of `vulkan` and of `indi`, and the cascade above. Before you
 change it, read
 [`references/closure-library.md`](references/closure-library.md).
 
-## 5b. The trust store
-
-When the `trust` row shows `behind`, read
-[`references/trust-store.md`](references/trust-store.md). It covers
-the bump of the CA bundle, the `indi` revision that the bump needs,
-and what to read before you take it.
-
 ## 5a. The INDI images
 
 When a row of `indi/latest.sh` shows `behind` or `wrong channel`,
@@ -329,6 +313,13 @@ read [`references/indi-images.md`](references/indi-images.md). It
 covers the snapshot bump, the SDK licenses, the builds and smoke
 checks, and the steps that generate the files of
 `observatory-operator` again.
+
+## 5b. The trust store
+
+When the `trust` row shows `behind`, read
+[`references/trust-store.md`](references/trust-store.md). It covers
+the bump of the CA bundle, the revisions that the bump needs, and
+what to read before you take it.
 
 ## 5c. The toolchains
 
@@ -368,19 +359,9 @@ A new reference in `[build]` changes the recipe of each pinned
 component whose Dockerfile names that key. So each of those
 components needs a new revision, and the cascade in step 5 applies.
 
-No Dockerfile names these entries, so a move of either needs no
-revision:
-
-- **`cosign`.** `liken/flux/latest.sh --bump` and
-  `ci/latest.sh --bump trivy` run it with docker to verify the
-  signatures of upstreams. The publish job of every component signs
-  each image that it pushes with it. So a flux bump needs docker.
-  `toolchains/latest.sh --bump cosign` verifies the new image with
-  the pinned cosign before it writes the line. It stops unless
-  sigstore's release build signed the image.
-- **`buildkit`.** `ci/` writes it into the `driver-opts` of each
-  `docker/setup-buildx-action` step, so CI's builders run that
-  BuildKit daemon. `make workflows` writes it into the workflows.
+No Dockerfile names the `cosign` or the `buildkit` entry, so a move
+of either needs no revision. When either row shows `behind`, read
+[`references/cosign-and-buildkit.md`](references/cosign-and-buildkit.md).
 
 Run `make workflows` after every bump of `images.toml`.
 `cd ci && go run . pins -root ..` fails when two copies of a Go
@@ -443,9 +424,7 @@ Dependabot closes its pull request when `main` has the version.
    its behavior. Read its migration notes, port each call site, and
    check each behavior that a comment at the call site depends on.
    For example, `ureq` 3 replaced the read timeout for each socket of
-   `ureq` 2 with deadlines for each whole stage. It kept a timeout for
-   each read only as `timeout_per_read`, and it reports that timeout
-   as `ureq::Error::Timeout` inside an `io::Error` of kind `Other`.
+   `ureq` 2 with a deadline for each whole stage of a request.
 6. Check the result for known vulnerabilities. Run `govulncheck ./...`
    in each module, and `osv-scanner scan source --lockfile=<lock>` on
    each `Cargo.lock`. Neither tool is pinned in the repository, so
@@ -477,8 +456,7 @@ image, and the builds that prove them.
 Load the `pins` skill before you write or change a `latest.sh`, a
 `fetch.sh`, or a `pin.toml`. It has the rules of a pin, the library
 `toolchains/pin.sh`, the manifest, the signature that a bump
-verifies, and each pattern that `cd ci && go run . pins -root ..`
-rejects.
+verifies, and the check `cd ci && go run . pins -root ..`.
 
 ## 6. Report
 

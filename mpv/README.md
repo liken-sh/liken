@@ -37,10 +37,8 @@ on `mpv`, and adds the player's own program and the CA bundle of
 - **The PipeWire client** modules and SPA plugins that `mpv`'s audio
   output loads by name, and PipeWire's client configuration.
 - **The fontconfig configuration** that libass reads.
-- **The record of each package**, as in `vulkan`, in
-  `/usr/share/doc/liken/mpv.packages`, and
-  `/usr/share/doc/liken/mpv.cdx.json`, a CycloneDX record of the
-  release tarball.
+- **The record of each package**, as in `vulkan`, and a CycloneDX
+  record of the release tarball, `mpv.cdx.json`.
 
 No Debian package in the image provides `mpv`, so syft finds no
 package for it. Instead, `image-sbom` writes `mpv.cdx.json` from
@@ -52,12 +50,9 @@ an unmodified release. syft drops the `pedigree` when it copies the
 component, so the list of patches is only in the record in the
 image.
 
-`smoke/mpv.sh` tests the image before it publishes. It checks the
-notices, the SBOM record, the release, the fix that `patches/`
-applies, and the video output, audio output, and decoder that the
-build turns on. Then it plays a clip with a subtitle track and an
-AC-3 track that `mpv` passes through, to the null video and audio
-outputs, so nothing is shown or heard.
+CI runs `smoke/mpv.sh` on the image before it publishes. The script
+plays a clip to the null video and audio outputs, so nothing is shown
+or heard, and its comments list what else it checks.
 
 The image publishes under the tag `<version>-<revision>`, where the
 version is the date of the Debian snapshot. The label
@@ -69,8 +64,8 @@ The reasons to build from the release are in root
 
 ## Bumping mpv
 
-`latest.sh --bump` stops in two cases, and each one needs a step from
-you first.
+`latest.sh --bump` stops in each of these cases, and each one needs a
+step from you first.
 
 **A patch is in `patches/`.** Each patch is a fix from a newer mpv
 release. If the release you are bumping to already includes the fix,

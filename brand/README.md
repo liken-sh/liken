@@ -63,8 +63,8 @@ kind of consumer uses it in its own way:
   one. The manual's own tests run it.
 - `preview/` serves every manual together on a workstation. Run it
   with `make preview` at the top of the repository.
-- `iced/` is the Rust crate `liken-iced`, which the screens of
-  `media-operator` and `library-operator` use. It draws the mark,
+- `iced/` is the Rust crate `liken-iced`, which each screen that draws
+  with `iced` uses, such as the media browser. It draws the mark,
   reads the palette from `liken.css`, runs the pulse animation that
   `motion.md` describes, and loads the fonts.
 - `fonts/` contains Source Sans 3: the static upright and italic

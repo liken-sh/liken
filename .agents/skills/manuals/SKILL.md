@@ -70,6 +70,10 @@ generates the CRD. Then run `make -C docs generate`. Write the
 description as text for the manual, with each identifier in
 backticks. Do not edit the generated page.
 
+The text above and below the fields comes from files that a person
+writes in `docs/crdref/`, such as `adapter-preamble.md`. The rule for
+each page in `docs/Makefile` names its files.
+
 Each component commits its generated pages, except `liken/docs/`.
 There the build writes the pages, and git ignores them.
 
@@ -89,7 +93,7 @@ each kind of change:
 | A behavior that the operator adds on its own and that a person can see, such as a recovery or a retry | The guide that a reader opens when the behavior surprises them |
 | A field or a topic removed from the message bus or the API | Every page of another component that mentions it |
 | A new failure, a new retry or recovery, or a new reason of a condition or an `Event` | `guides/troubleshoot.md`, in a component that has one |
-| A topic, a payload, a writer, a reader, or the delivery of a message on the bus | `reference/bus.md` of the component that publishes the topic, in `library-operator` and `media-operator` |
+| A topic, a payload, a writer, a reader, or the delivery of a message on the bus | `reference/bus.md` of the component that publishes the topic |
 
 For the OS, in `liken/docs/`:
 

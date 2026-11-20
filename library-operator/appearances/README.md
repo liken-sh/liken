@@ -2,7 +2,7 @@
 
 `appearances` finds which credited person is on screen at each second
 of a title. It is step 1 of
-[plan 75](../plans/75-scene-level-cast-appearances.md): the files on the
+[plan 75](../plans/completed/75-scene-level-cast-appearances.md): the files on the
 volume. The tool has three commands:
 
 - `appearances detect <video>` decodes every frame of the video with

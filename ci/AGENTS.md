@@ -5,14 +5,12 @@ is for and describes its commands.
 
 ## How it runs
 
-The `graph` job of `.github/workflows/ci.yaml` runs `generate -check`,
-`pins`, `namespaces`, `selectors`, and `deps` on every run. The `plan`
-job runs `plan` and `bases`, and every later job of the run uses their
-outputs. Each component's publish job runs `publish`. On its
-schedule, `scan.yaml` runs `scans` and `scan`. Every command reads the
-tree. `plan`, `bases`, `publish`, and `scans` also query ghcr.io and
-the release channel. Only `publish` and `record` write outside the
-tree.
+The generated workflows run `ci`. Read `.github/workflows/ci.yaml`,
+`scan.yaml`, and a component's workflow to see which job runs which
+command. The `plan` job runs `plan` and `bases`, and every later job
+of the run uses their outputs. Every command reads the tree, and some
+also query ghcr.io and the release channel. Only `publish` and
+`record` write outside the tree.
 
 ## Design
 
@@ -21,8 +19,7 @@ generated. Their sources are each component's `package.toml`, the
 templates in `templates/`, and the generator's code. To change a
 generated file, change one of those sources and run `make workflows`
 at the top of the repository. Then commit the source and the
-generated files together. The `graph` job fails when the committed
-files differ from what `generate` writes.
+generated files together.
 
 The workflows are static files, not a matrix that a script computes.
 So GitHub draws the dependency graph of each run, and a skipped job
@@ -48,5 +45,5 @@ changes the recipe of every pinned component.
   component does not rebuild when that dependency changes. So `deps`
   fails when `[depends]` leaves out a dependency that `go list -deps`,
   `cargo metadata`, or an image's `FROM` lines and bake contexts find.
-- The `releases` skill describes how an image is published, signed,
-  and verified.
+- The `releases` skill describes how an image is published, and the
+  `sbom-and-scans` skill describes how it is signed and verified.

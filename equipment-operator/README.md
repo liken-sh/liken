@@ -1,56 +1,44 @@
 # equipment-operator
 
 `equipment-operator` lets you read and control a room's A/V receiver
-and TV through the Kubernetes API.
-
-- A `Receiver` shows the receiver's power, input, volume, and
-  settings. You set its power and its settings in the same manifest.
-- A `Television` shows the TV's power and the input it last switched
-  to. You set its power the same way.
-
-When a `Player` plays through this equipment, the operator turns the
-equipment on and switches the TV and the receiver to the machine's
-input. It also sets the receiver's volume when someone presses the
-volume keys on the `Player`'s remote.
+and TV through the Kubernetes API. A `Receiver` shows the receiver's
+power, input, volume, and settings, and you set its power and its
+settings in the same manifest. A `Television` shows the TV's power
+and the input it last switched to, and you set its power the same
+way. The operator does not play media, draw on a screen, or set the
+volume of a speaker that `liken` drives. It does not control lights
+or other home automation.
 
 The operator controls a receiver over the network, with the
-receiver's own protocol. For a Denon or Marantz receiver, that is the
-Denon control protocol on TCP port 23. For a WiiM device, it is the
-WiiM HTTPS API. The operator controls a TV over HDMI-CEC, through a
-USB-CEC adapter plugged into a `liken` machine. It finds the WiiM
-devices on the LAN by itself and creates a `Receiver` for each one,
-unless you turn discovery off.
+receiver's own protocol, such as the Denon control protocol. The
+operator's `Deployment` runs as an unprivileged pod on the host
+network, so a network `Receiver` needs no `liken` machine. The
+operator can find some receivers on the LAN by itself and create a
+`Receiver` for each one, unless you turn discovery off. The
+`Receiver` reference names the receivers that the operator supports.
+The operator controls a TV over HDMI-CEC, through a USB-CEC adapter
+plugged into a `liken` machine. `liken` publishes the adapter as a
+device, and a pod of the operator's `DaemonSet` claims it.
 
-The operator does not play media, draw on a screen, or set the volume
-of a speaker that `liken` drives. It does not control lights or other
-home automation.
-
-## What each kind needs
-
-A network `Receiver` does not need a `liken` machine. The operator's
-`Deployment` runs as an unprivileged pod on the host network. It
-claims no device and connects to the receiver over the LAN.
-
-A `CECBus` and a `Television` need a `liken` machine with a USB-CEC
-adapter. `liken` publishes the adapter as a device, and a pod of the
-operator's `DaemonSet` claims it. A bus in `Control` mode also needs
-the `Display` that `display-operator` publishes for the machine's
-video output. The adapter announces that `Display`'s physical
-address on the bus.
-
-`media-operator` uses this operator for each `Player`. It writes the
-`Player`'s session and each key press into the `Receiver`'s status.
-When someone selects the machine's input on the TV, the operator
-records that request, and `media-operator` passes it on to the
-`Player`'s screen.
+When a `Player` of `media-operator` plays through this equipment, the
+operator turns the equipment on and switches the TV and the receiver
+to the machine's input. `media-operator` writes the `Player`'s
+session and each key press into the `Receiver`'s status, so the
+operator sets the receiver's volume when someone presses the volume
+keys on the `Player`'s remote. When someone selects the machine's
+input on the TV, the operator records that request, and
+`media-operator` passes it on to the `Player`'s screen. A `CECBus` in
+`Control` mode needs the `Display` that `display-operator` publishes
+for the machine's video output, because the adapter announces that
+`Display`'s physical address on the bus.
 
 ## The kinds
 
 - **`Receiver`** is an A/V receiver on the network. It has exactly
-  one protocol block, `spec.denon` or `spec.wiim`, with the address
-  and the settings that only that brand has. `spec.inputs` says which
+  one protocol block, such as `spec.denon`, with the address and the
+  settings that only that brand has. `spec.inputs` says which
   `liken` machine is connected to which input. `spec.zones` controls
-  a second and a third zone. The status shows each zone and the
+  the receiver's other zones. The status shows each zone and the
   brand's own settings.
 - **`CECBus`** is the CEC wire of one HDMI tree, with the adapters
   connected to it. In `Listen` mode, each adapter sends nothing and

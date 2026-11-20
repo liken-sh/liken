@@ -42,11 +42,10 @@ server's watch cache, which can be behind. A list that an operator
 sends itself records nothing, so the next pass acts on the older copy.
 The list sets no `resourceVersion`, so etcd serves it.
 
-`library-operator` is the exception. It reads its member pods,
-Players, MediaPreferences, Plays, people, claims, volumes, the pods
-that it creates, progress pods, and nodes only from their stores, and
-never from the API server. While the watch of one of these is
-forbidden, the reflector lists the collection again after each
+`library-operator` is the exception. It reads some watched kinds, such
+as its member pods, `Player`s, and nodes, only from their stores, and
+never from the API server. `library-operator/watch.go` lists its
+watches. While the watch of one of these is forbidden, the reflector lists the collection again after each
 backoff, and the backoff grows to between thirty and sixty seconds.
 The pass reads the result of that list from the store
 (`library-operator/watch.go`, `items`).
@@ -142,7 +141,7 @@ the call:
   of a selected object by name.
 - `kubernetes/memo/requests_test.go`: the status write after a `409`.
 - `kubernetes/memo/memo_test.go`: the memo itself.
-- `bluetooth-operator/objectcache_test.go`: the memo across three
+- `bluetooth-operator/objectcache_test.go`: the memo across several
   kinds, and a store that follows its selector.
 - `display-operator/objectcache.go`: two goroutines that write one
   kind.

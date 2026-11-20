@@ -6,18 +6,15 @@ it is for and describes its kinds.
 
 ## How it runs
 
-The operator is a `Deployment` in `liken-system`. A Lease makes sure
-that only one replica acts at a time. The operator is the only
-process of this component that has a Kubernetes credential. It
-watches its own kinds, `media-operator`'s `Player`, `Play`, and
-`MediaPreferences`, `people-operator`'s `Person`, and the claims,
-volumes, pods, and `Job`s it uses. It writes every status and creates
-every pod, `Job`, and `Play`. It serves the webhook that Radarr,
-Sonarr, and Jellyfin post to, and starts a scan of the folder that
-each post names. The pods and `Job`s run the pod build of this
-program, which is the same code built with the tag `pod`.
+The operator is a `Deployment`, and a Lease makes sure that only one
+replica acts at a time. The operator is the only process of this
+component that has a Kubernetes credential. It writes every status
+and creates every pod, `Job`, and `Play`. It serves the webhook that
+Radarr, Sonarr, and Jellyfin post to, and it starts a scan of the
+folder that each post names. The pods and `Job`s run the pod build of
+this program, which is the same code built with the tag `pod`.
 
-Each namespace has two Corrosion clusters, one for the catalog and one
+Each namespace has a Corrosion cluster for the catalog and another
 for the progress store. Each Corrosion agent stores a full SQLite copy
 of its database. The catalog pods publish a report of each `Library`
 on the bus, and the operator writes the report into the `Library`'s
@@ -59,9 +56,6 @@ nothing from this operator. When this operator needs a change in
 `media-operator`, a plan here describes the change and says which
 component makes it.
 
-The reasons for these decisions are in `plans/`. Read the relevant
-plan before you change how something works.
-
 ## Finding things
 
 - `logcontent_test.go` checks the log line rule against the lines that
@@ -73,6 +67,3 @@ plan before you change how something works.
   when you add a fact to the operator, add it there too.
 - The browser and `media-operator`'s command sidecar read the cases of
   the subtitle rule from `media-operator/testdata/subtitle-rule.json`.
-- `docs/Makefile` writes each reference page in `GENERATED` from a CRD
-  in `deploy/`, and `make -C docs skills` writes `skills/` from the
-  guides. `make test-docs` fails when one is stale.

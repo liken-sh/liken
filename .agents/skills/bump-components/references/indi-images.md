@@ -1,18 +1,18 @@
 # The INDI images
 
-`indi` is also a pinned component. It has the 17 images that
-observatory-operator runs. It is not one of the five bases of section
-5 of `SKILL.md`. It installs from Ubuntu 26.04, the INDI PPA, and the
-PHD2 PPA, through dated snapshots of all three, and it moves on its
-own schedule.
+`indi` is also a pinned component. It has the images that
+`observatory-operator` runs, and `indi/package.toml` lists them. It is
+not one of the bases of section 5 of `SKILL.md`. It installs from
+Ubuntu, the INDI PPA, and the PHD2 PPA, through a dated snapshot of
+each, and it moves on its own schedule. `indi/snapshot.sh` names the
+Ubuntu series.
 
 The `version` of `indi` is the date of those snapshots. Its
-`[package.upstream]` lists the versions of the `indi-bin`,
-`indi-3rdparty-drivers`, `gsc`, and `phd2` packages that the date
-installs. Its smoke checks fail when the image has other versions.
+`[package.upstream]` lists the versions of the packages that matter,
+such as `indi-bin` and `phd2`, that the date installs. Its smoke checks fail when the image has other versions.
 
-`indi/latest.sh` reports the snapshot date, the four package
-versions, and the newest Ubuntu series that both PPAs publish. When a
+`indi/latest.sh` reports the snapshot date, the versions of
+`[package.upstream]`, and the newest Ubuntu series that both PPAs publish. When a
 PPA publishes a newer series, the row shows `wrong channel`. To move
 to that series, edit `indi/snapshot.sh` and the `ubuntu` entry of
 `toolchains/images.toml` by hand.
@@ -69,4 +69,4 @@ in order, with the frame header that you capture by hand.
 - Report each new line of
   `observatory-operator/schema/disagreements.txt`.
 
-CI builds the 17 images only when this tag is new.
+CI builds the images of `indi` only when this tag is new.

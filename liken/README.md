@@ -68,11 +68,11 @@ release goes to [releases.liken.sh](https://releases.liken.sh/).
 To upgrade, add the release to the catalog and set `version` to it:
 
     spec:
-      version: "2026.12.01-001"
+      version: "<release>"
       releases:
         source: https://releases.liken.sh
         catalog:
-          - version: "2026.12.01-001"
+          - version: "<release>"
             digest: sha256:<digest of the release's release.yaml>
 
 ## How liken is written

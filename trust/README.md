@@ -34,8 +34,8 @@ the bumps of more than one component check.
   under the MPL 2.0, which requires each copy to include the license.
   An image that verifies TLS copies both files with
   `COPY --from=trust / /`.
-- `/usr/share/doc/liken/trust.cdx.json` in the image is a CycloneDX
-  record of the bundle, which `image-sbom` writes from `pin.toml`.
+- The image also contains `trust.cdx.json`, a CycloneDX record of the
+  bundle, which `image-sbom` writes from `pin.toml`.
   syft finds no package in the bundle itself. So syft copies the
   component in this record into the SBOM of this image and of every
   image that copies the bundle.

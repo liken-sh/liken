@@ -38,6 +38,3 @@ write. An annotation on the `Person` asks for a read at once.
 `people-operator` reads no other operator's resources. An operator
 that refers to a `Person` depends on this CRD and on nothing else in
 this component.
-
-The reasons for these decisions are in `plans/`. Read the relevant
-plan before you change how something works.

@@ -6,13 +6,13 @@
 name = "brand"
 license = "MIT"
 
-# No build reads voice.md, motion.md, editing-prompt.md, mark.md, or
-# theme.md, so a change to them releases no component that depends on
-# brand. A component with a manual still runs its checks on a change
-# to them, because CI runs those checks on any change in brand/
-# outside its plans.
+# No build reads the writing rules or the two reference documents in
+# this list. So a change to one of them does not release the
+# components that depend on brand. A component with a manual still
+# runs its checks after such a change, because CI runs those checks
+# on any change in brand/ outside its plans.
 [outputs]
-exclude = ["voice.md", "motion.md", "editing-prompt.md", "mark.md", "theme.md"]
+exclude = ["voice.md", "messages.md", "names.md", "instructions.md", "motion.md", "editing-prompt.md", "mark.md", "theme.md"]
 
 [[jobs]]
 name = "go"

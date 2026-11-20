@@ -25,9 +25,10 @@ The OS publishes each machine's USB devices. Each device resource
 names a claim, and the device's pod gets its USB device through that
 claim. The drivers come from the images of [`indi/`](../indi/). The
 guider runs PHD2 from the `indi-phd2` image beside a headless
-`weston`. Some cameras, such as many QHY cameras, power up with no
-firmware. They need `firmware-operator`, and `deploy/firmware/`
-contains a `Firmware` for each such QHY chip.
+`weston`. A camera that powers up with no firmware needs
+`firmware-operator`. `deploy/firmware/` contains `Firmware` objects
+for such cameras, and its `kustomization.yaml` shows how to install
+them.
 
 The operator is useful on its own, with KStars as the holder.
 [`astrophotography-operator`](../astrophotography-operator/) is
@@ -41,9 +42,10 @@ declare.
 - `Telescope` is one mount with its own INDI server. `OpticalTube`
   records a tube's aperture and focal length. `OpticalTrain` is one
   light path through a tube, with the devices on it.
-- The device kinds, such as `Mount`, `Camera`, `Focuser`,
-  `FilterWheel`, `Dome`, `WeatherStation`, and `Switch`, each
-  represent one INDI interface. A device names its driver and its
+- The device kinds each represent one INDI interface: `Mount`,
+  `Camera`, `Focuser`, `FilterWheel`, `Rotator`, `Dome`, `DustCap`,
+  `FlatPanel`, `PolarAligner`, `GPS`, `WeatherStation`, `Switch`,
+  and `Receiver`, a radio receiver. A device names its driver and its
   parent. The operator starts nothing for a device until a
   reservation needs it.
 - `Guider` runs PHD2 for a telescope, with the camera of one
@@ -58,9 +60,8 @@ declare.
 ## The Go packages
 
 The Go module `github.com/liken-sh/liken/observatory-operator`
-contains the operator and the packages below.
-`astrophotography-operator` imports `observatory`, `indi`, and
-`phd2`.
+contains the operator and the packages below. Another program can
+import them, as `astrophotography-operator` does.
 
 - [`observatory/`](observatory/) has the Go types of the kinds.
 - [`indi/`](indi/) is a client of INDI protocol version 1.7, in Go

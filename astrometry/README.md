@@ -19,17 +19,16 @@ workers mount the volume that contains the frames, and extract the
 stars of each frame there. Its solvers solve the star lists against
 the index files of a `Solver`. The image builds from the same Debian
 snapshot as the base images, and its build scripts come from
-`vulkan/`. So when the base
-images move to a new snapshot, this image moves with them.
+`vulkan/`. So when the base images move to a new snapshot, this image
+moves with them.
 
 ## The image
 
 - `astrometry-engine` and `solve-field` from astrometry.net.
 - `source-extractor`, with its convolution filters and its neural
   network.
-- The copyright file of each Debian package that the image copied
-  files from, and the list `/usr/share/doc/liken/astrometry.packages`,
-  as [`notices/`](../notices/) describes. astrometry.net is
+- The copyright file and the record of each Debian package that the
+  image copied files from, as [`notices/`](../notices/) describes. astrometry.net is
   BSD-3-Clause with GPL parts, and SourceExtractor is GPL-3.0+.
 
 Before the image ships, `smoke/astrometry.sh` extracts the stars of a

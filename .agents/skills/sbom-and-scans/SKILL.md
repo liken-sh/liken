@@ -132,7 +132,7 @@ Each OS release includes `sbom.cdx.json`, a CycloneDX SBOM, at
 `https://releases.liken.sh/<version>/sbom.cdx.json`. `release.yaml`
 lists it by its digest like every other artifact, so each machine's
 boot slot has a copy too. `make release` writes the SBOM before the
-bundle, with `liken/releases/sbom/scan.sh`, from three sources:
+bundle, with `liken/releases/sbom/scan.sh`, from these sources:
 
 * Each `pin.toml` of a pin that the release ships, such as the kernel,
   k3s, and the firmware. Each entry has its purl, version, sha256,
@@ -147,7 +147,7 @@ bundle, with `liken/releases/sbom/scan.sh`, from three sources:
   `liken`'s own Go programs and their modules come from this scan, and
   so do the containerd, runc, and CNI plugins of k3s.
 
-`liken/releases/sbom` merges the three. `scan.sh` assigns some paths
+`liken/releases/sbom` merges them. `scan.sh` assigns some paths
 to a manifest or a buildroot package, such as `/bin/k3s`. When syft
 finds a program at one of those paths, the SBOM keeps the component
 from the manifest or from buildroot, and the modules that the program
@@ -199,7 +199,7 @@ machine.
 
 To rehearse the signing on a lab release, sign with a throwaway key.
 The script then writes nothing to the public Rekor log, so the
-verification skips the log:
+verification skips the log. Run the commands from `liken/`:
 
 ```sh
 cosign=$(awk -F' = ' '$1 == "cosign" { gsub(/"/, "", $2); print $2 }' ../toolchains/images.toml)
@@ -235,9 +235,9 @@ sets these two inputs.
   `ci/trivy.go`, on each image that it pushes. It uploads the findings
   that have a fixed version under the category `trivy/<image>`.
 * **The OS.** The OS publishes no image, and no package database
-  records its kernel, bootloaders, microcode, k3s, or Flux. So each of
-  those `pin.toml` entries sets the CPE that NVD lists the upstream
-  under. `liken/releases/sbom/vulnerabilities.sh` runs grype, pinned
+  records some of the files that it ships, such as the kernel and k3s.
+  So each `pin.toml` entry of such a file sets the CPE that NVD lists
+  the upstream under. `liken/releases/sbom/vulnerabilities.sh` runs grype, pinned
   in `toolchains/images.toml`, over an SBOM of the OS. Trivy matches
   no component by its CPE, so this is the only scan that uses grype.
   The script leaves out each component with the scope `excluded`, and
@@ -261,9 +261,9 @@ sets these two inputs.
   one set of results per category, and each upload replaces the set
   before it.
 * **Every third day.** `ci/` generates `.github/workflows/scan.yaml`
-  from `ci/templates/scan.yaml.tmpl`. The workflow runs at 04:43 UTC
-  on the 1st, the 4th, and every third day of the month up to the
-  31st, and on a manual dispatch. `go run . scans` in `ci/` lists
+  from `ci/templates/scan.yaml.tmpl`. The workflow runs on every third
+  day of the month, on the schedule that the template's `cron` line
+  sets and its comment explains, and on a manual dispatch. `go run . scans` in `ci/` lists
   every published image at the version that a cluster pulls, and the
   newest OS release on the channel. The `trivy` job scans each image.
   The `liken` job fetches the release's SBOM with `liken sbom -json`,

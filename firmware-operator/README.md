@@ -13,8 +13,9 @@ a catalog of releases and reports the updates that each machine can
 install. It installs an update only when you have approved one
 release and pinned its file by SHA-256, a rehearsal of the install
 has passed on that machine, and the machine is drained in its turn to
-reboot. It installs Secure Boot database updates and UEFI capsules,
-and it rejects an update of any other kind. It ships no firmware.
+reboot. It installs only the kinds of update that it supports, such
+as a UEFI capsule, and it rejects any other kind. The manual's page
+on discovery names the kinds. The operator ships no firmware.
 Each file comes from a container image that you name, or from a
 catalog that a `FirmwareCatalog` declares.
 

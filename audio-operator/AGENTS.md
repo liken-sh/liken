@@ -6,38 +6,37 @@ describes its kinds.
 
 ## How it runs
 
-The `audio-operator` `DaemonSet` runs one pod on each node, except a
-node with the label `audio.liken.sh/sound-card: none`. The pod claims
-its devices through the `ResourceClaimTemplate` `every-sound-card`,
-which uses the `DeviceClass` `sound-card`. That class matches every
-device on the node whose attribute `sound.liken.sh/supportsSound` is
-true. Those devices are each sound card that `liken` publishes, and
-the media bus that `bluetooth-operator` publishes for the Bluetooth
-radio. Every container of the pod runs the same image.
+One `audio-operator` pod runs on each node that has a sound card. Its
+claim takes every device whose attribute `sound.liken.sh/supportsSound`
+is true: each sound card that `liken` publishes, and the media bus
+that `bluetooth-operator` publishes for a Bluetooth radio. The comments in
+`deploy/operator.yaml` give the order in which the containers start,
+and the reason for it.
 
-- `declare` is an init container. It writes PipeWire's node
-  declarations for the claimed cards. When the claim includes a media
-  bus, it also writes the WirePlumber fragment that turns on the
-  Bluetooth monitor.
-- `pipewire` and `wireplumber` are native sidecars. PipeWire opens the
-  PCM devices of the cards. WirePlumber registers the A2DP endpoint
-  with `bluetoothd` over the media bus.
-- `operator` reads the PipeWire graph with `pw-dump -m`, the control
-  devices of the cards, and the list of paired devices from BlueZ. It
-  serves DRA to the kubelet. It writes the `ResourceSlice`
-  `<node>-audio.liken.sh`, the CDI spec that gives a consumer pod the
-  PipeWire socket, and the `status` of each `Sink` and `Source` on its
-  node. It applies each `spec` to PipeWire and to the card's controls.
-- `capture` runs `pw-record` on the pod's PipeWire socket for each
-  tap, which is one capture request. It encodes the sound and streams
-  it.
+PipeWire owns the PCM devices of the cards. Every process that plays
+or records, in the pod and in a consumer pod, connects to PipeWire's
+socket. PipeWire reads its node declarations only when it loads its
+configuration, so the `declare` init container writes them from the
+claimed cards before PipeWire starts. WirePlumber owns the connection
+to `bluetoothd` over the media bus, and registers the A2DP endpoint
+there.
 
-The `audio-api` `Deployment` serves the capture API for the whole
-cluster. For each request, it checks authentication and
-authorization, reads `status.node` of the `Sink` or `Source` to find
-its node, and forwards the request to the `capture` container on that
-node. It posts a `Captured` `Event` on the `Sink` or `Source` for each
-tap. Neither `audio-api` nor `capture` stores any sound.
+The `operator` container reads the PipeWire graph with `pw-dump -m`,
+the control devices of the cards, and the paired devices from BlueZ.
+It applies each `spec` to PipeWire and to the controls of the card.
+It writes the `ResourceSlice` `<node>-audio.liken.sh`, the `status`
+of each `Sink` and `Source` on its node, and the CDI spec that mounts
+PipeWire's socket into a consumer pod. A consumer then plays through
+PipeWire directly.
+
+A capture request goes to the `audio-api` `Deployment`. `audio-api`
+checks authentication and authorization, reads `status.node` of the
+`Sink` or `Source`, and forwards the request to the `capture`
+container on that node. `capture` records from PipeWire's socket with
+`pw-record`, encodes the sound, and streams it back. `audio-api` posts
+a `Captured` `Event` on the `Sink` or `Source` for each tap, which is
+one capture request. Neither `audio-api` nor `capture` stores any
+sound.
 
 ## Design
 
@@ -56,17 +55,10 @@ device publishes that fact as an attribute. `media-operator` owns
 `status.session` of a `Sink`, and this operator writes the rest of
 `status`.
 
-The reasons for these decisions are in `plans/`. Read the relevant
-plan before you change how something works.
-
 ## Finding things
 
-- The reference pages `docs/content/docs/reference/sinks.md`,
-  `sources.md`, and `routes.md` are generated from `deploy/crds.yaml`,
-  the text in `docs/crdref/` and `docs/apiref/`, and the OpenAPI
-  document. `make -C docs generate` regenerates them, and
-  `make -C docs skills` regenerates `skills/` from the guides.
-  `make test` fails when either is out of date.
+- The reference page of the routes is generated from the OpenAPI
+  document, with text from `docs/apiref/`.
 - `make openapi` writes `docs/static/v1/audio/openapi.json` from the
   route table. A test fails when the committed file differs from it.
 - `smoke/audio-operator.sh` checks that the image contains every file

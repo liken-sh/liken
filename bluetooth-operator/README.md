@@ -57,8 +57,7 @@ spec:
 ```
 
 The manual is at [liken.sh/bluetooth](https://liken.sh/bluetooth/).
-It has the install guide, the guide to pair a controller and give it
-to a pod, and a reference for the devices and each kind.
+It has the install guide, the guides, and a reference for each kind.
 The design documents and the open problems are in [`plans/`](plans/).
 
 MIT. See [LICENSE](LICENSE).

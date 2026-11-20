@@ -25,35 +25,15 @@ the top of the repository runs it.
 
 ## The commands
 
-- **`generate`** writes the workflows, the bake file, and
-  `dependabot.yml`. With `-check`, it fails when the files on disk
-  differ from what it would write.
-- **`plan`** decides what a workflow run builds and publishes. It
-  decides from the paths that changed and from each component's newest
-  published version.
-- **`bases`** checks the published image of each pinned base, and
-  writes `docker-bake.override.hcl`.
-- **`pins`**, **`deps`**, **`namespaces`**, and **`selectors`** are
-  checks. `pins` checks the pins and downloads. `deps` checks each
-  `[depends]` table against the code. `namespaces` checks the
-  namespace of each object in a deploy base. `selectors` checks that
-  each selector of a `DeviceClass` tests that an attribute exists
-  before it reads the attribute.
-- **`publish`** pushes one component's outputs.
-- **`record`** writes the GitHub release for a tag.
-- **`scan`** scans one published image with Trivy. **`scans`** lists
-  the published images and the newest OS release for the scheduled
-  scan.
-- **`sites`**, **`reports`**, and **`profile`** collect the manuals and
-  the coverage reports for the website.
-
-`main.go` lists each command with its flags.
+Each task that the paragraphs above name is one command of `ci`,
+such as `generate`, `plan`, `pins`, or `publish`. The doc comment at the top of `main.go`
+lists each command with its flags. `generate -check` fails when the
+generated files on disk differ from what `generate` would write, and
+CI runs it on each push.
 
 ## `package.toml`
 
-A `package.toml` has the tables `[package]`, `[depends]`, `[docs]`,
-`[[jobs]]`, `[outputs]`, and `[[outputs.images]]`. The comments on
-`Component` in `component.go` and on `Job` in `job.go` describe each
-field.
+The comments on `Component` in `component.go` and on `Job` in `job.go`
+describe each table and field of a `package.toml`.
 
 MIT. See [LICENSE](LICENSE).

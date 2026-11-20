@@ -136,9 +136,10 @@ writes and another writer also changes.
   how RBAC matches a list and a watch against a Role's
   `resourceNames`. It gives the owner each version of the object. It
   gives nil when the object does not exist, and that includes the end
-  of a first read that finds nothing. The API pods of
-  `audio-operator`, `display-operator`, and `media-operator` follow
-  their certificate `Secret`s and CA `ConfigMap`s this way.
+  of a first read that finds nothing. For example, the API pod of
+  `audio-operator` follows its capture `Secret` and the
+  `ConfigMap` of the client CA this way (`followCertificateObjects` in
+  `audio-operator/api.go`).
 
 ## The test of the handlers
 

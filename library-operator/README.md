@@ -15,8 +15,8 @@ providers that you list, and writes them beside the media as the
 `.nfo` files and art files that Kodi and Jellyfin read. It also makes
 the images for the seek bar, finds the credited people on screen,
 finds where the end titles start, and records each person's progress
-in each title. A webhook from Radarr, Sonarr, or Jellyfin makes the
-operator rescan the folder that the webhook names. The files on the
+in each title. A webhook, such as one from Sonarr, makes the operator
+rescan the folder that the webhook names. The files on the
 volume are the source of truth. The operator reads and writes the
 media, the `.nfo` files, and the art. The catalog is an index built
 from those files, so the operator can rebuild it from them at any
@@ -40,9 +40,9 @@ work runs on the CPU.
 
 The operator defines these resources:
 
-- A `Library` is one root directory of media on a volume: films,
-  series, or a checkout of franchise files that show the films and
-  series of one story in story order. It lists the providers to ask,
+- A `Library` is one root directory of media on a volume, of one kind,
+  such as films, or a checkout of franchise files that show the films
+  and series of one story in story order. It lists the providers to ask,
   in order, and the work to run on its videos.
 - A `Catalog` is the namespace's shared catalog. It creates the pods
   that store the catalog of record, the copies that every other
@@ -70,8 +70,6 @@ spec:
 ```
 
 The manual is at [liken.sh/library](https://liken.sh/library/). It
-has the install guide, a guide for each kind of library, enrichment,
-the media browser, webhooks, and Jellyfin, and a reference for each
-resource. [`plans/00-design.md`](plans/00-design.md) is the design.
+has the install guide, the guides, and a reference for each resource. [`plans/00-design.md`](plans/00-design.md) is the design.
 
 MIT. See [LICENSE](LICENSE).
