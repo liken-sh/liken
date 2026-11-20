@@ -411,6 +411,89 @@ What the case showed:
   name a fact, and a stage serves several facts, so the join from a
   series to a stage is knowledge that the operator's author holds.
 
+## The agent system, through the primitives
+
+This section tests the primitives against the second case, a system of
+several services that runs autonomous agents.  An operator starts one
+turn of an agent as a `Job` when an event arrives.  A second service
+takes webhooks and serves them as events, a third gives a pod its
+credentials, a fourth gives it a browser, and a fifth keeps each turn's
+transcript.  Its facts were read from a home cluster and from the
+services' code on 2026-11-20.
+
+**Parts and relations.**  Custom resources declare nearly all of this
+system, so the cluster records most of how its parts relate.  One kind
+names a responsibility, a second names a skill and what starts it, a
+third is one conversation, and each turn is a `Job` that the
+conversation owns.  Other kinds name the accounts that may have a
+credential or a browser.  A reader can follow an event from the source
+that names it to the pod that runs the turn, through fields and owner
+references alone.
+
+**What the cluster does not record:**
+
+- The webhook service's paths are data in a `ConfigMap`, and the
+  namespaces whose transcripts are kept are one environment variable.
+- No object stores the name of the account that a turn runs as.  The
+  operator derives it from other names by a rule in its code, and every
+  credential grant is joined to its turn through that name.
+- A template that most of the responsibilities share is merged in when
+  the manifests are built, so a live object shows only the result.
+- An object states that a turn failed and gives no reason.
+- No object states why it exists.  The reasons are comments in the
+  repository of the cluster's manifests, and the agents wrote many of
+  them.
+
+**Expectations.**  Each name that an object states is an exact check:
+the account that a grant names exists, a server that a responsibility
+lists exists, and a condition that a skill starts on is declared.  On
+that day every one of those checks passed.
+
+**Likeness.**  The responsibilities are peers.  Seen side by side, some
+of them lack the volume that sends transcripts to the archive, so their
+transcripts are not kept.  A comment in the repository says that this
+is intended, and no object in the cluster does.
+
+**Signals.**  Each conversation's status gives the outcome of every
+turn.  Most of the failed turns belonged to one skill on one day.  The
+metric that counts turns by outcome has no label for the skill, so
+only the objects show where the failures were.
+
+What the case showed:
+
+- **A system that is declared as resources is mostly legible from the
+  cluster.**  The claims it needs are few: what each part is for, the
+  rule that derives an account's name, and what a part reads from a
+  file.
+- **An expectation that is met is worth showing.**  The reader's
+  question was what is out of place, and for every stated name the
+  answer was "nothing".  That answer has value only when the reader
+  can see what was checked.
+- **A stated name is the simplest expectation.**  It needs no pattern
+  and no convention.  An object names another, and the other exists or
+  it does not.
+- **Likeness did the work that no check did.**  No stated expectation
+  covers the responsibilities that keep no transcripts.  A reader finds
+  them when the peers are shown together, and then finds that no claim
+  explains them.
+- **A relation can be a rule.**  The join from a turn to its grants is
+  a name that the operator computes.  A claim for it states the rule,
+  not a field.
+- **The knowledge exists already, in a place the cluster does not
+  hold.**  The comments in the manifests are the reasons that claims
+  would carry.
+- **A signal can lack the label that locates it.**  The count of failed
+  turns reaches the responsibility and stops there.
+
+A primer of this system, written by hand, has sections that the
+primitives cover and sections that they do not.  The table of the
+services, the map of the whole, the kinds and what each names, the
+containers of a turn's pod with the audience of each token, and the
+table of who may have what are all parts, relations, and claims.  The
+order of the steps in one event's life and the cases of which
+conversation gets an event are behavior over time.  No object records
+them, and the primitives do not hold them.
+
 ## The order of the design
 
 The work goes in this order, and a later step does not start before the
