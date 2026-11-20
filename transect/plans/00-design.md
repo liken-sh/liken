@@ -453,11 +453,14 @@ thing is made of.
 The author states the places and the shapes.  `transect` owns
 everything else, so that every sketch reads the same way:
 
-- **The shapes.**  An author names a shape from a small set that
-  `transect` draws, such as a screen, a box, a handheld, a speaker, and
-  a store.  An author does not ship a drawing.
+- **The shapes.**  `transect` ships a library of the shapes that many
+  patterns use, such as a screen, a box, a handheld, a speaker, a
+  store, and a disc.  An author names one of them for each role.  An
+  author can add a shape for a part that no other pattern has, such as
+  the tripod of a mount.  An author does not ship a whole drawing.
 - **The states.**  A part that is healthy, a part that deviates, and a
-  role with no part look the same in every elevation.
+  role with no part look the same in every elevation, on a shape of the
+  library and on a shape that an author added.
 - **The readings, the wires, and the source of each fact.**
 
 An arrangement can repeat.  The author of the telescope sketches one
@@ -466,11 +469,23 @@ that the telescope has.  The author also states which roles a train is
 expected to have.  An expected role with no part is drawn empty, and an
 optional role with no part leaves its place blank.
 
+A sketch that looks like the thing is the better sketch.  On
+2026-11-20 the maintainer compared two drawings of one telescope.  The
+first had a row of boxes for each optical train.  The second showed the
+instrument from the side, with the guide scope on top of the main tube,
+the filter wheel as a disc, and the mount on its tripod under them.  He
+chose the second, and it needed shapes that the first did not.
+
+A part that fills a role can have no object.  The speakers of a home
+theater are channels in the spec of a `Receiver`, and the sketch draws
+each one in its place in the room, with an outline and no fill, as a
+view draws a thing outside the cluster.
+
 An arrangement is knowledge and not a template.  A person reads it as a
 view, and an agent reads the same roles as a query.
 
-Settled on 2026-11-20.  The set of shapes and the form in which an
-author writes an arrangement are open.
+Settled on 2026-11-20.  The shapes of the library, and the form in
+which an author writes an arrangement or adds a shape, are open.
 
 ## Where the knowledge of a pattern ships
 
@@ -769,7 +784,7 @@ served.
 - What makes parts of the same sort, for likeness.
 - What a pattern's catalog holds first.  The cases will show which
   patterns are real.
-- Which shapes `transect` draws, and the form in which an author
-  writes an arrangement.
+- Which shapes the library has first, and the form in which an author
+  writes an arrangement or adds a shape.
 - Which of `LogPattern` and the pattern of this document keeps the
   name.
