@@ -77,6 +77,11 @@ and its `package.toml` for its jobs and its outputs.
 - **A Rust server with an image and a `deploy/`**: `transect`, which
   has no manual. Its binary links glibc, so a closure script copies
   the binary and its libraries onto `scratch`.
+- **A component that no one sibling matches**, such as a CSI driver
+  in Rust: take the crate's files from the Rust sibling, and the
+  `deploy/`, the `smoke/`, and the manual from the sibling that runs
+  the same kind of workload. Say in the plan which sibling each part
+  comes from.
 - **A pinned image of upstream programs**: `astrometry`, with
   `version`, `revision`, and `[package.upstream]` in its
   `package.toml`. The rules of the tag and the revision are in the

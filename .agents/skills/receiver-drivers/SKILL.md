@@ -130,8 +130,13 @@ Unsupported, and the reason names the document.
 
 ## The exceptions and the condition
 
-Plan 14 designs `status.settingExceptions`, and the CRD does not have
-it yet. It lists each field whose state differs from
+The built `SettingsConfirmed` condition is `False` with the reason
+`NotConfirmed` when the operator sent a declared field `sendLimit`
+times and the receiver still reports another value. The message lists
+the spec path of each such field.
+
+Plan 14 designs the rest, and the CRD does not have it yet.
+`status.settingExceptions` lists each field whose state differs from
 its tier, with the reason. When the device sent its own text, the
 reason includes that text. When a declared field is in the list, the
 `SettingsConfirmed` condition is `False`, and the condition's message
