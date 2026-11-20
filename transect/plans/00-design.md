@@ -485,14 +485,30 @@ What the case showed:
 - **A signal can lack the label that locates it.**  The count of failed
   turns reaches the responsibility and stops there.
 
-A primer of this system, written by hand, has sections that the
-primitives cover and sections that they do not.  The table of the
-services, the map of the whole, the kinds and what each names, the
-containers of a turn's pod with the audience of each token, and the
-table of who may have what are all parts, relations, and claims.  The
-order of the steps in one event's life and the cases of which
-conversation gets an event are behavior over time.  No object records
-them, and the primitives do not hold them.
+A primer of this system, written by hand, explains it with sequence
+diagrams: a lane for each participant, and one labelled arrow for each
+interaction, in order.  The first form of this section said that such
+an order is behavior over time, which the primitives do not hold.  That
+was wrong, and the walk `Job` shows why.  The order of a pipeline's
+stages is a claim by the operator's author, and the order of the
+interactions among services is a claim of the same kind.
+
+- **An interaction is a relation with a verb.**  "Creates the `Job`"
+  and "asks for a credential" each join one participant to another.  A
+  claim states the interactions and their order.
+- **A pattern has its own form.**  A pipeline is parts that hand work
+  forward, and it reads from left to right.  A web of interactions is
+  participants that call on each other, and it reads as a sequence
+  diagram.  The first drawing of this system used the pipeline's form,
+  and the maintainer found that it did not explain the system.
+- **Each interaction is a place for a signal.**  The count of events by
+  outcome belongs on the step that routes an event, and the outcomes of
+  the turns belong on the step that runs one.  A reader goes down the
+  lanes and sees where the work stops.
+- **What `transect` does not have is the record of one event.**  The
+  claim gives the steps that every event takes.  The steps that one
+  event took are a trace, and traces are a source of signals that is
+  not designed.
 
 ## The order of the design
 
