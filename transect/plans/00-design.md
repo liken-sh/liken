@@ -160,6 +160,21 @@ shows how far the system has moved since.
 
 Settled on 2026-11-20.
 
+## No language model at runtime
+
+`transect` calls no language model while it runs.  Every sentence that
+it shows is a template that it fills from the cluster and its signals,
+or text that a person or an agent stored as a claim.  So the same
+cluster and the same claims give the same page, and a reader can trace
+each sentence to its source.
+
+A language model does its work when knowledge is written.  An agent
+writes a claim when it builds a thing, and "Claims" above says how that
+claim is checked or shows its age.
+
+This is a constraint, and the proof of concept kept it.  The maintainer
+confirmed it for new work on 2026-11-20.
+
 ## Who writes the knowledge
 
 The people who know a fact write it: the author of an operator, the
@@ -241,7 +256,7 @@ served.
   a forge, an identity provider, and the devices on a bus.
 - Which ideas of the proof of concept carry over.  The candidates are
   places that keep their position from one visit to the next, a mark on
-  each fact that states its source, a runtime that calls no language
-  model, and the elevations from the cluster down to a container.
+  each fact that states its source, and the elevations from the cluster
+  down to a container.
 - What a pattern's catalog holds first.  The cases will show which
   patterns are real.
