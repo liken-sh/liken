@@ -87,9 +87,9 @@ each kind of change:
 |---|---|
 | A file added to or removed from `deploy/kustomization.yaml` | Every file list in the install guide: the install from raw URLs, the GitOps example, and the removal steps |
 | A container, a `Deployment`, or a `DaemonSet` added or removed | The install guide's description of what runs, and the pin of a development build, which lists every image |
-| A metric added, renamed, or removed | `reference/metrics.md` |
+| A metric added, renamed, or removed | `reference/metrics.md`. A dashboard panel or an alert rule in the component's `deploy/monitoring/` can also need the metric: see "Metrics" in the `operators` skill |
 | A flag of the operator or of the `kubectl liken` plugin | The guide that runs the command |
-| A printer column, a condition, or the reason of an `Event` | Every sample of `kubectl get` or `kubectl describe` output that shows it |
+| A printer column, a condition, or the reason of an `Event` | Each sample of `kubectl get` or `kubectl describe` output that shows it, where a page has one |
 | A behavior that the operator adds on its own and that a person can see, such as a recovery or a retry | The guide that a reader opens when the behavior surprises them |
 | A field or a topic removed from the message bus or the API | Every page of another component that mentions it |
 | A new failure, a new retry or recovery, or a new reason of a condition or an `Event` | `guides/troubleshoot.md`, in a component that has one |

@@ -6,6 +6,10 @@ machines into Kubernetes resources. You manage a machine, a monitor,
 a speaker, a telescope, and a workload the same way: with a manifest
 and `kubectl`.
 
+`liken` aims to be the most Linux-native and Kubernetes-native
+operating system there is. Where the kernel or Kubernetes already has
+a mechanism, `liken` uses it and does not invent one of its own.
+
 The OS is an immutable image with the Linux kernel, k3s, and one
 `init` process. It has no shell and no package manager. It joins each
 machine to a cluster, upgrades the fleet one machine at a time, and
@@ -18,10 +22,8 @@ manifest. An operator claims a device that the OS publishes and
 offers pods something more specific, such as one monitor output or
 one speaker. A cluster runs fine without any of them.
 
-Each top-level directory is one component, named for what it ships.
-A component's `README.md` says what it is for, and links to its
-manual on [liken.sh](https://liken.sh/) when it has one. One release
-tag releases every component that changed.
+Each top-level directory is one component. Its `README.md` says what
+it is for and links to its manual on [liken.sh](https://liken.sh/).
 
 ## Hardware
 
@@ -93,7 +95,6 @@ tag releases every component that changed.
 ## Working in the repository
 
 [`AGENTS.md`](AGENTS.md) has the rules that apply to every component,
-and `.agents/skills` has a skill for each kind of task, such as a
-release. To read every manual together, run `make preview` and open
-<http://localhost:8080/>. The comment at the top of the `Makefile`
-lists the targets that cover more than one component.
+and `.agents/skills` has a skill for each kind of task. One release
+tag releases every component that changed. To read every manual
+together, run `make preview` and open <http://localhost:8080/>.

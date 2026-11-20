@@ -12,6 +12,23 @@ that moves pins to newer releases is in the `bump-components` skill.
 The form of a Dockerfile is in the `images` skill. The reasons for
 both are in root plan 83.
 
+## Which section to read
+
+* **Every pin, before you add or change one:** "Every pin stays
+  current" and "The rules of a download".
+* **Write a `latest.sh` or a `fetch.sh`:** "Write a `latest.sh` or a
+  `fetch.sh`", and `references/pin-library.md`.
+* **Fetch a file into an image:** "The manifest", up to the paragraph
+  "A CPE for a file of the OS". The form of the Dockerfile is in the
+  `images` skill.
+* **A file that an OS release ships, and its CPE:** "The manifest",
+  then "A CPE for a file of the OS".
+* **An upstream that signs its files:** "The signature", and
+  `references/signatures.md`.
+* **A program that buildroot builds:** "A static program from
+  buildroot".
+* **A failure of `ci pins`:** "The check".
+
 ## Every pin stays current
 
 A pin is current when it matches the newest upstream release that is
@@ -128,6 +145,13 @@ A `fetch.sh` never names a checksum file such as `SHA256SUMS` or
 digest came from, such as "the digest came from sha256sums.asc,
 signed by kernel.org's checksum autosigner".
 
+When the upstream publishes no checksum, such as for an asset of a
+GitHub release, the bump downloads the file and computes the digest
+with `digest_of_url <url>`. `liken/hwdata/latest.sh` is an example.
+The script's header comment and its printed line must then say that
+the upstream signs nothing, and that the digest comes from the bump's
+own download.
+
 **A test of a new script.** A `--bump` that has nothing to move
 proves nothing, and a `--bump` in the tree writes the pin. So test
 the bump on a copy in the session's scratch directory:
@@ -172,7 +196,11 @@ needs no manifest, and `unmanifestedDownloads` lists each Dockerfile
 whose downloads only its build reads, each with the reason.
 
 **The fields.** A manifest has one table for each file that the
-fetch downloads:
+fetch downloads, whatever the upstream of the file. For example,
+`liken/linux-firmware/pin.toml` has a table for `linux-firmware` and
+a table for `wireless-regdb`, which come from different projects. So
+a Dockerfile that fetches a second file adds a table to the
+`pin.toml` beside it:
 
 ```toml
 [k3s]
@@ -219,15 +247,32 @@ to, so the bump that moves a binary moves its source too.
 the last argument, and has no digest of its own. Read `sources.sh`
 for the pins that it mirrors.
 
-**A file that an image ships.** Its entry also has a CycloneDX `type`
-that syft keeps, such as `library`, `application`, or
-`machine-learning-model`. When NVD lists the upstream, the entry has
-the `cpe` that NVD lists it under. The bump writes the entry with
+**The `type` of an entry.** `type` is the CycloneDX type of the
+component. An entry with no `type` gets `file`, from `defaultType` in
+`toolchains/manifest/manifest.go`. Choose the type for what the file
+is, and for where it ships:
+
+- **A file that an OS release ships.** Use the CycloneDX type that
+  describes the file, such as `application`, `firmware`, or `data`.
+  `data` marks a data file that no program is built from, such as
+  `pci.ids` in `liken/hwdata/pin.toml`.
+- **A file that an image ships.** syft drops a component of the type
+  `file` or `data` when it reads the record inside an image, as the
+  comment at `defaultType` says. So use a type that syft keeps, such
+  as `library`, `application`, or `machine-learning-model`, even for
+  a data file such as a font. Pick the one that is closest to how the
+  image uses the file. Run
+  `git grep -h '^type' -- '*pin.toml' | sort | uniq -c` to see the
+  types in use.
+
+**A file that an image ships.** When NVD lists the upstream, its entry
+has the `cpe` that NVD lists it under. The bump writes the entry with
 `set_pin`, with the CPE as the last argument.
 
 The Dockerfile has a second copy of the URL and the digest in its
 `ADD --checksum`, because BuildKit reads the checksum from the text
-of the Dockerfile. The pin's `latest.sh --bump` writes both copies.
+of the Dockerfile. The pin's `latest.sh --bump` writes both copies of
+each file that it moves.
 `ci pins` fails on an `ADD --checksum` that no manifest beside the
 Dockerfile lists at that digest, after the `ARG` defaults are
 substituted.

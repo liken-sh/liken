@@ -17,14 +17,10 @@ to a login at an outside identity provider. It says nothing about a
 person's age or what they may watch.
 
 Other operators refer to a `Person` by its name and attach their own
-facts to it, the way workloads refer to a `ServiceAccount`. The first
-two references are in `library-operator`:
-
-- A `Watch` names a set of people on one item, and progress belongs
-  to that set.
-- A `Play` carries the people who watched it as owner references, so
-  the garbage collector removes a person's plays when the person is
-  deleted.
+facts to it, the way workloads refer to a `ServiceAccount`. For
+example, a `Play` has the people who watched it as owner references,
+so the garbage collector removes a person's plays when the person is
+deleted.
 
 ## The picture
 

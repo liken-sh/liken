@@ -19,7 +19,9 @@ A major version of an action can change its inputs, so read its
 release notes before you take it.
 
 **flux2.** The `fluxcd/flux2` line follows `liken/flux/VERSION`, and
-`liken/flux/latest.sh --bump` moves it.
+`liken/flux/latest.sh --bump` moves it. That bump runs
+`ci/latest.sh --bump fluxcd/flux2` itself, so run `make workflows`
+after it too.
 
 **prek.** prek-action runs a prek version that is not in its own
 checksum table without checking it. So `--bump prek` also writes

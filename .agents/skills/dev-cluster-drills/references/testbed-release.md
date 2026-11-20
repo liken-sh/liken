@@ -41,8 +41,8 @@ show before you start the next one.
 
    ```bash
    timeout 3000 make release VERSION=$(date +%Y.%m.%d)-901 \
-       > /tmp/release.log 2>&1; echo rc=$?
-   grep -A2 'catalog entry' /tmp/release.log
+       > <scratch>/release.log 2>&1; echo rc=$?
+   grep -A2 'catalog entry' <scratch>/release.log
    ```
 
    Go on when it prints `rc=0` and the catalog entry, with its
@@ -53,7 +53,7 @@ show before you start the next one.
    keeps running when the harness cleans up the task that started it:
 
    ```bash
-   setsid make serve </dev/null >/tmp/serve.log 2>&1 &
+   setsid make serve </dev/null ><scratch>/serve.log 2>&1 &
    ```
 
    `liken serve` listens on `:8017` on every interface. The testbed

@@ -13,28 +13,44 @@ Run every command in this skill from `liken/`. Every path is relative
 to `liken/` unless the text gives another base. A path that starts
 with `/`, such as `/run/liken/`, is a path on a guest.
 
-Longer procedures are in separate files. Read a file when the drill
-needs what its line describes:
+Write each log to a scratch directory outside the repository, such as
+the session's scratchpad. The commands in this skill write
+`<scratch>` for that directory.
 
-* [references/cross-version-drills.md](references/cross-version-drills.md):
-  old-release baselines, releases that fail on purpose, the metal
-  hardware shape, and reading a guest's disks while it is off.
-* [references/schema-drills.md](references/schema-drills.md): testing
-  a CRD schema or CEL change before you commit it.
-* [references/testbed-release.md](references/testbed-release.md):
-  serving a lab release to the testbed, `liken-1` and `stick-1`.
-* [references/lab-registry.md](references/lab-registry.md): a guest
-  that pulls an image you built on the laptop.
-* [references/firmware-guests.md](references/firmware-guests.md): a
-  guest with Secure Boot keys or capsule firmware, and the test
-  firmware catalog, for `firmware-operator` drills.
-* [references/guest-boot-faults.md](references/guest-boot-faults.md):
-  a guest that hangs after `reboot: machine restart`, and a
-  `BOOT=kernel` guest that reboots onto its old initramfs.
-* [references/inspect-a-machine.md](references/inspect-a-machine.md):
-  reading or writing a running machine's filesystem from a busybox
-  pod, enabling or removing a feature with a live patch, and
-  rebooting a machine on purpose.
+## Before the first command
+
+Other sessions use the same ports and the same guest directories. So
+before you start anything, run the check at the end of "Clean up". If
+it prints a guest, a `liken serve`, a listener, or the registry, stop
+and ask the maintainer whether the lab is in use.
+
+## Which section to read
+
+* **Boot, stop, or reach the fleet**: "Reach the cluster", "Start and
+  stop guests", and "Install and reinstall machines".
+* **An upgrade drill onto a lab release**: "The upgrade drill".
+* **A guest that you must watch boot**: "Console output".
+* **A drill that fails in a way you do not expect**: "Common
+  failures".
+* **The end of every drill**: "Clean up".
+* **An older published release as the baseline, a release that fails
+  on purpose, the metal hardware shape, or a guest's disks while it is
+  off**: [references/cross-version-drills.md](references/cross-version-drills.md).
+* **A CRD schema or CEL change before you commit it**:
+  [references/schema-drills.md](references/schema-drills.md).
+* **A lab release on the testbed, `liken-1` and `stick-1`**:
+  [references/testbed-release.md](references/testbed-release.md).
+* **A guest that pulls an image you built on the laptop**:
+  [references/lab-registry.md](references/lab-registry.md).
+* **A guest with Secure Boot keys or capsule firmware, and the test
+  firmware catalog, for `firmware-operator` drills**:
+  [references/firmware-guests.md](references/firmware-guests.md).
+* **A guest that hangs after `reboot: machine restart`, or a
+  `BOOT=kernel` guest that reboots onto its old initramfs**:
+  [references/guest-boot-faults.md](references/guest-boot-faults.md).
+* **A running machine's filesystem from a busybox pod, a feature
+  enabled or removed with a live patch, or a reboot on purpose**:
+  [references/inspect-a-machine.md](references/inspect-a-machine.md).
 
 ## What the dev cluster is
 
@@ -129,7 +145,7 @@ to its child QEMU process:
 
 ```bash
 setsid make run NODE=node-2 CONSOLE=file:guests/node-2/console.log \
-    </dev/null >/tmp/node-2.make.log 2>&1 &
+    </dev/null ><scratch>/node-2.make.log 2>&1 &
 ```
 
 A `CONSOLE=file:` path is relative to `dev-cluster/`, whichever
@@ -176,8 +192,33 @@ and of `spec.registries`. Run it in its own task, like a node.
 
 ## The upgrade drill
 
-This drill moves a running fleet forward to a new release. Start the
-fleet first.
+This drill moves a running fleet forward to a new release. The
+baseline is the release that the fleet runs before the drill. A fleet
+that you install from the tree runs the tree's own build, with the
+version `<yyyy.mm.dd>-000`, where the date is the day of the build. To start from an older published release,
+install the fleet from it instead, as
+[references/cross-version-drills.md](references/cross-version-drills.md)
+describes, and then continue at step 1.
+
+**Step 0. Start the fleet.**
+
+1. Make the kubeconfig, as "Reach the cluster" describes.
+2. Install each machine and start it, as "Install and reinstall
+   machines" and "Start and stop guests" describe. Start `node-1`
+   first, because it founds the cluster.
+3. Wait with a deadline until every machine is Ready, with the loop
+   in "Start and stop guests".
+4. Find the baseline's catalog entry. The tree build's release
+   document is `dev-cluster/image/channel/<version>/release.yaml`, and
+   its digest is the sha256 of the file. The build deletes the
+   directory when the date changes, so check that `<version>` is the
+   version that the machines report:
+
+   ```bash
+   dev-cluster/kubectl get machines \
+       -o jsonpath='{range .items[*]}{.status.version.liken}{"\n"}{end}'
+   sha256sum dev-cluster/image/channel/*/release.yaml
+   ```
 
 **Step 1. Build a lab release.**
 
@@ -185,8 +226,8 @@ The build takes tens of minutes, so put a timeout on it:
 
 ```bash
 timeout 3000 make release VERSION=$(date +%Y.%m.%d)-901 \
-    > /tmp/release.log 2>&1; echo rc=$?
-grep -A2 'catalog entry' /tmp/release.log
+    > <scratch>/release.log 2>&1; echo rc=$?
+grep -A2 'catalog entry' <scratch>/release.log
 ```
 
 `VERSION` has no default, so `make release` alone fails. The serial
@@ -218,7 +259,7 @@ server under `setsid`, as for a guest:
 
 ```bash
 ss -ltnp | grep ':8017' || echo free
-setsid make serve </dev/null >/tmp/serve.log 2>&1 &
+setsid make serve </dev/null ><scratch>/serve.log 2>&1 &
 ```
 
 This serves `releases/dist` on `:8017`, the default port of
@@ -230,6 +271,10 @@ task running. It logs every fetch, so you see a stalled or repeated
 download when it happens.
 
 **Step 3. Patch the Cluster.**
+
+The old entry is the baseline's catalog entry from step 0. For a
+published baseline, it is the entry that the release's page on the
+channel gives. The new entry is the one that step 1 printed.
 
 ```bash
 dev-cluster/kubectl patch cluster lab --type=merge -p '{
@@ -311,7 +356,15 @@ make run NODE=node-2
 
 `make install` boots the install image through `-kernel`. The install
 claims the blank boot disk, copies the release into slot A, writes the
-firmware's boot chain, and powers off.
+firmware's boot chain, and powers off. Before `make run`, check that
+the install console contains the line that a finished install prints:
+
+```bash
+grep 'liken: installed to slot' dev-cluster/guests/node-2/install-console.log
+```
+
+An install that failed prints `liken: the install did not finish`
+and powers off too.
 
 **A reinstall does not clear cluster state.** The state disk survives
 a reinstall. A follower whose state disk has etcd members from an
@@ -423,7 +476,8 @@ do.
 You may start the dev cluster, `make serve`, and the lab registry
 whenever a test needs them. When the testing ends, stop each of them.
 Kill each guest's QEMU and the `liken serve` process by PID, and run
-`docker stop liken-lab-registry`. Leave them running only when the
+`make registry-stop`, which removes the registry's container and
+keeps its images. Leave them running only when the
 maintainer asked for that.
 
 When the drill ends, report what is still running: which guests,

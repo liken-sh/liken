@@ -16,6 +16,12 @@ of `equipment-operator` has the reasons, the common vocabulary and its
 units, the survey of receiver protocols, and the references for a new
 brand.
 
+## Which section to read
+
+- **A setting or a zone control on a brand that has a driver:** every
+  section except "Add a receiver brand".
+- **A driver for another brand:** every section.
+
 ## What the CRD declares and what plan 14 adds
 
 Plan 14 designs fields that the CRD may not have yet. So read
@@ -44,7 +50,14 @@ meaning.
 
 ## Where a setting goes
 
-- A setting that means the same thing on every brand goes in the
+Read the CRD first, because it decides where a setting goes. When
+the CRD has `spec.settings` with the setting's family, the setting
+goes there. When the CRD has no `spec.settings`, or no family for the
+setting, the setting goes in the brand's block, such as
+`spec.denon.settings`, and the common family waits for the plan that
+builds it.
+
+- A setting that means the same thing on every brand belongs in the
   `Receiver`'s `spec.settings`. It uses one vocabulary, with explicit
   units, so a person learns one shape, and a new receiver keeps the
   room's setup. Plan 14's table "The families and their units" lists
@@ -61,7 +74,14 @@ meaning.
 
 ## The tiers
 
-Each field in a driver's table has one tier. The operator learns what
+Plan 14 gives each field one tier. In `denon/`, `settingsTable` in `settings.go` joins one list of
+`settingSpec` for each family, such as `toneSettings` in
+`settings_tone.go`. A `settingSpec` has the field's id, the function
+that builds its command, and the function that copies it, and no
+tier. When a driver's table records no tier, write the tier of a
+field in the description of its CRD field.
+
+The operator learns what
 a model supports from the model itself, never from a table of models,
 because support differs by model and not only by protocol.
 
@@ -78,7 +98,7 @@ because support differs by model and not only by protocol.
   it out of its capability document, or did not reply to it during
   the first read.
 
-The tier in the table is the highest tier that the field can reach.
+The tier of a field is the highest tier that the field can reach.
 When a unit does not report a Confirmed field's value, the operator
 sends that field once on that unit. The tier goes in the CRD field's
 description and in the reference, because it is the same for every
@@ -130,23 +150,34 @@ field needs, the field is listed as Blocked.
 
 ## Add a setting
 
-1. Find the plan that covers the setting's family. In it, find the
+1. Check that the setting does not exist. Search the CRD and the
+   driver's package for it, for example for the bass of a Denon:
+
+   ```sh
+   cd equipment-operator
+   grep -n -i bass deploy/receivers-crd.yaml denon/*.go
+   ```
+
+   A zone control, such as a zone's volume, is under `spec.zones` and
+   `spec.volume` in the CRD. When the field exists, the task is a
+   change to it, and not a new field.
+2. Find the plan that covers the setting's family. In it, find the
    row with the setting's setter, its read, its values, and its tier.
-2. Find where the command comes from in the driver's protocol
+3. Find where the command comes from in the driver's protocol
    reference: the `AGENTS.md` of the driver's package, such as
    `denon/AGENTS.md`, and the files it links to. For another brand,
    plan 14's table "References for the next protocol block" lists the documents and the client
    libraries.
-3. Add the field to the CRD, with a description that gives the tier,
+4. Add the field to the CRD, with a description that gives the tier,
    the values, and the units. Then run `make -C docs generate` in
    `equipment-operator`, because the reference pages are generated
    from the CRD.
-4. Add the field to the driver's types, its codec, and its read. Map
+5. Add the field to the driver's types, its codec, and its read. Map
    the device's replies to the answer kinds.
-5. Test it against the driver's fake peer, which replies from a real
+6. Test it against the driver's fake peer, which replies from a real
    device's transcript in `testdata/`. The `testing` skill describes
    the fakes.
-6. Update the manual pages that the `manuals` skill lists for a
+7. Update the manual pages that the `manuals` skill lists for a
    change to a resource's spec or status.
 
 ## Add a receiver brand
@@ -154,7 +185,7 @@ field needs, the field is listed as Blocked.
 1. Write a package `<protocol>/` in `equipment-operator` that
    implements `equipment.Driver`. It imports `equipment/`, and never
    the controller. It contains the brand's settings type, its table
-   of fields with their tiers, its codecs, and its mapping of replies
+   of fields, such as `settingsTable` in `denon/settings.go`, its codecs, and its mapping of replies
    to the answer kinds.
 2. Write an `AGENTS.md` in the package, as `denon/AGENTS.md` does.
    Put in it the protocol references, the

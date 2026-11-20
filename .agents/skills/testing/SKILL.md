@@ -14,11 +14,26 @@ failure depend on something outside the repository. Real hardware and
 real clusters prove a change in the drills at the end of this skill,
 not in a test.
 
+## Which section to read
+
+- **Any test:** "How to write a test", and "Where a fixture lives".
+- **A test that waits, or a test of an operator:** "Fake time with
+  `testing/synctest`", and "Fake the Kubernetes API server".
+- **A test that fails now and then:** "Reproduce a flaky test".
+- **A client of an HTTP or TCP peer:** "Fake a network peer".
+- **Code that talks to hardware:** "Fake a device".
+- **A coverage floor that fails or changes:** "The coverage gate".
+- **Proof on real machines:** "Where real proof happens".
+
 ## How to write a test
 
 - **Write the failing test first.** Then write the code that passes
   it, and then clean up both. A test that never failed has not shown
   that it detects the fault.
+- **Make a test of existing behavior fail once.** When the code
+  already has the behavior, the new test passes at once. Change the
+  code so that the behavior is wrong, and run the test to see it
+  fail. Then put the code back, and run the test to see it pass.
 - **Test outcomes, not implementation details.** Assert what a person
   or a peer observes: the status that the operator wrote, the frames
   on the CEC bus, the requests that the API server received. A test
@@ -26,6 +41,13 @@ not in a test.
 - **Keep each test flat and small.** Put no branches and no error
   plumbing in the test body. Give several cases as a table with
   `t.Run`, not as a loop with conditions (`ci/recipe_test.go`).
+- **Start from the helper that builds the operator.** An operator's
+  tests start the operator and its fakes through one helper. Before
+  you write a test, find it, and start from it. The helper's name
+  starts with `start` or `new`, such as `startWorld` in
+  `firmware-operator/world_test.go`, which returns a `world` with the
+  operator and its fake API server. To find the helpers of a package,
+  run `grep -nE '^func (start|new)' *_test.go` in its directory.
 - **Push setup into fixtures and builders.** A builder reads as the
   thing it builds. `fakeCECBus` in `equipment-operator/cecnode_test.go`
   declares a TV and a receiver in two lines. `managedObjects` in
@@ -46,6 +68,23 @@ when every goroutine in the bubble is durably blocked. So
 returns when every goroutine has settled, and the test asserts after
 it. For examples, see `kubernetes/informer/one_test.go` and the
 `cecnode_*_test.go` files in `equipment-operator`.
+
+A test in a bubble cannot call `t.Run`, because Go panics when it
+does. So a table of cases that each need fake time calls
+`synctest.Test` inside each `t.Run`, and builds its fixture inside the
+bubble (`TestAScanEndedAtAShutdownIsNotRunAgain` in
+`firmware-operator/kubeletend_test.go`):
+
+```go
+for _, c := range cases {
+	t.Run(c.name, func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			w := discoveryWorld(t)
+			// act, then assert on c
+		})
+	})
+}
+```
 
 The gotchas:
 

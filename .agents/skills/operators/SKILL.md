@@ -1,6 +1,6 @@
 ---
 name: operators
-description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, conditions and the Events they post, timers, device traffic, the node label that keeps a device DaemonSet off a node, the replacement of a pod that the kubelet ended, the order of preference between Linux, Kubernetes, and code of the project's own, where an operator runs and where its workloads run, and the decision to watch through client-go, with references for the code of a watch and of a read from the cache. Use when writing or reviewing an operator's watch, informer, reconcile pass, read of a watched kind, status write, condition, Event, backstop, timer, device polling, wait for a socket, replaced pod, device DaemonSet, RBAC, or deploy base, and before committing any change to an operator or a CSI driver.
+description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, conditions and the Events they post, timers, device traffic, the node label that keeps a device DaemonSet off a node, the replacement of a pod that the kubelet ended, the order of preference between Linux, Kubernetes, and code of the project's own, where an operator runs and where its workloads run, and the decision to watch through client-go, with references for the code of a watch and of a read from the cache. Use when writing or reviewing an operator's watch, informer, reconcile pass, read of a watched kind, status write, condition, Event, metric, backstop, timer, device polling, wait for a socket, replaced pod, device DaemonSet, RBAC, or deploy base.
 ---
 
 # Writing and reviewing operators
@@ -17,6 +17,30 @@ before it met the guards below. So the organization chose client-go's
 reflector for every operator (see "Decision: every watch runs on
 client-go"). Read this skill before you write, change, or review a
 watch, and check the watch against every guard and scenario here.
+
+## Which section to read
+
+- **A watch, an informer, or a read of a watched kind:** "The guards
+  of a watch loop", "Scenarios every watch loop must pass", and
+  "Decision: every watch runs on client-go" with its references.
+- **A status write or a reconcile pass:** "Status, echoes, and the
+  pass".
+- **A condition, an `Event`, or the reason of either:** "Conditions
+  and Events".
+- **A timer, a backstop, device traffic, or a wait for a socket:**
+  "Timers and devices".
+- **A pod that the kubelet evicted or rejected:** "A pod that the
+  kubelet ended".
+- **A lifecycle that the operator manages, or a workaround for an
+  upstream fault:** "Linux first, then Kubernetes, then code of our
+  own".
+- **A device `DaemonSet` or its node affinity:** "A device DaemonSet
+  stays off a node labeled none".
+- **RBAC, a deploy base, or the scope of a kind:** "An operator runs
+  in liken-system and watches every namespace".
+- **A metric:** "Metrics".
+- **Any change that a person sees:** "The manual changes with the
+  code".
 
 ## The guards of a watch loop
 
@@ -103,9 +127,13 @@ and the correct result.
   `display-operator/plans/open-problems/rbac-grants-watches-that-no-code-opens.md`
   records the grants that remain. No unit test reads RBAC, so a run on
   the `lab` fleet is the proof that a removal is safe.
-- **A CRD change reinitializes its storage.** During a rollout that
-  changes a CRD, the API server responds `429 storage is
-  (re)initializing` for a short time. A loop must back off and retry.
+- **The Kubernetes API server refuses requests while a CRD changes.**
+  During a rollout that changes a CRD, the API server reinitializes
+  the storage of that kind. For a short time it responds to requests
+  for the kind with `429 storage is (re)initializing`. A loop that
+  gets this response from the API server must back off and retry.
+  A `429` from any other HTTP server has other causes, and this rule
+  does not cover it.
 - **Read once per pass, not once per object.** A pass that sends a GET
   for each claim or pod that it creates costs one request per object
   on every pass. One list per pass gets the same information.
@@ -126,8 +154,16 @@ The rule and the reasons are in root plan 78. In short:
   Each action that changes no condition also posts one: a pod created
   again, a reboot requested, a key minted, a device that appears or
   vanishes. Nothing else posts an `Event`: no reading, key press,
-  guide step, or retry of a retry loop. A retry loop posts its first
-  failure and its recovery.
+  guide step, or retry of a retry loop. A retry loop posts one `Event`
+  at its first failure, and one at the first success after a failure.
+  The attempts and the waits between those two post no `Event`, and
+  they need no reason of their own. Write them to the log.
+- **A new condition type.** `conditions.Set` counts a condition that
+  is not in the list as a transition. So when a release adds a
+  condition type, each object that exists gets the condition on the
+  first status write after the upgrade, and it posts one `Event` for
+  it. A person who upgrades sees one `Event` on every object of the
+  kind.
 - **Warning or Normal.** Warning means a person may need to act.
   Normal means an expected transition or an action the component
   took.
@@ -136,7 +172,17 @@ The rule and the reasons are in root plan 78. In short:
   object that another component owns, such as a `Pod`, the reason
   starts with the prefix of the component that posts it. A message
   includes the values, and never a token. Write it in the voice of
-  `brand/voice.md`. List a component's reasons in one file.
+  `brand/voice.md`.
+- **Where a reason goes.** Each component lists the reasons of the
+  `Event`s that no condition gives in one file, such as
+  `audio-operator/eventreasons.go` or `firmware-operator/events.go`.
+  Put the reason of a new `Event` of that kind there. The reason of a
+  condition goes where the component already declares the reasons of
+  its other conditions. In `audio-operator` and
+  `firmware-operator`, the reasons of a condition are beside the code
+  that sets the condition, such as `audio-operator/sinkstatus.go`. In
+  `display-operator` and `equipment-operator`, `reasons.go` lists the
+  reasons of conditions and of `Event`s together.
 - **The writer.** Build one `events.Recorder` in `main` with
   `events.New(ctx, client, component, events.Options{})`, and post with
   `Normal` and `Warning`. A write never blocks or fails a pass. The
@@ -237,18 +283,13 @@ wait is replaced at once. Only a pod that ends young waits.
 
 ## Linux first, then Kubernetes, then code of our own
 
-The maintainer ranks designs in this order: what Linux provides, then
-what Kubernetes provides, then code that the project writes. The
-decision to watch through client-go, below, has the same reason.
-Upstream maintains and tests its mechanism, and the project must
-maintain its own code alone. So before an operator manages a
-lifecycle itself, look for a mechanism in the kernel or in Kubernetes
-that does the work, such as `ttlSecondsAfterFinished` on a `Job`.
-
-When the project works around a fault in an upstream project, put a
-comment at the workaround. The comment links to the upstream issue
-and says when the workaround can go. A later session can then remove
-the workaround when upstream ships the fix.
+The rule is in `AGENTS.md`, under "Use what Linux and Kubernetes
+already provide". Before an operator manages a lifecycle itself, look
+for a mechanism in the kernel or in Kubernetes that does the work,
+such as `ttlSecondsAfterFinished` on a `Job`. The comment at a
+workaround for an upstream fault also says when the workaround can
+go, so that a later session can remove it when upstream ships the
+fix.
 
 ## A device DaemonSet stays off a node labeled none
 
@@ -368,6 +409,18 @@ loop that the operator writes around the informer.
 - Read `references/cache-reads.md` before you write or review a read
   of a watched kind, the memo of the versions that an operator wrote,
   or a status write that can get a `409`.
+
+## Metrics
+
+Every long-running process serves Prometheus metrics on a port of its
+own. Root plan 65, `plans/completed/65-prometheus-metrics.md`, is the
+contract for the names, the labels, and the port. Read it before you
+add or rename a metric.
+
+A new metric also needs a test that scrapes it, and a row in the
+component's `docs/content/docs/reference/metrics.md`. Check the
+dashboards and the `PodMonitor` in the component's
+`deploy/monitoring/` for a panel or a rule that should use it.
 
 ## The manual changes with the code
 

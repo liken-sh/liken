@@ -59,16 +59,29 @@ the project's to publish.
 
 ## Add or change a field or a kind
 
-1. Edit the template or the fields file. For a kind that is written by
+1. Check that the field does not exist. Search the kind's fields file
+   and the kind's CRD for the INDI property or the field's name, for
+   example for the temperature of a focuser:
+
+   ```sh
+   grep -n -i temperature schema/focusers-fields.yaml deploy/focusers-crd.yaml
+   ```
+
+   A fields file has an entry for each standard property of the kind's
+   INDI interfaces. So each standard property already has a field,
+   such as `temperature` for `FOCUS_TEMPERATURE`. A request to add the
+   field of a standard property is usually a request to change the
+   entry's role, its unit, or its description. Change the entry.
+2. Edit the template or the fields file. For a kind that is written by
    hand, edit its CRD and its Go type. Give a new field a description
    that names its unit.
-2. Run `make schema`. It writes the generated CRDs and Go types
+3. Run `make schema`. It writes the generated CRDs and Go types
    again. It fails on each standard property that no fields file
    names. `TestTheSchemaIsCurrent` fails when a generated file is
    stale.
-3. Run `make -C docs generate skills`, because the manual's reference
+4. Run `make -C docs generate skills`, because the manual's reference
    pages are generated from the CRDs.
-4. Run `make test`.
+5. Run `make test`.
 
 The tests in `observatory/` load the CRDs into the API server's own
 validators, and compare them with the Go types:

@@ -12,6 +12,10 @@ If that context names components, asks only for a short reminder, or
 asks for a pick under a constraint (such as "not the OS" or "nothing
 that needs my input"), follow it in place of the defaults below.
 
+A request that only asks what is open ends with the report of
+section 5. Sections 6 and 7 apply only when the maintainer asks for a
+pick, or agrees to the housekeeping commit.
+
 **Core principle: a plan's text is a claim, not a fact. Every verdict
 and every stale fact in the report cites a commit hash or a
 `file:line` that you read yourself, or that an agent read and you
@@ -32,10 +36,30 @@ done
 find . -path '*/plans/open-problems/*.md' -not -path '*/node_modules/*'
 ```
 
+For one component, list only that component's `plans/`. Then search
+the root plans and the OS's plans for the component's name, because a
+plan there can cover work inside the component:
+
+```sh
+ls <component>/plans <component>/plans/open-problems 2>/dev/null
+grep -l '<component>' plans/*.md plans/open-problems/*.md \
+  liken/plans/*.md liken/plans/open-problems/*.md 2>/dev/null
+```
+
+Read each hit to see whether it covers work in the component. A hit
+in a `README.md` is an index, and it is not open work.
+
 `00-design.md` is a component's design overview, and `README.md` is an
 index, so neither is open work. Name each plan with its component,
 as the `plans` skill says, because plan numbers repeat across
 components.
+
+Work is open only when a plan or an open problem exists for it. A
+design document can end with a list of work for later, with no plan
+for any item. That list is not open work, because the `plans` skill
+uses the directory of each plan to show what is open. Do not report
+such an item as open. When the maintainer asks for ideas, you can
+name it as a candidate that needs a plan first.
 
 For a short reminder ("what's open?"), stop here and give one line per
 document from its header. Say that the list comes from the headers and
@@ -143,6 +167,12 @@ which can close, and which have wrong facts. Then:
    plan. Propose the merge, and do not narrow each document to what
    the other leaves out.
 5. **The pick**, when the maintainer asked for one.
+
+When a component has nothing open, say that nothing is open. Then
+list what you checked: the directories, the searches of the root
+plans and the OS's plans, and any design document that you read.
+Then give each fact that you found to be wrong, with the document,
+the claim, and the truth with its `file:line`.
 
 Each line names the component and the thing, in the words that the
 maintainer would use. The maintainer did not take part in each design

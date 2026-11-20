@@ -31,5 +31,5 @@ When the build cannot resolve names, set
 happens on a VPN whose DNS server responds to the laptop but not to
 its containers.
 
-When the drill ends, run `docker stop liken-lab-registry`, as the
+When the drill ends, run `make registry-stop`, as the
 "Clean up" section of `SKILL.md` says.

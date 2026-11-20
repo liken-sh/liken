@@ -1,6 +1,6 @@
 ---
 name: plans
-description: Writes, builds, closes, or rejects a plan or an open problem in a plans/ directory of the liken repository - which plans/ directory a document belongs in, its number and its header, what a plan contains and what it leaves out, the move to completed/ in the commit that builds the plan, the links to fix after a move, and when an open problem is written, kept, or deleted. Use before writing a plan or a design document, before the commit that builds a plan or a milestone, when a bug or a design question needs a record, and when a document in plans/ moves, closes, or changes. To survey every open plan and choose work, use the open-work skill.
+description: Writes, builds, closes, or rejects a plan or an open problem in a plans/ directory of the liken repository - which plans/ directory a document belongs in, its number and its header, what a plan contains and what it leaves out, the move to completed/ in the commit that builds the plan, the links to fix after a move, and when an open problem is written, kept, or deleted. Use before writing a plan or a design document, before the first code of a new component, operator, driver, kind, or feature, because the plan comes before the code, before the commit that builds a plan or a milestone, when a bug or a design question needs a record, and when a document in plans/ moves, closes, or changes. To survey every open plan and choose work, use the open-work skill.
 ---
 
 # Plans
@@ -53,9 +53,11 @@ changed that detail were in other directories.
    directory and its subdirectories. Each directory numbers its own
    plans, and a number never changes. Name the file
    `<number>-<subject-in-words>.md`.
-3. Start with a header paragraph that gives the number, the date, and
-   the status: "Plan 12. Proposed on 2026-11-10. Nothing is built."
-   The OS writes "Milestone 95." in place of "Plan 12."
+3. Start with the title `# <number>, <Title>`, and then a header
+   paragraph with the date and the status: "Proposed on 2026-11-10.
+   Nothing is built." Older plans have other forms, so do not copy
+   one of them. The OS's plans say "Milestone" and the number first:
+   "Milestone 95. Proposed on 2026-11-10. Nothing is built."
 4. Describe the problem, the design, the alternatives that were set
    aside with the reason for each, and how the work will be proved. A
    plan specifies contracts, such as a field, a condition, a message,
@@ -66,7 +68,7 @@ changed that detail were in other directories.
    `brand/voice.md` for the text.
 
 When the maintainer asks for a stub, write only the header and the
-problem, and say so in the header: "Plan 12. Proposed on 2026-11-10,
+problem, and say so in the header: "Proposed on 2026-11-10,
 as a stub." A later session writes the design.
 
 A component's code exists only where a plan calls for it, so write
@@ -102,7 +104,7 @@ become an open problem. The header lists the drills that have not
 run.
 
 When one session writes a plan and builds it, write the file in
-`completed/` from the start, with the header "Plan 12. Proposed and
+`completed/` from the start, with the header "Proposed and
 built on 2026-11-20."
 
 ## A plan that will not be built as written

@@ -1,6 +1,6 @@
 ---
 name: images
-description: Describes the required form of a Dockerfile in the liken repository - the one way to build a Go program, cargo auditable for a Rust binary, a closure of Debian or Ubuntu packages on scratch with its dpkg records, and a static program that buildroot builds from liken/userland. Also covers how a Dockerfile names a base image of the repository, how every image builds through docker-bake.hcl, and what the ci pins check rejects. Use before writing, changing, or reviewing a Dockerfile, a closure script, a FROM line, or a buildroot recipe or fragment under liken/userland, when adding an image to a component, when building a program from source in an image, when an image or its build cache is larger than expected, and when ci pins fails on a Dockerfile or CI's plan job fails because the recipe of a pinned component changed with no new revision.
+description: Describes the required form of a Dockerfile in the liken repository - the one way to build a Go program, cargo auditable for a Rust binary, a closure of Debian or Ubuntu packages on scratch with its dpkg records, and a static program that buildroot builds from liken/userland. Also covers how a Dockerfile names a base image of the repository, how every image builds through docker-bake.hcl, and what the ci pins check rejects. Use before writing, changing, or reviewing a Dockerfile, a closure script, a FROM line, or a buildroot recipe or fragment under liken/userland, when adding an image or a kubectl plugin to a component, when building a program from source in an image, when an image or its build cache is larger than expected, and when ci pins fails on a Dockerfile or CI's plan job fails because the recipe of a pinned component changed with no new revision.
 ---
 
 # Images
@@ -19,6 +19,23 @@ checksum, its `pin.toml`, and its `latest.sh` are in the `pins`
 skill. The labels that a publish writes, and the tags of the pinned
 base images, are in the `releases` skill. No Dockerfile writes a
 `LABEL` or a `MAINTAINER`, because `ci publish` writes every label.
+
+## Which section to read
+
+* **Build an image, or change a `FROM` line:** "The bake file and the
+  base images".
+* **A change that moves the recipe of a base, or a CI failure about a
+  revision:** "The recipe of a pinned component".
+* **Fetch a file into an image:** "The bake file and the base images"
+  and "The recipe of a pinned component". The rules of the download
+  and its `pin.toml` are in the `pins` skill.
+* **A Go program:** "Go programs".
+* **A Rust program:** "Rust binaries".
+* **Files copied out of Debian or Ubuntu packages:** "Closures".
+* **A static program from another project:** "Static programs".
+* **Add an image to a component:** "A new image in a component".
+* **Add a kubectl plugin to an operator:** "The image of a kubectl
+  plugin", then "Go programs".
 
 ## The bake file and the base images
 
@@ -67,6 +84,15 @@ of it from the tree too, until the new tag of the base is published.
 The reasons are in root plan 89.
 
 ### The recipe of a pinned component
+
+A pinned component is one whose `package.toml` sets a `version`
+under `[package]`, as `weston/package.toml` does. Only a pinned
+component has a recipe and a `revision`. A component with no
+`version`, such as `display-operator`, takes its version from the
+release tag or the development build. So it needs no change when a
+base under it changes. A new revision of a base cascades only to the
+pinned components above it, as `PinnedDependents` in `ci/pinned.go`
+finds them.
 
 The recipe of a pinned component covers every file in each of its
 build contexts, as `Recipe` in `ci/recipe.go` reads them. It also
@@ -278,3 +304,57 @@ installs the packages that Alpine has on the day of the build.
   layer of 2.19 GB compressed. A later build that missed the cache
   downloaded that layer again. Keep only the target tree, the license
   files, and the package list that the SBOM reads.
+
+## A new image in a component
+
+A Dockerfile alone publishes nothing. `ci` builds and publishes the
+images that the component's `package.toml` lists.
+
+1. Add an `[[outputs.images]]` entry to the component's
+   `package.toml`, with the image's `name` and a one-line
+   `description`. Name the Dockerfile in `file`, relative to the
+   component. When the Dockerfile has more than one stage to publish,
+   name the stage in `target`. List each build context from another
+   directory in `contexts`, as a path from the top of the repository.
+   Add a `smoke` script when the image has one. The image builds for
+   `linux/amd64` unless `platforms` names others. Copy the form from
+   an entry of a sibling component, such as `display-operator`. The
+   comments on `Image` in `ci/component.go` describe each field.
+2. Run `make workflows` at the top of the repository. It adds the
+   bake target and the jobs.
+3. Add the image to the component's manual. The `manuals` skill lists
+   the pages.
+
+## The image of a kubectl plugin
+
+An operator can ship a command that people run as
+`kubectl liken <domain> <verb>`. The program is in the component's
+`cli/`, and `Dockerfile.cli` builds it into its own image. Copy both
+from an operator that has them, such as `display-operator`. Add the
+image to `package.toml` as "A new image in a component" says.
+
+The plugin depends on these things outside the Dockerfile:
+
+- **The binary** is named `kubectl-liken-<domain>`, because `kubectl`
+  finds a plugin by its file name. The image runs it as its
+  `ENTRYPOINT`, and `liken plugins sync` extracts the file that the
+  entrypoint names.
+- **The label.** The operator's workload in `deploy/` has the label
+  `cli.liken.sh/plugin: <domain>`. `liken plugins sync` finds the
+  workload by that label and reads the image of its first container.
+  So put the label on the workload whose first container runs the
+  operator's image.
+- **The image name.** `plugins sync` adds `-cli` to the repository of
+  that first container's image and keeps its tag. So the image is
+  named for the operator's image, as `display-operator-cli` is for
+  `display-operator`, and it publishes at the same version.
+- **The platform.** The image is for `linux/amd64` only. The build
+  stage runs with `--platform=$BUILDPLATFORM` and cross-compiles with
+  `GOOS` and `GOARCH`, so the build needs no emulation. The last stage
+  is `distroless` with the `trust` component copied in, because the
+  plugin calls HTTPS APIs.
+
+"The operator plugins" in `liken/docs/content/docs/reference/cli.md`
+describes how a person installs and runs a plugin. Its list "These
+domains ship a CLI" names each domain, so add the new domain to that
+list in the same commit.

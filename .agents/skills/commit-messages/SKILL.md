@@ -46,7 +46,9 @@ paragraph as ragged lines.
   measurement with its conditions are evidence. "A publish of
   `library-operator` failed on 2026-11-17 after it pushed every
   layer: ghcr.io answered 404 for the digest two seconds after it
-  accepted the push."
+  accepted the push." When you did not see the evidence yourself,
+  write what was wrong and what the system does after the change. Do
+  not write a date, an error, or a measurement that you did not see.
 - **Say what the system does now**, in the terms that a user or an
   operator sees: the new limits, and the cases that did not change.
 - **Say what the change leaves open**: a cause that is not known, a

@@ -12,6 +12,17 @@ If that context names specific components, or says to skip the
 research or to stop after a step, follow it instead of the defaults
 below.
 
+## Which section to read
+
+* **A pass over every pin:** every step, in order.
+* **A request that names one pin, such as Flux:** steps 1 to 4 and
+  step 6 for that pin, and the part of step 5 about its kind, if any.
+* **The base images and their snapshot:** step 5. **INDI:** step 5a.
+  **The CA bundle of `trust`:** step 5b.
+* **A toolchain, an outside image, or a GitHub Action:** step 5c.
+* **The Go and Rust graphs, Dependabot, or a CVE:** step 5d.
+* **The bluetoothd or appearances image:** step 5e.
+
 The bumps themselves are quick edits to the working tree. The value
 of a pass is in the research, and in the builds that prove each
 bump. A pass ends with one commit for each domain that moved. Step 6
@@ -162,6 +173,12 @@ These bumps need more care:
 - **A kernel bump.** Before you take one, check memory and
   `plans/open-problems/` for items tied to the current kernel, such
   as a workaround that should be tested again on the next kernel.
+- **A Flux bump.** `flux/latest.sh --bump` also runs
+  `ci/latest.sh --bump fluxcd/flux2`, which writes the commit of the
+  flux action into `ci/actions.go`. The generated workflows name that
+  commit. So run both `next:` lines that the bump prints:
+  `make workflows` at the top of the repository, and
+  `make cluster-operator` in `liken/`.
 
 ## 3. Read the changelogs
 
@@ -187,7 +204,11 @@ the first boot on real hardware are its first real test.
 
 1. Run `make versions` again. Every row must show `current` or
    `held`.
-2. Run `git diff --stat`. The change is in these files:
+2. Run `make workflows` at the top of the repository after any bump.
+   It reads only the tree, so it changes nothing when no generated
+   file depends on the pin.
+3. Run `git diff --stat`. Each of these files appears only when the
+   bump changes it:
    - `VERSION` files, `pin.toml` files, digests in `fetch.sh`, and
      `toolchains/images.toml`
    - `docker-bake.hcl` and `.github/`, from `make workflows`
@@ -199,15 +220,18 @@ the first boot on real hardware are its first real test.
      its tag, as step 5c says
 
    Any other file needs a reason in the report.
-3. Run `make all`. A changelog does not show breakage in configure or
-   in the toolchain, and a bump that does not build is not done. The
-   programs that `userland` compiles from source against musl break
-   most often. A new configure check or a dropped default there is
-   invisible until the build runs.
-4. Run `make smoke-uefi` and `make smoke-bios`. A boot to Ready under
-   each firmware proves that the parts still assemble into a working
-   machine. The BIOS boot is the proof of a `grub` bump, because the
-   core image of GRUB must still fit in the `biosBoot` partition.
+4. Run `make all` for a pass, or the build that a single bump's
+   `next:` line names, such as `make kernel`. A changelog does not
+   show breakage in configure or in the toolchain, and a bump that
+   does not build is not done. The programs that `userland` compiles
+   from source against musl break most often. A new configure check
+   or a dropped default there is invisible until the build runs.
+5. Run `make smoke-uefi` and `make smoke-bios` after `make all`, and
+   after a bump that changes how a machine boots, such as the kernel,
+   a boot loader, the firmware, or `userland`. A boot to Ready proves
+   that the parts still assemble into a working machine. The BIOS
+   boot proves a `grub` bump, because the core image of GRUB must
+   still fit in the `biosBoot` partition.
 
 ## 5. The base images
 
@@ -470,8 +494,10 @@ loaders, the bases and their snapshot, `indi`, the CI actions, or the
 Terraform providers. Then a reader or a bisect finds each move on its
 own. A change that a bump forced in another file, such as a port to
 a new major version or a regenerated file, goes in the commit of that
-bump. The rest of the mechanics are in the root `AGENTS.md` section
-"Branches and landing" and in the `commit-messages` skill.
+bump. So does a file outside the domain that the bump script wrote,
+such as `ci/actions.go` and the workflows for Flux. The rest of
+the mechanics are in the root `AGENTS.md` section "Branches and
+landing" and in the `commit-messages` skill.
 
 The rollout goes to the `liken-1` testbed first: the release, or the
 development builds of the operators, and a soak there. A home cluster

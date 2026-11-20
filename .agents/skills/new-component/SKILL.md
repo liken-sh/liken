@@ -21,22 +21,26 @@ it.
 
 ## Design it with the maintainer first
 
-The maintainer designs each component with the agent before any code
-is written. In the session that created `firmware-operator`, the
-maintainer and the agent decided these things together: the name of
-the kind, which work belongs in the new component and which stays in
-`liken` and `observatory-operator`, that it ships separately from the
-OS like `display-operator`, and that it is low in the CI graph. The
-maintainer also asked that the plans name the guides of the manual,
-because each guide becomes a skill for the component's users. Code
-started only after the maintainer said to build it.
+A request to create a component, such as "set up the component", is
+a request to design it. Do not write the component's code, its
+`package.toml`, or its `deploy/` yet. Do these steps:
+
+1. Talk the design through with the maintainer, one question at a
+   time. Settle the name of each kind, which work belongs in the new
+   component and which stays in an existing one, whether it ships
+   separately from the OS, and which components it depends on.
+2. Write the plan. Load the `plans` skill first, and use the header
+   that its section "Write a plan" gives. Name each guide of the
+   manual in the plan, because each guide becomes a skill for the
+   component's users.
+3. Start the files of the component when the maintainer agrees to the
+   plan.
 
 A component has code only where a plan calls for it. So the first
 files of a component are its plan and its description:
 
 - `plans/00-design.md`, the design of the component as a whole, and
-  `plans/README.md`, copied from a sibling. Load the `plans` skill
-  first.
+  `plans/README.md`, copied from a sibling.
 - `README.md` and `AGENTS.md`, in the shapes that "The README and
   AGENTS.md" below describes.
 - A root plan, only when the design crosses components. The detail
@@ -49,19 +53,26 @@ stub runs no job and publishes nothing.
 
 ## Choose the sibling to copy
 
-Copy the closest component file by file, and change each name, path,
-and comment for the new component. The `firmware-operator` session
-copied the `LICENSE` and `.pre-commit-config.yaml` of
-`people-operator`, and changed the names in its `.gitignore` and
-`Makefile` with `sed`.
+Choose the sibling by the kind of workload that the component runs
+and by what it claims. Then confirm the choice: read the sibling's
+`deploy/` for the workload's `kind:` and any `ResourceClaimTemplate`,
+and its `package.toml` for its jobs and its outputs.
 
-- **A Go operator with its own kinds**: `people-operator`, which is
-  small. It has one `Deployment` with leader election, watches
+- **An operator that runs as a `Deployment` and claims no device**:
+  `people-operator`, which is small. It has leader election, watches
   through `kubernetes/informer`, and creates and follows short-lived
   pods. It has a fake API server in `fakeapi_test.go`, a manual with a
   generated reference page, and `deploy_test.go` for the base.
-- **A CSI driver or a node `DaemonSet`**: `per-node-csi-driver`, which
-  also has a `smoke/` script and a `lab/` of drills.
+- **A device operator**, which is a DRA driver that runs as a
+  `DaemonSet` and claims a device that the OS publishes:
+  `bluetooth-operator`. Its `deploy/deviceclasses.yaml` selects the
+  devices that the driver `liken.sh` publishes for one kernel driver.
+  Its `deploy/operator.yaml` has the `ResourceClaimTemplate` that
+  gives each pod the device of its own node. The tree is large, so
+  copy these files and the shape of its DRA code, not every file.
+- **A CSI driver**: `per-node-csi-driver`, whose `deploy/` has a
+  `CSIDriver` and a node `DaemonSet`. It also has a `smoke/` script
+  and a `lab/` of drills.
 - **A Rust crate with no output**: `media-screen`.
 - **A Rust server with an image and a `deploy/`**: `transect`, which
   has no manual. Its binary links glibc, so a closure script copies
@@ -71,6 +82,11 @@ copied the `LICENSE` and `.pre-commit-config.yaml` of
   `package.toml`. The rules of the tag and the revision are in the
   "Pinned components" section of the `releases` skill and in the
   `bump-components` skill.
+
+Copy the sibling file by file, including `LICENSE` and
+`.pre-commit-config.yaml`. Change each name, path, and comment for the
+new component. `sed` changes the names in `.gitignore` and the
+`Makefile`.
 
 ## Build the component
 
@@ -83,12 +99,11 @@ before it wrote.
    `golang` entry of `toolchains/images.toml`. Add a `replace` for each
    module of the tree that it imports. Then run `go mod tidy`, and
    compare each dependency's version with the siblings' versions.
-   Result: a module whose versions are the same as the siblings'. In
-   the `firmware-operator` session, `go mod tidy` moved the Kubernetes
-   modules one minor version past the other operators. `ci pins` fails
-   on that. Also, the newer `cel-go` crashed the DRA compiler of the
-   older line. So the session set every Kubernetes module back to the
-   version that the siblings use.
+   `go mod tidy` can move a module, such as the Kubernetes modules,
+   past the version that the siblings use. Set each such module back
+   to the siblings' version. `ci pins` fails when two modules use
+   different versions of one dependency. Result: a module whose
+   versions are the same as the siblings'.
 2. **The code and the tests.** Load the `operators` skill and the
    `testing` skill first. Result: `make test-go` passes, or
    `make test` for a Rust workspace. Set the floor in
@@ -99,15 +114,21 @@ before it wrote.
    `ghcr.io/liken-sh/<image>` with `newTag: latest`. `:latest` exists
    only after the component's first release. Until then, a person pins
    a development build, as the "Pin a component" section of the
-   `releases` skill describes. Result: `kubectl kustomize deploy`
-   builds, and a test reads the manifests of the base, as
+   `releases` skill describes. A device `DaemonSet` needs the node
+   affinity in the section "A device DaemonSet stays off a node
+   labeled none" of the `operators` skill. Result: `kubectl kustomize
+   deploy` builds, and a test reads the manifests of the base, as
    `people-operator/deploy_test.go` does.
 4. **The `Dockerfile`.** Load the `images` skill first. Also load the
    `pins` skill when the image or the tree includes a file from
    outside the repository, such as the checked-in htmx of `transect`.
-   Result: a Dockerfile in the repository's form for its kind of
-   program. The `package.toml` of the next step lists its build
-   contexts.
+   Copy the sibling's `.dockerignore` when it has one, and list in it
+   each file that no build reads, as `bluetooth-operator/.dockerignore`
+   does. The section "The recipe of a pinned component" of the
+   `images` skill explains how `.dockerignore` changes what a build
+   context includes. Result: a Dockerfile in the repository's form
+   for its kind of program. The `package.toml` of the next step lists
+   its build contexts.
 5. **The manual.** Copy the sibling's `docs/`, and load the `manuals`
    skill. Change these:
    - the module path of `docs/go.mod`
@@ -136,71 +157,84 @@ before it wrote.
      list does not include.
    - `[docs] prefix` sets the manual's address,
      `https://liken.sh/<prefix>/`.
-   - Give the component at least one job. Every `package.toml` in the
-     tree has one, because GitHub rejects a workflow with no jobs as an
-     invalid file. A Go component has the `go`, `docs`, and `prek`
-     jobs of `people-operator`. A Rust component has the `rust` and
-     `prek` jobs of `media-screen`.
+   - Give the component at least one job. GitHub rejects a workflow
+     with no jobs as an invalid file. A Go component has the `go`,
+     `docs`, and `prek` jobs of `people-operator`. A Rust component
+     has the `rust` and `prek` jobs of `media-screen`.
    - Each `[[outputs.images]]` entry has a `description` of one line,
      with no Markdown and no em-dash. `ci` writes it to the label that
      ghcr.io shows, and fails on a description that breaks a rule.
 7. **The `README.md` and `AGENTS.md`.** Update the stub of the first
-   commit for the code that now exists. "The README and AGENTS.md"
-   below describes the shapes.
-8. **The lists outside the component.** "Files outside the component"
-   below describes each one.
+   commit for the code that exists. "The README and AGENTS.md" below
+   describes the shapes.
+8. **The files outside the component.** "Files outside the component"
+   below describes how to find each one.
 
 ## The README and AGENTS.md
 
-`README.md` is for a person, and is under 100 lines:
+`README.md` is for a person, and is under 100 lines.
+`audio-operator/README.md` and `media-operator/README.md` have this
+shape:
 
-- An introduction of three short paragraphs: what the component is
-  for, what it is responsible for and what it is not, and how it fits
-  with the rest of `liken`.
-- The major parts: each kind, package, or module, with a line or two.
-- One short example, such as a manifest of its kind.
-- A link to the manual at `https://liken.sh/<prefix>/`, and a link to
-  `plans/00-design.md`.
+- An opening paragraph on what the component lets you do.
+- A paragraph on how it works, and on what it does not do.
+- A paragraph on how it fits with the other components. A hardware
+  operator links to
+  `https://liken.sh/docs/concepts/claiming-hardware/` here.
+- The kinds, each with a line or two.
+- One short example, such as a manifest of a kind.
+- A link to the manual at `https://liken.sh/<prefix>/`, a link to
+  `plans/`, and the line `MIT. See [LICENSE](LICENSE).`
 
 `AGENTS.md` is for an agent that changes the component. Every session
 in the directory loads the root `AGENTS.md` with it, so it repeats
 nothing that the root file says. The rules in `brand/instructions.md`
-apply to it.
+apply to it. `audio-operator/AGENTS.md` and
+`firmware-operator/AGENTS.md` have this shape:
 
-- The first lines give the kind of component in a sentence, such as
-  "`people-operator` is a Go Kubernetes operator", and say that
-  `README.md` says what it is for.
+- The title `# Working on <component>`. Then a sentence on the type of
+  the component, such as "`firmware-operator` is a Go Kubernetes
+  operator", and the sentence "`README.md` says what it is for and
+  describes its kinds."
 - `## How it runs`: the processes, and how information and control
   move between them.
-- `## Rules a change must keep`: each rule with its reason.
-- A section on each boundary, named `## The boundary with
-  <component>`, for each component that the new one shares a contract
-  with.
+- `## Design`: one or two short paragraphs that describe the design
+  and give the reason for each choice. Include what the component
+  owns and how it talks to the components next to it. Write
+  paragraphs, not a list of rules. The full reasons are in `plans/`.
 - `## Finding things`: what a file name does not tell the reader.
 
 ## Files outside the component
 
-When a new component's first push fails, the most common reason is a
-list that does not include the component. `make workflows` writes some
-of the lists, and you write the others.
+`make workflows` at the top of the repository writes some of the
+files that name each component, and you edit the others.
 
-`make workflows` at the top of the repository runs
-`cd ci && go run . generate -root ..`. That command writes the files
-of `.github/workflows/`, `docker-bake.hcl`, and `.github/dependabot.yml`
-from every `package.toml`, every `FROM` line, and every `go.mod` and
-`Cargo.lock`. The component gets its own
+`make workflows` runs `cd ci && go run . generate -root ..`. That
+command writes the files of `.github/workflows/`, `docker-bake.hcl`,
+and `.github/dependabot.yml` from every `package.toml`, every `FROM`
+line, and every `go.mod` and `Cargo.lock`. The component gets its own
 `.github/workflows/component-<name>.yaml`. `scan.yaml` lists an image
 only after its first publish.
 
-Edit these by hand:
+To find the files that you edit by hand, search the repository for
+the name of the sibling that you copied. Leave out the sibling's own
+directory and every `plans/` directory:
 
-- **The root `README.md`**: one entry under the group that the
-  component belongs to, in the words of its `README.md`.
-- **`liken/docs/content/docs/concepts/extension-operators.md`**, for an
-  extension operator: the operator under its area.
+```sh
+git grep -l <sibling> -- . ':(exclude)<sibling>' ':(exclude,glob)**/plans/**'
+```
+
+Look at each hit. A list of components or a page that names each
+component of the same kind needs an entry for the new component, such
+as the root `README.md` and the concept pages under
+`liken/docs/content/docs/concepts/`. Skip the generated files, which
+`make workflows` writes, and the code of a component that uses the
+sibling.
+
+The search does not find these:
+
 - **`SECURITY.md`**, section "What is in scope", for a component that
-  is not an operator and not part of the build. The `transect` commit
-  added `transect` there.
+  is not an operator and not part of the build.
 - **A component with a coverage job and no manual**: add
   `/coverage/<name>.html` to the exceptions in
   `liken/docs/linkcheck/manual_test.go`. Add the component to "The
@@ -210,8 +244,7 @@ Edit these by hand:
 - **The `plugins` repository**, outside this repository, for a
   component with a `skills/` directory. Its `AGENTS.md` describes the
   catalog entry, the `everything` plugin, and the table in its
-  `README.md`. The `firmware-operator` session added the `firmware`
-  plugin there.
+  `README.md`.
 
 These files have no list of components, so a new component needs no
 edit in them:
@@ -235,15 +268,7 @@ edit in them:
 ## Check the component before the first push
 
 Run these from the worktree, in this order. Each one is a check that
-CI runs on the push. The session that made `liken/userland` a
-component found its faults only on CI. First, `ci deps` failed on a
-dependency that `bluetooth-operator/package.toml` did not list, and
-the session had not run `ci deps`. Then GitHub rejected the new
-component's workflow, because it had no jobs. The session that created
-`firmware-operator` ran `make test`, `ci generate -check`, `ci deps`,
-and the hooks. The session that moved `transect` into the repository
-ran every check below. The first CI run of each of those components
-passed.
+CI runs on the push. A check that you skip here fails on CI instead.
 
 1. **Stage the component**: `git add <component>`. Several checks read
    only what git tracks. `make test-docs` fails on a generated page or
@@ -257,13 +282,16 @@ passed.
    worktree, where `.git` is a file.
 2. **The component's own checks**: `make test` in the component's
    directory. For a Go component, it runs `test-go` and `test-docs`.
-3. **The generated files**: `make workflows` at the top, then
-   `cd ci && go run . generate -root .. -check`, which prints that
-   every generated file is current. A second `make workflows` changes
-   nothing.
-4. **The checks of CI's `graph` job**: run each `go run .` step of
-   the `graph` job in `.github/workflows/ci.yaml`, from `ci/`, such as
-   `go run . pins -root ..` and `go run . deps -root ..`.
+3. **The generated files**: `make workflows` at the top. A second
+   `make workflows` changes nothing.
+4. **The checks of CI's `graph` job**: run each `run:` step of the
+   `graph` job in `.github/workflows/ci.yaml`, from `ci/`. The first
+   step is `go run . generate -root .. -check`. This command lists
+   the steps:
+
+   ```sh
+   sed -n '/^  graph:/,/^  [a-z]/p' .github/workflows/ci.yaml | grep 'run:'
+   ```
 5. **The tests of `ci`**: `cd ci && go test ./...`. They read files
    from the whole repository, such as each `Makefile`, which must
    declare `.DELETE_ON_ERROR:`.
@@ -275,16 +303,15 @@ passed.
    script with the image's reference. CI's images job runs the same
    build and script.
 8. **The prose**: check every comment, page, and commit message against
-   `brand/voice.md`. The repository is public, so before `transect`
-   moved here, the maintainer had its tree checked for details of a
-   home cluster and given a full voice pass.
+   `brand/voice.md`. The repository is public, so check the tree for
+   details of a home cluster, as the section "Privacy" of the root
+   `AGENTS.md` describes. A comment or a page never contains a
+   measurement from one run, such as how many seconds a device took to
+   leave the slice in a lab run. Put the measurement in the plan that
+   made it, with the conditions of the run.
 
 Then commit the component and the generated files together, with the
-`commit-messages` skill. A comment or a page never contains a
-measurement from one run, such as how many seconds a device took to
-leave the slice in a lab run. The maintainer had those removed from
-`firmware-operator` the morning after its first commit. A measurement
-goes in the plan that made it, with the conditions of the run.
+`commit-messages` skill.
 
 ## After the push
 

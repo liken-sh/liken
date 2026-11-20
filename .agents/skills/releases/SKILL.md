@@ -17,6 +17,23 @@ nothing. `gh variable get PUBLISH -R liken-sh/liken` prints the
 value. The `release` skill is the procedure that cuts a release, and
 it checks this variable before the tag.
 
+## Which section to read
+
+* **The form of a version or a tag:** "The version scheme".
+* **Which components a tag releases, and why:** "What a tag
+  releases".
+* **Why a tag published a component or did not:** "Find what a run
+  published".
+* **The version of a development build:** "Development builds".
+* **Which jobs and image builds a run runs:** "The checks a run runs".
+* **A base image, `indi`, or `trust`, and its revision:** "Pinned
+  components".
+* **The labels and annotations of a published image:** "What an image
+  says about itself".
+* **Point a cluster at a release or a development build:** "Pin a
+  component".
+* **The OS and its channel:** "The liken OS".
+
 ## The version scheme
 
 CalVer, `yyyy.mm.dd-nnn`:
@@ -98,15 +115,50 @@ The `record` job writes the GitHub release for the tag. The GitHub
 release lists every component and its version at that tag. When the
 tag released the OS, it also has the OS's catalog entry.
 
+## Find what a run published
+
+Use these steps when a tag did not publish a component that you
+expected, or published one that you did not expect.
+
+1. Run `gh variable get PUBLISH -R liken-sh/liken`. If it does not
+   print `true`, no run pushes anything.
+2. Run `gh release view <version> -R liken-sh/liken`. The GitHub
+   release lists each component and its version at the tag. A
+   component that the tag did not release shows the version of its
+   previous release.
+3. Find the tag's run with
+   `gh run list -R liken-sh/liken --workflow ci.yaml --branch <version>`.
+4. Read the summary of the run's `plan` job. Step 2 of the `release`
+   skill has the command that reads it from the job's log. In a tag's
+   run, the table under "The plan" has a row for each component. The
+   row shows what the component publishes, its version, and why. The
+   heading "A release tag at this commit" is only in the run of a push
+   to `main`.
+5. Read the section "Write access" of the same summary. It lists each
+   package that the workflow cannot push to. A package in that list
+   needs the Write role for `liken-sh/liken` in its settings on
+   GitHub.
+6. To check that an image is on ghcr.io at a version, run
+   `docker buildx imagetools inspect ghcr.io/liken-sh/<image>:<version>`.
+   It prints the image's index when the version is published, and
+   stops with an error when it is not.
+
 ## Development builds
 
 A push to `main` publishes a development build of each component whose
-outputs changed in the push. The version is the output of
-`git describe` from the newest release tag, plus a suffix:
+outputs changed in the push. The version is the newest release tag
+before the commit, then `-dev-`, the number of commits since that tag
+in three digits, and the first eight characters of the commit:
 `2026.10.02-001-dev-017-abcdef01` is 17 commits past
 `2026.10.02-001`, at commit `abcdef01`. The count is for the whole
 repository. The suffix sorts after its release and before the next
-one. A development build never moves `:latest`.
+one. `DevVersion` in `ci/version.go` makes the version. A development
+build never moves `:latest`.
+
+Do not compute the version of a development build by hand. Read it in
+the summary of the `plan` job of the run for that commit, in the
+"Version" column of the table under "The plan". Find the run with
+`gh run list -R liken-sh/liken --workflow ci.yaml --commit <sha>`.
 
 The OS publishes no development builds. The channel contains releases
 only.
@@ -356,7 +408,11 @@ spec:
 ```
 
 A development build pins the same way, with its development version as
-the tag. No pin uses a commit sha.
+the tag. No pin uses a commit sha. "Development builds" says where to
+read the version of a commit's build. Before you pin it, check that
+the deploy artifact is on ghcr.io with
+`docker buildx imagetools inspect --raw ghcr.io/liken-sh/<component>-deploy:<version>`.
+The artifact is not an image, so `--raw` prints its manifest as JSON.
 
 ## The liken OS
 

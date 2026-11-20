@@ -12,6 +12,16 @@ from. The version scheme, what a tag publishes, and the labels of an
 image are in the `releases` skill. The `pin.toml` manifest that these
 records are made from is in the `pins` skill.
 
+## Which section to read
+
+* **Verify an image, or read its SBOM:** "Image attestations and
+  signatures".
+* **Verify a file of an OS release, or read the release's SBOM:** "The
+  OS release's SBOM and signatures".
+* **Rehearse the signing of a lab release:** the end of "The OS
+  release's SBOM and signatures".
+* **Open alerts, a CVE, or a change to a scan:** "Vulnerability scans".
+
 ## Image attestations and signatures
 
 Every image that a publish job pushes, in a development build, a
@@ -67,6 +77,18 @@ If the signing fails, the publish fails. This happens before `:latest`
 moves and before the deploy artifact refers to the image. The rerun
 finds the version already published and signs it again by its tag.
 cosign resolves the tag to the digest that the failed run pushed.
+
+Find the version to verify first. A tag releases a component only when
+the component's outputs changed, so the newest tag can have no image
+of the component. Use one of these:
+
+* `gh release view <tag> -R liken-sh/liken` lists each component and
+  its version at that tag. A component that the tag did not release
+  shows the version of its earlier release.
+* `cd ci && go run . scans` prints each published image at the version
+  that a cluster pulls. For a tracked component, that is its newest
+  published version, which can be a development build. For a pinned
+  component, it is the pinned tag.
 
 To verify an image on a workstation, run
 `liken verify image <image>:<version>`, which the paragraph after the
@@ -225,11 +247,24 @@ gh api 'repos/liken-sh/liken/code-scanning/analyses?tool_name=Grype' \
   --jq '.[] | [.created_at, .ref, .category] | @tsv'
 ```
 
-Code scanning files each upload under the ref that the upload gives.
-The Security tab's view of the default branch shows only the uploads
-on `main`. So when a run is on a release tag, every upload of its scan
-gives `main` as the ref, with the run's commit. `ci/templates/sarif.tmpl`
-sets these two inputs.
+To list the open alerts of one image, select its category,
+`trivy/<image>`. A component with a second image, such as
+`audio-operator-cli`, has a category for each image, so query each
+one. The upload action can add a `/` to the end of a category, so the
+filter removes it before it compares:
+
+```sh
+gh api --paginate 'repos/liken-sh/liken/code-scanning/alerts?state=open&per_page=100' \
+  --jq '.[] | select((.most_recent_instance.category | rtrimstr("/")) == "trivy/audio-operator")
+    | [.rule.id, .rule.security_severity_level, .most_recent_instance.location.path] | @tsv'
+```
+
+The open alerts on the default branch are what the Security tab shows,
+and the commands above read those alerts. Code scanning files each
+upload under the ref that the upload gives, and the tab's view of the
+default branch shows only the uploads on `main`. So when a run is on a
+release tag, every upload of its scan gives `main` as the ref, with
+the run's commit. `ci/templates/sarif.tmpl` sets these two inputs.
 
 * **Each image.** The publish job of a component runs Trivy, pinned in
   `ci/trivy.go`, on each image that it pushes. It uploads the findings

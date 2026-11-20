@@ -18,6 +18,23 @@ The skills for agents that work on this repository are in
 different: it is generated from the component's manual, for the
 agents of the people who use the component.
 
+## Use what Linux and Kubernetes already provide
+
+`liken` aims to be the most Linux-native and Kubernetes-native
+operating system there is. That goal decides most design questions.
+When you are in doubt about how to build something, ask what the most
+native Linux or Kubernetes approach is, and use it.
+
+Prefer a mechanism of the Linux kernel first, then a mechanism of
+Kubernetes, and write code of the project's own only when neither one
+does the job. For example, a pod gets a device through a Dynamic
+Resource Allocation claim, and not through an API that `liken`
+invents. Kubernetes runs each service, so the OS has no service
+manager of its own. Do not work against something that Kubernetes
+owns, such as scheduling or the life of a pod. If an upstream fault
+forces a workaround, put a comment at the workaround that names the
+upstream issue.
+
 ## Voice
 
 Everything the project publishes follows `brand/voice.md`, including
@@ -170,9 +187,11 @@ git worktree add .worktrees/<slug> -b <slug> origin/main
 ```
 
 To land the work, rebase the branch onto `origin/main` and push
-`HEAD:main`. Then remove the worktree and the branch. If the
-maintainer wants to review first, commit on the branch and do not
-push.
+`HEAD:main`. If the rebase brought in changes to the component you
+changed, run its tests again before you push. Then remove the
+worktree, and delete the branch with `git branch -D`, because the
+local `main` is behind and `-d` refuses. If the maintainer wants to
+review first, commit on the branch and do not push.
 
 `corrosion` is a shallow fork of superfly/corrosion. Its `main`
 branch mirrors upstream and takes no commits, and the project's own
