@@ -338,6 +338,18 @@ understand, as answers to the questions above.
 
 Settled on 2026-11-20.
 
+## Where the reader starts
+
+The reader starts from the namespaces.  The list of namespaces is the
+overview of the cluster, and a namespace is where the reader opens the
+views of what runs in it.  The proof of concept is organized the same
+way, and that part of it carries over.
+
+A system that spans several namespaces, as the agent system does, has
+no place in that list yet.  That is open.
+
+Settled on 2026-11-20.
+
 ## The surroundings
 
 A service often depends on a thing outside the cluster: a scanner that
@@ -639,10 +651,10 @@ served.
 
 - Who may write a claim.  That depends on where knowledge is stored,
   which the design settles last.
-- Which ideas of the proof of concept carry over.  The candidates are
-  places that keep their position from one visit to the next, a mark on
-  each fact that states its source, and the elevations from the cluster
-  down to a container.
+- Where the reader finds a system that spans several namespaces.
+- Which other ideas of the proof of concept carry over.  The candidates
+  are places that keep their position from one visit to the next, and
+  a mark on each fact that states its source.
 - What makes parts of the same sort, for likeness.
 - What a pattern's catalog holds first.  The cases will show which
   patterns are real.
