@@ -78,8 +78,11 @@ that value is.
 
 ### Names and labels
 
-Prefixes, one per repository. people-operator ships a CRD and no
-program, so it has no prefix and no metrics.
+Prefixes, one per repository. people-operator has no prefix and no
+metrics. This plan's reason was that it ships a CRD and no program.
+On 2026-11-20 it runs a `Deployment`, and
+[root plan 94](../94-metrics-for-the-operators-that-serve-none.md)
+covers its metrics and those of firmware-operator.
 
 | Repository | Prefix |
 | --- | --- |
