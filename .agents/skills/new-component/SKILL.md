@@ -1,6 +1,6 @@
 ---
 name: new-component
-description: Creates a new component of the liken repository - a Go operator, a CSI driver, a Rust crate or server, or a pinned image - from the design and its plan, through the files that ci reads and the lists outside the directory that name each component, to the local checks that let the first push to main pass. Use when asked to create a new operator, add a component, start a new driver, bring a project into the repository, or scaffold a component's directory.
+description: Creates a new component of the liken repository - a Go operator, a CSI driver, a Rust crate or server, or a pinned image - from the design and its plan, through the files that ci reads and the lists outside the directory that name each component, to the local checks that let the first push to main pass. Use when asked to create a new operator, add a component, start a new driver, bring a project into the repository, or scaffold a component's directory or a new crate. A new component starts with its plan, so load the plans skill with this one.
 ---
 
 # Create a component

@@ -67,8 +67,8 @@ Kubernetes through client-go's reflector, because each guard that a
 watch loop needs failed review in a hand-written loop. The
 `operators` skill has the guards.
 
-Use a timer as a clock: a time-to-live, a deadline, or the age of a
-certificate. A timer that reads state again to look for a change is a
+Use a timer as a clock: a time-to-live, a deadline, the wait before a
+retry, or the age of a certificate. A timer that reads state again to look for a change is a
 defect when the source has an event to subscribe to. It is correct in
 two cases, each with a comment at the timer. A long resync can be a
 backstop for a subscription, and its comment says which failure it
@@ -160,9 +160,9 @@ To land the work, rebase the branch onto `origin/main` and push
 `HEAD:main`. If the rebase brought in changes to the component you
 changed, run its tests again first. Then remove the worktree, and
 delete the branch with `git branch -D`, because the local `main` is
-behind and `-d` refuses. If the maintainer wants to review first,
-commit on the branch and do not push. `corrosion` is a fork whose
-`main` mirrors upstream, so its own work is on its `liken` branch.
+behind and `-d` refuses. If the maintainer wants to review first, do
+not push. The `commit-messages` skill has the form of a commit. The
+`corrosion` repository does its own work on its `liken` branch.
 
 ## Pins, images, and releases
 
