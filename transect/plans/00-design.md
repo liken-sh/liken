@@ -338,6 +338,79 @@ understand, as answers to the questions above.
 
 Settled on 2026-11-20.
 
+## The walk `Job`, through the primitives
+
+This section tests the primitives against the first case.  Its facts
+were read from `library-operator`'s code on 2026-11-20.
+
+**Parts.**  A `Library` owns a `Job` named `<library>-walk-<suffix>`.
+The `Job`'s pod has a `catalog` sidecar, a `scan` container, one
+container for each phase that the `Library`'s sources serve (`probe`,
+`arrival`, `identity`, `nfo`, `art`, `trailer`, `marks`,
+`contributors`, and `trailer-files`), and a `close` container.  After
+the run, the operator creates a worker `Job` for each of the facts
+`trickplay`, `appearances`, and `titles` that the `Library` turns on,
+with one pod for each video.
+
+**Relations.**  The cluster records that the `Library` owns each `Job`,
+which labels each `Job` has, and which volumes the pod mounts.  It does
+not record the order of the work.  Every container but the sidecar
+starts at the same time.  `probe`, `arrival`, and `identity` wait for
+`scan`.  `nfo`, `art`, and `trailer` wait for `identity`.  `marks`
+waits for `identity` and `probe`, `contributors` waits for `nfo`, and
+`trailer-files` waits for `trailer`.  That table is in the operator's
+code, and each container records that it ended as a file on a volume
+of the pod, which `transect` cannot read.
+
+**Roles.**  The pod is a pipeline, and each container is a stage.
+`close` is the stage that ends the run and hands the work lists to the
+workers through retained messages on a broker.  The workers and those
+messages are a work queue.
+
+**Claims.**  The author of the operator would state the order of the
+stages, the hand-off to the workers, and which fact each stage serves.
+
+**Expectations.**  Each stage ends after the stages that it waits for.
+`close` ends last.  A worker `Job` appears for each fact whose list is
+not empty.
+
+**Signals.**  The API gives each container's state, the `Library`'s
+`status.phase`, the count that each fact still needs in `status.gaps`,
+and the `Event`s `JobCreated`, `ScanCompleted`, and `ScanFailed`.
+Prometheus gives `library_fact_gap` and `library_attempts_total`, both
+by `library` and `fact`.  No metric has a label for a stage or a
+container.
+
+**Likeness.**  Every phase container runs the same program with a
+different list of facts, so they are alike.  The walk `Job`s of
+different `Library`s are peers, and so are a walk `Job` and the `Job`
+that fills gaps with no `scan` container.
+
+What the case showed:
+
+- **The primitives are enough to answer how the `Job` works.**  A
+  reader who has the stages, their order, and the count that each
+  still needs can tell which stage holds the others back.
+- **A role can have no part.**  A `Library` with no source for trailers
+  runs no `trailer` container.  A reader learns more when the stage
+  stays in the pipeline, dimmed, than when it is absent, and only the
+  claim knows that the stage is possible.
+- **A part can have no object.**  The messages on the broker and the
+  files that record a stage's end are parts of how the system works,
+  and the API holds neither.
+- **The cluster alone misleads.**  A phase that fails exits with status
+  0, and the `Job` succeeds.  The failure is one string in the
+  `Library`'s `status.runs`, written when `close` ends.  So the API
+  shows a failed stage as completed, and a claim must state that a
+  container's exit status does not give a stage's result.
+- **A signal is missing.**  While the `Job` runs, nothing that
+  `transect` can read states that a stage failed.  The rate of failed
+  attempts in `library_attempts_total` is the nearest signal.  That is
+  a finding about `library-operator`, and the case found it.
+- **A signal needs a claim before it can be correlated.**  The metrics
+  name a fact, and a stage serves several facts, so the join from a
+  series to a stage is knowledge that the operator's author holds.
+
 ## The order of the design
 
 The work goes in this order, and a later step does not start before the
