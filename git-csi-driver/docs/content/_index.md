@@ -15,7 +15,8 @@ The driver fits these uses:
 - **Data that a repository already holds**, such as a tree of YAML, a
   set of templates, or a static site. Any pod in any namespace can
   mount it as an inline volume, or through a `ReadOnlyMany` claim, and
-  the driver keeps it current.
+  the driver keeps it current. With `paths`, the node checks out only
+  the directories and files that the pod reads.
 - **Application configuration.** Many self-hosted applications keep
   their configuration as text files in one directory and edit it from
   their own user interface. On this driver that directory is a

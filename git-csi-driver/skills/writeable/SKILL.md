@@ -1,6 +1,6 @@
 ---
 name: writeable
-description: "Give an application a git repository as a writeable volume that the driver commits and pushes. Use when an application writes files that must go into git, when upstream moves, when several writers share one repository, or to restore a volume."
+description: "Give an application a git repository as a writeable volume that the driver commits and pushes, all of it or only its paths. Use when an application writes files that must go into git, when upstream moves, when several writers share one repository, when a write outside the paths is skipped, or to restore a volume."
 ---
 
 This skill is the guide at https://liken.sh/git/docs/guides/writeable/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
@@ -175,6 +175,85 @@ The driver records file modes, owners, and empty directories on a ref of
 its own, `refs/git-csi/metadata`. That ref is not part of the tree and
 does not show in the forge's file view.
 
+## Part of a repository
+
+Set `paths` on the `PersistentVolume` to check out only some
+directories and files of the repository. The driver then uses git's
+sparse checkout, so the node writes only the files of those entries,
+and the driver commits only changes inside them:
+
+```yaml
+    volumeAttributes:
+      url: git@code.example.com:home/configuration.git
+      ref: main
+      paths: assistant/configuration
+```
+
+Each entry keeps its place in the repository, so this volume's root
+contains `assistant/configuration/`. To mount that directory at the
+container's `mountPath`, also set `subPath` on the `volumeMount`.
+[Give many applications one repository](https://liken.sh/git/docs/guides/one-repository-many-apps/)
+uses both. The [attributes
+reference](https://liken.sh/git/docs/reference/attributes/#the-paths-attribute) has the
+rules for an entry and the values that the driver refuses.
+
+When upstream moves, the driver writes into the tree only the upstream
+changes inside the entries, at stage and after a rejected push. A
+commit that changes files outside the entries changes no file in the
+tree.
+
+### Writes outside the paths
+
+A pod that mounts the root of the volume can write a file outside the
+entries. The driver never commits such a file, and the file stays in
+the node's work tree only. It is not a pending change, so it does not
+count in `git_csi_pending_paths`. It does not delay a commit either,
+because only a write inside the entries starts the wait for
+`push.quiesce` again. So a pod that writes a log outside its paths all
+the time still commits.
+
+The first time the pod writes each such file, the driver posts a
+`GitVolumeFileSkipped` warning on the pod and the claim. The file
+counts in `git_csi_skipped_files` while it stays in the tree, and it
+does not make the volume abnormal. The driver sees these writes only
+through its inotify watch of the tree. For a write that the watch did
+not see, such as a write made while the driver was not running, the
+driver posts no event and counts no file. When the pod deletes the
+file and writes it again, the driver posts the event again.
+
+### An entry that the repository lacks
+
+A writeable volume stages when its commit has no file or directory at
+an entry, and checks out nothing for that entry. A new application
+has no directory in the repository until its first commit. The pod
+creates the directory when it writes, or the kubelet creates it for a
+`subPath` mount, and the driver commits the files that the pod writes
+in it. A pod that deletes every file of its entry commits the deletes,
+and its next stage still succeeds.
+
+### Other paths for a kept work tree
+
+The `csi` block of a `PersistentVolume` cannot change, so you change
+the `paths` of a volume by creating its `PersistentVolume` again.
+Scale the application to zero, delete the claim and the
+`PersistentVolume`, and create both again with the same
+`volumeHandle` and the new `paths`. Under `Retain`, the node keeps the
+work tree, and the next stage on that node changes the tree to the
+new entries. On a node with no work tree, the stage clones as usual.
+
+At that stage, the driver compares the new entries with the entries
+that the tree checks out. When the tree has no uncommitted change
+inside the old entries, the driver checks out the files of the new
+entries and removes the files of the old entries. When it has one, the
+driver leaves the tree as it is and refuses the stage with
+`FailedPrecondition`, because under the new paths it would never
+commit that change. The kubelet shows the message, with both lists of
+entries and the number of uncommitted paths, in a `FailedMount` event
+on the pod. To keep the change, create the `PersistentVolume` again
+with the old `paths`, start the pod with a class on the claim, and
+wait until `git_csi_pending_paths` and `git_csi_unpushed_commits` are
+0. Then change the `paths`.
+
 ## When upstream moves
 
 The driver brings in upstream commits at stage, before the pod starts.
@@ -214,8 +293,8 @@ side branch.
 ## Many writers on one repository
 
 One repository can hold the configuration of many applications. Each
-application has its own writeable volume, and its own directory of the
-repository is mounted with `subPath`. [Give many applications one
+application has its own writeable volume, which checks out only the
+application's directory with `paths` and mounts it with `subPath`. [Give many applications one
 repository](https://liken.sh/git/docs/guides/one-repository-many-apps/) has the manifests and the
 rules.
 

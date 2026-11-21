@@ -1,9 +1,11 @@
 # 17, A volume checks out only its paths
 
-Proposed on 2026-11-21. Nothing is built. Three reviews of the first
-draft on 2026-11-21 ran git 2.53.0 and the image's git 2.55.0 against
-small repositories and a clone of `liken`. Their findings and
-measurements are in this version.
+Proposed and built on 2026-11-21. Three reviews of the first draft on
+2026-11-21 ran git 2.53.0 and the image's git 2.55.0 against small
+repositories and a clone of `liken`. Their findings and measurements
+are in this version. The drill on `liken-1` has not run. "What the
+build changed" at the end lists where the code differs from the
+design below.
 
 ## The problem
 
@@ -313,3 +315,29 @@ directory per application:
 | Two writers whose entries overlap | Divergence and its repair. |
 | A kept tree under a new `PersistentVolume` with other entries | The new entries are checked out. |
 | A writeable pod deletes every file of its entry, then stages again | The stage succeeds. |
+
+## What the build changed
+
+- **One pattern form.** Each line of `info/sparse-checkout` is
+  `/<entry>`, not `/<dir>/` or `/<file>`. A pattern with no trailing
+  slash matches a file or a whole directory, so the driver does not
+  look up what an entry is. A missing entry has no kind to look up,
+  and an entry that changes from a file to a directory still matches.
+- **`.gitattributes` inside an entry.** A change to any
+  `.gitattributes` that `diff-tree` reports forces a full checkout,
+  including one inside an entry, because it can change the bytes of
+  files that did not change.
+- **The reason that clears a missing entry** is `GitVolumePathFound`,
+  a Normal Event.
+- **The missing-entry fault is in memory**, so a restarted driver
+  posts `GitVolumePathMissing` again.
+- **A write outside the paths** posts `GitVolumeFileSkipped` only while
+  the inotify watch works. It counts in `git_csi_skipped_files`, and it
+  does not make the volume abnormal.
+- **The metadata record at commit** keeps the lines outside the
+  entries of the volume's own metadata ref, which holds the newest
+  remote lines that the volume has seen. The merge with the record of
+  the remote happens in `reparentMetadata`.
+- **Literal pathspecs** come from `GIT_LITERAL_PATHSPECS=1` in git's
+  environment, which git documents as the same as
+  `--literal-pathspecs`.

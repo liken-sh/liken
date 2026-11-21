@@ -52,6 +52,22 @@ writeable volume commits and pushes nothing until its claim names a
 class. This gives a person time to write the ignore list before a
 commit can include a secret.
 
+A read-only volume's tree moves to a new commit in `place` in
+`store.go`. It runs `git diff-tree` from the commit in the volume's
+`commit` file to the new commit, and renames only the changed files
+into the tree, because a pod that watches its files reloads on each
+file that gets a new inode. `place` checks out every entry again, with
+`replaceTree`, when the tree has no recorded commit, the old commit is
+gone, or a `.gitattributes` on the way to an entry or inside one
+changed, because a changed attribute changes the bytes of a file that
+the diff does not list. A writeable volume with `paths` uses git's
+sparse checkout in pattern mode, which `sparse.go` sets up. Cone mode
+also checks out every file at the root and beside each parent
+directory of an entry, and it cannot name a file. Every volume of a
+URL writes the one `refs/git-csi/metadata`, so a volume with `paths`
+replaces only the lines inside its entries and keeps the others.
+Plan 17 in `plans/completed/` has the measurements and the reasons.
+
 A credential is on the node's disk only while one git command runs.
 A token reaches git through a credential helper, not the command
 line, so it does not appear in the process list. Nothing in this

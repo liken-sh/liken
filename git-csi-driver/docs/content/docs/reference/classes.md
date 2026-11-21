@@ -17,8 +17,14 @@ message gives the first bad one.
 | `push.maxLatency` | A Go duration, at least `push.quiesce`, or `never`. The driver pushes when the oldest unpushed commit is this old, whatever the tree is doing. | `5m`, or `push.quiesce` when that is longer |
 | `commit.maxFileSize` | A Kubernetes quantity such as `1Mi`, or `0` for no limit. A larger file is not committed and is named in the events and the log. | `1Mi` |
 | `commit.author` | `Name <email>`. The author and committer of every commit. | `git-csi-driver <git-csi-driver@liken.sh>` |
-| `ignore` | Comma-separated `.gitignore` patterns, added to the repository's own. | empty |
+| `ignore` | `.gitignore` patterns, added to the repository's own. Separate them with commas, or put one on each line with a YAML block scalar. | empty |
 | `metadata` | `true` or `false`. Whether modes, owners, and empty directories are recorded on `refs/git-csi/metadata` and replayed at restore. | `true` |
+
+`paths` is not a class parameter. It is a volume attribute, set in
+the `csi` block of the `PersistentVolume`, which cannot change.
+[The paths attribute](../attributes/#the-paths-attribute) describes
+it. The controller rejects a class that sets `paths`, as it
+rejects every unknown parameter.
 
 ## Events
 
@@ -29,7 +35,7 @@ message gives the first bad one.
 | `GitVolumePending` | The tree has paths that the driver has not committed. Posted when the first such path appears. |
 | `GitVolumePushed` | A push succeeded, with the commit and the count of paths. |
 | `GitVolumePushFailed` | A push failed, with git's error. |
-| `GitVolumeFileSkipped` | A file over `commit.maxFileSize` was left out of a commit, or the pod first wrote a file outside the volume's `paths`, which the driver never commits. |
+| `GitVolumeFileSkipped` | A file over `commit.maxFileSize` was left out of a commit, or the pod wrote a file outside the volume's `paths` for the first time. The driver never commits a file outside the `paths`. It sees those writes only through its inotify watch of the tree, so it posts no event for a write that the watch did not see, such as a write made while the driver was not running. |
 | `GitVolumeRebased` | A push was rejected, so the driver rebased the tree onto upstream and pushed again, with the count of commits and the upstream commit. |
 | `GitVolumeDiverged` | The volume moved to its side branch, because a push was still rejected after three rebases, a rebase aborted, or the application and upstream both changed a file. |
 | `GitVolumeHealed` | A person merged the side branch into the ref, so the volume pushes to its ref again and the driver deletes the side branch. |
@@ -55,11 +61,15 @@ is true for a volume, and zero otherwise. The `volume` label is the
 * The volume pushes to its side branch.
 * The claim's class is invalid.
 * The last commit left out a file over `commit.maxFileSize`.
+* The commit of a read-only volume's ref has no file or directory at
+  an entry of `paths`.
 * An unpushed commit is older than `push.maxLatency`.
 * The claim has no class of this driver, and the tree has changes that
   are not committed.
 
-The driver's log gives the reason.
+A file that the pod wrote outside the volume's `paths` counts in
+`git_csi_skipped_files`, and it does not make the volume abnormal. The
+driver's log gives the reason for each abnormal volume.
 
 ## Metrics
 

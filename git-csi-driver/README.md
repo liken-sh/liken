@@ -24,7 +24,8 @@ While pushes fail, the commits stay on the node, and the volume's
 node's disk is lost, every commit that was not pushed is lost with
 it. A writeable volume is `ReadWriteOncePod`, so only one pod writes
 it. Several applications can write to one ref through separate
-volumes, each with its own directory of the repository. The driver is
+volumes, each with its own directory of the repository in `paths`, so
+the node checks out only that directory for each volume. The driver is
 for text that a person also reads as history. The class sets a size
 limit, and the driver leaves out each file larger than that limit. Do
 not put a database, a cache, or media on it. A submodule appears as
@@ -44,8 +45,9 @@ franchises can read its files from a read-only claim of this driver.
 
 The driver defines no custom resources.
 
-- A `PersistentVolume` sets the repository and the ref in
-  `volumeAttributes`. For a private repository, it also sets the
+- A `PersistentVolume` sets the repository, the ref, and the `paths`
+  to check out in `volumeAttributes`. A volume with no `paths` checks
+  out the whole tree. For a private repository, it also sets the
   credential's `Secret` in both `nodeStageSecretRef` and
   `nodePublishSecretRef`. The `Secret` contains an SSH key under
   `ssh-privatekey`, or a token under `token`.

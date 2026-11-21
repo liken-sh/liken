@@ -30,7 +30,7 @@ components:
 | git-csi-driver | `git_csi_unpushed_commits{namespace, claim}` | gauge | commits in the tree that are not yet on the remote |
 | git-csi-driver | `git_csi_last_push_timestamp_seconds{namespace, claim}` | gauge | when the last push to the remote succeeded, in seconds since the epoch |
 | git-csi-driver | `git_csi_push_failures_total{namespace, claim}` | counter | pushes to the remote that failed |
-| git-csi-driver | `git_csi_skipped_files{namespace, claim}` | gauge | files that the commits leave out: the files that the last commit left out because they are larger than `commit.maxFileSize`, and the files that the pod wrote outside the volume's `paths` and that are still in the tree |
+| git-csi-driver | `git_csi_skipped_files{namespace, claim}` | gauge | files that the commits leave out: the files that the last commit left out because they are larger than `commit.maxFileSize`, and the files outside the volume's `paths` that the pod wrote since the driver started and that are still in the tree. A file outside the `paths` does not make the volume abnormal |
 | git-csi-driver | `git_csi_diverged{namespace, claim}` | gauge | one while the volume pushes to its side branch, zero while it pushes to its ref |
 | git-csi-driver | `git_csi_volume_abnormal{namespace, volume}` | gauge | one while any problem listed under [the abnormal gauge](../classes/#the-abnormal-gauge) is true for the volume, zero otherwise. `volume` is the `volumeHandle`, so this metric also covers read-only volumes, which have no claim of their own |
 | git-csi-driver | `git_csi_demanded_pulls_total{namespace, volume}` | counter | pulls started by a demand on the volume's `PersistentVolume` |
@@ -39,6 +39,12 @@ components:
 | git-csi-driver | `git_csi_watch_restarts_total{kind}` | counter | times the node plugin opened a watch again after it ended, by the kind it watches. The node plugin runs one watch of `PersistentVolume`s, and one watch of a `PersistentVolumeClaim` for each writeable volume. client-go ends each watch after 5 to 10 minutes and opens it again, so a healthy watch restarts 6 to 12 times an hour. A higher rate means watches that fail soon after they open. A refused watch is not counted, so a rate near zero can mean the API server refuses every watch |
 | git-csi-driver | `git_csi_webhook_requests_total{result}` | counter | webhook requests the controller handled, by `result`: `accepted`, `unauthenticated`, `malformed`, or `failed` |
 | git-csi-driver | `git_csi_webhook_marked_total` | counter | `PersistentVolume`s that the controller marked for a pull after a push that it verified |
+
+The node plugin answers the CSI call `NodeGetVolumeStats` with the
+size of the files in the volume's tree, as both the space used and the
+capacity. A volume with `paths` checks out only its entries, so its
+size is the size of those entries. A writeable volume's size also
+includes each file that the pod wrote outside its entries.
 
 The [writeable guide](../../guides/writeable/) and the
 [read-only guide](../../guides/read-only/) show how to read several of
