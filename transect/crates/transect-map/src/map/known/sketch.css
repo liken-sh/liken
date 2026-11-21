@@ -123,12 +123,17 @@
    narrower than that, and where the frame is narrower, the plan scrolls
    sideways inside this frame, with its wires, and the page does not.
    A scroll container clips what stands past its edges, so its padding
-   keeps room for the feet under the last row and for a piece above the
-   first, and its margin takes the padding back out of the layout. */
+   keeps room for a piece that stands outside its part, such as the
+   feet under the last row, and its margin takes the padding back out
+   of the layout.  The frame never scrolls up and down.  A browser that
+   could show a vertical scrollbar here would take the bar's width from
+   the plan, the narrower plan would fit, and the browser would remove
+   the bar and add it again without end. */
 .sketch-scroll {
   overflow-x: auto;
-  padding: 8px 0;
-  margin: -8px 0;
+  overflow-y: hidden;
+  padding: 16px 8px;
+  margin: -16px -8px;
 }
 
 .sketch-scroll > .sketch-plan { min-width: min-content; }
@@ -146,6 +151,14 @@
 }
 
 .sketch .shape-port { visibility: hidden; }
+
+/* A mark that the page does not show has no thickness, so a port on
+   the edge of the plan does not stand past it and make the frame
+   scroll.  The script reads where the mark is, on the edge of its
+   part, and that does not change. */
+.sketch :is(.shape-port-left, .shape-port-right) { width: 0; margin-left: 0; }
+
+.sketch :is(.shape-port-top, .shape-port-bottom) { height: 0; margin-top: 0; }
 
 /* A wide line along each run, which the page does not show, takes the
    pointer, so a reader can point at a thin wire. */
