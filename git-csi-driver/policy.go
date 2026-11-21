@@ -86,7 +86,7 @@ func parsePolicy(parameters map[string]string) (*policy, error) {
 		case authorParameter:
 			resolved.authorName, resolved.authorEmail, err = parseAuthor(value)
 		case ignoreParameter:
-			resolved.ignore = parseIgnore(value)
+			resolved.ignore = splitList(value)
 		case metadataParameter:
 			resolved.metadata, err = parseMetadataFlag(value)
 		default:
@@ -184,16 +184,6 @@ func parseAuthor(value string) (string, string, error) {
 			"%s: %q is not Name <email>", authorParameter, value)
 	}
 	return found[1], found[2], nil
-}
-
-func parseIgnore(value string) []string {
-	patterns := []string{}
-	for _, pattern := range strings.Split(value, ",") {
-		if trimmed := strings.TrimSpace(pattern); trimmed != "" {
-			patterns = append(patterns, trimmed)
-		}
-	}
-	return patterns
 }
 
 // parseMetadataFlag accepts only true and false, and refuses the other

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -188,5 +189,17 @@ func TestAuthorSetsTheAuthorAndTheCommitterOfACommit(t *testing.T) {
 	}
 	if strings.Join(resolved.author(), "\n") != strings.Join(want, "\n") {
 		t.Errorf("author() returned %v, want %v", resolved.author(), want)
+	}
+}
+
+func TestTheIgnoreParameterAcceptsNewlines(t *testing.T) {
+	resolved, err := parsePolicy(map[string]string{
+		ignoreParameter: ".storage/\n*.db*, *.log\n\n",
+	})
+	if err != nil {
+		t.Fatalf("parsing the policy: %v", err)
+	}
+	if want := []string{".storage/", "*.db*", "*.log"}; !slices.Equal(resolved.ignore, want) {
+		t.Errorf("%s resolved to %q, want %q", ignoreParameter, resolved.ignore, want)
 	}
 }

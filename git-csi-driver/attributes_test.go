@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func TestParseAttributesDefaultsEverythingButTheURL(t *testing.T) {
 		ephemeral: true,
 		pod:       podReference{name: "reader", namespace: "home", uid: "9b1c"},
 	}
-	if *parsed != want {
+	if !reflect.DeepEqual(*parsed, want) {
 		t.Errorf("parseAttributes returned %+v, want %+v", *parsed, want)
 	}
 }
@@ -107,7 +108,7 @@ func TestParseAttributesAcceptsEveryAttribute(t *testing.T) {
 			want.url = "https://example.com/data.git"
 			want.ephemeral = true
 			want.pod = podReference{name: "reader", namespace: "home", uid: "9b1c"}
-			if *parsed != want {
+			if !reflect.DeepEqual(*parsed, want) {
 				t.Errorf("parseAttributes returned %+v, want %+v", *parsed, want)
 			}
 		})
@@ -133,7 +134,7 @@ func TestParseAttributesRefuses(t *testing.T) {
 		{
 			name:        "an unknown attribute",
 			request:     inlineRequest(map[string]string{"url": "u", "branch": "main"}),
-			wantMessage: "branch: unknown attribute, want one of url, ref, pull, depth, offline, webhookSecret",
+			wantMessage: "branch: unknown attribute, want one of url, ref, pull, depth, offline, webhookSecret, paths",
 		},
 		{
 			name:        "a pull that is not a duration",

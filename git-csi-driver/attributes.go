@@ -92,6 +92,10 @@ type attributes struct {
 	// controller verifies a forge's push against it before it demands a
 	// pull on this volume.
 	webhookSecret string
+	// paths is the sorted, deduplicated list of the repository's
+	// directories and files that the volume checks out. It is nil when
+	// the volume sets no paths, which means the whole tree.
+	paths []string
 }
 
 // parseAttributes reads the volume context. It refuses an unknown
@@ -167,6 +171,12 @@ func parseVolumeContext(context map[string]string) (*attributes, error) {
 			parsed.depth = depth
 		case "webhookSecret":
 			parsed.webhookSecret = value
+		case "paths":
+			paths, err := parsePaths(value)
+			if err != nil {
+				return nil, err
+			}
+			parsed.paths = paths
 		case "offline":
 			switch offlinePolicy(value) {
 			case offlineRefuse, offlineAllowStale:
@@ -186,7 +196,7 @@ func parseVolumeContext(context map[string]string) (*attributes, error) {
 		case serviceAccountKey:
 			// The kubelet sends it. The driver accepts it and does not use it.
 		default:
-			return nil, status.Errorf(codes.InvalidArgument, "%s: unknown attribute, want one of url, ref, pull, depth, offline, webhookSecret", key)
+			return nil, status.Errorf(codes.InvalidArgument, "%s: unknown attribute, want one of url, ref, pull, depth, offline, webhookSecret, paths", key)
 		}
 	}
 
