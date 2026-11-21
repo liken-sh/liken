@@ -2,6 +2,8 @@
 //! reads the resource the way a workload's page does, so the two pages
 //! show the same card.
 
+mod readings;
+
 use super::super::model::Model;
 use super::super::snapshot::Snapshot;
 use super::WorkloadAt;
@@ -10,23 +12,25 @@ use super::read_workloads;
 use k8s_openapi::jiff::Timestamp;
 use transect_graph::edges::{Object, Shown};
 use transect_map::map::{
-    Board, EdgeRow, KnownEntry, KnownPage, Reading, Standing, Why, every_chip, has_page,
-    known_chips, known_through, workload_card,
+    Board, EdgeRow, KnownEntry, KnownPage, Standing, Why, every_chip, has_page, known_chips,
+    known_through, workload_card,
 };
 use transect_map::objects::{self, Center, ObjectCard};
 use transect_observe::health::{Deciding, Level, Reason};
 use transect_observe::usage;
-use transect_resources::knowledge::{ColumnRead, columns, plural_label};
+use transect_resources::knowledge::plural_label;
 use transect_resources::layers::Layers;
 
 /// The page for the custom resource `namespace/name` whose kind is
-/// served under the URL segment `resource`, or `None` when no watched
-/// resource of a kind with a `KindKnowledge` matches.
+/// served under the URL segment `resource`, drawing the elevation whose
+/// slug is `elevation`, or the first when it is none. It is `None` when
+/// no watched resource of a kind with a `KindKnowledge` matches.
 pub fn known_page(
     model: &Model,
     layers: &Layers,
     usage: &usage::Reading,
     at: WorkloadAt,
+    elevation: Option<&str>,
     shown: &Shown,
     now: Timestamp,
 ) -> Option<KnownPage> {
@@ -48,6 +52,11 @@ pub fn known_page(
         (served.as_deref() == Some(resource)).then_some((object, found))
     })?;
     let knowledge = snapshot.kinds.of_object(&object)?;
+    // A kind with no elevation has no URL for one, so the page of an
+    // elevation of its object is not found.
+    if elevation.is_some() && knowledge.elevations.is_empty() {
+        return None;
+    }
     let page = read_workloads(
         model,
         layers,
@@ -60,8 +69,10 @@ pub fn known_page(
             let workload = contents.owners.contains(&&object);
             let level = match workload {
                 true => contents.by_workload.get(&object).map(|health| health.level),
-                false => transect_observe::health::condition(&snapshot.kinds, &object, found)
-                    .map(|r| r.level()),
+                false => {
+                    transect_observe::health::condition(&snapshot.kinds, snapshot, &object, found)
+                        .map(|r| r.level())
+                }
             };
             let siblings = snapshot.custom_objects().into_iter().filter(|other| {
                 (&other.group, &other.kind, other.namespace.as_deref())
@@ -95,26 +106,34 @@ pub fn known_page(
                 knowledge,
                 layer,
                 path,
+                elevation,
                 reached: snapshot.relations_reached(&object, contents.graph),
                 column,
                 counts: counts.collect(),
                 chips: known_chips(&found.data, &Deciding::of(&snapshot.kinds, &object)),
                 level: level.unwrap_or_default(),
-                resting: transect_observe::health::resting(&snapshot.kinds, &object, found),
+                resting: transect_observe::health::resting(
+                    &snapshot.kinds,
+                    snapshot,
+                    &object,
+                    found,
+                ),
                 plurals,
                 page: &page_of,
                 ground: &|title| super::ground_link(model, title),
                 device: &|device| snapshot.devices.named(device, &snapshot.resources.devices),
                 standing: &|other| standing(snapshot, other),
-                readings: &|other, reads| readings(snapshot, other, reads, now),
+                readings: &|other, reads| readings::readings(snapshot, other, reads, now),
             };
             // The card is on the object's own page, so its title does not
             // link.
             let card = workload.then(|| workload_card(&object, &contents).with_href(None));
             let known = known_through(&object, &contents)?;
             let deciding = Deciding::of(&snapshot.kinds, &object);
-            let resting = transect_observe::health::resting(&snapshot.kinds, &object, found);
-            let reported = transect_observe::health::reported(&snapshot.kinds, &object, found);
+            let resting =
+                transect_observe::health::resting(&snapshot.kinds, snapshot, &object, found);
+            let reported =
+                transect_observe::health::reported(&snapshot.kinds, snapshot, &object, found);
             let object_card = ObjectCard {
                 known: Some(known),
                 ..card::card(
@@ -146,7 +165,8 @@ pub fn known_page(
     )?;
     let mut page = page;
     if super::has_access(model, namespace, resource, name) {
-        page.tabs = page.tabs.map(|tabs| tabs.with_access(&page.path));
+        let path = transect_graph::links::page(&object, plurals)?;
+        page.tabs = page.tabs.map(|tabs| tabs.with_access(&path));
     }
     // The edge kinds affect only the diagram, so a page without a
     // diagram has no edge kinds in its masthead.
@@ -175,10 +195,12 @@ fn standing(snapshot: &Snapshot, object: &Object) -> Standing {
         return Standing::Plain;
     }
     let found = found.dynamic();
-    if let Some((reason, message)) = transect_observe::health::at_rest(kinds, object, &found) {
+    if let Some((reason, message)) =
+        transect_observe::health::at_rest(kinds, snapshot, object, &found)
+    {
         return Standing::Resting(Why { reason, message });
     }
-    match transect_observe::health::condition(kinds, object, &found) {
+    match transect_observe::health::condition(kinds, snapshot, object, &found) {
         Some(said) => unwell(said),
         None => Standing::Plain,
     }
@@ -186,18 +208,25 @@ fn standing(snapshot: &Snapshot, object: &Object) -> Standing {
 
 /// How an object stands whose health condition gave `said`. A condition
 /// with no reason still gets a short line, so the part says which
-/// condition is not `True`.
+/// condition is not `True`. A health through a reference that leads to
+/// no object says why.
 fn unwell(said: Reason) -> Standing {
     let level = said.level();
-    let Reason::Condition {
-        condition,
-        status,
-        reason,
-        message,
-        ..
-    } = said
-    else {
-        return Standing::Plain;
+    let (condition, status, reason, message) = match said {
+        Reason::Condition {
+            condition,
+            status,
+            reason,
+            message,
+            ..
+        } => (condition, status, reason, message),
+        Reason::Unfollowed { why, .. } => {
+            return Standing::Warning(Why {
+                reason: why,
+                message: None,
+            });
+        }
+        _ => return Standing::Plain,
     };
     let reason = reason.unwrap_or_else(|| match status {
         Some(status) => format!("{condition} is {status}"),
@@ -208,44 +237,6 @@ fn unwell(said: Reason) -> Standing {
         Level::Failing => Standing::Failing(why),
         _ => Standing::Warning(why),
     }
-}
-
-/// The printer columns named in `reads` that have a value for `object`,
-/// in the order of `reads`, each with the value that `kubectl get`
-/// prints.
-fn readings(
-    snapshot: &Snapshot,
-    object: &Object,
-    reads: &[String],
-    now: Timestamp,
-) -> Vec<Reading> {
-    let Some(Some(found)) = super::object::stored(snapshot, object) else {
-        return Vec::new();
-    };
-    let version = found
-        .api_version
-        .as_deref()
-        .and_then(|v| v.rsplit('/').next());
-    let Some(version) = version else {
-        return Vec::new();
-    };
-    let declared = snapshot
-        .paged
-        .columns
-        .of(&object.group, &object.kind, version);
-    let read = columns::read(declared, &found.dynamic(), now);
-    let value = |wanted: &String| {
-        read.iter().find_map(|column| match column {
-            ColumnRead::Value { name, value } if name == wanted && !value.is_empty() => {
-                Some(Reading {
-                    name: name.clone(),
-                    value: value.clone(),
-                })
-            }
-            _ => None,
-        })
-    };
-    reads.iter().filter_map(value).collect()
 }
 
 #[cfg(test)]
@@ -282,6 +273,26 @@ mod tests {
         "acme-ops",
         "strip-light",
         Standing::Plain
+    )]
+    #[case::through_a_reference_to_an_object_at_rest(
+        "stock.example.test",
+        "Vent",
+        "acme-ops",
+        "east-vent",
+        Standing::Resting(Why {
+            reason: "Sleeping".into(),
+            message: Some("wakes every ten minutes".into()),
+        })
+    )]
+    #[case::through_a_reference_to_no_object(
+        "stock.example.test",
+        "Vent",
+        "acme-ops",
+        "west-vent",
+        Standing::Warning(Why {
+            reason: "the cluster has no such Thermostat".into(),
+            message: None,
+        })
     )]
     fn says_how_a_named_object_stands(
         #[case] group: &str,
@@ -342,38 +353,5 @@ mod tests {
         #[case] expected: Standing,
     ) {
         assert_eq!(unwell(said), expected);
-    }
-
-    #[rstest]
-    #[case::in_the_order_of_reads(
-        "promotions.example.test",
-        "Promotion",
-        "spring-sale",
-        &["Ready", "Discount"],
-        &[("Ready", "True"), ("Discount", "20%")]
-    )]
-    #[case::a_trimmed_object_without_empty_values(
-        "gizmos.example.test",
-        "Gizmo",
-        "gizmo-red",
-        &["Size", "Detail", "Colour"],
-        &[("Size", "large")]
-    )]
-    #[case::no_such_object("gizmos.example.test", "Gizmo", "gone", &["Size"], &[])]
-    fn reads_the_printer_columns_a_role_names(
-        #[case] group: &str,
-        #[case] kind: &str,
-        #[case] name: &str,
-        #[case] reads: &[&str],
-        #[case] expected: &[(&str, &str)],
-    ) {
-        let object = Object::new(group, kind, Some("acme-shop"), name);
-        let reads: Vec<String> = reads.iter().map(|read| read.to_string()).collect();
-        let found = readings(&fixture::snapshot(), &object, &reads, Timestamp::UNIX_EPOCH);
-        let found: Vec<(&str, &str)> = found
-            .iter()
-            .map(|r| (r.name.as_str(), r.value.as_str()))
-            .collect();
-        assert_eq!(found, expected);
     }
 }

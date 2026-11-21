@@ -150,6 +150,13 @@ pub enum Reason {
         reason: Option<String>,
         message: Option<String>,
     },
+    /// A custom resource's health is the health of the object at the end
+    /// of one of its references, and `why` says why no object is there,
+    /// such as "status.pad names nothing".
+    Unfollowed {
+        workload: Object,
+        why: String,
+    },
     /// The workload's pods logged `errors` error lines, and the latest
     /// was `minutes_ago`.  `seen` records how transect counted them.
     LoggedErrors {

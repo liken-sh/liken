@@ -72,6 +72,9 @@ operator reads nothing from `library-operator`.
   the other.
 - `transect/` contains the kind knowledge that `transect` reads for the
   `Player` and the `Remote`, in `kinds.yaml`, and in `shapes.yaml` the
-  `amplifier` shape that the `Player`'s receiver is drawn in. A change
-  to a condition, a printer column, or a status field that a file
-  there names also changes that file.
+  `amplifier` shape that the `Player`'s receiver is drawn in. The
+  `Player`'s roles are stated once, and its elevations, the room and
+  the signal path, place them. The signal path's wires follow
+  `status.receiver`, and the `Remote` is as healthy as its
+  `Peripheral`. A change to a condition, a printer column, or a status
+  field that a file there names also changes that file.

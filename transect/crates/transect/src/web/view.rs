@@ -37,6 +37,15 @@ pub enum Page {
         resource: String,
         name: String,
     },
+    /// One elevation of a custom resource whose kind's knowledge states
+    /// elevations, by the object's namespace, its kind's resource name,
+    /// its name, and the elevation's slug.
+    Elevation {
+        namespace: String,
+        resource: String,
+        name: String,
+        slug: String,
+    },
     /// One pod, by its namespace and name.
     Pod { namespace: String, name: String },
     /// One cluster-scoped object, by its kind's name in the URL and its
@@ -291,6 +300,19 @@ impl Page {
                     name: name.into(),
                 })
             }
+            ["namespaces", namespace, resource, name, "elevations", slug]
+                if resource != "pods"
+                    && [namespace, resource, name, slug]
+                        .iter()
+                        .all(|part| !part.is_empty()) =>
+            {
+                Some(Self::Elevation {
+                    namespace: namespace.into(),
+                    resource: resource.into(),
+                    name: name.into(),
+                    slug: slug.into(),
+                })
+            }
             ["namespaces", namespace, resource, name, "access"]
                 if [namespace, resource, name]
                     .iter()
@@ -362,6 +384,9 @@ mod tests {
     #[case::a_workload_with_no_name("namespaces/shop/deployments/", None, None)]
     #[case::below_a_workload("namespaces/shop/deployments/web/more", None, None)]
     #[case::a_section("namespaces/shop/deployments/web/section", None, Some(Page::Section { namespace: "shop".into(), resource: "deployments".into(), name: "web".into() }))]
+    #[case::an_elevation("namespaces/shop/kiosks.example.test/front/elevations/the-wiring", None, Some(Page::Elevation { namespace: "shop".into(), resource: "kiosks.example.test".into(), name: "front".into(), slug: "the-wiring".into() }))]
+    #[case::no_slug("namespaces/shop/kiosks.example.test/front/elevations", None, None)]
+    #[case::an_empty_slug("namespaces/shop/kiosks.example.test/front/elevations/", None, None)]
     #[case::no_section_of_a_pod("namespaces/shop/pods/web-5d8f-x2x7q/section", None, None)]
     #[case::a_section_with_no_name("namespaces/shop/deployments//section", None, None)]
     #[case::a_pods_logs("namespaces/shop/pods/web-5d8f-x2x7q/logs", None, Some(Page::Logs { namespace: "shop".into(), resource: "pods".into(), name: "web-5d8f-x2x7q".into(), pod: None, container: None }))]

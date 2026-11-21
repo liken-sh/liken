@@ -10,7 +10,9 @@ pub fn gone_page(model: &Model, gone: &Gone) -> GonePage {
     let snapshot = &model.snapshot;
     let (namespace, pod) = match gone {
         Gone::Namespace(namespace) => (Some(namespace), None),
-        Gone::Workload { namespace, .. } | Gone::Kind { namespace, .. } => (Some(namespace), None),
+        Gone::Workload { namespace, .. }
+        | Gone::Elevation { namespace, .. }
+        | Gone::Kind { namespace, .. } => (Some(namespace), None),
         Gone::Pod { namespace, name } => (Some(namespace), Some(name)),
         Gone::Machine(_)
         | Gone::Ground(_)

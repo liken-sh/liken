@@ -19,9 +19,10 @@
 }
 
 /* The head is a title band over the drawing: the object's kind, name,
-   and chips on one line, and the elevation's name and question as a
-   caption under it.  The pseudo-element is an empty flex item as wide
-   as the band, so the caption starts a line of its own. */
+   and chips on one line, and under it the elevation's name, or a tab
+   for each of the kind's elevations, its question, and who states it.
+   The pseudo-element is an empty flex item as wide as the band, so the
+   second line starts a line of its own. */
 .sketch-head {
   display: flex;
   flex-wrap: wrap;
@@ -41,10 +42,31 @@
 .sketch-head .known-chips { margin-left: auto; }
 
 .sketch-elevation,
-.sketch-question {
+.sketch-question,
+.sketch-author,
+.sketch-missing {
   order: 2;
   font-family: "Source Sans 3", system-ui, sans-serif;
   font-size: 14px;
+}
+
+/* The tabs of the elevations look like the lens tabs, and stand at the
+   start of their line, where the elevation's name stands when the kind
+   has one. */
+.sketch-tabs {
+  order: 2;
+  margin-left: 0;
+}
+
+.sketch-author {
+  margin-left: auto;
+  color: var(--ink-muted);
+}
+
+.sketch-missing {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--warm);
 }
 
 .sketch-elevation {
@@ -69,11 +91,97 @@
 
 /* The rows of the sketch alternate with gap tracks, which the page
    writes in `grid-template-rows`.  A gap track is `--sketch-gap`, or
-   zero between two areas whose parts touch. */
+   zero between two areas whose parts touch.  The grid stands over the
+   wires, so a wire that runs under a part to its port is hidden where
+   the part is. */
 .sketch-grid {
   --sketch-gap: 28px;
+  position: relative;
   display: grid;
   column-gap: 20px;
+}
+
+/* A sketch with wires leaves room between its columns for a wire to
+   bend and for the words it carries.  A reader points at a wire under
+   the grid, so a wired grid and its areas let the pointer through to
+   it, and only the parts take it. */
+.sketch-grid.sketch-wired { column-gap: clamp(64px, 7.5%, 104px); }
+
+.sketch-wired,
+.sketch-wired .sketch-area { pointer-events: none; }
+
+.sketch-wired .shape-part { pointer-events: auto; }
+
+.sketch-plan { position: relative; }
+
+/* `wires.js` sizes the SVG to the plan and writes each path.  The
+   marks of the ports are where it measures, and the page does not show
+   them.  A wire is hidden until the script places it. */
+.sketch-wires {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.sketch .shape-port { visibility: hidden; }
+
+/* A wide line along each run, which the page does not show, takes the
+   pointer, so a reader can point at a thin wire. */
+.sketch-wire-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14px;
+  pointer-events: stroke;
+}
+
+.sketch-wire:focus { outline: none; }
+
+.sketch-wire:is(:hover, :focus-visible) .sketch-wire-path { stroke: var(--ink); }
+
+.sketch-wire-label,
+.sketch-wire-source {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 13px;
+  fill: var(--ink-muted);
+  stroke: var(--row);
+  stroke-width: 5px;
+  stroke-linejoin: round;
+  paint-order: stroke;
+}
+
+/* The fields that a wire was read from show while the reader points at
+   it or it has the focus, as the field of a part does. */
+.sketch-wire-source {
+  font-size: 12px;
+  fill: var(--ink-faint);
+  visibility: hidden;
+}
+
+.sketch-wire:is(:hover, :focus-visible) .sketch-wire-source { visibility: visible; }
+
+/* Each wire is a sentence too.  The list shows until `wires.js` has
+   drawn the wires, so a page without the script still names each
+   wire, and the drawing names them after that. */
+.sketch-wire-list {
+  margin: 0;
+  padding-left: 18px;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--ink-muted);
+}
+
+.sketch-drawn .sketch-wire-list { display: none; }
+
+.sketch-wire-from { color: var(--ink-faint); }
+
+.sketch-wire-empty { color: var(--ink-faint); }
+
+.sketch-unplaced {
+  margin: 0;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ink-faint);
 }
 
 /* The parts of one role stand side by side in its area, on the area's
@@ -122,12 +230,16 @@
 @container known (max-width: 760px) {
   .sketch-grid { column-gap: 10px; }
 
+  .sketch-grid.sketch-wired { column-gap: 40px; }
+
   .sketch-area { gap: 8px; }
 }
 
 /* Below this width the columns of the sketch are too narrow for any
    shape, so the areas leave the grid and wrap in the order of the
-   sketch, two to a line, and nothing joins.  An area's place on a line
+   sketch, two to a line, and nothing joins.  No area faces the area it
+   faced in the grid, so no wire is drawn, and the list of wires shows
+   in its place.  An area's place on a line
    no longer follows its columns, so every area centers its parts.  A
    part with a share of the sketch's width takes a line of its own at
    the full width, and a part that follows its text keeps its width.  A
@@ -161,4 +273,10 @@
     position: relative;
     inset: auto;
   }
+
+  .sketch-wires { display: none; }
+
+  .sketch-drawn .sketch-wire-list { display: block; }
+
+  .sketch-author { margin-left: 0; }
 }

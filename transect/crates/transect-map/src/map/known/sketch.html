@@ -1,11 +1,19 @@
-{#- The sketch of the first elevation of a kind's knowledge. The author
-    names the area, the shape, and the readings of each role. The areas
-    and the rows come from role names that the parser checked, so they
-    are safe in a style attribute.
+{#- The sketch of one elevation of a kind's knowledge. The author names
+    the area, the shape, and the readings of each role, and what each
+    wire carries. The areas and the rows come from role names that the
+    parser checked, so they are safe in a style attribute.
 
     An area's class says which edge its parts stand against, so the
     parts of a row gather toward the middle of the sketch, and whether
-    they touch the parts of the area above. -#}
+    they touch the parts of the area above.
+
+    The browser lays the grid out, so `wires.js` measures the ports of
+    the parts and draws the path of each run of a wire in the SVG under
+    the grid. A wire is hidden until the script has placed it, so its
+    words never show at a corner of the drawing. Each wire is also a
+    sentence in the list after the sketch, which shows until the script
+    has drawn the wires, and which a phone shows in place of them. -#}
+{%- import "links/link.html" as links -%}
 <div class="known-frame">
 <section class="sketch" aria-label="{{ sketch.name }} of {{ kind }} {{ name }}">
 <header class="{{ sketch_head_class() }}">
@@ -19,17 +27,60 @@
 <span class="known-chip"{% if let Some(title) = chip.title %} title="{{ title }}"{% endif %}><span class="{{ chip.dot_class() }}"></span>{{ chip.text }}</span>
 {%- endfor %}
 </div>
+{%- if sketch.head.tabs.is_empty() %}
 <div class="sketch-elevation">{{ sketch.name }}</div>
+{%- else %}
+<nav class="lens-tabs sketch-tabs" aria-label="Elevations">
+{%- for tab in sketch.head.tabs %}
+<a class="lens-tab{% if tab.current %} lens-tab-current{% endif %}" href="{{ tab.href }}" hx-get="{{ tab.href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true"{% if tab.current %} aria-current="page"{% endif %}>{{ tab.name }}</a>
+{%- endfor %}
+</nav>
+{%- endif %}
 <div class="sketch-question">{{ sketch.question }}</div>
+<div class="sketch-author">described by {% call links::object_link(sketch.head.author.text, sketch.head.author.href, "") %}{% endcall %}</div>
+{%- if let Some(missing) = sketch.head.missing %}
+<p class="sketch-missing">{{ missing }}</p>
+{%- endif %}
 </header>
-<div class="sketch-grid" style="grid-template-columns: repeat({{ sketch.columns }}, minmax(0, 1fr)); grid-template-rows: {{ sketch.rows }}; grid-template-areas: {{ sketch.areas }}">
+<div class="sketch-plan">
+{%- if !sketch.wires.is_empty() %}
+<svg class="sketch-wires" role="list" aria-label="Wires of {{ sketch.name }}">
+<defs><marker id="sketch-arrow" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path class="section-arrow" d="M0 0 L4 2 L0 4 Z"/></marker></defs>
+{%- for wire in sketch.wires %}
+<g class="sketch-wire" role="listitem" tabindex="0" visibility="hidden">
+<title>{{ wire.title() }}</title>
+{%- for run in wire.runs %}
+<g class="sketch-run" data-from="{{ run.from.area }}" data-from-edge="{{ run.from.edge.word() }}" data-from-slot="{{ run.from.slot }}" data-from-of="{{ run.from.of }}" data-to="{{ run.to.area }}" data-to-edge="{{ run.to.edge.word() }}" data-to-slot="{{ run.to.slot }}" data-to-of="{{ run.to.of }}">
+<path class="sketch-wire-hit"/>
+<path class="sketch-wire-bars {{ run.class() }}"/>
+<path class="sketch-wire-path {{ run.class() }}" marker-end="url(#sketch-arrow)"/>
+</g>
+{%- endfor %}
+<text class="sketch-wire-label">{{ wire.carries }}</text>
+<text class="sketch-wire-source">{{ wire.source }}</text>
+</g>
+{%- endfor %}
+</svg>
+{%- endif %}
+<div class="sketch-grid{% if !sketch.wires.is_empty() %} sketch-wired{% endif %}" style="grid-template-columns: repeat({{ sketch.columns }}, minmax(0, 1fr)); grid-template-rows: {{ sketch.rows }}; grid-template-areas: {{ sketch.areas }}">
 {%- for role in sketch.roles %}
-<div class="{{ role.area_class() }}" style="grid-area: {{ role.area }}">
+<div class="{{ role.area_class() }}" style="grid-area: {{ role.area }}" data-area="{{ role.area }}">
 {%- let drawn = role.drawn %}
 {%- include "shapes/parts.html" %}
 </div>
 {%- endfor %}
 </div>
+</div>
+{%- if !sketch.wires.is_empty() %}
+<ul class="sketch-wire-list" aria-label="Wires of {{ sketch.name }}">
+{%- for wire in sketch.wires %}
+<li{% if wire.dashed() %} class="sketch-wire-empty"{% endif %}>{% call links::sentence(wire.sentence.as_slice()) %}{% endcall %}<span class="sketch-wire-from">, {{ wire.source }}</span></li>
+{%- endfor %}
+</ul>
+{%- endif %}
+{%- if let Some(unplaced) = sketch.unplaced %}
+<p class="sketch-unplaced">{% call links::sentence(unplaced.as_slice()) %}{% endcall %}</p>
+{%- endif %}
 </section>
 </div>
 <p class="known-caption">{{ sketch.caption() }}</p>

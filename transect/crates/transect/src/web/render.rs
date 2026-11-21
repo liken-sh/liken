@@ -236,7 +236,7 @@ pub fn draw(
                 page.flatten().map(|page| template(page, part))
             });
             page.or_else(|| {
-                let known = known_page(model, layers, usage, at, shown, now);
+                let known = known_page(model, layers, usage, at, None, shown, now);
                 if let Some(known) = known {
                     return Some(template(known, part));
                 }
@@ -258,6 +258,20 @@ pub fn draw(
                     page.map(|page| template(page, part))
                 })
             })
+        }
+        Page::Elevation {
+            namespace,
+            resource,
+            name,
+            slug,
+        } => {
+            let at = WorkloadAt {
+                namespace,
+                resource,
+                name,
+            };
+            let page = known_page(model, layers, usage, at, Some(slug), shown, now);
+            page.map(|page| template(page, part))
         }
         Page::ClusterObject { resource, name } => {
             let object_at = ObjectAt {
@@ -373,6 +387,17 @@ fn gone(page: &Page) -> Option<Gone> {
         } => Gone::Kind {
             namespace,
             resource,
+        },
+        Page::Elevation {
+            namespace,
+            resource,
+            name,
+            slug,
+        } => Gone::Elevation {
+            namespace,
+            resource,
+            name,
+            slug,
         },
         Page::Workload {
             namespace,

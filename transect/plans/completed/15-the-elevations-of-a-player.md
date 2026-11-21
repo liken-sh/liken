@@ -1,11 +1,11 @@
 # 15, The elevations of a player
 
-Proposed on 2026-11-21. Nothing is built.
+Proposed and built on 2026-11-21.
 
-This plan builds what [plan 13](completed/13-sketches.md) left out of
-"Elevations of a pattern" in [00-design.md](00-design.md), with the
+This plan builds what [plan 13](13-sketches.md) left out of
+"Elevations of a pattern" in [00-design.md](../00-design.md), with the
 signal path of a `Player` as its first use. Everything it draws reads
-fields that a cluster has today. [Plan 18](18-the-speakers-of-a-room.md)
+fields that a cluster has today. [Plan 18](../18-the-speakers-of-a-room.md)
 adds the speakers and the title on the screen, which wait on new
 fields of two operators.
 
@@ -81,7 +81,7 @@ warning, because a `Remote` has no condition.
 has a `name`, a `question`, a `sketch` that places the roles it needs,
 and `wires` when it has any. A role that no elevation places is still
 knowledge that an agent can read. The catalog of
-[plan 16](16-a-primary-with-replicas.md) uses the same form: `roles`
+[plan 16](../16-a-primary-with-replicas.md) uses the same form: `roles`
 once at the top of a pattern's file, and elevations with `name`,
 `question`, `sketch`, and `wires`.
 
@@ -103,7 +103,7 @@ under the parts, as the ring draws its lines.
 A wire joins the facing edges of two roles' areas, horizontally or
 vertically as the grid places them. It meets each part at a port of
 the part's shape, a span along that edge, as
-[plan 17](completed/17-the-shapes-of-a-sketch.md) draws it, and it ends on a bar
+[plan 17](17-the-shapes-of-a-sketch.md) draws it, and it ends on a bar
 along the area's edge when the role has several parts. The wire has an
 arrow at `to` and the words of `carries` on it.
 
@@ -184,7 +184,7 @@ spec:
     - {path: status.idle.claim, kind: ResourceClaim, group: resource.k8s.io, edge: holds}
   roles:
     display:  {reference: status.screen.monitor, shape: screen, expected: true, reads: [Connector, Mode], shows: [Activity, [Play, Idle]]}
-    receiver: {reference: status.receiver.name, shape: amplifier, expected: true, reads: [Model, Power, Input, Volume, Sound]}
+    receiver: {reference: status.receiver.name, shape: amplifier, reads: [Model, Power, Input, Volume, Sound]}
     sink:     {reference: "status.sinks[].name", shape: box, expected: true, reads: [Layout, Volume, Mute]}
     machine:  {reference: status.screen.node, shape: box, expected: true}
     remote:   {reference: "spec.remotes[].name", shape: handheld, expected: true, reads: [Keymap, {column: Battery, through: status.peripheral}]}
@@ -195,17 +195,16 @@ spec:
     - name: the room
       question: What is this player made of?
       sketch: |
-        display  display   display   display
-        sink     receiver  receiver  remote
-        machine  idle      bus       claim
+        .        .        display  display  display   display   remote  .
+        .        .        sink     sink     receiver  receiver  .       .
+        machine  machine  idle     idle     bus       bus       claim   claim
     - name: the signal path
       question: Where do picture and sound go?
       sketch: |
-        machine  receiver  display
-        sink     receiver  .
+        sink  machine  receiver  display  display
       wires:
-        - {from: machine, to: display, via: receiver, carries: picture}
-        - {from: sink, to: receiver, carries: sound}
+        - {from: sink, to: machine, carries: sound}
+        - {from: machine, to: display, via: receiver, carries: picture and sound}
   controller: {image: liken-sh/media-operator}
   docs: media:declare-a-player
 ```
@@ -213,9 +212,11 @@ spec:
 The `Remote`'s document in the same file keeps its fields and gains
 `healthy: {through: status.peripheral}`.
 
-The room has the screen on top, the sink and the receiver side by side
-below it, the remote beside the receiver, and the machine and the
-things a viewer does not see in the last row. The receiver is an
+The room has the screen on top with the remote beside it, the sink and
+the receiver side by side directly below the screen, and the machine
+and the things a viewer does not see in the last row. The receiver is
+not expected, because the `Player` CRD describes a `Player` with no
+`status.receiver` as one that plays directly to its panel. The receiver is an
 `amplifier`, which resolves to `amplifier.media.liken.sh`, the shape
 that `media-operator` ships. The room has no speaker until plan 18, and
 the `Sink` and the machine are plain `box`es in both elevations,
@@ -224,21 +225,20 @@ because the `Sink` is the machine's sound output and not a speaker.
 ### The signal path
 
 One HDMI cable leaves the machine's output and goes through the
-receiver, when the `Player` has one, to the panel. The `Display` is
-the picture on that cable and the `Sink` is the sound.
+receiver, when the `Player` has one, to the panel. It carries picture
+and sound. The `Sink` is the machine's sound output onto that cable,
+and the `Display` is the picture on it.
 
-- **A `Player` with a receiver** draws the machine, a solid wire
-  "picture" to the receiver, and a solid wire "picture" from the
-  receiver to the screen. The `Sink` has a solid wire "sound" to the
-  receiver. The sound ends at the receiver, which plays it: a Denon
-  `Receiver` on a home cluster reports `status.denon.hdmi.audioOut` as
-  `avr`. Plan 18 adds the speakers after it.
+- **A `Player` with a receiver** draws the `Sink`, a solid wire
+  "sound" to the machine, and a solid wire "picture and sound" from
+  the machine through the receiver to the screen. A Denon `Receiver`
+  on a home cluster reports `status.denon.hdmi.audioOut` as `avr`, so
+  the receiver plays the sound. Plan 18 adds the speakers after it.
 - **A `Player` with no receiver**, which the `Player` CRD describes as
-  one "that plays directly to its panel", draws a solid wire "picture"
-  from the machine straight to the screen, past the receiver's empty
-  dashed place. The `Sink`'s wire to the empty receiver is dashed. The
-  panel plays the sound, and no field of the `Player` states it, so no
-  wire claims it.
+  one "that plays directly to its panel", draws the `Sink`, the
+  machine, and a solid wire "picture and sound" from the machine
+  straight to the screen. The receiver is not expected, so its place
+  is blank.
 
 The page draws what `status.receiver` states. A home cluster has a
 `Player` whose `status.receiver` names a receiver on an optical input,
@@ -249,7 +249,7 @@ through that receiver.
 
 ### What plan 17 gives these elevations
 
-[Plan 17](completed/17-the-shapes-of-a-sketch.md) gives the screen, the
+[Plan 17](17-the-shapes-of-a-sketch.md) gives the screen, the
 `amplifier.media.liken.sh` of the receiver, and the `box` of the `Sink`
 and the machine, each with the ports of its definition. A `box` and an
 `amplifier` have ports on their left and right edges, and the wires of
@@ -327,3 +327,147 @@ operators' `transect/` directories linked under `--resources`. Both
 elevations of a `Player` with a receiver and of one with none are read
 against `kubectl get players,receivers,sinks,peripherals -o wide`, and
 a screenshot of each is compared with the design's mocks.
+
+## What the build changed
+
+On 2026-11-21 a workstation ran `transect` against a home cluster with
+the `transect/` directories of `media-operator`, `display-operator`,
+`equipment-operator`, and `audio-operator` linked under `--resources`,
+and read both elevations of each `Player` at 1680 and 420 pixels. After the
+changes below, the signal path of a `Player` with a receiver drew the
+sound from the `Sink` to the machine, and one wire "picture and sound"
+from the machine through the receiver to the screen. The signal path
+of the `Player` with no receiver drew the same wire straight from the
+machine to the screen. The room drew the remote of each `Player`
+whose `Peripheral` was `Asleep` dimmed, with the reason, and the
+battery of the remote whose `Peripheral` was connected, linked to the
+`Peripheral`. The build differs from the proposal in these ways:
+
+- **A wire to a shape with no port on the facing edge is checked when
+  the shapes are found.** A role's shape is known only after
+  `Kinds::find_shapes` resolves it, which plan 17's build moved out of
+  the load. So the wire is left out, and its document gets the
+  condition `NoPort`, of the type `ShapesFound`, as a missing shape
+  gets `UnknownShape`. The document stays, so one wire does not hide
+  the rest of a kind's knowledge. The test that loads each operator's
+  `transect/` directory fails on `NoPort` too.
+- **The health functions take a `ReferenceEnds`, and only the callers
+  that read a health change.** `ReferenceEnds` is a trait of
+  `transect-resources`, which the binary's `Snapshot` implements from
+  the relations and the stores that it has, through the one function
+  `knowledge::follow`. `condition`, `reported`, `resting`, and
+  `at_rest` take it, and the callers that pass it are
+  `snapshot/known.rs`, `pages/known.rs`, `pages/kinds.rs`,
+  `pages/object/mod.rs`, and `transect-map`'s `objects/mod.rs`, whose
+  `Sources` draw the dot of each custom resource on the namespace page.
+  `map/workload/mod.rs` and `pages/machine.rs` call only `Deciding::of`,
+  which takes none, so neither changes. A reading through a reference
+  uses the same `ReferenceEnds`.
+- **A health that leads to no object has a reason of its own,
+  `Reason::Unfollowed`.** Its sentence is the object's name and why,
+  such as "living-room: status.peripheral names nothing". A reason read
+  through a reference names the object, not the object at the end of
+  the reference, because the namespace page counts each reason for the
+  object that it names. A reference to a kind that `transect` does not
+  watch gives no health, because `transect` cannot say whether the
+  object exists.
+- **`KindKnowledge::healthy` is a condition or a `Through`.** One
+  field has either a condition with its `calm` reasons or a reference
+  to follow, so no document can state both, and
+  `Deciding::condition` is empty for a kind whose health is through a
+  reference. The parser refuses a `healthy` with both, or with
+  neither, and a `through` with `calm`, because the knowledge of the
+  kind at the end of the reference states which reasons are calm.
+- **A reading through a reference needs a role whose reference names a
+  kind.** Without a kind, the part has no knowledge in which to look
+  for the reference, so the parser refuses the role.
+- **A reading that does not resolve shows the message as its value.**
+- **Two elevations with one slug is the one fault for two names.** Two
+  elevations with one name have one slug, so the check of slugs
+  replaces plan 13's check of names.
+- **A script draws the path of each wire.** The browser lays out the
+  grid and sizes each part to its text, so the server cannot know where
+  a port is. The server writes each wire with its areas, their edges,
+  and each end's place along its edge, and draws each part's port marks
+  hidden. `wires.js` measures the marks and writes each path after each
+  load, each swap, and each change of the sketch's size.
+- **A wire is drawn under the parts.** Plan 17 put wires over the parts.
+  Under them, a short wire from a bar to the port of a part behind
+  another part is hidden where it passes behind, so no wire crosses
+  text.
+- **A wire that is alone at each of its ports runs straight when the
+  two spans overlap.** Two parts of different heights on one floor
+  otherwise drew a step of a few pixels halfway.
+- **A sketch with wires has wider gaps between its columns,** so a wire
+  can bend and carry its words between two parts that fill their
+  areas. A sketch without wires keeps the gaps of plan 13.
+- **Below 640 pixels no wire is drawn.** The areas gather into lines,
+  so no area faces the area that it faces in the grid, and the list of
+  wires shows in place of the drawing.
+- **The head names the author as "described by"**, with the link that
+  the card's "Described by" has.
+- **The routes of the binary moved to `object_route.rs`.** The route of
+  an elevation made `web/mod.rs` longer than 500 lines, so the routes
+  of one object's pages moved to a file of their own. `Kinds` moved to
+  `knowledge/kinds.rs`, a role to `knowledge/role.rs`, the tests of
+  `knowledge/parse.rs` to a file of their own, and the readings of a
+  page of a known kind to `pages/known/readings.rs`, for the same
+  reason. The modules of `knowledge` depend on each other one way:
+  `grid.rs` has the grid of a sketch and the edges where two areas
+  face, `through.rs` follows a reference and depends on no other check,
+  and `kinds/resolve.rs` confirms each `through` against another
+  kind's knowledge. The enum of what a referenced object does for its
+  referrer, `IssuesTls`, is `Duty`, so `Role` names one thing.
+- **The signal path is one cable, and the receiver is optional.** The
+  proposal drew the `Sink` and the machine as two boxes, each with a
+  wire into the receiver, and a dashed sound wire into the empty
+  receiver of a `Player` with no receiver. A reviewer read the first
+  drawing as two cables, and read a `Player` that plays directly to its
+  panel, which the `Player` CRD describes, as broken. So the `Sink`'s
+  wire ends at the machine, one wire carries "picture and sound" from
+  the machine through the receiver to the screen, and the receiver is
+  not expected. The screen spans two of the five columns, so its title
+  has room at desktop width.
+- **The room puts the sink and the receiver directly below the
+  screen.** In the proposal's four columns the screen, whose width is a
+  share of the sketch, stood in the middle, the sink stood outside its
+  width, and the receiver, whose area crosses the middle, stood in the
+  middle of its two columns, 90 pixels from the sink. In eight columns
+  the sink and the receiver each take two of the middle four, under the
+  screen, and the remote stands beside the screen.
+- **A wire names the parts as the drawing does.** The list of wires
+  and the line under the sketch named roles, such as `machine` and
+  `claim`, which the drawing shows nowhere. Each wire is now a sentence
+  such as "picture and sound from Node a through Receiver b to Display
+  c", each part linked, followed by the fields it was read from and the
+  `KindKnowledge` that states it. A wire shows the same on hover and
+  focus. The line under the sketch names the parts of each role that
+  the elevation does not place, by the role's label, as "Not in the
+  signal path: controlled by Remote a, …", and links the elevations
+  that draw them.
+- **A wire shows only once it is placed.** Each wire is hidden until
+  `wires.js` places it, and the list of wires shows until the script
+  has drawn them, so a page without the script names each wire and a
+  page with it never shows a label at a corner. A mutation observer
+  draws each sketch that the page swaps in, from a link or from the
+  event stream, before the browser paints it.
+- **A label wraps at spaces** to fit its segment less 8 pixels at each
+  end, and the gap between the columns of a sketch with wires is 7.5% of
+  its width, from 64 to 104 pixels.
+- **A value on a display surface takes a size from the part's width**,
+  and a narrow surface leaves out the names of its shown columns, so a
+  value keeps its two lines and its ellipsis at every width. A part's
+  name wraps balanced.
+- **A reference that reads several values has an end for each.**
+  `follow` returns each end, which plan 14's role `through` needs, and
+  a health and a reading take the first. A value that matches several
+  objects is its own end, and a health says so.
+- **An elevation URL of an object whose kind states no elevation is not
+  found.**
+- **The fixture has a thermostat and two vents.** The shelf's room
+  reads the temperature of the room's `Thermostat`, and a `Vent` is as
+  healthy as the `Thermostat` that it names: one sleeps, and the other
+  names one that the cluster does not have. The shelf's second
+  elevation, "the restock", has a wire with `via` and a wire to an
+  empty role, and the golden pages `sketch-restock.txt` and `vent.txt`
+  cover the second elevation and a health through a reference.

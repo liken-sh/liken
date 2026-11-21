@@ -123,7 +123,7 @@ impl GitOps {
                 continue;
             };
             let known = kinds.of(&resource.group, &resource.kind);
-            let healthy = known.and_then(|known| known.healthy.as_deref());
+            let healthy = known.and_then(|known| known.condition());
             for found in objects {
                 let meta = &found.metadata;
                 let Some(name) = meta.name.as_deref() else {

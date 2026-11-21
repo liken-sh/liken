@@ -22,7 +22,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 
 use super::reach::Reached;
 use super::references::Relation;
-use super::{Kinds, ReferencedBy, Role};
+use super::{Duty, Kinds, ReferencedBy};
 use transect_graph::edges::{Edge, Endpoint, Graph, Object, Provenance};
 
 /// An annotation on `referrer` that refers to `target`.
@@ -34,7 +34,7 @@ pub struct Referral {
     pub target: Object,
     pub annotation: String,
     /// What the target does for the referrer, as the knowledge declares.
-    pub role: Option<Role>,
+    pub role: Option<Duty>,
 }
 
 /// The referrals between `annotated` and `targets`: each object in

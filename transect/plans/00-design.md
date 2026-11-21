@@ -433,6 +433,11 @@ has installed comes before the knowledge that `transect` ships.
 
 Settled on 2026-11-20.
 
+[Plan 15](completed/15-the-elevations-of-a-player.md), built on
+2026-11-21, draws every elevation of a kind that one author states:
+each has a tab in the head of the drawing, its question and its author,
+and a URL of its own, and the object's own URL draws the first.
+
 ## Who draws a pattern
 
 `transect` draws a pattern of its catalog itself.  Requests, a work
@@ -494,6 +499,13 @@ materials, drawn with the same code and stylesheet as every shape of
 the library.  The form in which an author writes an arrangement is
 still open.
 
+[Plan 15](completed/15-the-elevations-of-a-player.md), built on
+2026-11-21, settles part of that form: a `KindKnowledge` states each
+role once, in `spec.roles`, and each elevation places the roles that it
+needs in a sketch and states its wires.  A wire says what passes
+between two roles, and `transect` draws its state from the parts of the
+roles it joins.  A repeated arrangement is still open.
+
 ## Where the knowledge of a pattern ships
 
 The knowledge of a first-party pattern ships with its operator.
@@ -546,7 +558,11 @@ Each of these lacks a name for its model, and the code or a resource of
 references of a kind as a sketch when the knowledge of the kind states
 one.  It also marks a reference that names an object that does not
 exist.  The knowledge of the `Player` is now in
-`media-operator/transect/`, with the first sketch.
+`media-operator/transect/`, with the first sketch.  [Plan 15](completed/15-the-elevations-of-a-player.md),
+built on 2026-11-21, adds the signal path of a `Player`, the first
+view in the pipeline form, and follows a reference for a reading and
+for a health, so a `Remote` is drawn at rest while its `Peripheral`
+sleeps.
 
 `LogPattern` in `transect-observe` uses the word "pattern" for a filter
 on log lines.  One of the two names must change before the code has a

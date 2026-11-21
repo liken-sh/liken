@@ -178,14 +178,18 @@ impl Sample {
                 .map(|(name, value)| Reading {
                     name: name.to_string(),
                     value: value.to_string(),
+                    from: None,
                 })
                 .collect(),
             shows: self
                 .shows
                 .iter()
                 .map(|(name, value)| Shown {
-                    name: name.to_string(),
-                    value: value.to_string(),
+                    reading: Reading {
+                        name: name.to_string(),
+                        value: value.to_string(),
+                        from: None,
+                    },
                     fallback: false,
                 })
                 .collect(),

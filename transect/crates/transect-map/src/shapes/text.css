@@ -18,11 +18,14 @@
   color: var(--ink-faint);
 }
 
+/* A name that wraps is balanced across its lines, so its last line is
+   never one or two characters. */
 .shape-name {
   font-size: 13px;
   font-weight: 600;
   color: var(--ink);
   overflow-wrap: break-word;
+  text-wrap: balance;
 }
 
 .shape-name a { text-decoration: none; }
@@ -203,21 +206,32 @@
   text-transform: uppercase;
 }
 
+/* A value on a surface wraps to at most two lines and then ends with an
+   ellipsis, with the whole text in its title.  Its size follows the
+   part's width, and on a narrow part the names of the shown columns
+   give their room to the values, so the two lines fit inside the glass
+   at every size and the text region never cuts a value off. */
 .shape-display-surface .shape-shows .shape-reading-value {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
   font-family: "Source Sans 3", system-ui, sans-serif;
-  font-size: 18px;
+  font-size: clamp(13px, 4.2cqi, 18px);
   line-height: 1.25;
+}
+
+@container (max-width: 340px) {
+  .shape-display-surface .shape-shows .shape-reading-name { display: none; }
+
+  .shape-display-surface .shape-shows { gap: 4px; padding: 2px 0; }
 }
 
 /* A value from a column after the first of its entry, such as the idle
    screen in place of the play, is smaller and in the muted ink, so a
    display that plays looks on and a display at rest looks quiet. */
 .shape-display-surface .shape-shows .shape-fallback .shape-reading-value {
-  font-size: 15px;
+  font-size: clamp(12px, 3.5cqi, 15px);
   color: var(--ink-muted);
 }
 

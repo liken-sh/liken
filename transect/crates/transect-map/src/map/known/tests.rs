@@ -82,6 +82,7 @@ fn board(card: Option<WorkloadCard>) -> KnownPage {
         knowledge: &known,
         layer: "apps".into(),
         path: "/namespaces/shop/jukeboxes.widgets.example.com/front-room".into(),
+        elevation: None,
         reached: relations.iter().map(|r| (r, reach(r))).collect(),
         column: Vec::new(),
         counts: Vec::new(),

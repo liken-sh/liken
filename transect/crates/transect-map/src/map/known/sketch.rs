@@ -1,21 +1,27 @@
-//! The sketch of a known kind: the first elevation of its
-//! `KindKnowledge`, drawn in place of the ring of boxes. The author
-//! states only where each role is, its shape, and which printer columns
-//! its parts show. `transect` draws the state of each part the same way
-//! in every sketch, so a failing part looks the same on every kind's
-//! page.
+//! The sketch of a known kind: one elevation of its `KindKnowledge`,
+//! drawn in place of the ring of boxes. The author states only where
+//! each role is, its shape, which printer columns its parts show, and
+//! what each wire carries. `transect` draws the state of each part and
+//! each wire the same way in every sketch, so a failing part looks the
+//! same on every kind's page.
 
+mod head;
 mod lean;
 mod tracks;
+mod unplaced;
+mod wires;
 
+pub use head::{ElevationTab, Head, choose, href};
 pub use lean::Lean;
 use tracks::{Joins, tracks};
+pub use wires::{Placed, Presence, SketchWire};
 
 use super::{Board, end};
 use crate::shapes::text::{Drawn, End, Nothing, Part, Reading, Shown, State, Why};
 use crate::shapes::{Drawing, Pose};
 use transect_graph::edges::Object;
-use transect_resources::knowledge::elevation::{Role, Show};
+use transect_graph::links::Reference;
+use transect_resources::knowledge::role::{Column, Role, Show};
 use transect_resources::knowledge::{Elevation, Grid, Names, Reached, Relation, Target};
 use transect_resources::shapes::{Edge, Shape};
 
@@ -25,6 +31,9 @@ pub struct Sketch {
     /// The elevation's name, such as "the room".
     pub name: String,
     pub question: String,
+    /// The tabs of the kind's elevations, who states them, and the
+    /// elevation that the URL named and the kind does not have.
+    pub head: Head,
     /// The number of columns of the grid.
     pub columns: usize,
     /// The value of the grid's `grid-template-areas`.
@@ -35,6 +44,11 @@ pub struct Sketch {
     /// role that is not expected and has no part is left out, so its
     /// area stays blank.
     pub roles: Vec<SketchRole>,
+    /// The wires between the roles that the page draws.
+    pub wires: Vec<SketchWire>,
+    /// The line that names the parts of the roles that the elevation
+    /// does not place, as words and links.
+    pub unplaced: Option<Vec<Reference>>,
     /// The name of the `KindKnowledge` that states the elevation.
     pub knowledge: String,
 }
@@ -73,15 +87,54 @@ pub enum Standing {
 }
 
 impl Sketch {
-    /// The sketch of `elevation` for `board`'s object. Each role's
-    /// parts are the relations whose path is the role's reference.
-    pub fn build(board: &Board, elevation: &Elevation) -> Self {
+    /// The sketch of `elevation` for `board`'s object, under `head`.
+    /// Each role's parts are the relations whose path is the role's
+    /// reference.
+    pub fn build(board: &Board, elevation: &Elevation, head: Head) -> Self {
         let grid = &elevation.grid;
-        let drawn: Vec<(SketchRole, Shape)> = elevation
-            .roles
-            .iter()
-            .filter_map(|role| drawn(board, grid, role))
+        let wired = |name: &str| {
+            elevation
+                .wires
+                .iter()
+                .any(|w| w.pairs().iter().any(|(a, b)| *a == name || *b == name))
+        };
+        let roles = &board.knowledge.roles;
+        let placed_roles = grid
+            .names()
+            .into_iter()
+            .filter_map(|name| roles.iter().find(|r| r.name == name));
+        let drawn: Vec<(SketchRole, Shape)> = placed_roles
+            .filter_map(|role| drawn(board, grid, role, wired(&role.name)))
             .collect();
+        let placed = |name: &str| {
+            let path = roles.iter().find(|r| r.name == name);
+            let path = path.map(|r| r.reference.clone()).unwrap_or_default();
+            let Some((role, _)) = drawn.iter().find(|(role, _)| role.area == name) else {
+                return Placed {
+                    presence: Presence::Absent,
+                    names: Vec::new(),
+                    path,
+                };
+            };
+            let parts = role
+                .drawn
+                .parts
+                .iter()
+                .map(|part| part.end.reference.clone());
+            let nothing = role.drawn.nothing.iter().map(|nothing| Reference {
+                text: nothing.text.clone(),
+                href: None,
+            });
+            Placed {
+                presence: match role.drawn.parts.is_empty() {
+                    true => Presence::Empty,
+                    false => Presence::Parts,
+                },
+                names: parts.chain(nothing).collect(),
+                path,
+            }
+        };
+        let wires = wires::wires(elevation, &board.knowledge.name, placed);
         let joins = |name: &str| {
             let found = drawn.iter().find(|(role, _)| role.area == name);
             found.map(|(_, shape)| Joins {
@@ -90,17 +143,20 @@ impl Sketch {
             })
         };
         let tracks = tracks(grid, joins);
-        let roles = drawn.into_iter().map(|(role, _)| SketchRole {
+        let drawn = drawn.into_iter().map(|(role, _)| SketchRole {
             joined: tracks.joined.contains(&role.area),
             ..role
         });
         Self {
             name: elevation.name.clone(),
             question: elevation.question.clone(),
+            head,
             columns: grid.columns(),
             areas: tracks.areas,
             rows: tracks.rows,
-            roles: roles.collect(),
+            roles: drawn.collect(),
+            wires,
+            unplaced: unplaced::line(board, elevation),
             knowledge: board.knowledge.name.clone(),
         }
     }
@@ -131,9 +187,8 @@ impl SketchRole {
 
 /// `role` as the page draws it, with the shape it is drawn in, or
 /// `None` when it is not expected and its reference reads no value. A
-/// shape that turns lies on its side in an area that spans more columns
-/// than rows.
-fn drawn(board: &Board, grid: &Grid, role: &Role) -> Option<(SketchRole, Shape)> {
+/// role that a wire meets marks its ports, where the wire attaches.
+fn drawn(board: &Board, grid: &Grid, role: &Role, wired: bool) -> Option<(SketchRole, Shape)> {
     let mut references = board.knowledge.references.iter();
     let reference = references.find(|r| r.path == role.reference)?;
     let shows = shows(board, &role.shows);
@@ -156,10 +211,10 @@ fn drawn(board: &Board, grid: &Grid, role: &Role) -> Option<(SketchRole, Shape)>
     });
     let label = reference.label.as_deref().unwrap_or(reference.edge.words());
     let columns = grid.columns_of(&role.name).unwrap_or_default();
-    let rows = grid.rows_of(&role.name).unwrap_or_default();
-    let shape = match role.drawn.turns && columns.len() > rows.len() {
-        true => role.drawn.turned(),
-        false => role.drawn.as_ref().clone(),
+    let shape = grid.posed(&role.name, &role.drawn);
+    let pose = Pose {
+        ports: wired,
+        ..Pose::default()
     };
     let drawn = SketchRole {
         area: role.name.clone(),
@@ -167,7 +222,7 @@ fn drawn(board: &Board, grid: &Grid, role: &Role) -> Option<(SketchRole, Shape)>
         joined: false,
         abutting: shape.joins(Edge::Left) && shape.joins(Edge::Right),
         drawn: Drawn {
-            drawing: Drawing::of(&shape, Pose::default()),
+            drawing: Drawing::of(&shape, pose),
             label: label.into(),
             source: format!("from {}", role.reference),
             parts,
@@ -209,7 +264,7 @@ fn part(
     let readings = read(board, object, &role.reads).into_iter();
     let readings = readings.map(|reading| Reading {
         name: reading.name.to_lowercase(),
-        value: reading.value,
+        ..reading
     });
     Part {
         readings: readings.collect(),
@@ -222,17 +277,16 @@ fn part(
 }
 
 /// The first column of each entry of `shows` that has a value on the
-/// page's own object.
+/// page's own object, or on the object at the end of its reference.
+/// Each column is read on its own, so a column of the object and the
+/// column of the same name through a reference are not confused.
 fn shows(board: &Board, shows: &[Show]) -> Vec<Shown> {
-    let names: Vec<String> = shows.iter().flat_map(|s| s.columns.clone()).collect();
-    let read = read(board, board.object, &names);
     let first = |show: &Show| {
         let mut columns = show.columns.iter().enumerate();
         columns.find_map(|(at, column)| {
-            let reading = read.iter().find(|reading| &reading.name == column)?;
+            let read = read(board, board.object, std::slice::from_ref(column));
             Some(Shown {
-                name: reading.name.clone(),
-                value: reading.value.clone(),
+                reading: read.into_iter().next()?,
                 fallback: at > 0,
             })
         })
@@ -240,7 +294,7 @@ fn shows(board: &Board, shows: &[Show]) -> Vec<Shown> {
     shows.iter().filter_map(first).collect()
 }
 
-fn read(board: &Board, object: &Object, columns: &[String]) -> Vec<Reading> {
+fn read(board: &Board, object: &Object, columns: &[Column]) -> Vec<Reading> {
     if columns.is_empty() {
         return Vec::new();
     }

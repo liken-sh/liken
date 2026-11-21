@@ -8,9 +8,17 @@
     that a part was read from is the part's `title` too, because the
     line that names it shows only while the reader points at the part.
     A shown value from a column after the first of its entry has
-    `shape-fallback`, which a display draws quieter. -#}
+    `shape-fallback`, which a display draws quieter.  A value read
+    through a reference links to the object it was read from, and its
+    title says which object and which reference. -#}
 {%- import "links/link.html" as links -%}
 {%- import "shapes/part.html" as shapes -%}
+{%- macro reading(reading, class) -%}
+<div class="shape-reading{{ class }}" title="{% if let Some(from) = reading.from %}{{ from.text }}{% else %}{{ reading.name }} {{ reading.value }}{% endif %}"><span class="shape-reading-name">{{ reading.name }}</span> <span class="shape-reading-value">
+{%- if let Some(from) = reading.from %}{% call links::value_link(reading.value, from.href) %}{% endcall %}
+{%- else %}{% call links::spelled(reading.value) %}{% endcall %}
+{%- endif %}</span></div>
+{%- endmacro -%}
 {%- for part in drawn.parts %}
 {% call shapes::part(drawn.drawing, part.state.class(), drawn.source) %}
 <div class="shape-label">{{ drawn.label }}</div>
@@ -29,14 +37,18 @@
 {%- if !part.readings.is_empty() %}
 <div class="shape-readings">
 {%- for reading in part.readings %}
-<div class="shape-reading" title="{{ reading.name }} {{ reading.value }}"><span class="shape-reading-name">{{ reading.name }}</span> <span class="shape-reading-value">{% call links::spelled(reading.value) %}{% endcall %}</span></div>
+{% call reading(reading, "") %}{% endcall %}
 {%- endfor %}
 </div>
 {%- endif %}
 {%- if !part.shows.is_empty() %}
 <div class="shape-readings shape-shows">
 {%- for show in part.shows %}
-<div class="shape-reading{% if show.fallback %} shape-fallback{% endif %}" title="{{ show.name }} {{ show.value }}"><span class="shape-reading-name">{{ show.name }}</span> <span class="shape-reading-value">{% call links::spelled(show.value) %}{% endcall %}</span></div>
+{%- if show.fallback %}
+{% call reading(show.reading, " shape-fallback") %}{% endcall %}
+{%- else %}
+{% call reading(show.reading, "") %}{% endcall %}
+{%- endif %}
 {%- endfor %}
 </div>
 {%- endif %}

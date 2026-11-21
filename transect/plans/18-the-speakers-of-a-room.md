@@ -5,7 +5,7 @@ Proposed on 2026-11-21. Nothing is built.
 This plan draws a speaker for each channel in the room of a `Player`,
 and the title of what plays on its screen. It builds on the roles, the
 readings `through` a reference, and the wires of
-[plan 15](15-the-elevations-of-a-player.md). It waits on a decision
+[plan 15](completed/15-the-elevations-of-a-player.md). It waits on a decision
 about two new fields of other operators, which "The decision" below
 states.
 

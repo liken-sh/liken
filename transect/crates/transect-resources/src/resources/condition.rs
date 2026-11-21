@@ -119,6 +119,29 @@ impl Condition {
         }
     }
 
+    /// A wire of an elevation meets a role whose shape has no port on
+    /// the facing edge, so the page does not draw the wire.
+    pub fn no_port(message: impl Into<String>) -> Self {
+        Self {
+            kind: "ShapesFound",
+            status: Status::False,
+            reason: "NoPort",
+            message: message.into(),
+        }
+    }
+
+    /// A `through` names a reference that the knowledge of another kind
+    /// does not confirm, so the page shows this message in place of what
+    /// the reference leads to.
+    pub fn unresolved(message: impl Into<String>) -> Self {
+        Self {
+            kind: "Resolved",
+            status: Status::False,
+            reason: "Unresolved",
+            message: message.into(),
+        }
+    }
+
     /// The log store rejected the resource's last search, or the search
     /// failed.
     pub fn search_failed(message: impl Into<String>) -> Self {
@@ -137,7 +160,7 @@ impl Condition {
         match (self.kind, self.reason) {
             (
                 "Loaded" | "Matched" | "Served" | "LayerDeclared" | "Attached" | "Searched"
-                | "ShapesFound",
+                | "ShapesFound" | "Resolved",
                 _,
             ) => self.status == Status::False,
             _ => self.status == Status::True,
@@ -158,7 +181,11 @@ impl Condition {
             ("LayerDeclared", Status::False) => "refers to a layer that Layers does not declare",
             ("Conflict", Status::True) => "set twice",
             ("Searched", Status::False) => "search failed",
+            ("ShapesFound", Status::False) if self.reason == "NoPort" => {
+                "has a wire to a shape with no port there"
+            }
             ("ShapesFound", Status::False) => "names a shape transect has not loaded",
+            ("Resolved", Status::False) => "follows a reference that does not resolve",
             (_, Status::True) => "true",
             (_, Status::False) => "false",
         };
@@ -201,6 +228,8 @@ mod tests {
     #[case::an_unknown_layer(Condition::unknown_layer("no layer edge"), true)]
     #[case::a_conflict(Condition::conflict("why is set twice"), true)]
     #[case::an_unknown_shape(Condition::unknown_shape("the role amp names kettle"), true)]
+    #[case::no_port(Condition::no_port("the wire meets a tag"), true)]
+    #[case::unresolved(Condition::unresolved("Pad has no knowledge"), true)]
     fn says_which_conditions_to_act_on(#[case] condition: Condition, #[case] trouble: bool) {
         assert_eq!(condition.trouble(), trouble);
     }
@@ -213,6 +242,14 @@ mod tests {
         "matches nothing: no Deployment web"
     )]
     #[case::a_conflict(Condition::conflict("why is set twice"), "set twice: why is set twice")]
+    #[case::no_port(
+        Condition::no_port("the wire meets a tag"),
+        "has a wire to a shape with no port there: the wire meets a tag"
+    )]
+    #[case::unresolved(
+        Condition::unresolved("Pad has no knowledge"),
+        "follows a reference that does not resolve: Pad has no knowledge"
+    )]
     fn says_a_condition_in_words(#[case] condition: Condition, #[case] text: &str) {
         assert_eq!(condition.text(), text);
     }

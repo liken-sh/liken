@@ -6,7 +6,7 @@
 
 use serde_json::Value;
 
-use super::{KindKnowledge, Matches, Target, path};
+use super::{KindKnowledge, Matches, Reference, Target, path};
 use transect_graph::edges::ClusterScoped;
 use transect_graph::edges::{Kind, Object, Provenance};
 use transect_graph::untrusted::capped;
@@ -152,6 +152,16 @@ fn referenced_object(
     let cluster_wide = scoped.contains(&(group.to_string(), kind.to_string()));
     let namespace = from.namespace.as_deref().filter(|_| !cluster_wide);
     Object::new(group, kind, namespace, name)
+}
+
+/// The group and the kind that the reference at `path` names, or none
+/// when no reference is at `path` or it names no kind.
+pub fn target_of<'a>(references: &'a [Reference], path: &str) -> Option<(&'a str, &'a str)> {
+    let reference = references.iter().find(|r| r.path == path)?;
+    match &reference.target {
+        Target::Object { kind, group } => Some((group.as_deref().unwrap_or_default(), kind)),
+        Target::Address | Target::Value => None,
+    }
 }
 
 impl Relation {

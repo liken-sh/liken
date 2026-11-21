@@ -5,8 +5,8 @@
 //! the object is healthy, the docs, and the objects that the object's
 //! fields refer to.
 
-use super::KindKnowledge;
 use super::references::{Names, Relation};
+use super::{Healthy, KindKnowledge};
 use crate::intent::{Docs, Line};
 use transect_graph::edges::{Endpoint, Object, Plurals, Provenance};
 use transect_graph::links::Reference;
@@ -24,7 +24,7 @@ pub struct KnownThrough {
     pub name: String,
     /// The summary, unless the card already opens with it.
     pub summary: Option<String>,
-    /// The name of the condition that means the object is healthy.
+    /// The sentence that says when the object is healthy.
     pub healthy: Option<String>,
     pub docs: Option<Docs>,
     /// The objects that the object's fields refer to, in the order the
@@ -100,6 +100,21 @@ pub fn page(
     }
 }
 
+/// The sentence that says when an object of `knowledge`'s kind is
+/// healthy, such as "Healthy when its Ready condition is True.".
+fn healthy(knowledge: &KindKnowledge) -> Option<String> {
+    Some(match knowledge.healthy.as_ref()? {
+        Healthy::Condition { condition, .. } => {
+            format!("Healthy when its {condition} condition is True.")
+        }
+        Healthy::Through(through) => {
+            let target = super::references::target_of(&knowledge.references, &through.path);
+            let (_, kind) = target?;
+            format!("As healthy as the {kind} that {} names.", through.path)
+        }
+    })
+}
+
 impl KnownThrough {
     /// The section with no related lines. `with_related` adds them.
     pub fn of(knowledge: &KindKnowledge, controller: Option<Reference>) -> Self {
@@ -114,7 +129,7 @@ impl KnownThrough {
             controller,
             name: knowledge.name.clone(),
             summary: knowledge.summary.clone(),
-            healthy: knowledge.healthy.clone(),
+            healthy: healthy(knowledge),
             docs,
             related: Vec::new(),
         }
@@ -179,11 +194,7 @@ impl KnownThrough {
     /// that keeps sessions. Healthy when its Ready condition is True.".
     /// It is none when the knowledge has neither.
     pub fn body(&self) -> Option<String> {
-        let healthy = self
-            .healthy
-            .as_ref()
-            .map(|condition| format!("Healthy when its {condition} condition is True."));
-        let parts: Vec<String> = [self.summary.clone(), healthy]
+        let parts: Vec<String> = [self.summary.clone(), self.healthy.clone()]
             .into_iter()
             .flatten()
             .collect();
@@ -235,6 +246,10 @@ mod tests {
     #[case::a_condition_only(
         "{healthy: {condition: Spinning}}",
         Some("Healthy when its Spinning condition is True.")
+    )]
+    #[case::through_a_reference(
+        "{references: [{path: status.disk, kind: Disk}], healthy: {through: status.disk}}",
+        Some("As healthy as the Disk that status.disk names.")
     )]
     #[case::neither("{}", None)]
     fn joins_the_summary_and_the_healthy_condition(#[case] spec: &str, #[case] body: Option<&str>) {

@@ -30,6 +30,16 @@ pub enum Named {
         namespace: String,
         name: String,
     },
+    /// An elevation of an object, by the object's namespace, the
+    /// resource name of its kind, its name, and the elevation's slug.
+    /// The object may be in the cluster with knowledge that states no
+    /// elevation of that slug, so the page links to the object.
+    Elevation {
+        namespace: String,
+        resource: String,
+        name: String,
+        slug: String,
+    },
     /// The list of a kind's objects in a namespace, by the kind's
     /// resource name.
     Kind {
@@ -129,6 +139,31 @@ impl GonePage {
                 ),
                 namespace_link(namespace).into_iter().collect(),
             ),
+            Named::Elevation {
+                namespace,
+                resource,
+                name,
+                slug,
+            } => {
+                let object = format!(
+                    "/namespaces/{namespace}/{resource}/{}",
+                    transect_graph::links::segment(name)
+                );
+                let object_up = Up {
+                    text: name.clone(),
+                    href: object.clone(),
+                    name: true,
+                };
+                (
+                    format!("An elevation {slug} of {resource}/{name} in {namespace}"),
+                    slug.clone(),
+                    format!("{object}/elevations/{slug}"),
+                    [object_up]
+                        .into_iter()
+                        .chain(namespace_link(namespace))
+                        .collect(),
+                )
+            }
             Named::Pod { namespace, name } => {
                 let workload = above.workload.and_then(|workload| {
                     Some(Up {
@@ -287,6 +322,22 @@ mod tests {
         None,
         "deployments/web in shop was not found.",
         vec![up("shop", "/namespaces/shop"), up("cluster", "/")]
+    )]
+    #[case::an_elevation(
+        Named::Elevation {
+            namespace: "shop".into(),
+            resource: "kiosks.example.com".into(),
+            name: "front".into(),
+            slug: "the-wiring".into(),
+        },
+        true,
+        None,
+        "An elevation the-wiring of kiosks.example.com/front in shop was not found.",
+        vec![
+            up("front", "/namespaces/shop/kiosks.example.com/front"),
+            up("shop", "/namespaces/shop"),
+            up("cluster", "/")
+        ]
     )]
     #[case::a_workload_in_a_gone_namespace(
         deployment("web"),

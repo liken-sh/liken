@@ -15,6 +15,7 @@ mod golden;
 mod latest;
 pub mod loaded;
 mod model;
+mod object_route;
 mod pages;
 mod probes;
 mod render;
@@ -30,7 +31,6 @@ mod view;
 mod views;
 mod vulnerabilities_route;
 
-use k8s_openapi::jiff::Timestamp;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -208,14 +208,21 @@ fn router(changes: &watch::Sender<()>, sources: Sources) -> Router {
         )
         // For the same reason, `/namespaces/{namespace}/pods/{name}` is
         // the pod page and not a workload's.
-        .route("/namespaces/{namespace}/pods/{name}", get(pod_elevation))
+        .route(
+            "/namespaces/{namespace}/pods/{name}",
+            get(object_route::pod),
+        )
         .route(
             "/namespaces/{namespace}/{resource}/{name}",
-            get(workload_elevation),
+            get(object_route::workload),
         )
         .route(
             "/namespaces/{namespace}/{resource}/{name}/section",
-            get(section_elevation),
+            get(object_route::section),
+        )
+        .route(
+            "/namespaces/{namespace}/{resource}/{name}/elevations/{slug}",
+            get(object_route::elevation),
         )
         .route(
             "/namespaces/{namespace}/{resource}/{name}/access",
@@ -227,7 +234,7 @@ fn router(changes: &watch::Sender<()>, sources: Sources) -> Router {
         )
         .route(
             "/namespaces/{namespace}/{resource}/{name}/logs",
-            get(logs_lens),
+            get(object_route::logs),
         )
         // A page opens `/events` followed by its own path and query, so
         // the stream renders the same view that the page shows.
@@ -397,87 +404,4 @@ async fn cluster_object(
     state
         .whole(Page::ClusterObject { resource, name }, &query)
         .await
-}
-
-async fn workload_elevation(
-    State(state): State<AppState>,
-    Path((namespace, resource, name)): Path<(String, String, String)>,
-    Query(query): Query<view::Query>,
-) -> Response {
-    let page = Page::Workload {
-        namespace,
-        resource,
-        name,
-    };
-    state.whole(page, &query).await
-}
-
-async fn section_elevation(
-    State(state): State<AppState>,
-    Path((namespace, resource, name)): Path<(String, String, String)>,
-    Query(query): Query<view::Query>,
-) -> Response {
-    let page = Page::Section {
-        namespace,
-        resource,
-        name,
-    };
-    state.whole(page, &query).await
-}
-
-async fn pod_elevation(
-    State(state): State<AppState>,
-    Path((namespace, name)): Path<(String, String)>,
-    Query(query): Query<view::Query>,
-) -> Response {
-    // Log tails are read on a page load, never for a push.
-    let last = state.sources.models.last().await;
-    let pod = last
-        .iter()
-        .flat_map(|model| &model.snapshot.pods)
-        .find(|pod| {
-            pod.metadata.namespace.as_deref() == Some(namespace.as_str())
-                && pod.metadata.name.as_deref() == Some(name.as_str())
-        });
-    // The page renders from the last model but reads its tails from the
-    // cache, so it shows the new tails. When a read finishes, `refresh`
-    // signals a change, and the push that follows sends the health
-    // counts from the new tails.
-    if let Some(pod) = pod {
-        state.sources.logs.refresh(pod).await;
-    }
-    state
-        .whole_on(last, Page::Pod { namespace, name }, &query)
-        .await
-}
-
-async fn logs_lens(
-    State(state): State<AppState>,
-    Path((namespace, resource, name)): Path<(String, String, String)>,
-    Query(query): Query<view::Query>,
-) -> Response {
-    let model = state.sources.models.last().await;
-    let (pod, container) = (query.pod(), query.container());
-    let lens = pages::Lens {
-        namespace: &namespace,
-        resource: &resource,
-        name: &name,
-        pod: pod.as_deref(),
-        container: container.as_deref(),
-    };
-    // As in `pod_elevation`, read the tails on a page load.
-    if let Some(pod) = model
-        .as_deref()
-        .and_then(|model| pages::shown_pod(model, &lens, Timestamp::now()))
-    {
-        state.sources.logs.refresh(&pod).await;
-    }
-    let page = Page::Logs {
-        namespace: namespace.clone(),
-        resource: resource.clone(),
-        name: name.clone(),
-        pod,
-        container,
-    };
-    state.whole_on(model, page, &query).await
 }

@@ -46,6 +46,7 @@ impl Reason {
             | Self::PodPending { pod, .. } => Object::new("", "Pod", Some(namespace), pod),
             Self::RestartedAcross { workload, .. }
             | Self::Condition { workload, .. }
+            | Self::Unfollowed { workload, .. }
             | Self::LoggedErrors { workload, .. } => workload.clone(),
             // Lines from a pod that no longer exists, or from no pod, have
             // no page to link to, so they count for the namespace.

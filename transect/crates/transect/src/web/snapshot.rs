@@ -51,6 +51,7 @@ mod alerted;
 mod card;
 mod changed;
 mod described;
+mod follow;
 mod graph;
 mod issuers;
 mod known;

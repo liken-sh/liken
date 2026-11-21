@@ -190,8 +190,8 @@ pub fn object_page(
         _ => None,
     };
     let dynamic = found.dynamic();
-    let level = transect_observe::health::reported(&snapshot.kinds, &object, &dynamic);
-    let resting = transect_observe::health::resting(&snapshot.kinds, &object, &dynamic);
+    let level = transect_observe::health::reported(&snapshot.kinds, snapshot, &object, &dynamic);
+    let resting = transect_observe::health::resting(&snapshot.kinds, snapshot, &object, &dynamic);
     let path = transect_graph::links::page(&object, &snapshot.plurals)?;
     let graph = model.graph(&Shown::default());
     let deciding = transect_observe::health::Deciding::of(&snapshot.kinds, &object);

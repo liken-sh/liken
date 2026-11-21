@@ -224,7 +224,15 @@ operator ships its own shapes in its `transect/` directory.  The
 `shapes` module of `transect-map` draws every part, `shapes.css` draws
 every state, and `/shapes` draws each shape in each state.  No code and
 no rule names a shape: when a shape needs a rule of its own, the form
-of a `Shape` is missing a field.
+of a `Shape` is missing a field.  Plan 15 states each role once, in
+`spec.roles`, and gives a kind several elevations, each with a
+question, a tab, and a URL of its own,
+`/namespaces/<namespace>/<resource>/<name>/elevations/<slug>`.  An
+elevation's `wires` say what passes between its roles, and
+`sketch/wires.rs` gives each wire its state while `wires.js` draws its
+path from the parts' ports.  `through` follows one more reference, for
+a reading and for a health, and `knowledge::follow` is the one place
+that follows it.
 
 `plans/open-problems/` holds the defects that a test reproduced in the
 code as it is.  Write a plan before you build anything new.

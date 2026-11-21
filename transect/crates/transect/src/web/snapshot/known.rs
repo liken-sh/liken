@@ -70,6 +70,7 @@ impl Snapshot {
         let sources = objects::Sources {
             custom: &self.custom,
             kinds: &self.kinds,
+            ends: self,
             href: &href,
         };
         sources.groups(namespace, &workloads)
@@ -109,7 +110,7 @@ impl Snapshot {
                     continue;
                 }
                 if let Some(reason) =
-                    transect_observe::health::condition(&self.kinds, &object, found)
+                    transect_observe::health::condition(&self.kinds, self, &object, found)
                 {
                     reasons.push((namespace.clone(), reason));
                 }
@@ -377,4 +378,33 @@ fn applications(graph: &Graph, reading: &StatedReading, referrer: &Object) -> Ve
         }
     }
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::super::super::fixture;
+    use transect_observe::health::Level;
+
+    /// A vent is as healthy as the thermostat it names, so the
+    /// namespace page draws the vent whose thermostat sleeps at rest,
+    /// and the vent whose thermostat the cluster does not have as a
+    /// warning.
+    #[rstest]
+    fn draws_a_health_through_a_reference_in_the_namespaces_list() {
+        let groups = fixture::snapshot().resources_in("acme-ops");
+        let vents = groups.iter().find(|group| group.label == "Vents").unwrap();
+        let items = vents.items.iter();
+        let items: Vec<(&str, Option<Level>, bool)> = items
+            .map(|item| (item.name.as_str(), item.level, item.resting))
+            .collect();
+        assert_eq!(
+            items,
+            vec![
+                ("east-vent", Some(Level::Healthy), true),
+                ("west-vent", Some(Level::Warning), false),
+            ]
+        );
+    }
 }

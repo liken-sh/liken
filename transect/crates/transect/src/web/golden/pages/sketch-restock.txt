@@ -1,0 +1,64 @@
+Shelf top-shelf · acme-ops · transect
+transect
+cluster / platform / acme-ops / Shelf top-shelf
+access vulnerabilities kinds
+Search /
+esc
+acme-ops Shelf low-shelf Shelf top-shelf Kustomizations ×4 Buckets ×1 GitRepositories ×2 HelmRepositories ×1 OCIRepositories ×1 Gates ×3 Bins ×1 Rooms ×1 Thermostats ×1 Vents ×2
+Edges
+Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+Shelf
+top-shelf
+Ready
+the shelf the restock
+How does stock reach this shelf, and what lights its label?
+described by shelves.stock.example.test
+stock from Room cellar to Room back-room, read from spec.spill and spec.room, as the KindKnowledge shelves.stock.example.test states
+stock
+read from spec.spill and spec.room, as the KindKnowledge shelves.stock.example.test states
+light from no Lamp to A-1, read from spec.lamp and spec.label, as the KindKnowledge shelves.stock.example.test states
+light
+read from spec.lamp and spec.label, as the KindKnowledge shelves.stock.example.test states
+spills into
+no such object
+Room cellar
+the cluster has no such Room
+from spec.spill
+part of
+Room back-room
+floor ground
+temperature 18C
+Aisle 7
+Stock full
+from spec.room
+lit by
+empty
+no Lamp
+spec.lamp names nothing now
+labeled by
+not an object
+A-1
+not an object in the cluster
+from spec.label
+stock from Room cellar to Room back-room , read from spec.spill and spec.room, as the KindKnowledge shelves.stock.example.test states
+light from no Lamp to A-1 , read from spec.lamp and spec.label, as the KindKnowledge shelves.stock.example.test states
+Hover a part for the field it was read from. The places and shapes are from the KindKnowledge shelves.stock.example.test, and /shapes draws each shape.
+Part of Room back-room
+Status
+Aisle 7
+Sale —
+Stock full
+Its parts
+Bin screw-bin
+Shelf top-shelf healthy
+Described by shelves.stock.example.test
+A shelf in a stock room.
+from the KindKnowledge shelves.stock.example.test

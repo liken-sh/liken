@@ -3,15 +3,17 @@
 # the radio's address, such as AA:BB:CC:DD:EE:FF, not the name of the
 # Adapter object, such as aa-bb-cc-dd-ee-ff, so the reference matches
 # on the Adapter's status.address.  A remote that sleeps between
-# presses reports Connected False with reason Asleep, which is normal,
-# so calm shows it gray instead of as a fault.
+# presses reports Connected False with reason Asleep, and a device that
+# ended the link, such as one that was switched off, reports
+# ClosedByDevice.  Both are normal, so calm shows them gray instead of
+# as a fault.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
   name: peripherals.bluetooth.liken.sh
 spec:
   summary: A Bluetooth device a radio has paired.
-  healthy: {condition: Connected, calm: [Asleep]}
+  healthy: {condition: Connected, calm: [Asleep, ClosedByDevice]}
   references:
     - {path: status.adapter, kind: Adapter, group: bluetooth.liken.sh, match: status.address, edge: depends on, label: pairs through}
   controller: {image: liken-sh/bluetooth-operator}

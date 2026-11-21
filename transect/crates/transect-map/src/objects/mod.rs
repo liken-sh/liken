@@ -29,7 +29,7 @@ pub use section::{Section, Shape, Side, Table, words};
 use transect_cluster::cluster::Custom;
 use transect_graph::edges::Object;
 use transect_observe::health::{Level, reported, resting};
-use transect_resources::knowledge::{Kinds, plural_label};
+use transect_resources::knowledge::{Kinds, ReferenceEnds, plural_label};
 
 /// The most objects a kind's group lists on a namespace page. Any
 /// further objects appear as a count that links to the kind's list.
@@ -99,6 +99,9 @@ impl Group {
 pub struct Sources<'a> {
     pub custom: &'a [(ApiResource, Vec<Arc<Custom>>)],
     pub kinds: &'a Kinds,
+    /// The ends of each reference, for a kind whose health is the
+    /// health of the object at the end of one.
+    pub ends: &'a dyn ReferenceEnds,
     pub href: &'a dyn Fn(&Object) -> Option<String>,
 }
 
@@ -153,8 +156,8 @@ impl Sources<'_> {
 
     fn item(&self, object: Object, found: &Custom) -> Item {
         Item {
-            level: reported(self.kinds, &object, found),
-            resting: resting(self.kinds, &object, found).is_some(),
+            level: reported(self.kinds, self.ends, &object, found),
+            resting: resting(self.kinds, self.ends, &object, found).is_some(),
             href: (self.href)(&object),
             name: object.name,
         }

@@ -21,10 +21,12 @@ fn drawn(sketch: &str, amp: &str, hand: &str) -> Sketch {
         std::sync::Arc::new(transect_resources::shapes::parse(DocId::default(), value).unwrap())
     };
     let shapes = Shapes::with(&[shape("rail", "[bottom]"), shape("cart", "[top]")]);
-    let elevation = format!(
-        "elevations: [{{name: the kiosk, question: What is it?, sketch: {sketch:?}, roles: {{amp: {{reference: status.amp.name, shape: {amp}, expected: true}}, hand: {{reference: 'spec.handsets[].name', shape: {hand}}}}}}}]"
+    let roles = format!(
+        "roles: {{amp: {{reference: status.amp.name, shape: {amp}, expected: true}}, hand: {{reference: 'spec.handsets[].name', shape: {hand}}}}}"
     );
-    let spec = format!("{{{REFERENCES}, {elevation}}}");
+    let elevation =
+        format!("elevations: [{{name: the kiosk, question: What is it?, sketch: {sketch:?}}}]");
+    let spec = format!("{{{REFERENCES}, {roles}, {elevation}}}");
     page_with(&spec, Standing::Plain, &shapes).sketch.unwrap()
 }
 

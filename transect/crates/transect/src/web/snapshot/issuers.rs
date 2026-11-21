@@ -13,7 +13,7 @@ use kube::ResourceExt;
 use super::Snapshot;
 use transect_graph::edges::Object;
 use transect_network::entry::Issuers;
-use transect_resources::knowledge::{self, Names, Role};
+use transect_resources::knowledge::{self, Duty, Names};
 
 impl Snapshot {
     /// The issuer of each `Ingress` that has one. When there are several,
@@ -63,7 +63,7 @@ impl Snapshot {
                 let references = known.references.iter();
                 references
                     .into_iter()
-                    .any(|r| r.path == path && r.role == Some(Role::IssuesTls))
+                    .any(|r| r.path == path && r.role == Some(Duty::IssuesTls))
             };
             let secret = relations.iter().find_map(|relation| match &relation.names {
                 Names::Object(secret) if relation.path == written && relation.edge.is_none() => {
@@ -95,7 +95,7 @@ impl Snapshot {
         let issues_tls = |group: &str, kind: &str| {
             let known = self.kinds.of(group, kind);
             let by = known.into_iter().flat_map(|known| &known.referenced_by);
-            by.into_iter().any(|by| by.role == Some(Role::IssuesTls))
+            by.into_iter().any(|by| by.role == Some(Duty::IssuesTls))
         };
         let targets: Vec<Object> = self
             .custom
@@ -126,7 +126,7 @@ impl Snapshot {
         let referrals = knowledge::referrals(&self.kinds, &targets, &ingresses);
         let mut issuers = Issuers::new();
         for referral in referrals {
-            if referral.role != Some(Role::IssuesTls) {
+            if referral.role != Some(Duty::IssuesTls) {
                 continue;
             }
             let issuer = issuers

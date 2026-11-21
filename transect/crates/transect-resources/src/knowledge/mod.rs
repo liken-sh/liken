@@ -16,8 +16,10 @@ mod defined;
 pub mod elevation;
 pub mod findings;
 pub mod gitops;
+pub mod grid;
 mod guess;
 pub mod jsonpath;
+mod kinds;
 mod layer;
 mod matches;
 mod parse;
@@ -25,27 +27,31 @@ pub mod path;
 mod reach;
 mod referenced;
 mod references;
-
-use std::collections::HashMap;
+pub mod role;
+pub mod through;
+pub mod wire;
 
 pub use age::age;
 pub use card::{KnownThrough, Related};
 pub use columns::{Column, Columns, KEPT, Read as ColumnRead};
 pub use counts::{Count, counts};
 pub use defined::Definitions;
-pub use elevation::{Elevation, Grid};
+pub use elevation::Elevation;
 pub use gitops::{GitOpsFields, IgnoreChange, MetaKey};
+pub use grid::Grid;
 pub use guess::{Clue, Hint, clues};
+pub use kinds::Kinds;
 pub use layer::{Named, named};
 pub use matches::{Key, Matches};
 pub use parse::{edge_kind, parse};
 pub use reach::{Reached, edges};
 pub use referenced::{referrals, referred_edges};
-pub use references::{Names, Relation, relations, written_secret};
+pub use references::{Names, Relation, relations, target_of, written_secret};
+pub use through::{Followed, ReferenceEnds, Through, follow};
 
-use crate::resources::{Condition, DocId};
+use crate::resources::DocId;
 use crate::shapes::Shapes;
-use transect_graph::edges::{Kind, Object, Plurals, Provenance};
+use transect_graph::edges::{Kind, Provenance};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct KindKnowledge {
@@ -60,12 +66,8 @@ pub struct KindKnowledge {
     /// The layer that the namespaces of its objects belong to. It is
     /// kept only when the cluster's `Layers` declares it.
     pub layer: Option<String>,
-    /// The condition type whose status `True` means an object works.
-    pub healthy: Option<String>,
-    /// Reasons of a `False` `healthy` condition that mean the object is
-    /// idle, not failing, such as `Idle`. The page draws such an object
-    /// gray.
-    pub calm: Vec<String>,
+    /// What says that an object works.
+    pub healthy: Option<Healthy>,
     pub references: Vec<Reference>,
     /// The annotations on objects of other kinds that name objects of
     /// this kind.
@@ -93,10 +95,28 @@ pub struct KindKnowledge {
     /// How to read the findings in an object, when the kind is a
     /// vulnerability scanner's report.
     pub findings: Option<findings::Findings>,
-    /// The arrangements of roles that the author states for the kind.
-    /// The page of an object draws the first in place of the ring of
-    /// boxes.
+    /// The roles that the elevations place, each stated once, in the
+    /// order of the document.
+    pub roles: Vec<role::Role>,
+    /// The arrangements of roles that the author states for the kind, in
+    /// the author's order. The page of an object draws the first in place
+    /// of the ring of boxes, and each at a URL of its own.
     pub elevations: Vec<Elevation>,
+}
+
+/// What says that an object of a kind works.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Healthy {
+    /// A condition of the object's own: `True` means it works. A `False`
+    /// condition with one of the `calm` reasons, such as `Idle`, means
+    /// the object is at rest, not failing, and the page draws it gray.
+    Condition {
+        condition: String,
+        calm: Vec<String>,
+    },
+    /// The object is as healthy as the object that one of its
+    /// references names, by that object's own knowledge.
+    Through(Through),
 }
 
 /// A field of the kind's spec or status that refers to another object,
@@ -120,7 +140,7 @@ pub struct Reference {
     pub across_namespaces: bool,
     /// What the referenced object does for the `Secret` that this
     /// object writes, when a page reads that role.
-    pub role: Option<Role>,
+    pub role: Option<Duty>,
 }
 
 /// An annotation on objects of another kind that names objects of this
@@ -139,13 +159,13 @@ pub struct ReferencedBy {
     pub name: String,
     /// What the named object does for the annotated one, when a page
     /// reads that role.
-    pub role: Option<Role>,
+    pub role: Option<Duty>,
 }
 
 /// What an object does for the object that names it in an annotation,
 /// or for an object that writes a `Secret` and refers to it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Role {
+pub enum Duty {
     /// The object issues the TLS certificate of the `Ingress` that
     /// names it, or of the `Ingress` that serves the `Secret` that the
     /// referring object writes. The page labels the entry "TLS from".
@@ -171,82 +191,6 @@ pub enum Disruptions {
     /// evicted, so a `PodDisruptionBudget` that allows no eviction is
     /// expected.
     Operator,
-}
-
-/// The kind knowledge for one reading of the cluster, by group and
-/// kind, with the conditions that `resolve` created.
-#[derive(Debug, Default)]
-pub struct Kinds {
-    by_kind: HashMap<(String, String), KindKnowledge>,
-    pub conditions: Vec<(DocId, Condition)>,
-}
-
-impl Kinds {
-    /// Matches each entry of `knowledge` to the kind that `plurals`
-    /// serves under the entry's name. An entry whose kind is not served
-    /// is left out, with a condition. In an entry whose layer is not in
-    /// `layers`, the layer is cleared, with a condition, and the rest
-    /// of the entry stays in use.
-    pub fn resolve(knowledge: &[KindKnowledge], plurals: &Plurals, layers: &[&str]) -> Self {
-        let mut kinds = Self::default();
-        for one in knowledge {
-            let served = plurals
-                .iter()
-                .find(|((group, _), plural)| *group == one.group && **plural == one.plural);
-            let Some(((group, kind), _)) = served else {
-                let message = format!("the cluster serves no {}", one.name);
-                kinds
-                    .conditions
-                    .push((one.doc, Condition::not_served(message)));
-                continue;
-            };
-            let mut one = one.clone();
-            if let Some(layer) = &one.layer
-                && !layers.contains(&layer.as_str())
-            {
-                let message = format!("layer {layer:?} is not one the cluster's Layers declares");
-                kinds
-                    .conditions
-                    .push((one.doc, Condition::unknown_layer(message)));
-                one.layer = None;
-            }
-            kinds.by_kind.insert((group.clone(), kind.clone()), one);
-        }
-        kinds
-    }
-
-    /// Finds the shape of each role of each elevation in `shapes`, for
-    /// the pages that draw the elevations. A role whose shape is not
-    /// there is drawn in the default shape, and its knowledge gets the
-    /// condition `UnknownShape`. Only knowledge of a served kind is
-    /// here, so the shapes of a kind the cluster does not serve are not
-    /// checked.
-    pub fn find_shapes(&mut self, shapes: &Shapes) {
-        for one in self.by_kind.values_mut() {
-            for message in one.draw_with(shapes) {
-                let condition = Condition::unknown_shape(message);
-                self.conditions.push((one.doc, condition));
-            }
-        }
-    }
-
-    pub fn of(&self, group: &str, kind: &str) -> Option<&KindKnowledge> {
-        self.by_kind.get(&(group.to_string(), kind.to_string()))
-    }
-
-    pub fn of_object(&self, object: &Object) -> Option<&KindKnowledge> {
-        self.of(&object.group, &object.kind)
-    }
-
-    pub fn kinds(&self) -> impl Iterator<Item = &(String, String)> {
-        self.by_kind.keys()
-    }
-
-    /// Whether `object`'s kind declares `disruptions: operator`.
-    pub fn moves_before_eviction(&self, object: &Object) -> bool {
-        let known = self.of_object(object);
-        known.is_some_and(|k| k.disruptions == Some(Disruptions::Operator))
-    }
 }
 
 /// The plural of a kind as a card prints it. The API plural is lower
@@ -297,14 +241,59 @@ impl KindKnowledge {
         gitops.chain(findings).collect()
     }
 
-    /// Finds the shape of each role of each elevation in `shapes`, and
-    /// returns a message for each role whose shape is not there.
-    pub fn draw_with(&mut self, shapes: &Shapes) -> Vec<String> {
-        let group = self.group.clone();
-        let elevations = self.elevations.iter_mut();
-        elevations
-            .flat_map(|e| e.draw_with(shapes, &group))
-            .collect()
+    /// The condition type of the object's own that says it works, when
+    /// the knowledge names one.
+    pub fn condition(&self) -> Option<&str> {
+        match &self.healthy {
+            Some(Healthy::Condition { condition, .. }) => Some(condition),
+            _ => None,
+        }
+    }
+
+    /// The reasons of a `False` health condition that mean the object
+    /// is at rest.
+    pub fn calm(&self) -> &[String] {
+        match &self.healthy {
+            Some(Healthy::Condition { calm, .. }) => calm,
+            _ => &[],
+        }
+    }
+
+    /// Finds the shape of each role in `shapes`, and leaves out each
+    /// wire that meets a role whose shape has no port on the facing
+    /// edge. It returns the message of a condition for each role whose
+    /// shape is not there, and for each wire it left out.
+    pub fn draw_with(&mut self, shapes: &Shapes) -> (Vec<String>, Vec<String>) {
+        let mut unknown = Vec::new();
+        for role in &mut self.roles {
+            role.drawn = match shapes.resolve(&role.shape, &self.group) {
+                Some(shape) => shape.clone(),
+                None => {
+                    unknown.push(format!(
+                        "the role {} names the shape {:?}, which transect has not loaded, so it is drawn as a {}",
+                        role.name,
+                        role.shape,
+                        crate::shapes::library::DEFAULT
+                    ));
+                    crate::shapes::library::default()
+                }
+            };
+        }
+        let mut unported = Vec::new();
+        for elevation in &mut self.elevations {
+            let grid = &elevation.grid;
+            let roles = &self.roles;
+            let shape_of = |name: &str| {
+                let role = roles.iter().find(|role| role.name == name)?;
+                Some(grid.posed(name, &role.drawn))
+            };
+            let faults = wire::leave_unported(&mut elevation.wires, grid, shape_of);
+            let named = faults
+                .into_iter()
+                .map(|f| format!("elevation {:?}: {f}", elevation.name));
+            unported.extend(named);
+        }
+        (unknown, unported)
     }
 
     /// The provenance of a fact read through `field` of this knowledge.
@@ -319,6 +308,7 @@ impl KindKnowledge {
 #[cfg(any(test, feature = "fixtures"))]
 pub mod fixtures {
     use super::*;
+    use transect_graph::edges::Plurals;
 
     /// The knowledge `spec` declares for `name`, with each role drawn
     /// in a shape of the library.
@@ -327,6 +317,16 @@ pub mod fixtures {
         let mut known = parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap();
         known.draw_with(&Shapes::default());
         known
+    }
+
+    /// A cluster in which every reference names nothing, for a test that
+    /// follows none.
+    pub struct Nowhere;
+
+    impl ReferenceEnds for Nowhere {
+        fn ends(&self, _: &transect_graph::edges::Object, _: &str) -> Vec<Followed<'_>> {
+            Vec::new()
+        }
     }
 
     /// Plurals that serve `widgets.widgets.example.com` as `Widget`.
@@ -342,94 +342,7 @@ pub mod fixtures {
 mod tests {
     use rstest::rstest;
 
-    use super::fixtures::{knowledge, plurals};
     use super::*;
-
-    fn resolved(name: &str, spec: &str) -> Kinds {
-        Kinds::resolve(&[knowledge(name, spec)], &plurals(), &["apps", "platform"])
-    }
-
-    fn reasons(kinds: &Kinds) -> Vec<&'static str> {
-        kinds.conditions.iter().map(|(_, c)| c.reason).collect()
-    }
-
-    #[rstest]
-    #[case::served("widgets.widgets.example.com", "{}", true, vec![])]
-    #[case::not_served("gadgets.widgets.example.com", "{}", false, vec!["NotServed"])]
-    #[case::an_unknown_layer("widgets.widgets.example.com", "{layer: edge}", true, vec!["UnknownLayer"])]
-    #[case::a_declared_layer("widgets.widgets.example.com", "{layer: platform}", true, vec![])]
-    fn matches_each_name_to_a_served_kind(
-        #[case] name: &str,
-        #[case] spec: &str,
-        #[case] found: bool,
-        #[case] expected: Vec<&'static str>,
-    ) {
-        let kinds = resolved(name, spec);
-        let widget = kinds.of("widgets.example.com", "Widget");
-        assert_eq!((widget.is_some(), reasons(&kinds)), (found, expected));
-    }
-
-    const ELEVATION: &str = "references: [{path: spec.node, kind: Node}], elevations: [{name: the rack, question: Where is it?, sketch: node, roles: {node: {reference: spec.node, shape: SHAPE}}}]";
-
-    /// A role's shape, as `resolve` finds it among the library's shapes
-    /// and one author's shape in the kind's group, with the condition
-    /// for a shape that is not there.
-    #[rstest]
-    #[case::the_library("drum", "drum", vec![])]
-    #[case::the_kinds_own_group("crate", "crate.widgets.example.com", vec![])]
-    #[case::a_whole_name("crate.widgets.example.com", "crate.widgets.example.com", vec![])]
-    #[case::no_such_shape("kettle", "box", vec!["UnknownShape"])]
-    fn draws_each_role_in_the_shape_it_names(
-        #[case] written: &str,
-        #[case] drawn: &str,
-        #[case] expected: Vec<&'static str>,
-    ) {
-        let spec = format!("{{{}}}", ELEVATION.replace("SHAPE", written));
-        let author = crate::shapes::parse(
-            DocId::default(),
-            serde_yaml::from_str(
-                "{metadata: {name: crate.widgets.example.com}, spec: {summary: A crate., size: {design: [100, 50], width: [80, 120]}}}",
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        let shapes = Shapes::with(&[std::sync::Arc::new(author)]);
-        let mut kinds = Kinds::resolve(
-            &[knowledge("widgets.widgets.example.com", &spec)],
-            &plurals(),
-            &[],
-        );
-        kinds.find_shapes(&shapes);
-        let widget = kinds.of("widgets.example.com", "Widget").unwrap();
-        let role = &widget.elevations[0].roles[0];
-        assert_eq!(
-            (role.drawn.name.as_str(), reasons(&kinds)),
-            (drawn, expected)
-        );
-    }
-
-    /// A document whose kind the cluster does not serve is left out with
-    /// `NotServed`, so its shapes are checked only when it is served.
-    #[rstest]
-    fn checks_no_shape_of_a_kind_the_cluster_does_not_serve() {
-        let spec = format!("{{{}}}", ELEVATION.replace("SHAPE", "kettle"));
-        let mut kinds = resolved("gadgets.widgets.example.com", &spec);
-        kinds.find_shapes(&Shapes::default());
-        assert_eq!(reasons(&kinds), vec!["NotServed"]);
-    }
-
-    #[rstest]
-    fn drops_a_layer_no_layers_declares() {
-        let kinds = resolved(
-            "widgets.widgets.example.com",
-            "{layer: edge, summary: Turns.}",
-        );
-        let widget = kinds.of("widgets.example.com", "Widget").unwrap();
-        assert_eq!(
-            (widget.layer.as_deref(), widget.summary.as_deref()),
-            (None, Some("Turns."))
-        );
-    }
 
     #[rstest]
     #[case::a_summary_and_a_controller(
@@ -442,7 +355,7 @@ mod tests {
     #[case::a_node_by_its_name("{node: metadata.name}", false)]
     #[case::a_node_in_its_status("{node: status.nodeName}", true)]
     #[case::an_elevation(
-        "{references: [{path: spec.node, kind: Node}], elevations: [{name: the rack, question: Where is it?, sketch: node, roles: {node: {reference: spec.node}}}]}",
+        "{references: [{path: spec.node, kind: Node}], roles: {node: {reference: spec.node}}, elevations: [{name: the rack, question: Where is it?, sketch: node}]}",
         true
     )]
     fn reports_whether_it_reads_fields_a_trimmed_watch_drops(
@@ -467,17 +380,5 @@ mod tests {
         #[case] label: &str,
     ) {
         assert_eq!(plural_label(kind, plural), label);
-    }
-
-    #[rstest]
-    #[case::operator("{disruptions: operator}", true)]
-    #[case::not_declared("{}", false)]
-    fn reports_whether_the_operator_moves_work_before_eviction(
-        #[case] spec: &str,
-        #[case] moves: bool,
-    ) {
-        let kinds = resolved("widgets.widgets.example.com", spec);
-        let widget = Object::new("widgets.example.com", "Widget", Some("shop"), "a");
-        assert_eq!(kinds.moves_before_eviction(&widget), moves);
     }
 }

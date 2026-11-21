@@ -6,7 +6,8 @@
 //! whose field is empty still gets its box, so the diagram keeps its
 //! shape while an operator fills in status. The column on the left
 //! lists the kind's objects in the namespace. When the knowledge
-//! states an elevation, the page draws its sketch in place of the ring.
+//! states elevations, the page draws the sketch of one in place of the
+//! ring: the first at the object's URL, and each at a URL of its own.
 
 mod chips;
 mod fit;
@@ -21,12 +22,13 @@ use crate::objects::{Center, ObjectBoard, ObjectCard, Section};
 pub use crate::shapes::text::{End, Reading, Why};
 pub use chips::{Chip, chips, every_chip};
 use layout::{Place, Rect, places};
-pub use sketch::{Lean, Sketch, SketchRole, Standing};
+pub use sketch::{ElevationTab, Head, Lean, Sketch, SketchRole, SketchWire, Standing};
 use transect_frame::frame::crumbs::Crumb;
 use transect_frame::frame::tabs::{Lens, Tabs};
 use transect_graph::edges::{Endpoint, Kind, Object, Plurals};
 use transect_graph::links::Reference;
 use transect_observe::health::Level;
+use transect_resources::knowledge::role::Column;
 use transect_resources::knowledge::{Count, KindKnowledge, KnownThrough, Names, Reached, Relation};
 
 #[derive(Template)]
@@ -37,7 +39,8 @@ pub struct KnownPage {
     pub layer: String,
     pub kind: String,
     pub name: String,
-    /// The page's path, which is part of its event stream URL.
+    /// The page's path, which is part of its event stream URL: the
+    /// object's, or one of its elevations'.
     pub path: String,
     /// The kind's objects in the namespace, this one among them.
     pub column: Vec<Entry>,
@@ -55,8 +58,9 @@ pub struct KnownPage {
     pub height: i32,
     pub center: Rect,
     pub boxes: Vec<RelationBox>,
-    /// The first elevation of the kind's knowledge, which the page draws
-    /// in place of the boxes when the knowledge states one.
+    /// The elevation of the kind's knowledge that the URL names, or its
+    /// first, which the page draws in place of the boxes when the
+    /// knowledge states one.
     pub sketch: Option<Sketch>,
     /// The workload's card, for an object that runs pods.
     pub card: Option<WorkloadCard>,
@@ -97,7 +101,11 @@ pub struct Board<'a> {
     pub object: &'a Object,
     pub knowledge: &'a KindKnowledge,
     pub layer: String,
+    /// The object's path.
     pub path: String,
+    /// The slug of the elevation that the URL names, or none at the
+    /// object's own URL.
+    pub elevation: Option<&'a str>,
     /// Each relation read from the object's fields, with what it
     /// resolves to.
     pub reached: Vec<(&'a Relation, Reached)>,
@@ -117,10 +125,11 @@ pub struct Board<'a> {
     /// What the cluster says about an object that a part of the sketch
     /// names.
     pub standing: &'a dyn Fn(&Object) -> Standing,
-    /// The readings of an object: each of the printer columns named in
-    /// the list that has a value, in the list's order. A sketch reads
-    /// the objects that its parts name and the page's own object.
-    pub readings: &'a dyn Fn(&Object, &[String]) -> Vec<Reading>,
+    /// The readings of an object: each of the columns in the list that
+    /// has a value, of the object or of the object at the end of the
+    /// column's reference, in the list's order. A sketch reads the
+    /// objects that its parts name and the page's own object.
+    pub readings: &'a dyn Fn(&Object, &[Column]) -> Vec<Reading>,
 }
 
 impl KnownPage {
@@ -129,8 +138,21 @@ impl KnownPage {
     pub fn build(board: Board, card: Option<WorkloadCard>, object_card: ObjectCard) -> Self {
         let object = board.object;
         let namespace = object.namespace.clone().unwrap_or_default();
-        let elevation = board.knowledge.elevations.first();
-        let sketch = elevation.map(|elevation| Sketch::build(&board, elevation));
+        let described = card.as_ref().and_then(|card| card.known.as_ref());
+        let described = described.or(object_card.known.as_ref());
+        let author = described.map(KnownThrough::through).unwrap_or(Reference {
+            text: board.knowledge.name.clone(),
+            href: None,
+        });
+        let elevations = &board.knowledge.elevations;
+        let chosen = sketch::choose(
+            elevations,
+            board.elevation,
+            &board.path,
+            &object.kind,
+            author,
+        );
+        let sketch = chosen.map(|(elevation, head)| Sketch::build(&board, elevation, head));
         let mut references: Vec<(String, String, Option<Kind>)> = board
             .knowledge
             .references
@@ -193,7 +215,10 @@ impl KnownPage {
             layer: board.layer,
             kind: object.kind.clone(),
             name: object.name.clone(),
-            path: board.path,
+            path: match board.elevation {
+                Some(slug) => sketch::href(&board.path, slug),
+                None => board.path,
+            },
             column: board.column,
             counts: board.counts,
             chips: board.chips,

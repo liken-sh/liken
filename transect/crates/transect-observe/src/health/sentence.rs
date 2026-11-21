@@ -90,6 +90,7 @@ impl fmt::Display for Reason {
                 write!(f, "{pod} pending for {}", age(*minutes))
             }
             Self::LastRunFailed { workload } => write!(f, "{}: last run failed", workload.name),
+            Self::Unfollowed { workload, why } => write!(f, "{}: {why}", workload.name),
             Self::Condition {
                 workload,
                 condition,

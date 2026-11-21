@@ -165,6 +165,14 @@ fn diff(then: &str, now: &str) -> String {
     "/namespaces/acme-shop/promotions.promotions.example.test/spring-sale"
 )]
 #[case::a_sketch("sketch", "/namespaces/acme-ops/shelves.stock.example.test/top-shelf")]
+#[case::another_elevation(
+    "sketch-restock",
+    "/namespaces/acme-ops/shelves.stock.example.test/top-shelf/elevations/the-restock"
+)]
+#[case::a_health_through_a_reference(
+    "vent",
+    "/namespaces/acme-ops/vents.stock.example.test/west-vent"
+)]
 #[case::a_kustomization(
     "kustomization",
     "/namespaces/acme-ops/kustomizations.kustomize.toolkit.fluxcd.io/shop-apps"

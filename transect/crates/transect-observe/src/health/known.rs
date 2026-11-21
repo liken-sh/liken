@@ -7,6 +7,12 @@
 //! condition, `Ready` decides in the same way, except that a resource
 //! with no `Ready` condition adds no reason, and its health is the
 //! roll-up of the workloads under it.
+//!
+//! A kind whose knowledge says that it is healthy `through` a reference
+//! has no condition of its own.  Its object is as healthy as the object
+//! at the end of the reference, by that object's own knowledge, so it is
+//! at rest while that object is.  A reference that names nothing, or
+//! names an object that the cluster does not have, is a warning.
 
 use kube::core::DynamicObject;
 use serde_json::Value;
@@ -14,7 +20,7 @@ use serde_json::Value;
 use super::{Level, Reason};
 use transect_graph::edges::Object;
 use transect_graph::untrusted::capped;
-use transect_resources::knowledge::Kinds;
+use transect_resources::knowledge::{Followed, Healthy, Kinds, ReferenceEnds};
 
 /// The condition that decides a resource's health when no kind knowledge
 /// names one.
@@ -24,11 +30,88 @@ const READY: &str = "Ready";
 /// on a card.
 const MESSAGE_CHARS: usize = 200;
 
+/// The object whose own conditions decide another object's health.
+enum Judged<'a> {
+    /// The object, itself or at the end of a reference, and the data
+    /// that the cluster stores for it.
+    Own(Object, &'a DynamicObject),
+    /// No object decides, and the warning says why.
+    Unfollowed(String),
+    /// The reference names an object of a kind that `transect` does not
+    /// watch, so nothing can be said.
+    Unknown,
+}
+
+/// The object whose conditions decide the health of `object`: `object`
+/// itself, or the object at the first end of the reference that its
+/// knowledge follows. Only one reference is followed, because a kind
+/// whose health is through a reference has no condition of its own.
+fn judged<'a>(
+    kinds: &Kinds,
+    ends: &'a dyn ReferenceEnds,
+    object: &Object,
+    resource: &'a DynamicObject,
+) -> Judged<'a> {
+    let healthy = kinds.of_object(object).and_then(|k| k.healthy.as_ref());
+    let Some(Healthy::Through(through)) = healthy else {
+        return Judged::Own(object.clone(), resource);
+    };
+    if let Some(unresolved) = &through.unresolved {
+        return Judged::Unfollowed(unresolved.clone());
+    }
+    let path = &through.path;
+    match ends.ends(object, path).into_iter().next() {
+        Some(Followed::Found(other, found)) => {
+            match kinds.of_object(&other).and_then(|k| k.condition()) {
+                Some(_) => Judged::Own(other, found),
+                None => Judged::Unknown,
+            }
+        }
+        None => Judged::Unfollowed(format!("{path} names nothing")),
+        Some(Followed::Ambiguous(count)) => {
+            Judged::Unfollowed(format!("{path} matches {count} objects, so it names none"))
+        }
+        Some(Followed::Missing(other)) => {
+            Judged::Unfollowed(format!("the cluster has no such {}", other.kind))
+        }
+        Some(Followed::Unwatched(_)) => Judged::Unknown,
+    }
+}
+
 /// The reason that `resource` adds to its own health.  It is `None` when
 /// the deciding condition is `True` or at rest, and when no kind
 /// knowledge names a condition and the resource has no `Ready`.
-pub fn condition(kinds: &Kinds, object: &Object, resource: &DynamicObject) -> Option<Reason> {
-    let named = kinds.of_object(object).and_then(|k| k.healthy.as_deref());
+pub fn condition(
+    kinds: &Kinds,
+    ends: &dyn ReferenceEnds,
+    object: &Object,
+    resource: &DynamicObject,
+) -> Option<Reason> {
+    reason(kinds, object, &judged(kinds, ends, object, resource))
+}
+
+/// The reason that `judged` gives `object`.  A reason read through a
+/// reference is still about `object`, because the namespace page counts
+/// it for `object`.
+fn reason(kinds: &Kinds, object: &Object, judged: &Judged) -> Option<Reason> {
+    match judged {
+        Judged::Own(judged, resource) => {
+            let mut reason = own_condition(kinds, judged, resource)?;
+            if let Reason::Condition { workload, .. } = &mut reason {
+                *workload = object.clone();
+            }
+            Some(reason)
+        }
+        Judged::Unfollowed(why) => Some(Reason::Unfollowed {
+            workload: object.clone(),
+            why: why.clone(),
+        }),
+        Judged::Unknown => None,
+    }
+}
+
+fn own_condition(kinds: &Kinds, object: &Object, resource: &DynamicObject) -> Option<Reason> {
+    let named = kinds.of_object(object).and_then(|k| k.condition());
     let found = named.or(Some(READY)).and_then(|name| find(resource, name));
     let condition = match (named, found) {
         (_, Some(found)) => found,
@@ -65,34 +148,51 @@ pub fn condition(kinds: &Kinds, object: &Object, resource: &DynamicObject) -> Op
 /// or at rest.  It is `None` when `condition` returns no reason because
 /// the resource has no `Ready`, so such a kind gets no dot in place of a
 /// healthy one.
-pub fn reported(kinds: &Kinds, object: &Object, resource: &DynamicObject) -> Option<Level> {
-    if let Some(reason) = condition(kinds, object, resource) {
+pub fn reported(
+    kinds: &Kinds,
+    ends: &dyn ReferenceEnds,
+    object: &Object,
+    resource: &DynamicObject,
+) -> Option<Level> {
+    let judged = judged(kinds, ends, object, resource);
+    if let Some(reason) = reason(kinds, object, &judged) {
         return Some(reason.level());
     }
-    let named = kinds.of_object(object).and_then(|k| k.healthy.as_deref());
+    let Judged::Own(object, resource) = judged else {
+        return None;
+    };
+    let named = kinds.of_object(&object).and_then(|k| k.condition());
     find(resource, named.unwrap_or(READY)).map(|_| Level::Healthy)
 }
 
 /// Why `resource` is at rest, when the condition that its kind knowledge
 /// names is `False` with a calm reason: the condition's message, or its
 /// reason when it has no message.  The page shows it as a gray line.
-pub fn resting(kinds: &Kinds, object: &Object, resource: &DynamicObject) -> Option<String> {
-    let (reason, message) = at_rest(kinds, object, resource)?;
+pub fn resting(
+    kinds: &Kinds,
+    ends: &dyn ReferenceEnds,
+    object: &Object,
+    resource: &DynamicObject,
+) -> Option<String> {
+    let (reason, message) = at_rest(kinds, ends, object, resource)?;
     Some(message.unwrap_or(reason))
 }
 
-/// The reason and the message of the condition that `object`'s kind
-/// knowledge names, when it is `False` with a calm reason.  A sketch
-/// shows the reason on the part and the message when the reader points
-/// at it.
+/// The reason and the message of the condition that decides `object`'s
+/// health, when it is `False` with a calm reason.  A sketch shows the
+/// reason on the part and the message when the reader points at it.
 pub fn at_rest(
     kinds: &Kinds,
+    ends: &dyn ReferenceEnds,
     object: &Object,
     resource: &DynamicObject,
 ) -> Option<(String, Option<String>)> {
-    let named = kinds.of_object(object)?.healthy.as_deref()?;
+    let Judged::Own(object, resource) = judged(kinds, ends, object, resource) else {
+        return None;
+    };
+    let named = kinds.of_object(&object)?.condition()?;
     let condition = find(resource, named)?;
-    if !calm(kinds, object, condition) {
+    if !calm(kinds, &object, condition) {
         return None;
     }
     let text = |key: &str| capped(condition.get(key)?.as_str()?, MESSAGE_CHARS);
@@ -106,8 +206,8 @@ fn calm(kinds: &Kinds, object: &Object, condition: &Value) -> bool {
         return false;
     };
     let field = |key: &str| condition.get(key).and_then(Value::as_str);
-    let named = field("type") == knowledge.healthy.as_deref();
-    let reason = field("reason").is_some_and(|reason| knowledge.calm.iter().any(|c| c == reason));
+    let named = field("type") == knowledge.condition();
+    let reason = field("reason").is_some_and(|reason| knowledge.calm().iter().any(|c| c == reason));
     named && field("status") == Some("False") && reason
 }
 
@@ -116,10 +216,12 @@ fn calm(kinds: &Kinds, object: &Object, condition: &Value) -> bool {
 /// deciding condition is the one that the kind knowledge names, or
 /// `Ready` when the knowledge names none.  Only that condition gets a
 /// color, because for any other condition, such as `AttentionNeeded`,
-/// `True` can be good or bad.
+/// `True` can be good or bad.  A kind whose health is through a
+/// reference has no deciding condition of its own, so each of its own
+/// conditions is drawn gray.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Deciding {
-    pub condition: String,
+    pub condition: Option<String>,
     pub calm: Vec<String>,
 }
 
@@ -128,7 +230,7 @@ pub struct Deciding {
 impl Default for Deciding {
     fn default() -> Self {
         Self {
-            condition: READY.into(),
+            condition: Some(READY.into()),
             calm: Vec::new(),
         }
     }
@@ -136,14 +238,17 @@ impl Default for Deciding {
 
 impl Deciding {
     pub fn of(kinds: &Kinds, object: &Object) -> Self {
-        let knowledge = kinds.of_object(object);
+        let Some(knowledge) = kinds.of_object(object) else {
+            return Self::default();
+        };
+        let condition = match &knowledge.healthy {
+            Some(Healthy::Through(_)) => None,
+            Some(Healthy::Condition { condition, .. }) => Some(condition.clone()),
+            None => Some(READY.into()),
+        };
         Self {
-            condition: knowledge
-                .and_then(|known| known.healthy.clone())
-                .unwrap_or_else(|| READY.into()),
-            calm: knowledge
-                .map(|known| known.calm.clone())
-                .unwrap_or_default(),
+            condition,
+            calm: knowledge.calm().to_vec(),
         }
     }
 
@@ -151,7 +256,7 @@ impl Deciding {
     /// is `None`, which the page draws gray, for any condition but the
     /// deciding one, and for the deciding one at rest.
     pub fn level(&self, kind: &str, status: &str, reason: Option<&str>) -> Option<Level> {
-        if kind != self.condition {
+        if Some(kind) != self.condition.as_deref() {
             return None;
         }
         match (status, reason) {
@@ -172,192 +277,4 @@ fn find<'a>(resource: &'a DynamicObject, name: &str) -> Option<&'a Value> {
 }
 
 #[cfg(test)]
-mod tests {
-    use rstest::rstest;
-
-    use super::*;
-    use transect_resources::knowledge::fixtures::{knowledge, plurals};
-
-    fn widget() -> Object {
-        Object::new("widgets.example.com", "Widget", Some("shop"), "front-room")
-    }
-
-    fn resource(conditions: &str) -> DynamicObject {
-        serde_yaml::from_str(&format!(
-            "apiVersion: widgets.example.com/v1\nkind: Widget\nmetadata: {{namespace: shop, name: front-room}}\nstatus: {{conditions: {conditions}}}\n"
-        ))
-        .unwrap()
-    }
-
-    fn kinds(spec: &str) -> Kinds {
-        let known = [knowledge("widgets.widgets.example.com", spec)];
-        Kinds::resolve(&known, &plurals(), &[])
-    }
-
-    fn read(spec: Option<&str>, conditions: &str) -> Option<(String, Level)> {
-        let kinds = spec.map(kinds).unwrap_or_default();
-        let reason = condition(&kinds, &widget(), &resource(conditions))?;
-        Some((reason.to_string(), reason.level()))
-    }
-
-    const SPINNING: &str = "{healthy: {condition: Spinning}}";
-    const RESTING: &str = "{healthy: {condition: Spinning, calm: [Parked]}}";
-
-    #[rstest]
-    #[case::true_is_healthy(Some(SPINNING), "[{type: Spinning, status: 'True'}]", None)]
-    #[case::false_with_a_message(
-        Some(SPINNING),
-        "[{type: Spinning, status: 'False', reason: Jammed, message: the axle is stuck}]",
-        Some(("front-room: Spinning is False (Jammed): the axle is stuck", Level::Failing))
-    )]
-    #[case::unknown(
-        Some(SPINNING),
-        "[{type: Spinning, status: Unknown}]",
-        Some(("front-room: Spinning is Unknown", Level::Warning))
-    )]
-    #[case::missing(
-        Some(SPINNING),
-        "[{type: Ready, status: 'True'}]",
-        Some(("front-room: reports no Spinning condition", Level::Warning))
-    )]
-    #[case::ready_without_knowledge(
-        None,
-        "[{type: Ready, status: 'False', reason: NoQuorum}]",
-        Some(("front-room: Ready is False (NoQuorum)", Level::Failing))
-    )]
-    #[case::ready_when_knowledge_names_none(
-        Some("{summary: Turns.}"),
-        "[{type: Ready, status: 'True'}]",
-        None
-    )]
-    #[case::a_calm_reason(
-        Some(RESTING),
-        "[{type: Spinning, status: 'False', reason: Parked, message: nobody asked}]",
-        None
-    )]
-    #[case::a_false_that_is_not_calm(
-        Some(RESTING),
-        "[{type: Spinning, status: 'False', reason: Jammed}]",
-        Some(("front-room: Spinning is False (Jammed)", Level::Failing))
-    )]
-    #[case::neither_knowledge_nor_ready(None, "[{type: Synced, status: 'False'}]", None)]
-    #[case::no_conditions_at_all(None, "[]", None)]
-    fn reads_the_condition_that_means_it_works(
-        #[case] spec: Option<&str>,
-        #[case] conditions: &str,
-        #[case] expected: Option<(&str, Level)>,
-    ) {
-        let expected = expected.map(|(text, level)| (text.to_string(), level));
-        assert_eq!(read(spec, conditions), expected);
-    }
-
-    #[rstest]
-    #[case::ready(None, "[{type: Ready, status: 'True'}]", Some(Level::Healthy))]
-    #[case::not_ready(None, "[{type: Ready, status: 'False'}]", Some(Level::Failing))]
-    #[case::no_ready_condition(None, "[{type: Synced, status: 'True'}]", None)]
-    #[case::the_condition_knowledge_names(
-        Some(SPINNING),
-        "[{type: Spinning, status: 'True'}]",
-        Some(Level::Healthy)
-    )]
-    #[case::missing_the_condition_knowledge_names(Some(SPINNING), "[]", Some(Level::Warning))]
-    #[case::at_rest(
-        Some(RESTING),
-        "[{type: Spinning, status: 'False', reason: Parked}]",
-        Some(Level::Healthy)
-    )]
-    fn reads_the_level_of_a_dot(
-        #[case] spec: Option<&str>,
-        #[case] conditions: &str,
-        #[case] expected: Option<Level>,
-    ) {
-        let kinds = spec.map(kinds).unwrap_or_default();
-        assert_eq!(reported(&kinds, &widget(), &resource(conditions)), expected);
-    }
-
-    #[rstest]
-    #[case::its_message(
-        Some(RESTING),
-        "[{type: Spinning, status: 'False', reason: Parked, message: Not reserved}]",
-        Some("Not reserved")
-    )]
-    #[case::its_reason_with_no_message(
-        Some(RESTING),
-        "[{type: Spinning, status: 'False', reason: Parked}]",
-        Some("Parked")
-    )]
-    #[case::working(Some(RESTING), "[{type: Spinning, status: 'True'}]", None)]
-    #[case::failing(
-        Some(RESTING),
-        "[{type: Spinning, status: 'False', reason: Jammed}]",
-        None
-    )]
-    #[case::another_condition_with_a_calm_reason(
-        Some(RESTING),
-        "[{type: Spinning, status: 'True'}, {type: Lit, status: 'False', reason: Parked}]",
-        None
-    )]
-    fn says_why_a_resource_is_at_rest(
-        #[case] spec: Option<&str>,
-        #[case] conditions: &str,
-        #[case] expected: Option<&str>,
-    ) {
-        let kinds = spec.map(kinds).unwrap_or_default();
-        let found = resting(&kinds, &widget(), &resource(conditions));
-        assert_eq!(found.as_deref(), expected);
-    }
-
-    #[rstest]
-    #[case::with_a_message(
-        "[{type: Spinning, status: 'False', reason: Parked, message: Not reserved}]",
-        Some(("Parked", Some("Not reserved")))
-    )]
-    #[case::with_no_message(
-        "[{type: Spinning, status: 'False', reason: Parked}]",
-        Some(("Parked", None))
-    )]
-    #[case::working("[{type: Spinning, status: 'True'}]", None)]
-    fn gives_the_reason_and_message_of_a_resource_at_rest(
-        #[case] conditions: &str,
-        #[case] expected: Option<(&str, Option<&str>)>,
-    ) {
-        let found = at_rest(&kinds(RESTING), &widget(), &resource(conditions));
-        let found = found.as_ref().map(|(r, m)| (r.as_str(), m.as_deref()));
-        assert_eq!(found, expected);
-    }
-
-    #[rstest]
-    #[case::the_deciding_condition_working("Spinning", "True", None, Some(Level::Healthy))]
-    #[case::the_deciding_condition_failing(
-        "Spinning",
-        "False",
-        Some("Jammed"),
-        Some(Level::Failing)
-    )]
-    #[case::the_deciding_condition_at_rest("Spinning", "False", Some("Parked"), None)]
-    #[case::the_deciding_condition_unknown("Spinning", "Unknown", None, Some(Level::Warning))]
-    #[case::another_condition_true("AttentionNeeded", "True", None, None)]
-    #[case::another_condition_false("Active", "False", Some("Jammed"), None)]
-    fn colors_only_the_deciding_condition(
-        #[case] kind: &str,
-        #[case] status: &str,
-        #[case] reason: Option<&str>,
-        #[case] expected: Option<Level>,
-    ) {
-        let deciding = Deciding::of(&kinds(RESTING), &widget());
-        assert_eq!(deciding.level(kind, status, reason), expected);
-    }
-
-    #[rstest]
-    fn strips_what_an_operator_writes_to_one_short_line() {
-        let long = "x".repeat(400);
-        let conditions =
-            format!("[{{type: Ready, status: 'False', message: \"one\\ntwo {long}\"}}]");
-        let (text, _) = read(None, &conditions).unwrap();
-        assert!(
-            text.starts_with("front-room: Ready is False: one two x"),
-            "{text}"
-        );
-        assert!(text.chars().count() < 250, "{text}");
-    }
-}
+mod tests;

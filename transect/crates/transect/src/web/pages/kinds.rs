@@ -36,9 +36,10 @@ pub fn kinds_page(model: &Model) -> KindsPage {
             .iter()
             .filter_map(|found| Some((as_object(resource, found)?, found)))
         {
-            let level = reported(&snapshot.kinds, &object, found);
+            let level = reported(&snapshot.kinds, snapshot, &object, found);
             let resting =
-                transect_observe::health::resting(&snapshot.kinds, &object, found).is_some();
+                transect_observe::health::resting(&snapshot.kinds, snapshot, &object, found)
+                    .is_some();
             if let Some(level) = level.filter(|level| *level != Level::Healthy && !resting) {
                 unhealthy += 1;
                 worst = worst.max(Some(level));
@@ -140,8 +141,9 @@ pub fn kind_card(
     });
     for (object, found) in kept {
         count += 1;
-        let level = reported(&snapshot.kinds, &object, found);
-        let resting = transect_observe::health::resting(&snapshot.kinds, &object, found).is_some();
+        let level = reported(&snapshot.kinds, snapshot, &object, found);
+        let resting =
+            transect_observe::health::resting(&snapshot.kinds, snapshot, &object, found).is_some();
         if let Some(level) = level.filter(|level| *level != Level::Healthy && !resting) {
             unhealthy += 1;
             worst = worst.max(Some(level));
@@ -199,9 +201,14 @@ pub fn table(
         Some(KindObject {
             condition: condition.into_iter().next().map(|chip| chip.text),
             item: Item {
-                level: reported(&snapshot.kinds, &object, found),
-                resting: transect_observe::health::resting(&snapshot.kinds, &object, found)
-                    .is_some(),
+                level: reported(&snapshot.kinds, snapshot, &object, found),
+                resting: transect_observe::health::resting(
+                    &snapshot.kinds,
+                    snapshot,
+                    &object,
+                    found,
+                )
+                .is_some(),
                 href: pages.href(&object),
                 name: object.name.clone(),
             },
@@ -273,6 +280,8 @@ mod tests {
                 ("Bins", 1, 0),
                 ("Rooms", 1, 0),
                 ("Shelves", 2, 0),
+                ("Thermostats", 1, 0),
+                ("Vents", 2, 1),
                 ("Tills", 1, 0)
             ]
         );

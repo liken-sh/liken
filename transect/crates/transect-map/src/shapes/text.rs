@@ -56,18 +56,21 @@ pub struct Part {
 }
 
 /// One printer column of an object that has a value.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Reading {
     pub name: String,
     /// The value that `kubectl get` prints.
     pub value: String,
+    /// The object at the end of a reference that the value was read
+    /// from, when it is not the part's own: its page, and a sentence
+    /// such as "Charge of Pad aa-bb, through status.pad".
+    pub from: Option<Reference>,
 }
 
 /// One entry of a role's `shows` that has a value.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Shown {
-    pub name: String,
-    pub value: String,
+    pub reading: Reading,
     /// The value is from a column after the first of its entry, such as
     /// the idle screen in place of the play. A display draws it quieter,
     /// so a display at rest looks different from a display that plays.

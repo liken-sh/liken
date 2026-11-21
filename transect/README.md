@@ -49,7 +49,11 @@ and the product design that new work follows is in
   GitOps tool such as Flux applies it from and the commit that its
   image was built from.  A namespace of DaemonSets draws as
   a matrix of DaemonSets by machine, and a GitOps object or a custom
-  resource of a known kind gets a page of its own.
+  resource of a known kind gets a page of its own.  When the knowledge
+  of a kind states elevations, such as the room and the signal path of
+  a `Player`, the page draws each as a sketch of its parts, with a tab
+  and a URL for each, and wires between the parts that say what passes
+  from one to the next.
 - **Edges**, which you turn on and off from a row above each picture:
   runs on, depends on, authenticates through, stores on, holds,
   reconciles from, controlled by, and allowed to call (from

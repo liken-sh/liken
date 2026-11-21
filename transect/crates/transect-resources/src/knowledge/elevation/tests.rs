@@ -3,12 +3,19 @@ use std::ops::Range;
 use rstest::rstest;
 
 use super::super::{KindKnowledge, parse};
+use super::slug;
 use crate::resources::DocId;
+use crate::shapes::{Shapes, library};
 
 const REFERENCES: &str = "references:
     - {path: status.screen.monitor, label: shows on}
     - {path: status.amp.name, kind: Amp, group: amps.example.com}
-    - {path: 'spec.handsets[].name', kind: Handset, group: widgets.example.com}";
+    - {path: 'spec.handsets[].name', kind: Handset, group: widgets.example.com}
+  roles:
+    face: {reference: status.screen.monitor, shape: screen, expected: true}
+    amp: {reference: status.amp.name}
+    hand: {reference: 'spec.handsets[].name', shape: handheld}
+    bell: {reference: status.amp.name, shape: speaker}";
 
 /// The knowledge of a kind with `REFERENCES` and the elevations that
 /// `elevations` writes.
@@ -26,39 +33,12 @@ const KIOSK: &str = "
         face  face  .
         face  face  amp
         .     hand  .
-      roles:
-        face: {reference: status.screen.monitor, shape: screen, expected: true, reads: [Mode]}
-        amp: {reference: status.amp.name}
-        hand: {reference: 'spec.handsets[].name', shape: handheld}
+    - name: The Wiring!
+      question: What feeds what?
+      sketch: amp face
+      wires:
+        - {from: amp, to: face, carries: ' power '}
 ";
-
-#[rstest]
-fn reads_the_roles_in_the_order_of_the_sketch() {
-    let known = read(KIOSK).unwrap();
-    let roles: Vec<(&str, &str, &str, bool, Vec<&str>)> = known.elevations[0]
-        .roles
-        .iter()
-        .map(|role| {
-            let reads = role.reads.iter().map(String::as_str).collect();
-            let (name, reference) = (role.name.as_str(), role.reference.as_str());
-            (name, reference, role.shape.as_str(), role.expected, reads)
-        })
-        .collect();
-    assert_eq!(
-        roles,
-        vec![
-            (
-                "face",
-                "status.screen.monitor",
-                "screen",
-                true,
-                vec!["Mode"]
-            ),
-            ("amp", "status.amp.name", "box", false, vec![]),
-            ("hand", "spec.handsets[].name", "handheld", false, vec![]),
-        ]
-    );
-}
 
 #[rstest]
 fn reads_the_sketch_into_a_grid() {
@@ -90,6 +70,40 @@ fn reads_the_sketch_into_a_grid() {
     );
 }
 
+/// A wire as its ends and what it carries.
+type Ends<'a> = (&'a str, &'a str, &'a str);
+
+#[rstest]
+fn reads_the_slug_and_the_wires_of_each_elevation() {
+    let known = read(KIOSK).unwrap();
+    let found: Vec<(&str, Vec<Ends>)> = known
+        .elevations
+        .iter()
+        .map(|e| {
+            let wires = e.wires.iter();
+            let wires = wires.map(|w| (w.from.as_str(), w.to.as_str(), w.carries.as_str()));
+            (e.slug.as_str(), wires.collect())
+        })
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            ("the-kiosk", vec![]),
+            ("the-wiring", vec![("amp", "face", "power")])
+        ]
+    );
+}
+
+#[rstest]
+#[case::words("the signal path", "the-signal-path")]
+#[case::capitals_and_a_run_of_marks("The Room -- At Night", "the-room-at-night")]
+#[case::marks_at_each_end("(the store)", "the-store")]
+#[case::digits("rack 2", "rack-2")]
+#[case::no_letter("--", "")]
+fn makes_a_slug_from_a_name(#[case] name: &str, #[case] expected: &str) {
+    assert_eq!(slug(name), expected);
+}
+
 #[rstest]
 #[case::two_columns_of_two_rows("face", Some(0..2), Some(0..2))]
 #[case::the_last_column("amp", Some(2..3), Some(1..2))]
@@ -105,41 +119,24 @@ fn reads_the_columns_and_rows_that_an_area_spans(
     assert_eq!((grid.columns_of(name), grid.rows_of(name)), (columns, rows));
 }
 
-/// A role keeps the name of its shape as it wrote it, and names the
-/// library's default when it writes none. `Kinds::resolve` finds the
-/// definition.
+/// A shape that turns lies on its side in an area wider than it is
+/// tall, and stands in any other area.
 #[rstest]
-#[case::a_bare_name(", shape: screen", "screen")]
-#[case::a_whole_name(", shape: crate.widgets.example.com", "crate.widgets.example.com")]
-#[case::none(", reads: []", "box")]
-fn reads_the_name_of_each_roles_shape(#[case] written: &str, #[case] shape: &str) {
-    let roles = format!("{{face: {{reference: status.screen.monitor{written}}}}}");
-    let known = read(&one("a", "face", &roles)).unwrap();
-    assert_eq!(known.elevations[0].roles[0].shape, shape);
-}
-
-/// The `shows` of a role whose YAML is `shows`, as the lists of
-/// columns of each entry.
-fn shows(shows: &str) -> Vec<Vec<String>> {
-    let roles = format!("{{face: {{reference: status.screen.monitor{shows}}}}}");
-    let known = read(&one("a", "face", &roles)).unwrap();
-    let role = &known.elevations[0].roles[0];
-    role.shows.iter().map(|show| show.columns.clone()).collect()
+#[case::wider("bell bell", true)]
+#[case::square("bell", false)]
+#[case::taller("\"bell\\nbell\"", false)]
+fn poses_a_shape_that_turns_on_its_side_in_a_wide_area(#[case] sketch: &str, #[case] lies: bool) {
+    let known = read(&one("a", sketch)).unwrap();
+    let speaker = Shapes::default().resolve("speaker", "").unwrap().clone();
+    let posed = known.elevations[0].grid.posed("bell", &speaker);
+    assert_eq!(posed == speaker.turned(), lies);
 }
 
 #[rstest]
-#[case::none_written("", vec![])]
-#[case::one_column(", shows: [Activity]", vec![vec!["Activity"]])]
-#[case::a_list_of_alternatives(", shows: [[Play, Idle]]", vec![vec!["Play", "Idle"]])]
-#[case::both_forms(
-    ", shows: [Activity, [Play, Idle]]",
-    vec![vec!["Activity"], vec!["Play", "Idle"]]
-)]
-fn reads_each_entry_of_shows_as_a_list_of_alternatives(
-    #[case] written: &str,
-    #[case] expected: Vec<Vec<&str>>,
-) {
-    assert_eq!(shows(written), expected);
+fn poses_a_shape_that_does_not_turn_as_it_is() {
+    let known = read(&one("a", "face face")).unwrap();
+    let posed = known.elevations[0].grid.posed("face", &library::default());
+    assert_eq!(posed, *library::default());
 }
 
 #[rstest]
@@ -149,72 +146,101 @@ fn reads_a_kind_with_no_elevations() {
     assert_eq!(known.elevations, vec![]);
 }
 
-/// One elevation named `name` with `sketch` and `roles`, as YAML under
+/// One elevation named `name` with `sketch`, as YAML under
 /// `elevations`.
-fn one(name: &str, sketch: &str, roles: &str) -> String {
-    format!(
-        "    - name: {name}\n      question: What is it?\n      sketch: {sketch:?}\n      roles: {roles}\n"
-    )
+fn one(name: &str, sketch: &str) -> String {
+    format!("    - name: {name}\n      question: What is it?\n      sketch: {sketch}\n")
 }
 
-const SCREEN: &str = "{face: {reference: status.screen.monitor}}";
+/// `one` with `more` added to the elevation, such as its wires.
+fn with(name: &str, sketch: &str, more: &str) -> String {
+    format!("{}      {more}\n", one(name, sketch))
+}
 
 #[rstest]
 #[case::a_row_of_another_length(
-    one("a", "face face\nface", SCREEN),
+    one("a", "\"face face\\nface\""),
     "elevations[0]: row 2 of the sketch has 1 cells, and the first row has 2"
 )]
 #[case::an_area_that_is_not_a_rectangle(
-    one("a", "face face\nface .", SCREEN),
+    one("a", "\"face face\\nface .\""),
     "elevations[0]: the cells of face in the sketch do not form one filled rectangle"
 )]
 #[case::an_area_in_two_pieces(
-    one("a", "face . face", SCREEN),
+    one("a", "face . face"),
     "elevations[0]: the cells of face in the sketch do not form one filled rectangle"
 )]
 #[case::a_name_with_a_capital(
-    one("a", "Face", "{Face: {reference: status.screen.monitor}}"),
+    one("a", "Face"),
     "elevations[0]: the name \"Face\" in the sketch is not a lower-case letter followed by"
 )]
 #[case::a_name_that_starts_with_a_digit(
-    one("a", "1face", "{1face: {reference: status.screen.monitor}}"),
+    one("a", "1face"),
     "elevations[0]: the name \"1face\" in the sketch is not a lower-case letter"
 )]
 #[case::a_name_with_a_quote(
-    one("a", "fa\"ce", SCREEN),
+    one("a", "'fa\"ce'"),
     "elevations[0]: the name \"fa\\\"ce\" in the sketch is not a lower-case letter"
 )]
-#[case::a_name_no_role_has(
-    one("a", "face amp", SCREEN),
-    "elevations[0]: the sketch has the name amp, and roles has no amp"
+#[case::a_name_that_is_not_a_role(
+    one("a", "face lamp"),
+    "elevations[0]: the sketch has the name lamp, and spec.roles has no lamp"
 )]
-#[case::a_role_the_sketch_does_not_have(
-    one(
+#[case::roles_inside_an_elevation(
+    with("a", "face", "roles: {face: {reference: status.screen.monitor}}"),
+    "elevations[0]: the elevation has roles, and roles are stated once, in spec.roles"
+)]
+#[case::two_elevations_of_one_slug(
+    format!("{}{}", one("the room", "face"), one("The Room!", "face")),
+    "elevations[1]: the name \"The Room!\" makes the slug the-room, which elevations[0] has"
+)]
+#[case::a_name_with_no_slug(
+    one("'--'", "face"),
+    "elevations[0]: the name \"--\" has no letter or digit, so it makes no slug"
+)]
+#[case::an_empty_sketch(one("a", "''"), "elevations[0]: the sketch has no rows")]
+#[case::a_wire_to_a_role_the_sketch_does_not_place(
+    with("a", "face amp", "wires: [{from: amp, to: hand, carries: sound}]"),
+    "elevations[0]: wires[0]: hand is not a role that the sketch places"
+)]
+#[case::a_wire_via_a_role_the_sketch_does_not_place(
+    with(
         "a",
-        "face",
-        "{face: {reference: status.screen.monitor}, amp: {reference: status.amp.name}}"
+        "face amp",
+        "wires: [{from: amp, to: face, via: hand, carries: sound}]"
     ),
-    "elevations[0]: roles has amp, and the sketch has no cell named amp"
+    "elevations[0]: wires[0]: hand is not a role that the sketch places"
 )]
-#[case::a_reference_that_is_not_listed(
-    one("a", "face", "{face: {reference: status.screen.node}}"),
-    "elevations[0]: roles.face: reference status.screen.node is the path of no entry of references"
+#[case::a_wire_from_a_role_to_itself(
+    with("a", "face amp", "wires: [{from: amp, to: amp, carries: sound}]"),
+    "elevations[0]: wires[0]: the wire joins amp to itself"
 )]
-#[case::two_elevations_of_one_name(
-    format!("{}{}", one("a", "face", SCREEN), one("a", "face", SCREEN)),
-    "elevations[1]: the name \"a\" is the name of an earlier elevation"
-)]
-#[case::an_empty_sketch(one("a", "", "{}"), "elevations[0]: the sketch has no rows")]
-#[case::an_empty_list_in_shows(
-    one(
+#[case::a_wire_via_its_own_end(
+    with(
         "a",
-        "face",
-        "{face: {reference: status.screen.monitor, shows: [Activity, []]}}"
+        "face amp",
+        "wires: [{from: amp, to: face, via: face, carries: sound}]"
     ),
-    "elevations[0]: roles.face: shows[1] is an empty list, and an entry of shows is a column's name or a list of one or more names"
+    "elevations[0]: wires[0]: via is face, which is an end of the wire"
 )]
-#[case::an_unknown_field(
-    one("a", "face", "{face: {reference: status.screen.monitor, colour: red}}"),
+#[case::a_wire_that_repeats_another(
+    with(
+        "a",
+        "face amp",
+        "wires: [{from: amp, to: face, carries: sound}, {from: amp, to: face, carries: power}]"
+    ),
+    "elevations[0]: wires[1]: an earlier wire already runs from amp to face"
+)]
+#[case::a_wire_that_carries_no_words(
+    with("a", "face amp", "wires: [{from: amp, to: face, carries: ' '}]"),
+    "elevations[0]: wires[0]: carries has no words"
+)]
+#[case::an_unknown_field_of_a_wire(
+    with(
+        "a",
+        "face amp",
+        "wires: [{from: amp, to: face, carries: sound, colour: red}]"
+    ),
     "unknown field `colour`"
 )]
 fn refuses_an_elevation_it_cannot_draw(#[case] elevations: String, #[case] error: &str) {

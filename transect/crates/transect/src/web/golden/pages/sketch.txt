@@ -4,7 +4,7 @@ cluster / platform / acme-ops / Shelf top-shelf
 access vulnerabilities kinds
 Search /
 esc
-acme-ops Shelf low-shelf Shelf top-shelf Kustomizations ×4 Buckets ×1 GitRepositories ×2 HelmRepositories ×1 OCIRepositories ×1 Gates ×3 Bins ×1 Rooms ×1
+acme-ops Shelf low-shelf Shelf top-shelf Kustomizations ×4 Buckets ×1 GitRepositories ×2 HelmRepositories ×1 OCIRepositories ×1 Gates ×3 Bins ×1 Rooms ×1 Thermostats ×1 Vents ×2
 Edges
 Edges
 runs on A pod runs on a machine.
@@ -18,11 +18,13 @@ allowed to call NetworkPolicies let one workload call another.
 Shelf
 top-shelf
 Ready
-the shelf
+the shelf the restock
 Where is this shelf, and what does it need?
+described by shelves.stock.example.test
 part of
 Room back-room
 floor ground
+temperature 18C
 Aisle 7
 Stock full
 from spec.room

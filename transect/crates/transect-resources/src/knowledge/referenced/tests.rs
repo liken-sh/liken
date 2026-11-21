@@ -2,7 +2,7 @@ use rstest::rstest;
 
 use super::*;
 use crate::knowledge::fixtures::knowledge;
-use crate::knowledge::{Names, Reached, Role};
+use crate::knowledge::{Duty, Names, Reached};
 use transect_graph::edges::{Kind, Plurals};
 
 const GATES: &str = "{referencedBy: [{kind: Ingress, group: networking.k8s.io, annotation: example.com/gates, name: '{namespace}-{name}@crd'}], references: [{path: spec.check.address, address: true, edge: authenticates through}]}";
@@ -83,7 +83,7 @@ const ISSUERS: &str = "{referencedBy: [{kind: Ingress, group: networking.k8s.io,
 /// `annotation`.  The issuers that exist are internal in shop, and
 /// internal and public in ops.  Each result is the issuer's namespace,
 /// its name, and its role.
-fn issued(annotation: &str) -> Vec<(String, String, Option<Role>)> {
+fn issued(annotation: &str) -> Vec<(String, String, Option<Duty>)> {
     let plurals = Plurals::from([(
         ("certs.example.com".to_string(), "Issuer".to_string()),
         "issuers".to_string(),
@@ -117,11 +117,11 @@ fn issued(annotation: &str) -> Vec<(String, String, Option<Role>)> {
 }
 
 #[rstest]
-#[case::the_one_beside_it("internal", vec![("shop".into(), "internal".into(), Some(Role::IssuesTls))])]
+#[case::the_one_beside_it("internal", vec![("shop".into(), "internal".into(), Some(Duty::IssuesTls))])]
 #[case::none_beside_it("public", vec![])]
 fn a_name_without_a_namespace_names_the_object_beside_the_referrer(
     #[case] annotation: &str,
-    #[case] expected: Vec<(String, String, Option<Role>)>,
+    #[case] expected: Vec<(String, String, Option<Duty>)>,
 ) {
     assert_eq!(issued(annotation), expected);
 }

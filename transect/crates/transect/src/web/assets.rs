@@ -200,6 +200,11 @@ const ASSETS: &[Asset] = &[
     asset!("web/stream.js", "transect/src/web/stream.js", JS),
     asset!("search/search.js", "transect-map/src/search/search.js", JS),
     asset!(
+        "map/known/wires.js",
+        "transect-map/src/map/known/wires.js",
+        JS
+    ),
+    asset!(
         "search/search.css",
         "transect-map/src/search/search.css",
         CSS

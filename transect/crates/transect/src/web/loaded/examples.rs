@@ -48,8 +48,9 @@ fn has_yaml(directory: &Path) -> bool {
 
 /// Each fault that loading `directory` finds, one line each: a file
 /// that does not load, a document with a trouble condition, a role
-/// whose shape neither the directory nor the library has, or a
-/// directory with no files.
+/// whose shape neither the directory nor the library has, a wire that
+/// meets a shape with no port on the facing edge, or a directory with
+/// no files.
 fn trouble(directory: &Path) -> Vec<String> {
     let loaded: Loaded = load(directory);
     let shown = directory.display();
@@ -71,7 +72,8 @@ fn trouble(directory: &Path) -> Vec<String> {
     }
     let shapes = loaded.shapes();
     for known in &loaded.kinds {
-        for message in known.clone().draw_with(&shapes) {
+        let (unknown, unported) = known.clone().draw_with(&shapes);
+        for message in unknown.into_iter().chain(unported) {
             trouble.push(format!("{shown}: {}: {message}", known.name));
         }
     }

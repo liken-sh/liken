@@ -6,6 +6,7 @@ use super::*;
 use crate::objects::{Center, ObjectCard, Section, Side};
 use transect_graph::edges::{ClusterScoped, Endpoint, Plurals};
 use transect_observe::health::Level;
+use transect_resources::knowledge::role::Column;
 use transect_resources::knowledge::{self, KindKnowledge, fixtures::knowledge};
 use transect_resources::shapes::Shapes;
 
@@ -17,15 +18,16 @@ pub(super) const REFERENCES: &str = "references: [
     {path: status.bus.address, address: true, label: talks over},
     {path: status.bell.name, kind: Bell, group: widgets.example.com, label: rings}]";
 
-const ELEVATION: &str = "elevations: [{name: the kiosk, question: What is this kiosk made of?,
-    sketch: \"face face amp\\nhand lamp bell\\nbus . .\",
-    roles: {
+pub(super) const ROLES: &str = "roles: {
       face: {reference: status.screen.monitor, shape: screen, expected: true},
       amp: {reference: status.amp.name, expected: true, reads: [Model, Power]},
       hand: {reference: 'spec.handsets[].name', shape: handheld, expected: true},
       lamp: {reference: status.lamp.name, shape: speaker, expected: true},
       bus: {reference: status.bus.address, expected: true},
-      bell: {reference: status.bell.name}}}]";
+      bell: {reference: status.bell.name}}";
+
+const ELEVATION: &str = "elevations: [{name: the kiosk, question: What is this kiosk made of?,
+    sketch: \"face face amp\\nhand lamp bell\\nbus . .\"}]";
 
 const KIOSK: &str = "
 spec:
@@ -78,6 +80,18 @@ fn page_of(spec: &str, standing: Standing) -> KnownPage {
 
 /// The page of `page_of`, with each role drawn in a shape of `shapes`.
 pub(super) fn page_with(spec: &str, standing: Standing, shapes: &Shapes) -> KnownPage {
+    page_at(spec, standing, shapes, None)
+}
+
+/// The page of `page_with` at the URL of the elevation `slug`, or at the
+/// object's own URL when it is none. A column read through a reference
+/// reads "far", from the page `/far`.
+pub(super) fn page_at(
+    spec: &str,
+    standing: Standing,
+    shapes: &Shapes,
+    slug: Option<&str>,
+) -> KnownPage {
     let mut known = knowledge("kiosks.widgets.example.com", spec);
     known.draw_with(shapes);
     let data = serde_yaml::from_str(KIOSK).unwrap();
@@ -94,16 +108,25 @@ pub(super) fn page_with(spec: &str, standing: Standing, shapes: &Shapes) -> Know
             .then(|| transect_graph::links::page(object, &plurals))
             .flatten()
     };
-    let readings = |object: &Object, reads: &[String]| {
+    let readings = |object: &Object, reads: &[Column]| {
         let value = |name: &String| match *object == kiosk() {
             true => OWN.iter().find(|(own, _)| own == name).map(|(_, v)| *v),
             false => Some("on"),
         };
-        let read = reads.iter().filter_map(|name| {
-            value(name).map(|value| Reading {
-                name: name.clone(),
+        let read = reads.iter().filter_map(|column| match &column.through {
+            Some(through) => Some(Reading {
+                name: column.name.clone(),
+                value: "far".into(),
+                from: Some(transect_graph::links::Reference {
+                    text: format!("{} through {}", column.name, through.path),
+                    href: Some("/far".into()),
+                }),
+            }),
+            None => value(&column.name).map(|value| Reading {
+                name: column.name.clone(),
                 value: value.into(),
-            })
+                from: None,
+            }),
         });
         read.collect()
     };
@@ -112,6 +135,7 @@ pub(super) fn page_with(spec: &str, standing: Standing, shapes: &Shapes) -> Know
         knowledge: &known,
         layer: "apps".into(),
         path: "/namespaces/shop/kiosks.widgets.example.com/front".into(),
+        elevation: slug,
         reached: relations.iter().map(|r| (r, reach(r))).collect(),
         column: Vec::new(),
         counts: Vec::new(),
@@ -143,7 +167,7 @@ fn card(known: &KindKnowledge) -> ObjectCard {
 }
 
 fn sketch(standing: Standing) -> Sketch {
-    let spec = format!("{{{REFERENCES}, {ELEVATION}}}");
+    let spec = format!("{{{REFERENCES}, {ROLES}, {ELEVATION}}}");
     page_of(&spec, standing).sketch.unwrap()
 }
 
@@ -263,17 +287,19 @@ fn names_each_state_for_a_screen_reader(#[case] state: State, #[case] spoken: Op
 /// The sketch of the kiosk whose amp role has the `shows` that `shows`
 /// writes in YAML, with every named object standing as `standing`.
 fn showing(shows: &str, standing: Standing) -> Sketch {
-    let elevation = ELEVATION.replace(
+    let roles = ROLES.replace(
         "reads: [Model, Power]}",
         &format!("reads: [Model, Power], shows: {shows}}}"),
     );
-    let spec = format!("{{{REFERENCES}, {elevation}}}");
+    let spec = format!("{{{REFERENCES}, {roles}, {ELEVATION}}}");
     page_of(&spec, standing).sketch.unwrap()
 }
 
 fn shown(part: &Part) -> Vec<(&str, &str)> {
     let shows = part.shows.iter();
-    shows.map(|s| (s.name.as_str(), s.value.as_str())).collect()
+    shows
+        .map(|s| (s.reading.name.as_str(), s.reading.value.as_str()))
+        .collect()
 }
 
 #[rstest]
@@ -306,11 +332,11 @@ fn marks_a_column_that_is_not_the_first_of_its_entry_as_a_fallback(
 
 #[rstest]
 fn shows_nothing_of_the_pages_own_object_on_a_value() {
-    let elevation = ELEVATION.replace(
+    let roles = ROLES.replace(
         "shape: screen, expected: true}",
         "shape: screen, expected: true, shows: [Mode]}",
     );
-    let spec = format!("{{{REFERENCES}, {elevation}}}");
+    let spec = format!("{{{REFERENCES}, {roles}, {ELEVATION}}}");
     let sketch = page_of(&spec, Standing::Plain).sketch.unwrap();
     assert_eq!(shown(&sketch.roles[0].drawn.parts[0]), vec![]);
 }
@@ -352,11 +378,11 @@ fn spells_out_a_part_that_is_not_an_object(#[case] area: &str, #[case] literal: 
 /// `<wbr>` after each separator, and escapes the text between them.
 #[rstest]
 fn breaks_values_after_each_separator_and_escapes_them() {
-    let elevation = ELEVATION.replace(
+    let roles = ROLES.replace(
         "reads: [Model, Power]}",
         "reads: [Model, Power], shows: [Note]}",
     );
-    let spec = format!("{{{REFERENCES}, {elevation}}}");
+    let spec = format!("{{{REFERENCES}, {roles}, {ELEVATION}}}");
     let html = page_of(&spec, Standing::Plain).render().unwrap();
     let values = html.split("<span class=\"shape-reading-value\">").skip(1);
     let values: Vec<&str> = values.filter_map(|v| v.split("</span>").next()).collect();
@@ -426,7 +452,7 @@ fn lays_the_roles_out_on_the_grid_of_the_sketch() {
 }
 
 #[rstest]
-#[case::with_an_elevation(format!("{{{REFERENCES}, {ELEVATION}}}"), true, 0)]
+#[case::with_an_elevation(format!("{{{REFERENCES}, {ROLES}, {ELEVATION}}}"), true, 0)]
 #[case::without_one(format!("{{{REFERENCES}}}"), false, 6)]
 fn draws_a_sketch_in_place_of_the_ring(
     #[case] spec: String,
@@ -442,7 +468,7 @@ fn draws_a_sketch_in_place_of_the_ring(
 
 #[rstest]
 fn leaves_out_of_the_board_each_value_the_sketch_shows() {
-    let spec = format!("{{{REFERENCES}, {ELEVATION}}}");
+    let spec = format!("{{{REFERENCES}, {ROLES}, {ELEVATION}}}");
     let page = page_of(&spec, Standing::Plain);
     let center = Center {
         kind: "Kiosk".into(),
@@ -463,4 +489,5 @@ fn leaves_out_of_the_board_each_value_the_sketch_shows() {
     assert_eq!((board.center.is_none(), labels), (true, vec!["sells"]));
 }
 
+mod elevations;
 mod shapes;

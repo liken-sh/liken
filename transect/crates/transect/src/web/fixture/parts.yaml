@@ -1,7 +1,10 @@
 # A stock room with shelves, and a bin on a shelf, joined by the
 # `part of` references in the kind knowledge, so that a board shows the
 # nesting.  The bin is part of two shelves, and it nests under the shelf
-# of its first reference, spec.shelf.
+# of its first reference, spec.shelf.  The room has a thermostat, which
+# sleeps between readings, and each vent is as healthy as the
+# thermostat it names: the east vent's thermostat sleeps, and the west
+# vent's is not in the cluster.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata: {name: rooms.stock.example.test}
@@ -15,6 +18,29 @@ spec:
     storage: true
     additionalPrinterColumns:
     - {name: Floor, type: string, jsonPath: .spec.floor}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: thermostats.stock.example.test}
+spec:
+  group: stock.example.test
+  scope: Namespaced
+  names: {kind: Thermostat, plural: thermostats}
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - {name: Temperature, type: string, jsonPath: .status.temperature}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: vents.stock.example.test}
+spec:
+  group: stock.example.test
+  scope: Namespaced
+  names: {kind: Vent, plural: vents}
+  versions: [{name: v1, served: true, storage: true}]
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -44,8 +70,25 @@ spec:
 apiVersion: stock.example.test/v1
 kind: Room
 metadata: {namespace: acme-ops, name: back-room, uid: back-room}
-spec: {floor: ground}
+spec: {floor: ground, thermostat: back-thermostat}
 status: {conditions: [{type: Ready, status: 'True'}]}
+---
+apiVersion: stock.example.test/v1
+kind: Thermostat
+metadata: {namespace: acme-ops, name: back-thermostat, uid: back-thermostat}
+status:
+  temperature: 18C
+  conditions: [{type: Online, status: 'False', reason: Sleeping, message: wakes every ten minutes}]
+---
+apiVersion: stock.example.test/v1
+kind: Vent
+metadata: {namespace: acme-ops, name: east-vent, uid: east-vent}
+spec: {thermostat: back-thermostat}
+---
+apiVersion: stock.example.test/v1
+kind: Vent
+metadata: {namespace: acme-ops, name: west-vent, uid: west-vent}
+spec: {thermostat: attic-thermostat}
 ---
 apiVersion: stock.example.test/v1
 kind: Shelf

@@ -34,6 +34,7 @@ pub fn objects_page(
     let sources = objects::Sources {
         custom: &snapshot.custom,
         kinds: &snapshot.kinds,
+        ends: snapshot,
         href: &href,
     };
     let path = transect_graph::links::objects(namespace, &url_name(&api.group, &api.plural));

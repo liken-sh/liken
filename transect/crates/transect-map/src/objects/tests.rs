@@ -1,6 +1,7 @@
 use rstest::rstest;
 
 use super::*;
+use transect_resources::knowledge::fixtures::Nowhere;
 
 pub fn resource(group: &str, kind: &str, plural: &str) -> ApiResource {
     ApiResource {
@@ -67,6 +68,7 @@ fn groups_a_namespaces_custom_resources_by_kind() {
     let sources = Sources {
         custom: &custom,
         kinds: &kinds,
+        ends: &Nowhere,
         href: &none,
     };
     let runs = Object::new("example.io", "Gadget", Some("shop"), "runs-pods");
@@ -102,6 +104,7 @@ fn shows_the_first_names_of_a_long_group() {
     let sources = Sources {
         custom: &custom,
         kinds: &kinds,
+        ends: &Nowhere,
         href: &none,
     };
     let groups = sources.groups("shop", &BTreeSet::new());

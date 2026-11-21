@@ -47,7 +47,7 @@ pub fn chips(data: &Value, deciding: &Deciding) -> Vec<Chip> {
 /// Every chip of `data`'s `status.conditions`, the health condition
 /// first.
 pub fn every_chip(data: &Value, deciding: &Deciding) -> Vec<Chip> {
-    let healthy = Some(deciding.condition.as_str());
+    let healthy = deciding.condition.as_deref();
     let conditions = data.pointer("/status/conditions").and_then(Value::as_array);
     let mut found: Vec<(bool, Chip)> = conditions
         .into_iter()
@@ -125,7 +125,7 @@ mod tests {
         let data: Value =
             serde_yaml::from_str(&format!("status: {{conditions: {conditions}}}")).unwrap();
         let deciding = Deciding {
-            condition: healthy.unwrap_or("Ready").into(),
+            condition: Some(healthy.unwrap_or("Ready").into()),
             calm: vec!["Idle".into()],
         };
         let found = chips(&data, &deciding);
@@ -151,7 +151,7 @@ mod tests {
         let data: Value =
             serde_yaml::from_str(&format!("status: {{conditions: {conditions}}}")).unwrap();
         let deciding = Deciding {
-            condition: "Ready".into(),
+            condition: Some("Ready".into()),
             calm: vec!["Idle".into()],
         };
         assert_eq!(chips(&data, &deciding)[0].dot_class(), expected);

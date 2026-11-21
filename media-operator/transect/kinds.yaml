@@ -18,40 +18,63 @@ spec:
     - {path: status.idle.bus.address, address: true, edge: depends on, label: talks over}
     - {path: status.screen.node, kind: Node, edge: runs on}
     - {path: status.idle.claim, kind: ResourceClaim, group: resource.k8s.io, edge: holds}
-  # An elevation is a sketch that `transect` draws on the page of a
-  # `Player` in place of the ring of boxes.  Each row of the sketch is a
-  # row of the drawing, and each name is a role that takes the cells it
-  # fills.  This one is a home theater seen from the couch: the screen
-  # on top, the speaker, the receiver, and the remote under it, and the
-  # machine and the things a viewer does not see in a row at the bottom.
-  # The things a viewer does not see have the shape `tag`, a low outline
-  # that is quieter than the shapes of the room.  The receiver's shape,
-  # `amplifier`, is in `shapes.yaml` beside this file, and the other
-  # shapes are `transect`'s library, which its page `/shapes` draws.
-  # A role draws the objects that its `reference` reads, in its
-  # `shape`, with the printer columns in `reads` as readings.  A role's
-  # `shows` names printer columns of the `Player` itself, and an entry
-  # that is a list draws the first of its columns that has a value.  So the screen shows the
-  # `Player`'s activity, and the play when one plays or the idle screen
-  # when none does.  An `expected` role is drawn with a dashed outline
-  # when the `Player` names nothing for it, and a role that is not
-  # expected leaves its cells blank.
+  # Each role is one place in the drawings of a `Player`, filled by
+  # the objects that its `reference` reads, in its `shape`, with the
+  # printer columns in `reads` as readings.  A reading that is a map
+  # reads a column of the object at the end of a reference of the
+  # part's kind, so the remote shows the battery of its `Peripheral`.
+  # A role's `shows` names printer columns of the `Player` itself, and
+  # an entry that is a list draws the first of its columns that has a
+  # value.  So the screen shows the `Player`'s activity, and the play
+  # when one plays or the idle screen when none does.  An `expected`
+  # role is drawn with a dashed outline when the `Player` names nothing
+  # for it, and a role that is not expected leaves its cells blank.
+  # The receiver is not expected, because a `Player` with no
+  # `status.receiver` plays directly to its panel, as the `Player` CRD
+  # describes it.  The receiver's shape, `amplifier`, is in
+  # `shapes.yaml` beside this file, and the other shapes are
+  # `transect`'s library, which its page `/shapes` draws.  The `Sink`
+  # and the machine are plain boxes, because the `Sink` is the
+  # machine's sound output and not a speaker.
+  roles:
+    display:  {reference: status.screen.monitor, shape: screen, expected: true, reads: [Connector, Mode], shows: [Activity, [Play, Idle]]}
+    receiver: {reference: status.receiver.name, shape: amplifier, reads: [Model, Power, Input, Volume, Sound]}
+    sink:     {reference: "status.sinks[].name", shape: box, expected: true, reads: [Layout, Volume, Mute]}
+    machine:  {reference: status.screen.node, shape: box, expected: true}
+    remote:   {reference: "spec.remotes[].name", shape: handheld, expected: true, reads: [Keymap, {column: Battery, through: status.peripheral}]}
+    idle:     {reference: spec.idle.controller, shape: tag}
+    bus:      {reference: status.idle.bus.address, shape: tag}
+    claim:    {reference: status.idle.claim, shape: tag}
+  # Each elevation answers one question with a sketch of the roles,
+  # and the page of a `Player` has a tab for each.  Each row of a sketch
+  # is a row of the drawing, and each name takes the cells it fills.
+  # The room is a home theater seen from the couch: the screen on top,
+  # the sink, the receiver, and the remote under it, and the machine
+  # and the things a viewer does not see in the last row.  The things a
+  # viewer does not see have the shape `tag`, a low outline that is
+  # quieter than the shapes of the room.
+  #
+  # The signal path is the one HDMI cable from the machine's output to
+  # the panel.  The `Sink` is the machine's sound output onto that
+  # cable, so its wire ends at the machine, and the `Display` is the
+  # picture on it.  The cable carries picture and sound through the
+  # receiver when the `Player` names one, so its wire has `via`: with a
+  # receiver the page draws the cable into the receiver and out to the
+  # screen, and without one it draws the cable straight to the screen.
   elevations:
     - name: the room
       question: What is this player made of?
       sketch: |
-        display  display   display   display
-        sound    receiver  receiver  remote
-        machine  idle      bus       claim
-      roles:
-        display:  {reference: status.screen.monitor, shape: screen, expected: true, reads: [Connector, Mode], shows: [Activity, [Play, Idle]]}
-        receiver: {reference: status.receiver.name, shape: amplifier, expected: true, reads: [Model, Power, Input, Volume, Sound]}
-        sound:    {reference: "status.sinks[].name", shape: speaker, expected: true, reads: [Layout, Volume, Mute]}
-        machine:  {reference: status.screen.node, shape: box, expected: true}
-        remote:   {reference: "spec.remotes[].name", shape: handheld, expected: true, reads: [Keymap]}
-        idle:     {reference: spec.idle.controller, shape: tag}
-        bus:      {reference: status.idle.bus.address, shape: tag}
-        claim:    {reference: status.idle.claim, shape: tag}
+        .        .        display  display  display   display   remote  .
+        .        .        sink     sink     receiver  receiver  .       .
+        machine  machine  idle     idle     bus       bus       claim   claim
+    - name: the signal path
+      question: Where do picture and sound go?
+      sketch: |
+        sink  machine  receiver  display  display
+      wires:
+        - {from: sink, to: machine, carries: sound}
+        - {from: machine, to: display, via: receiver, carries: picture and sound}
   # media-operator writes the Player's status under the field manager
   # Go-http-client, which matches no workload, so the controller is
   # found by its image.
@@ -62,12 +85,16 @@ spec:
 # knowledge makes it a known kind, so each namespace shows a count of
 # its Remotes.  status.player is not a reference, because the Player
 # already references the Remote and a reference back would draw a loop.
+# A Remote has no condition of its own, and the Peripheral that pairs
+# as it says whether it is connected or asleep, so a Remote is as
+# healthy as its Peripheral, by the Peripheral's own knowledge.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
   name: remotes.media.liken.sh
 spec:
   summary: A paired controller whose buttons drive one Player.
+  healthy: {through: status.peripheral}
   references:
     - {path: spec.keymap, kind: Keymap, group: media.liken.sh, label: maps buttons with}
     - {path: status.peripheral, kind: Peripheral, group: bluetooth.liken.sh, label: pairs as}
