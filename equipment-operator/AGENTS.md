@@ -74,5 +74,7 @@ publishes the adapter as a device, and `display-operator` owns the
 - Load the `receiver-drivers` skill under `.agents/skills` before you
   add a receiver setting or a receiver brand.
 - `transect/` contains the kind knowledge that `transect` reads for the
-  `Receiver`. A change to a condition, a printer column, or a status
-  field that the file names also changes the file.
+  `Receiver`, in `kinds.yaml`, and in `shapes.yaml` the `amplifier`
+  shape that every sketch of `transect` draws a `Receiver` in. A change
+  to a condition, a printer column, or a status field that a file there
+  names also changes that file.

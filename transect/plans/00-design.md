@@ -468,6 +468,12 @@ everything else, so that every sketch reads the same way:
   library and on a shape that an author added.
 - **The readings, the wires, and the source of each fact.**
 
+A domain owns its representation.  The knowledge of a kind states the
+shape that draws its objects, and that knowledge ships with the
+operator that owns the kind.  A sketch that draws an object of another
+operator's kind takes that shape, and it can state another shape for
+one role.  Settled on 2026-11-21.
+
 An arrangement can repeat.  The author of the telescope sketches one
 optical train, and `transect` draws that sketch once for each train
 that the telescope has.  The author also states which roles a train is
@@ -505,6 +511,12 @@ role once, in `spec.roles`, and each elevation places the roles that it
 needs in a sketch and states its wires.  A wire says what passes
 between two roles, and `transect` draws its state from the parts of the
 roles it joins.  A repeated arrangement is still open.
+
+[Plan 19](completed/19-a-kind-states-its-shape.md), built on
+2026-11-21, moves the choice of a part's shape to the knowledge of the
+part's kind.  A `KindKnowledge` states `spec.shape`, and a part takes
+the shape of its role, then the shape of its kind, then `box`.
+`/shapes` lists the kinds whose knowledge states each shape.
 
 ## Where the knowledge of a pattern ships
 

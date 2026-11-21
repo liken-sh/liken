@@ -108,8 +108,9 @@ impl Condition {
         }
     }
 
-    /// A role of an elevation names a shape that `transect` has not
-    /// loaded, so the role is drawn in the default shape.
+    /// A kind's knowledge or a role of an elevation names a shape that
+    /// `transect` has not loaded, so the kind's objects or the role's
+    /// parts are drawn in the default shape.
     pub fn unknown_shape(message: impl Into<String>) -> Self {
         Self {
             kind: "ShapesFound",

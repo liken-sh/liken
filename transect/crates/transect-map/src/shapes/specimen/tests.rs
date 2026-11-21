@@ -4,6 +4,7 @@ use askama::Template;
 use rstest::rstest;
 
 use super::*;
+use transect_resources::knowledge::fixtures::{knowledge, plurals};
 use transect_resources::resources::{Condition, DocId, Sorts, from_text};
 use transect_resources::shapes::library;
 
@@ -57,7 +58,37 @@ spec: {summary: A glow., size: {design: [100, 50], width: [80, 120]}, color: red
 
 fn page() -> ShapesPage {
     let (directory, shapes) = directory();
-    ShapesPage::build(&shapes, &directory)
+    ShapesPage::build(&shapes, &directory, &Kinds::default())
+}
+
+/// A shape lists each kind whose knowledge states it, linked to the page
+/// of the kind, and a shape that no kind states lists none.
+#[rstest]
+fn lists_the_kinds_whose_knowledge_states_each_shape() {
+    let (directory, shapes) = directory();
+    let widget = knowledge("widgets.widgets.example.com", "{shape: plate.example.test}");
+    let mut kinds = Kinds::resolve(&[widget], &plurals(), &[]);
+    kinds.find_shapes(&shapes);
+    let page = ShapesPage::build(&shapes, &directory, &kinds);
+    let stating = |group: usize, name: &str| {
+        let shape = page.groups[group]
+            .shapes
+            .iter()
+            .find(|s| s.name == name)
+            .unwrap();
+        let kinds = shape.kinds.iter();
+        kinds
+            .map(|k| (k.text.clone(), k.href.clone()))
+            .collect::<Vec<_>>()
+    };
+    let widget = (
+        "Widget".to_string(),
+        Some("/kinds/widgets.widgets.example.com".to_string()),
+    );
+    assert_eq!(
+        (stating(1, "plate.example.test"), stating(0, "box")),
+        (vec![widget], vec![])
+    );
 }
 
 #[rstest]

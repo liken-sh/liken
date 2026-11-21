@@ -3,7 +3,8 @@
 # `True` only while the receiver answers the operator, and a `Player`
 # that plays through the receiver needs those answers to control its
 # power, input, and volume.  Its reason `Connecting` appears before the
-# first answer.
+# first answer.  `shape` names the `amplifier` in `shapes.yaml` beside
+# this file, which every sketch of `transect` draws a `Receiver` in.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -11,4 +12,5 @@ metadata:
 spec:
   summary: An A/V receiver that a `liken` machine plays through, with its power, input, and volume.
   healthy: {condition: Reachable}
+  shape: amplifier
   controller: {image: liken-sh/equipment-operator}

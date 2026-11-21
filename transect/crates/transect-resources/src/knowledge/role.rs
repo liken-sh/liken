@@ -21,12 +21,13 @@ pub struct Role {
     /// The `path` of the entry of `references` whose values are the
     /// role's parts.
     pub reference: String,
-    /// The shape's name as the role writes it, or the library's default
-    /// when the role names none.
-    pub shape: String,
-    /// The definition that the page draws the role's parts in.
-    /// `KindKnowledge::draw_with` finds it from `shape`. Until then, and
-    /// when no loaded shape has that name, it is the library's default.
+    /// The shape's name as the role writes it. A role names a shape
+    /// only to draw its parts otherwise than the knowledge of their kind
+    /// states, or when its reference names no kind.
+    pub shape: Option<String>,
+    /// The definition that the page draws the role's parts in, which
+    /// `KindKnowledge::draw_with` finds. Until then it is the library's
+    /// default.
     pub drawn: Arc<shapes::Shape>,
     /// Whether the page draws the role when its reference reads no
     /// value.
@@ -187,7 +188,7 @@ fn role(name: String, written: Written, references: &[Reference]) -> Result<Role
     Ok(Role {
         name,
         reference: written.reference,
-        shape: written.shape.unwrap_or_else(|| library::DEFAULT.into()),
+        shape: written.shape,
         drawn: library::default(),
         expected: written.expected,
         reads,

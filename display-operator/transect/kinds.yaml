@@ -3,7 +3,8 @@
 # while a monitor answers on the connector, and a pod that draws on
 # the screen needs one.  `NoPanel` is the reason when the connector
 # serves no monitor, which happens when a person unplugs or turns off
-# the panel, so `calm` shows it as at rest and not as a fault.
+# the panel, so `calm` shows it as at rest and not as a fault.  Every
+# sketch of `transect` draws a `Display` as the library's `screen`.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -11,4 +12,5 @@ metadata:
 spec:
   summary: One monitor output of a machine, and the screen that programs draw on.
   healthy: {condition: Connected, calm: [NoPanel]}
+  shape: screen
   controller: {image: liken-sh/display-operator}

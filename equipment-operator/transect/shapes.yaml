@@ -1,13 +1,17 @@
-# The shape that only the knowledge of a `Player` draws: the face of an
+# The shape of a `Receiver` in a sketch of `transect`: the face of an
 # A/V receiver, with a display window that shows the receiver's
-# readings and a volume knob beside it.  `transect` reads it as any
-# `Shape` under `--resources`, and a role of a kind in
-# `media.liken.sh` that names `amplifier` finds it before the library.
-# Its chassis has the geometry of the library's `box`.
+# readings and a volume knob beside it.  `equipment-operator` owns the
+# `Receiver`, so it ships the shape, and the knowledge of the
+# `Receiver` in `kinds.yaml` names it.  Every sketch that draws a
+# `Receiver`, such as the room of a `Player`, then draws it the same
+# way.  `transect` reads this file as any `Shape` under `--resources`,
+# and a kind in `equipment.liken.sh` that names `amplifier` finds this
+# shape before the library's.  Its chassis has the geometry of the
+# library's `box`.
 apiVersion: transect.liken.sh/v1alpha1
 kind: Shape
 metadata:
-  name: amplifier.media.liken.sh
+  name: amplifier.equipment.liken.sh
 spec:
   summary: An A/V receiver or an amplifier on a shelf, with a display window and a volume knob on its front.
   size: {design: [460, 153], width: [160, 460]}

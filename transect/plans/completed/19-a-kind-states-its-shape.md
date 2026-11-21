@@ -1,10 +1,10 @@
 # 19, A kind states its shape
 
-Proposed on 2026-11-21. Nothing is built.
+Proposed and built on 2026-11-21.
 
 This plan moves the choice of a part's shape from the sketch that
 draws the part to the knowledge of the part's kind. It follows
-[plan 17](completed/17-the-shapes-of-a-sketch.md), which made a shape
+[plan 17](17-the-shapes-of-a-sketch.md), which made a shape
 a resource that an operator ships.
 
 ## The problem
@@ -79,7 +79,7 @@ this cluster.
   receiver, and the remote. They keep `tag` for the idle screen's
   controller, the message bus, and the `ResourceClaim`.
 
-[Plan 14](14-the-rig-of-a-telescope.md) is written after this one, so
+[Plan 14](../14-the-rig-of-a-telescope.md) is written after this one, so
 the knowledge of each kind of the observatory states its shape, and
 the roles of a train state none.
 
@@ -114,3 +114,45 @@ floor unchanged.
 On a workstation, the page of each `Player` on a home cluster is
 compared with screenshots from before the change, and no part changes
 its shape.
+
+## What the build changed
+
+On 2026-11-21 a workstation compared the room and the signal path of
+each `Player` of a home cluster with screenshots and pages taken before
+the change, at 1680 pixels. With the numbers masked, the HTML of each
+sketch was the same except its caption, so no part changed its shape or
+its place. `/shapes` listed `amplifier.equipment.liken.sh` under the
+file of `equipment-operator`, with the `Receiver` beside it. The build
+differs from the proposal in these ways:
+
+- **The kinds' shapes are found before the roles' shapes.**
+  `Kinds::find_shapes` finds the shape that the knowledge of each kind
+  states, and then the shape of each role, because a role that states
+  no shape takes the shape of its kind. `KindKnowledge::draw_with`
+  takes the shape of each kind as an argument, so a test of one
+  document passes none. A part of a kind that the cluster does not
+  serve has no knowledge in `Kinds`, so it takes its role's shape or
+  `box`.
+- **A role that names a shape that is not loaded is drawn as a `box`,**
+  with `UnknownShape`, and not in the shape of its kind, because the
+  role stated a shape.
+- **The test that loads each operator's `transect/` directory checks
+  the shape of each kind, and draws each part in its role's shape or
+  `box`.** One directory does not say which kind each `KindKnowledge`
+  describes, because a reference names a kind and a document is named
+  for a plural. So a wire to a part that takes the shape of its kind is
+  checked against that shape only when a cluster serves the kind. A
+  fault then gives `NoPort` to the knowledge that states the wire.
+- **The caption under a sketch and the lede of `/shapes` changed.** The
+  caption said that the shapes are from the sketch's knowledge. It now
+  says that a part's shape is from that knowledge or from the knowledge
+  of the part's kind.
+- **The `Player`'s sink and machine state no shape.** The proposal did
+  not name them. The knowledge of a `Sink` and of a `Node` states no
+  shape, so each is drawn as a `box`. `audio-operator` owns how a `Sink`
+  looks, and the room takes the shape that it states when it states
+  one.
+- **The fixture's room states `crate` and its thermostat `disc`.** The
+  shelf's `room` role states `box`, so the fixture draws one part in
+  its kind's shape and one in its role's, and `/shapes` lists a kind
+  under a library shape and under an author's shape.

@@ -9,9 +9,9 @@
 //! The library's shapes are files in `library/`, embedded in the binary,
 //! with bare names such as `box`. An author's shapes are `Shape`
 //! documents under `--resources`, named `<shape>.<group>` for a group
-//! that the author owns. A role of a kind's knowledge names a shape, and
-//! `Shapes::resolve` finds the author's shape in the kind's own group
-//! before the library's.
+//! that the author owns. A kind's knowledge names the shape of the
+//! kind's objects, a role can name another, and `Shapes::resolve` finds
+//! the author's shape in the kind's own group before the library's.
 
 mod form;
 pub mod length;
@@ -311,10 +311,10 @@ impl Shapes {
         }
     }
 
-    /// The shape that a role's `shape` names in the knowledge of a kind
-    /// in `group`: the author's `<shape>.<group>` first, then the
-    /// library's `<shape>`. A role may write the whole name of any
-    /// author's shape.
+    /// The shape that a `shape` of the knowledge of a kind in `group`
+    /// names, the kind's own or a role's: the author's `<shape>.<group>`
+    /// first, then the library's `<shape>`. The knowledge may write the
+    /// whole name of any author's shape.
     pub fn resolve(&self, written: &str, group: &str) -> Option<&Arc<Shape>> {
         if written.contains('.') || group.is_empty() {
             return self.by_name.get(written);

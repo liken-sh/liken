@@ -87,7 +87,8 @@ and the product design that new work follows is in
   the conditions that say what is wrong with a resource.
 - **`/shapes`**: every shape that a sketch draws a part in, from
   `transect`'s library and from each `Shape` resource, drawn in every
-  state, and each `Shape` that did not load.
+  state, with the kinds whose knowledge states it, and each `Shape`
+  that did not load.
 
 `transect` does not observe traffic between workloads, so the map has
 no edge for the calls that actually happen.
@@ -119,8 +120,10 @@ these resources for public projects, such as Flux, cert-manager,
 Traefik, and kube-prometheus, in one directory each.  Copy them into
 your directory and edit them.  A `liken` operator ships the
 knowledge of its own kinds in its `transect/` directory, such as
-`media-operator/transect/`, with any `Shape` that only its sketches
-draw.  Copy or link that directory into yours.  The design of the proof of concept
+`media-operator/transect/`.  That knowledge states the shape that every
+sketch draws each kind's objects in, and the directory has the `Shape`
+when the library has none, as `equipment-operator/transect/` has the
+`amplifier` of a `Receiver`.  Copy or link that directory into yours.  The design of the proof of concept
 describes each resource's shape.  `cargo run -- --help` lists every flag, including
 `--alertmanager` for the alerts, registry credentials and mirrors for
 reading image labels, and the address of a log store.

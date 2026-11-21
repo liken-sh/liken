@@ -121,22 +121,27 @@ spec:
     - {attribute: card, driver: gpu.example.test, match: resource.kubernetes.io/pciBusID, label: speakers of}
 ---
 # The stock room's shelves and bins. Each is part of the one above it.
+# Every sketch draws a room as the `crate` of its own group, the stock
+# that it keeps, unless a role of the sketch states another shape.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
   name: rooms.stock.example.test
 spec:
   summary: A room the shop keeps stock in.
+  shape: crate
   references:
     - {path: spec.thermostat, kind: Thermostat, group: stock.example.test, label: kept warm by}
 ---
-# A thermostat sleeps between readings, so Sleeping is calm.
+# A thermostat sleeps between readings, so Sleeping is calm.  It is a
+# round dial on a wall, so a sketch draws it as the library's `disc`.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
   name: thermostats.stock.example.test
 spec:
   summary: A thermostat that keeps a room warm.
+  shape: disc
   healthy: {condition: Online, calm: [Sleeping]}
 ---
 # A vent has no condition of its own, so it is as healthy as the
@@ -161,7 +166,10 @@ spec:
 # aisle, and its sale when it has one or its stock when it has none,
 # and the temperature of the thermostat that the room names.  In the
 # restock, stock comes from the spill room by the ladder when the shelf
-# names one, and straight to the room when it names none.
+# names one, and straight to the room when it names none.  The spill
+# room is drawn in the shape that the knowledge of a room states.  The
+# `room` role states `box`, so the room that the shelf stands in is
+# drawn as a plain box in place of the room's `crate`.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -175,9 +183,9 @@ spec:
     - {path: spec.lamp, kind: Lamp, group: stock.example.test, label: lit by}
     - {path: spec.ladder, kind: Ladder, group: stock.example.test, label: reached by}
   roles:
-    room: {reference: spec.room, expected: true, reads: [Floor, {column: Temperature, through: spec.thermostat}], shows: [Aisle, [Sale, Stock]]}
+    room: {reference: spec.room, shape: box, expected: true, reads: [Floor, {column: Temperature, through: spec.thermostat}], shows: [Aisle, [Sale, Stock]]}
     label: {reference: spec.label, shape: screen, expected: true}
-    spill: {reference: spec.spill, shape: crate}
+    spill: {reference: spec.spill}
     lamp: {reference: spec.lamp, expected: true}
     ladder: {reference: spec.ladder}
   elevations:
@@ -195,10 +203,9 @@ spec:
         - {from: spill, to: room, via: ladder, carries: stock}
         - {from: lamp, to: label, carries: light}
 ---
-# The shape of the shelf's spill: a role of a kind in
-# `stock.example.test` that names `crate` finds this shape in the kind's
-# own group.  Its handle stands above its top edge, so a part keeps the
-# room above it.
+# The shape of a room: the knowledge of a kind in `stock.example.test`
+# that names `crate` finds this shape in the kind's own group.  Its
+# handle stands above its top edge, so a part keeps the room above it.
 apiVersion: transect.liken.sh/v1alpha1
 kind: Shape
 metadata:

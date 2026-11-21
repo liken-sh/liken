@@ -220,7 +220,8 @@ the page of an object draws it in place of the ring of boxes.  Plan 17
 made the shapes one system.  A `Shape` resource states a shape's
 geometry and materials and nothing else.  The library's shapes are
 files in `crates/transect-resources/src/shapes/library/`, and an
-operator ships its own shapes in its `transect/` directory.  The
+operator ships the shapes of its own kinds in its `transect/`
+directory.  The
 `shapes` module of `transect-map` draws every part, `shapes.css` draws
 every state, and `/shapes` draws each shape in each state.  No code and
 no rule names a shape: when a shape needs a rule of its own, the form
@@ -232,7 +233,12 @@ elevation's `wires` say what passes between its roles, and
 `sketch/wires.rs` gives each wire its state while `wires.js` draws its
 path from the parts' ports.  `through` follows one more reference, for
 a reading and for a health, and `knowledge::follow` is the one place
-that follows it.
+that follows it.  Plan 19 moves a part's shape to the knowledge of its
+kind, so the operator that owns a kind states how every sketch draws
+its objects.  A `KindKnowledge` states `spec.shape`, and a part takes
+its role's shape, then its kind's, then `box`.  `Kinds::find_shapes`
+finds the kinds' shapes first and then the roles', and `/shapes` lists
+the kinds whose knowledge states each shape.
 
 `plans/open-problems/` holds the defects that a test reproduced in the
 code as it is.  Write a plan before you build anything new.

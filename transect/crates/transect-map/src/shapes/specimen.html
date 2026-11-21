@@ -1,4 +1,5 @@
 {% extends "frame/layout.html" %}
+{%- import "links/link.html" as links -%}
 
 {% block title %}shapes · transect{% endblock %}
 
@@ -16,7 +17,7 @@
 <div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
 <main class="shapes-page">
 <h1 class="shapes-title">Shapes</h1>
-<p class="shapes-lede">A sketch draws each part in a shape. A shape states its size, its pieces, and where its text goes, and transect draws every state and every text the same way on each shape. Each shape is drawn here in each state with the same texts. The bars on its first drawing are its ports, where a wire attaches. A role of a KindKnowledge names a shape, and finds the shape of its kind's own group before the library's.</p>
+<p class="shapes-lede">A sketch draws each part in a shape. A shape states its size, its pieces, and where its text goes, and transect draws every state and every text the same way on each shape. Each shape is drawn here in each state with the same texts. The bars on its first drawing are its ports, where a wire attaches. The KindKnowledge of a kind states the shape that every sketch draws its objects in, and a role of a sketch can state another. A name finds the shape of its kind's own group before the library's.</p>
 {%- for group in groups %}
 <h2 class="shapes-group{% if group.file %} shapes-file{% endif %}">{{ group.heading }}</h2>
 {%- for shape in group.shapes %}
@@ -25,6 +26,10 @@
 <h3 class="shapes-name">{{ shape.name }}</h3>
 <p class="shapes-summary">{{ shape.summary }}</p>
 <p class="shapes-facts">{{ shape.facts }}</p>
+{%- if !shape.kinds.is_empty() %}
+<p class="shapes-facts">The KindKnowledge of each of these kinds states this shape:
+{%- for kind in shape.kinds %} {% call links::object_link(kind.text, kind.href, "") %}{% endcall %}{% if !loop.last %},{% endif %}{% endfor %}.</p>
+{%- endif %}
 </header>
 <div class="shapes-cells">
 {%- for cell in shape.cells %}

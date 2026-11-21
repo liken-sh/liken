@@ -75,5 +75,7 @@ with its speakers.
   monitor's EDID, run
   `od -An -tx1 /sys/class/drm/<card>-<connector>/edid`.
 - `transect/` contains the kind knowledge that `transect` reads for the
-  `Display`. A change to a condition, a printer column, or a status
-  field that the file names also changes the file.
+  `Display`, with the library's `screen` as the shape that every sketch
+  of `transect` draws a `Display` in. A change to a condition, a
+  printer column, or a status field that the file names also changes
+  the file.

@@ -49,8 +49,10 @@ pub use referenced::{referrals, referred_edges};
 pub use references::{Names, Relation, relations, target_of, written_secret};
 pub use through::{Followed, ReferenceEnds, Through, follow};
 
+use std::sync::Arc;
+
 use crate::resources::DocId;
-use crate::shapes::Shapes;
+use crate::shapes::{Shape, Shapes, library};
 use transect_graph::edges::{Kind, Provenance};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -95,6 +97,15 @@ pub struct KindKnowledge {
     /// How to read the findings in an object, when the kind is a
     /// vulnerability scanner's report.
     pub findings: Option<findings::Findings>,
+    /// The name of the shape that draws an object of the kind as a part
+    /// of any sketch, as the document writes it. The operator that owns
+    /// the kind states it, so every sketch that draws one of its objects
+    /// draws it the same way.
+    pub shape: Option<String>,
+    /// The definition that `shape` names, which `Kinds::find_shapes`
+    /// finds. It is none until then, and when the kind states no shape
+    /// or names one that is not loaded.
+    pub drawn: Option<Arc<Shape>>,
     /// The roles that the elevations place, each stated once, in the
     /// order of the document.
     pub roles: Vec<role::Role>,
@@ -259,25 +270,43 @@ impl KindKnowledge {
         }
     }
 
-    /// Finds the shape of each role in `shapes`, and leaves out each
-    /// wire that meets a role whose shape has no port on the facing
-    /// edge. It returns the message of a condition for each role whose
+    /// Finds the shape that `shape` names in `shapes`: the author's
+    /// shape in the kind's own group first, then the library's. It
+    /// returns the message of a condition when the kind names a shape
+    /// that is not there, and its objects are then drawn in the default
+    /// shape.
+    pub fn find_shape(&mut self, shapes: &Shapes) -> Option<String> {
+        let written = self.shape.as_ref()?;
+        self.drawn = shapes.resolve(written, &self.group).cloned();
+        self.drawn.is_none().then(|| {
+            format!(
+                "the kind's shape is {written:?}, which transect has not loaded, so its objects are drawn as a {}",
+                library::DEFAULT
+            )
+        })
+    }
+
+    /// Finds the shape of each role, and leaves out each wire that meets
+    /// a role whose shape has no port on the facing edge. `of_kind`
+    /// gives the shape that the knowledge of a kind states, by group and
+    /// kind. It returns the message of a condition for each role whose
     /// shape is not there, and for each wire it left out.
-    pub fn draw_with(&mut self, shapes: &Shapes) -> (Vec<String>, Vec<String>) {
+    pub fn draw_with(
+        &mut self,
+        shapes: &Shapes,
+        of_kind: impl Fn(&str, &str) -> Option<Arc<Shape>>,
+    ) -> (Vec<String>, Vec<String>) {
+        let found: Vec<_> = self
+            .roles
+            .iter()
+            .map(|role| self.shape_of(role, shapes, &of_kind))
+            .collect();
         let mut unknown = Vec::new();
-        for role in &mut self.roles {
-            role.drawn = match shapes.resolve(&role.shape, &self.group) {
-                Some(shape) => shape.clone(),
-                None => {
-                    unknown.push(format!(
-                        "the role {} names the shape {:?}, which transect has not loaded, so it is drawn as a {}",
-                        role.name,
-                        role.shape,
-                        crate::shapes::library::DEFAULT
-                    ));
-                    crate::shapes::library::default()
-                }
-            };
+        for (role, found) in self.roles.iter_mut().zip(found) {
+            role.drawn = found.unwrap_or_else(|message| {
+                unknown.push(message);
+                library::default()
+            });
         }
         let mut unported = Vec::new();
         for elevation in &mut self.elevations {
@@ -296,6 +325,33 @@ impl KindKnowledge {
         (unknown, unported)
     }
 
+    /// The shape that each part of `role` is drawn in: the first of the
+    /// role's `shape`, the shape that the knowledge of the part's kind
+    /// states, and the library's default. The kind is the one that the
+    /// role's reference names, so an expected role with no part takes
+    /// the same shape as its parts would. A reference that names no kind
+    /// reads a value, so only the role can state its shape. The error is
+    /// the message of a condition for a role whose shape is not loaded.
+    fn shape_of(
+        &self,
+        role: &role::Role,
+        shapes: &Shapes,
+        of_kind: impl Fn(&str, &str) -> Option<Arc<Shape>>,
+    ) -> Result<Arc<Shape>, String> {
+        if let Some(written) = &role.shape {
+            return shapes.resolve(written, &self.group).cloned().ok_or_else(|| {
+                format!(
+                    "the role {} names the shape {written:?}, which transect has not loaded, so it is drawn as a {}",
+                    role.name,
+                    library::DEFAULT
+                )
+            });
+        }
+        let kind = target_of(&self.references, &role.reference);
+        let stated = kind.and_then(|(group, kind)| of_kind(group, kind));
+        Ok(stated.unwrap_or_else(library::default))
+    }
+
     /// The provenance of a fact read through `field` of this knowledge.
     pub fn provenance(&self, field: &str) -> Provenance {
         Provenance::Kinds {
@@ -311,11 +367,11 @@ pub mod fixtures {
     use transect_graph::edges::Plurals;
 
     /// The knowledge `spec` declares for `name`, with each role drawn
-    /// in a shape of the library.
+    /// in a shape of the library, as if no other kind stated a shape.
     pub fn knowledge(name: &str, spec: &str) -> KindKnowledge {
         let text = format!("metadata: {{name: {name}}}\nspec: {spec}\n");
         let mut known = parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap();
-        known.draw_with(&Shapes::default());
+        known.draw_with(&Shapes::default(), |_, _| None);
         known
     }
 

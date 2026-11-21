@@ -71,10 +71,11 @@ operator reads nothing from `library-operator`.
   environment variables, so a change to one needs the same change in
   the other.
 - `transect/` contains the kind knowledge that `transect` reads for the
-  `Player` and the `Remote`, in `kinds.yaml`, and in `shapes.yaml` the
-  `amplifier` shape that the `Player`'s receiver is drawn in. The
-  `Player`'s roles are stated once, and its elevations, the room and
-  the signal path, place them. The signal path's wires follow
-  `status.receiver`, and the `Remote` is as healthy as its
-  `Peripheral`. A change to a condition, a printer column, or a status
-  field that a file there names also changes that file.
+  `Player` and the `Remote`, in `kinds.yaml`. The `Remote` states its
+  shape, the library's `handheld`, and the `Player`'s roles take the
+  shape of each part's kind unless a role states one. The `Player`'s
+  roles are stated once, and its elevations, the room and the signal
+  path, place them. The signal path's wires follow `status.receiver`,
+  and the `Remote` is as healthy as its `Peripheral`. A change to a
+  condition, a printer column, or a status field that the file names
+  also changes the file.

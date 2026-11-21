@@ -55,6 +55,7 @@ struct Spec {
     ignore_changes: Vec<gitops::WrittenIgnore>,
     node: Option<String>,
     findings: Option<findings::Written>,
+    shape: Option<String>,
     roles: Option<serde_yaml::Mapping>,
     #[serde(default)]
     elevations: Vec<elevation::Written>,
@@ -180,6 +181,8 @@ pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<KindKnowledge, Stri
         ignore_changes,
         node: spec.node,
         findings,
+        shape: spec.shape,
+        drawn: None,
         roles,
         elevations,
     })

@@ -1,11 +1,12 @@
-//! The sketch draws each role in the shape that it names: contact
-//! between rows, parts that touch in a row, a shape on its side, and
-//! the default shape.
+//! The sketch draws each role in the shape that it names or that the
+//! knowledge of its kind states: contact between rows, parts that touch
+//! in a row, a shape on its side, and the default shape.
 
 use rstest::rstest;
 
 use super::super::*;
-use super::{REFERENCES, page_with};
+use super::{REFERENCES, page_of_known, page_with};
+use transect_resources::knowledge::fixtures::knowledge;
 use transect_resources::resources::DocId;
 use transect_resources::shapes::Shapes;
 
@@ -79,4 +80,28 @@ fn lays_a_shape_that_turns_on_its_side_in_a_wide_area(#[case] sketch: &str, #[ca
 fn draws_a_role_whose_shape_is_unknown_as_a_box() {
     let sketch = drawn("amp\nhand", "kettle", "box");
     assert_eq!(sketch.roles[0].drawn.drawing, sketch.roles[1].drawn.drawing);
+}
+
+/// The sketch of the kiosk whose expected role `lamp` names nothing, in
+/// the shape that `shape` writes for the role, when the knowledge of a
+/// `Lamp` states a `disc`.
+fn lamp(shape: &str) -> Sketch {
+    let roles = format!("roles: {{lamp: {{reference: status.lamp.name, expected: true{shape}}}}}");
+    let elevation = "elevations: [{name: the kiosk, question: What is it?, sketch: lamp}]";
+    let spec = format!("{{{REFERENCES}, {roles}, {elevation}}}");
+    let mut known = knowledge("kiosks.widgets.example.com", &spec);
+    let shapes = Shapes::default();
+    let disc = shapes.resolve("disc", "").cloned();
+    known.draw_with(&shapes, |_, kind| disc.clone().filter(|_| kind == "Lamp"));
+    page_of_known(&known, Standing::Plain, None).sketch.unwrap()
+}
+
+#[rstest]
+fn draws_an_expected_role_with_no_part_in_the_shape_of_its_kind() {
+    let (stated, of_kind) = (lamp(", shape: disc"), lamp(""));
+    let empty = of_kind.roles[0].drawn.nothing.is_some();
+    assert_eq!(
+        (empty, &of_kind.roles[0].drawn),
+        (true, &stated.roles[0].drawn)
+    );
 }

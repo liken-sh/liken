@@ -94,6 +94,15 @@ fn reads_the_field_that_names_a_node(#[case] spec: &str, #[case] node: Option<&s
 }
 
 #[rstest]
+#[case::a_bare_name("{shape: drum}", Some("drum"))]
+#[case::a_whole_name("{shape: drum.cache.example.io}", Some("drum.cache.example.io"))]
+#[case::unsaid("{}", None)]
+fn reads_the_shape_of_the_kind(#[case] spec: &str, #[case] shape: Option<&str>) {
+    let knowledge = read("caches.cache.example.io", spec).unwrap();
+    assert_eq!(knowledge.shape.as_deref(), shape);
+}
+
+#[rstest]
 #[case::reconciles_from("reconciles from", Kind::ReconcilesFrom)]
 #[case::part_of("part of", Kind::PartOf)]
 fn reads_an_edge_from_the_vocabulary(#[case] edge: &str, #[case] expected: Kind) {

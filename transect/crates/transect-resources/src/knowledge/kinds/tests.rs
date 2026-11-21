@@ -30,18 +30,20 @@ fn matches_each_name_to_a_served_kind(
 
 const ELEVATION: &str = "references: [{path: spec.node, kind: Node}], roles: {node: {reference: spec.node, shape: SHAPE}}, elevations: [{name: the rack, question: Where is it?, sketch: node}]";
 
-/// The library's shapes and one author's shape, `crate`, in the group
-/// of the widget's kind.
+/// The library's shapes and an author's shape, `crate`, in the group of
+/// the widget's kind and in the group of the gadget's.
 fn shapes() -> Shapes {
-    let author = crate::shapes::parse(
-        DocId::default(),
-        serde_yaml::from_str(
-            "{metadata: {name: crate.widgets.example.com}, spec: {summary: A crate., size: {design: [100, 50], width: [80, 120]}}}",
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    Shapes::with(&[std::sync::Arc::new(author)])
+    let author = |name: &str| {
+        let text = format!(
+            "{{metadata: {{name: {name}}}, spec: {{summary: A crate., size: {{design: [100, 50], width: [80, 120]}}}}}}"
+        );
+        let shape = crate::shapes::parse(DocId::default(), serde_yaml::from_str(&text).unwrap());
+        std::sync::Arc::new(shape.unwrap())
+    };
+    Shapes::with(&[
+        author("crate.widgets.example.com"),
+        author("crate.gadgets.example.com"),
+    ])
 }
 
 /// A role's shape, as `find_shapes` finds it among the library's shapes
@@ -70,6 +72,78 @@ fn draws_each_role_in_the_shape_it_names(
         (role.drawn.name.as_str(), reasons(&kinds)),
         (drawn, expected)
     );
+}
+
+/// A widget whose role `part` reads `REFERENCE` and states `SHAPE`. The
+/// reference `spec.gadget` names a `Gadget`, `spec.node` names a `Node`,
+/// which has no knowledge, and `spec.note` names no kind.
+const WIDGET: &str = "references: [{path: spec.gadget, kind: Gadget, group: gadgets.example.com}, {path: spec.node, kind: Node}, {path: spec.note}],
+    roles: {part: {reference: REFERENCE, expected: true SHAPE}},
+    elevations: [{name: the bench, question: What is on it?, sketch: part}]";
+
+/// The kind that states each condition: the widget's knowledge is the
+/// first document, and the gadget's the second.
+fn stated_by(kinds: &Kinds) -> Vec<(&'static str, &'static str)> {
+    let kind = |doc: &DocId| ["Widget", "Gadget"][doc.document];
+    kinds
+        .conditions
+        .iter()
+        .map(|(doc, c)| (kind(doc), c.reason))
+        .collect()
+}
+
+/// A part takes the first shape that is stated: its role's, then the one
+/// that the knowledge of its kind states, then `box`. A kind's shape
+/// resolves in the kind's own group, and a name that is not loaded gives
+/// `UnknownShape` to the document that writes it.
+#[rstest]
+#[case::the_roles_over_the_kinds(Some("drum"), "spec.gadget", Some("disc"), "drum", vec![])]
+#[case::an_unknown_role_shape(Some("kettle"), "spec.gadget", Some("disc"), "box", vec![("Widget", "UnknownShape")])]
+#[case::the_kinds(None, "spec.gadget", Some("disc"), "disc", vec![])]
+#[case::the_kinds_in_its_own_group(None, "spec.gadget", Some("crate"), "crate.gadgets.example.com", vec![])]
+#[case::an_unknown_kind_shape(None, "spec.gadget", Some("kettle"), "box", vec![("Gadget", "UnknownShape")])]
+#[case::a_kind_that_states_none(None, "spec.gadget", None, "box", vec![])]
+#[case::a_kind_with_no_knowledge(None, "spec.node", Some("disc"), "box", vec![])]
+#[case::a_value(None, "spec.note", Some("disc"), "box", vec![])]
+fn draws_each_part_in_the_first_shape_stated(
+    #[case] role: Option<&str>,
+    #[case] reference: &str,
+    #[case] kind: Option<&str>,
+    #[case] drawn: &str,
+    #[case] expected: Vec<(&str, &str)>,
+) {
+    let role = role.map_or_else(String::new, |shape| format!(", shape: {shape}"));
+    let widget = WIDGET
+        .replace("REFERENCE", reference)
+        .replace("SHAPE", &role);
+    let gadget = kind.map_or_else(String::new, |shape| format!("shape: {shape}"));
+    let documents = [
+        ("widgets.widgets.example.com", widget),
+        ("gadgets.gadgets.example.com", gadget),
+    ];
+    let knowledge = documents
+        .iter()
+        .enumerate()
+        .map(|(document, (name, spec))| {
+            let text = format!("metadata: {{name: {name}}}\nspec: {{{spec}}}\n");
+            let doc = DocId { file: 0, document };
+            super::super::parse(doc, serde_yaml::from_str(&text).unwrap()).unwrap()
+        });
+    let served = Plurals::from([
+        (
+            ("widgets.example.com".into(), "Widget".into()),
+            "widgets".into(),
+        ),
+        (
+            ("gadgets.example.com".into(), "Gadget".into()),
+            "gadgets".into(),
+        ),
+    ]);
+    let mut kinds = Kinds::resolve(&knowledge.collect::<Vec<_>>(), &served, &[]);
+    kinds.find_shapes(&shapes());
+    let widget = kinds.of("widgets.example.com", "Widget").unwrap();
+    let part = widget.roles[0].drawn.name.as_str();
+    assert_eq!((part, stated_by(&kinds)), (drawn, expected));
 }
 
 /// A document whose kind the cluster does not serve is left out with

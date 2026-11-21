@@ -50,7 +50,7 @@ not an object in the cluster
 from spec.label
 stock from Room cellar to Room back-room , read from spec.spill and spec.room, as the KindKnowledge shelves.stock.example.test states
 light from no Lamp to A-1 , read from spec.lamp and spec.label, as the KindKnowledge shelves.stock.example.test states
-Hover a part for the field it was read from. The places and shapes are from the KindKnowledge shelves.stock.example.test, and /shapes draws each shape.
+Hover a part for the field it was read from. The places are from the KindKnowledge shelves.stock.example.test. A part's shape is from it or from the KindKnowledge of the part's kind, and /shapes draws each shape.
 Part of Room back-room
 Status
 Aisle 7

@@ -31,14 +31,14 @@ fn reads_the_roles_in_the_order_of_the_document() {
         "{hand: {reference: 'spec.handsets[].name', shape: handheld}, face: {reference: status.screen.monitor, shape: screen, expected: true}, amp: {reference: status.amp.name}}",
     )
     .unwrap();
-    let roles: Vec<(&str, &str, &str, bool)> = known
+    let roles: Vec<(&str, &str, Option<&str>, bool)> = known
         .roles
         .iter()
         .map(|r| {
             (
                 r.name.as_str(),
                 r.reference.as_str(),
-                r.shape.as_str(),
+                r.shape.as_deref(),
                 r.expected,
             )
         })
@@ -46,9 +46,9 @@ fn reads_the_roles_in_the_order_of_the_document() {
     assert_eq!(
         roles,
         vec![
-            ("hand", "spec.handsets[].name", "handheld", false),
-            ("face", "status.screen.monitor", "screen", true),
-            ("amp", "status.amp.name", "box", false),
+            ("hand", "spec.handsets[].name", Some("handheld"), false),
+            ("face", "status.screen.monitor", Some("screen"), true),
+            ("amp", "status.amp.name", None, false),
         ]
     );
 }

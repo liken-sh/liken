@@ -164,7 +164,7 @@ impl Sketch {
     /// The line under the sketch.
     pub fn caption(&self) -> String {
         format!(
-            "Hover a part for the field it was read from. The places and shapes are from the KindKnowledge {}, and /shapes draws each shape.",
+            "Hover a part for the field it was read from. The places are from the KindKnowledge {}. A part's shape is from it or from the KindKnowledge of the part's kind, and /shapes draws each shape.",
             self.knowledge
         )
     }

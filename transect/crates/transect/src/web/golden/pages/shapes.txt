@@ -5,7 +5,7 @@ access vulnerabilities kinds
 Search /
 esc
 Shapes
-A sketch draws each part in a shape. A shape states its size, its pieces, and where its text goes, and transect draws every state and every text the same way on each shape. Each shape is drawn here in each state with the same texts. The bars on its first drawing are its ports, where a wire attaches. A role of a KindKnowledge names a shape, and finds the shape of its kind's own group before the library's.
+A sketch draws each part in a shape. A shape states its size, its pieces, and where its text goes, and transect draws every state and every text the same way on each shape. Each shape is drawn here in each state with the same texts. The bars on its first drawing are its ports, where a wire attaches. The KindKnowledge of a kind states the shape that every sketch draws its objects in, and a role of a sketch can state another. A name finds the shape of its kind's own group before the library's.
 the library
 box
 A piece of equipment on a shelf, such as a computer, a network switch, or a hub.
@@ -84,6 +84,7 @@ a stack of alike parts
 disc
 A short cylinder seen face on, such as a filter wheel, a fan, or a reel.
 joins on its left, right; wires at left 40% to 60%, right 40% to 60%
+The KindKnowledge of each of these kinds states this shape: Thermostat .
 powered by
 Supply bench-supply
 model PS-30
@@ -608,6 +609,7 @@ resources.yaml
 crate.stock.example.test
 A crate with a slat across its side and a handle on its lid, such as a crate of stock in a store room.
 wires at left 30% to 70%, right 30% to 70%
+The KindKnowledge of each of these kinds states this shape: Room .
 powered by
 Supply bench-supply
 model PS-30

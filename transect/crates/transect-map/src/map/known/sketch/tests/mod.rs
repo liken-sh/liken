@@ -93,10 +93,20 @@ pub(super) fn page_at(
     slug: Option<&str>,
 ) -> KnownPage {
     let mut known = knowledge("kiosks.widgets.example.com", spec);
-    known.draw_with(shapes);
+    known.draw_with(shapes, |_, _| None);
+    page_of_known(&known, standing, slug)
+}
+
+/// The page of the kiosk with the knowledge `known`, whose shapes are
+/// already found, at the URL of the elevation `slug`.
+pub(super) fn page_of_known(
+    known: &KindKnowledge,
+    standing: Standing,
+    slug: Option<&str>,
+) -> KnownPage {
     let data = serde_yaml::from_str(KIOSK).unwrap();
     let relations = knowledge::relations(
-        &known,
+        known,
         &kiosk(),
         &data,
         &ClusterScoped::default(),
@@ -132,7 +142,7 @@ pub(super) fn page_at(
     };
     let board = Board {
         object: &kiosk(),
-        knowledge: &known,
+        knowledge: known,
         layer: "apps".into(),
         path: "/namespaces/shop/kiosks.widgets.example.com/front".into(),
         elevation: slug,
@@ -149,7 +159,7 @@ pub(super) fn page_at(
         standing: &|_| standing.clone(),
         readings: &readings,
     };
-    KnownPage::build(board, None, card(&known))
+    KnownPage::build(board, None, card(known))
 }
 
 fn card(known: &KindKnowledge) -> ObjectCard {
@@ -446,7 +456,7 @@ fn lays_the_roles_out_on_the_grid_of_the_sketch() {
                 "sketch-area sketch-lean-end".into(),
             ],
             "from status.screen.monitor",
-            "Hover a part for the field it was read from. The places and shapes are from the KindKnowledge kiosks.widgets.example.com, and /shapes draws each shape.".to_string(),
+            "Hover a part for the field it was read from. The places are from the KindKnowledge kiosks.widgets.example.com. A part's shape is from it or from the KindKnowledge of the part's kind, and /shapes draws each shape.".to_string(),
         )
     );
 }

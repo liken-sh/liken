@@ -413,11 +413,13 @@ pub fn pod_page(
     Some(page.with_edge_row(row))
 }
 
-/// The page of every shape that `transect` has loaded, and of each
-/// `Shape` under `--resources` that did not load.
+/// The page of every shape that `transect` has loaded, with the kinds
+/// whose knowledge states each one, and of each `Shape` under
+/// `--resources` that did not load.
 pub fn shapes_page(model: &Model) -> ShapesPage {
-    let resources = &model.snapshot.resources;
-    ShapesPage::build(&resources.shapes(), &resources.directory)
+    let snapshot = &model.snapshot;
+    let resources = &snapshot.resources;
+    ShapesPage::build(&resources.shapes(), &resources.directory, &snapshot.kinds)
 }
 
 /// The resources page: `transect`'s own resources, each with the

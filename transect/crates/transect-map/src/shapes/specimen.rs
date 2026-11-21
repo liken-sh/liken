@@ -2,16 +2,22 @@
 //! every state, with the same texts on every shape: the library's
 //! shapes by name, then each author's, under the file it came from. A
 //! reader compares shapes with the same words, and an author sees a new
-//! shape in each state before a sketch uses it. The last section lists
-//! each `Shape` document that was left out, with its condition.
+//! shape in each state before a sketch uses it. Each shape lists the
+//! kinds whose knowledge states it, so a reader sees what it draws in
+//! this cluster. The last section lists each `Shape` document that was
+//! left out, with its condition.
 
 mod samples;
+
+use std::collections::BTreeMap;
 
 use askama::Template;
 
 use super::text::Drawn;
 use super::{Drawing, Pose};
 use samples::{CELLS, Sample};
+use transect_graph::links::{self, Reference};
+use transect_resources::knowledge::Kinds;
 use transect_resources::resources::Directory;
 use transect_resources::shapes::{Origin, Shape, Shapes};
 
@@ -41,6 +47,9 @@ pub struct Specimen {
     pub summary: String,
     /// Its joins, ports, display, and whether it turns, in words.
     pub facts: String,
+    /// Each kind whose knowledge states the shape, by name, linked to
+    /// the page of the kind.
+    pub kinds: Vec<Reference>,
     pub cells: Vec<Cell>,
 }
 
@@ -66,8 +75,10 @@ pub struct LeftOut {
 impl ShapesPage {
     /// The page for `shapes`. `directory` gives the path of each
     /// author's file and the condition of each `Shape` that did not
-    /// load.
-    pub fn build(shapes: &Shapes, directory: &Directory) -> Self {
+    /// load, and `kinds` the knowledge of each kind that the cluster
+    /// serves, with its shape found.
+    pub fn build(shapes: &Shapes, directory: &Directory, kinds: &Kinds) -> Self {
+        let mut stating = stating(kinds);
         let mut groups: Vec<Group> = Vec::new();
         for shape in shapes.listed() {
             let heading = match shape.origin {
@@ -77,7 +88,8 @@ impl ShapesPage {
                     .get(doc.file)
                     .map_or_else(String::new, |file| file.path.clone()),
             };
-            let specimen = specimen(shape);
+            let stated = stating.remove(&shape.name).unwrap_or_default();
+            let specimen = specimen(shape, stated);
             match groups.last_mut() {
                 Some(group) if group.heading == heading => group.shapes.push(specimen),
                 _ => groups.push(Group {
@@ -98,13 +110,39 @@ impl ShapesPage {
     }
 }
 
-fn specimen(shape: &Shape) -> Specimen {
+/// Each kind whose knowledge states a shape that is loaded, by the
+/// shape's name, in the order of the kinds' names.
+fn stating(kinds: &Kinds) -> BTreeMap<String, Vec<Reference>> {
+    let mut stating: BTreeMap<String, Vec<Reference>> = BTreeMap::new();
+    for (group, kind) in kinds.kinds() {
+        let Some(known) = kinds.of(group, kind) else {
+            continue;
+        };
+        let Some(shape) = &known.drawn else {
+            continue;
+        };
+        stating
+            .entry(shape.name.clone())
+            .or_default()
+            .push(Reference {
+                text: kind.clone(),
+                href: Some(links::kind(&known.group, &known.plural)),
+            });
+    }
+    for named in stating.values_mut() {
+        named.sort_by(|a, b| (&a.text, &a.href).cmp(&(&b.text, &b.href)));
+    }
+    stating
+}
+
+fn specimen(shape: &Shape, kinds: Vec<Reference>) -> Specimen {
     let cells = CELLS.iter().enumerate();
     let cells = cells.filter(|(_, sample)| !sample.turned || shape.turns);
     Specimen {
         name: shape.name.clone(),
         summary: shape.summary.clone(),
         facts: facts(shape),
+        kinds,
         cells: cells
             .map(|(at, sample)| cell(shape, sample, at == 0))
             .collect(),
