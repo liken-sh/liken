@@ -5,7 +5,7 @@ access vulnerabilities kinds
 Search /
 esc
 cluster control plane node-beta workers node-alpha overview if lost
-node-alpha Worker, ready 10 pods in 4 namespaces run here.
+node-alpha Worker, ready 12 pods in 4 namespaces run here.
 cpu
 CPU 1.5 used · 0.0 requested of 4
 mem
@@ -22,6 +22,14 @@ cpu
 mem 256Mi · cpu 250m · no request or limit · 0 restarts
 data
 acme-ledger
+journal-1 of Ledger journal
+mem
+cpu
+no request or limit · 0 restarts
+journal-3 of Ledger journal
+mem
+cpu
+no request or limit · 0 restarts
 ledger-db-0 of StatefulSet ledger-db
 mem
 cpu

@@ -1,0 +1,97 @@
+Ledger receipts · acme-ledger · transect
+transect
+cluster / data / acme-ledger / Ledger receipts
+access vulnerabilities kinds
+Search /
+esc
+acme-ledger Ledger journal Ledger receipts ImageReports ×1 overview section logs access
+Edges
+Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+Ledger
+receipts
+Ready: running
+the store
+Where do writes and reads go, and which instances follow the primary?
+described by transect
+primary with replicas drawn the same way for every kind that fills its roles
+writes from Service receipts-rw to Pod receipts-1, read from receipts-rw and status.primary, as transect's pattern primary with replicas states
+writes
+read from receipts-rw and status.primary, as transect's pattern primary with replicas states
+reads from Service receipts-ro to no replica, read from receipts-ro and instances-but-primary, which transect derives, as transect's pattern primary with replicas states
+reads
+read from receipts-ro and instances-but-primary, which transect derives, as transect's pattern primary with replicas states
+streams from Pod receipts-1 to no replica, read from status.primary and instances-but-primary, which transect derives, as transect's pattern primary with replicas states
+streams
+read from status.primary and instances-but-primary, which transect derives, as transect's pattern primary with replicas states
+writes through
+Service receipts-rw
+ports 7000
+pods receipts-1
+from receipts-rw
+reads through
+at rest
+Service receipts-ro
+selects the replicas, and there is none
+ports 7000
+from receipts-ro
+primary
+Pod receipts-1
+ready 1/1
+node node-beta
+age 4d
+claim data-receipts-1 1Gi
+from status.primary
+replica
+empty, not missing a part
+no replica
+status.instances[] lists only the primary
+operator
+at rest
+Deployment acme-promoter/promoter
+no replica to promote
+from controller, which transect derives
+writes from Service receipts-rw to Pod receipts-1 , read from receipts-rw and status.primary, as transect's pattern primary with replicas states
+reads from Service receipts-ro to no replica , read from receipts-ro and instances-but-primary, which transect derives, as transect's pattern primary with replicas states
+streams from Pod receipts-1 to no replica , read from status.primary and instances-but-primary, which transect derives, as transect's pattern primary with replicas states
+What the pattern expects
+✓ met the primary is ready, and it is the operator's target: receipts-1
+✓ met writes reach only the primary: receipts-rw reaches receipts-1
+– does not apply each replica is ready: does not apply, no replica
+– does not apply reads reach only replicas: does not apply, no replica
+Hover a part or an expectation for the field it was read from. The parts and their states are from the Kubernetes API. Which part has which role is from the KindKnowledge ledgers.ledgers.example.test. The places, the shapes, and the expectations are from transect's pattern primary with replicas, and /shapes draws each shape.
+Status
+Instances 1
+Runs
+image
+repository
+version
+commit
+rolled
+example.test/ledger-engine:2
+not read
+none
+none
+—
+Ledger receipts 1 of 1 ready
+A ledger's primary, which takes the writes, and the replicas that stream from it. kind
+no way in · access
+Depends on
+Service receipts-ro kind
+Controlled by
+Deployment acme-promoter/promoter kind
+If it goes down
+Nothing in the cluster depends on it.
+No NetworkPolicy selects its pods, so any pod may call them.
+no GitOps applier's label or annotation is on it
+Described by promoter
+Healthy when its Ready condition is True.
+from the KindKnowledge ledgers.ledgers.example.test
+Marked lines are stored text, not read from the cluster. kind: from the kind knowledge. Hover a mark for its source.

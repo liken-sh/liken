@@ -2,6 +2,8 @@
 //! reads the resource the way a workload's page does, so the two pages
 //! show the same card.
 
+mod core;
+mod judged;
 mod readings;
 
 use super::super::model::Model;
@@ -17,10 +19,11 @@ use transect_map::map::{
     known_chips, known_through, workload_card,
 };
 use transect_map::objects::{self, Center, ObjectCard};
+use transect_network::entry::Endpoints;
 use transect_observe::health::{Deciding, Level, Reason};
 use transect_observe::usage;
-use transect_resources::knowledge::plural_label;
 use transect_resources::knowledge::role::NamedBy;
+use transect_resources::knowledge::{catalog, plural_label};
 use transect_resources::layers::Layers;
 
 /// The page for the custom resource `namespace/name` whose kind is
@@ -54,9 +57,9 @@ pub fn known_page(
         (served.as_deref() == Some(resource)).then_some((object, found))
     })?;
     let knowledge = snapshot.kinds.of_object(&object)?;
-    // A kind with no elevation has no URL for one, so the page of an
-    // elevation of its object is not found.
-    if elevation.is_some() && knowledge.elevations.is_empty() {
+    // A kind with no elevation of its own or of its pattern has no URL
+    // for one, so the page of an elevation of its object is not found.
+    if elevation.is_some() && knowledge.stated().is_empty() {
         return None;
     }
     let page = read_workloads(
@@ -104,6 +107,13 @@ pub fn known_page(
                     .flatten()
             };
             let subjects = |other: &Object| subject(snapshot, contents.graph, other);
+            let endpoints = Endpoints::build(&snapshot.endpoint_slices);
+            let facts = judged::Facts {
+                snapshot,
+                graph: contents.graph,
+                endpoints: &endpoints,
+            };
+            let judged = catalog::judge(knowledge, &object, &facts);
             let named_by = |named: &Object, by: &NamedBy| named_by(snapshot, named, by);
             let board = Board {
                 subject: subject(snapshot, contents.graph, &object)?,
@@ -124,11 +134,14 @@ pub fn known_page(
                 page: &page_of,
                 ground: &|title| super::ground_link(model, title),
                 device: &|device| snapshot.devices.named(device, &snapshot.resources.devices),
-                standing: &|other| standing(snapshot, other),
-                readings: &|other, reads| readings::readings(snapshot, other, reads, now),
+                standing: &|other| standing(snapshot, other, now),
+                readings: &|other, reads| {
+                    readings::readings(snapshot, &endpoints, other, reads, now)
+                },
                 subjects: &subjects,
                 named_by: &named_by,
                 ends: snapshot,
+                judged: judged.as_ref(),
             };
             // The card is on the object's own page, so its title does not
             // link.
@@ -214,8 +227,12 @@ fn named_by(snapshot: &Snapshot, named: &Object, by: &NamedBy) -> Vec<Object> {
 /// object of a kind that no store holds is drawn plainly, because the
 /// snapshot cannot say whether it exists. So is an object of a kind with
 /// no knowledge, because only knowledge says which condition is its
-/// health.
-fn standing(snapshot: &Snapshot, object: &Object) -> Standing {
+/// health. A `Pod` stands as the rules that mark a `Pod` on every page
+/// say.
+fn standing(snapshot: &Snapshot, object: &Object, now: Timestamp) -> Standing {
+    if let Some(standing) = core::standing(snapshot, object, now) {
+        return standing;
+    }
     let Some(stored) = super::object::stored(snapshot, object) else {
         return Standing::Plain;
     };
@@ -334,7 +351,8 @@ mod tests {
         #[case] expected: Standing,
     ) {
         let object = Object::new(group, kind, Some(namespace), name);
-        assert_eq!(standing(&fixture::snapshot(), &object), expected);
+        let now = Timestamp::UNIX_EPOCH;
+        assert_eq!(standing(&fixture::snapshot(), &object, now), expected);
     }
 
     fn said(status: Option<&str>, reason: Option<&str>, message: Option<&str>) -> Reason {

@@ -76,9 +76,10 @@ empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
-replicas
-Pod orders-1
-ready 2 of 2
+replica × 2
+Pod orders-2 , Pod orders-3
+ready 1/1 each
+node alpha , beta
 from status.replicas[]
 a stack of alike parts
 disc
@@ -151,9 +152,10 @@ empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
-replicas
-Pod orders-1
-ready 2 of 2
+replica × 2
+Pod orders-2 , Pod orders-3
+ready 1/1 each
+node alpha , beta
 from status.replicas[]
 a stack of alike parts
 drum
@@ -225,9 +227,10 @@ empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
-replicas
-Pod orders-1
-ready 2 of 2
+replica × 2
+Pod orders-2 , Pod orders-3
+ready 1/1 each
+node alpha , beta
 from status.replicas[]
 a stack of alike parts
 handheld
@@ -299,9 +302,10 @@ empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
-replicas
-Pod orders-1
-ready 2 of 2
+replica × 2
+Pod orders-2 , Pod orders-3
+ready 1/1 each
+node alpha , beta
 from status.replicas[]
 a stack of alike parts
 screen
@@ -373,9 +377,10 @@ empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
-replicas
-Pod orders-1
-ready 2 of 2
+replica × 2
+Pod orders-2 , Pod orders-3
+ready 1/1 each
+node alpha , beta
 from status.replicas[]
 a stack of alike parts
 socket
@@ -447,9 +452,10 @@ empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
-replicas
-Pod orders-1
-ready 2 of 2
+replica × 2
+Pod orders-2 , Pod orders-3
+ready 1/1 each
+node alpha , beta
 from status.replicas[]
 a stack of alike parts
 speaker
@@ -521,9 +527,10 @@ empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
-replicas
-Pod orders-1
-ready 2 of 2
+replica × 2
+Pod orders-2 , Pod orders-3
+ready 1/1 each
+node alpha , beta
 from status.replicas[]
 a stack of alike parts
 front
@@ -600,9 +607,10 @@ empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
-replicas
-Pod orders-1
-ready 2 of 2
+replica × 2
+Pod orders-2 , Pod orders-3
+ready 1/1 each
+node alpha , beta
 from status.replicas[]
 a stack of alike parts
 resources.yaml
@@ -676,9 +684,10 @@ empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
-replicas
-Pod orders-1
-ready 2 of 2
+replica × 2
+Pod orders-2 , Pod orders-3
+ready 1/1 each
+node alpha , beta
 from status.replicas[]
 a stack of alike parts
 Left out

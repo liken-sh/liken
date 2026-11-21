@@ -1,0 +1,221 @@
+# Two ledgers, each a store that fills the pattern `primary-with-replicas`
+# of transect's catalog through the knowledge in `resources.yaml`.  The
+# journal has four instances: the primary, two replicas that are alike,
+# so the page stacks them, and a replica that crash-loops and restarted
+# within the hour, so it is not ready and stands apart from the stack.
+# The receipts ledger has one instance, as most stores do, so it has no
+# replica.  Each ledger has a
+# `Service` for writes and one for reads, which its knowledge names by a
+# template, and an `EndpointSlice` for each.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: ledgers.ledgers.example.test}
+spec:
+  group: ledgers.example.test
+  scope: Namespaced
+  names: {kind: Ledger, plural: ledgers}
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - {name: Instances, type: integer, jsonPath: .spec.instances}
+---
+apiVersion: ledgers.example.test/v1
+kind: Ledger
+metadata: {namespace: acme-ledger, name: journal, uid: journal}
+spec: {instances: 4}
+status:
+  primary: journal-1
+  target: journal-1
+  instances: [journal-1, journal-2, journal-3, journal-4]
+  conditions: [{type: Ready, status: 'True', reason: Running}]
+---
+apiVersion: ledgers.example.test/v1
+kind: Ledger
+metadata: {namespace: acme-ledger, name: receipts, uid: receipts}
+spec: {instances: 1}
+status:
+  primary: receipts-1
+  target: receipts-1
+  instances: [receipts-1]
+  conditions: [{type: Ready, status: 'True', reason: Running}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ledger
+  name: journal-1
+  uid: journal-1
+  creationTimestamp: '2025-12-30T08:00:00Z'
+  labels: {ledger: journal, role: primary}
+  ownerReferences: [{apiVersion: ledgers.example.test/v1, kind: Ledger, name: journal, uid: journal, controller: true}]
+spec:
+  nodeName: node-alpha
+  containers: [{name: store, image: example.test/ledger-engine:2}]
+  volumes: [{name: data, persistentVolumeClaim: {claimName: data-journal-1}}]
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.21}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: store, ready: true, restartCount: 0, image: example.test/ledger-engine:2, imageID: '', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ledger
+  name: journal-2
+  uid: journal-2
+  creationTimestamp: '2025-12-30T08:05:00Z'
+  labels: {ledger: journal, role: replica}
+  ownerReferences: [{apiVersion: ledgers.example.test/v1, kind: Ledger, name: journal, uid: journal, controller: true}]
+spec:
+  nodeName: node-beta
+  containers: [{name: store, image: example.test/ledger-engine:2}]
+  volumes: [{name: data, persistentVolumeClaim: {claimName: data-journal-2}}]
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.22}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: store, ready: true, restartCount: 0, image: example.test/ledger-engine:2, imageID: '', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ledger
+  name: journal-3
+  uid: journal-3
+  creationTimestamp: '2025-12-30T08:10:00Z'
+  labels: {ledger: journal, role: replica}
+  ownerReferences: [{apiVersion: ledgers.example.test/v1, kind: Ledger, name: journal, uid: journal, controller: true}]
+spec:
+  nodeName: node-alpha
+  containers: [{name: store, image: example.test/ledger-engine:2}]
+  volumes: [{name: data, persistentVolumeClaim: {claimName: data-journal-3}}]
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.23}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: store, ready: true, restartCount: 0, image: example.test/ledger-engine:2, imageID: '', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ledger
+  name: journal-4
+  uid: journal-4
+  creationTimestamp: '2025-12-30T08:15:00Z'
+  labels: {ledger: journal, role: replica}
+  ownerReferences: [{apiVersion: ledgers.example.test/v1, kind: Ledger, name: journal, uid: journal, controller: true}]
+spec:
+  nodeName: node-beta
+  containers: [{name: store, image: example.test/ledger-engine:2}]
+  volumes: [{name: data, persistentVolumeClaim: {claimName: data-journal-4}}]
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.25}]
+  conditions: [{type: Ready, status: 'False'}]
+  containerStatuses:
+  - name: store
+    ready: false
+    restartCount: 4
+    image: example.test/ledger-engine:2
+    imageID: ''
+    state: {waiting: {reason: CrashLoopBackOff}}
+    lastState: {terminated: {exitCode: 1, reason: Error, startedAt: '2026-01-01T11:51:00Z', finishedAt: '2026-01-01T11:52:00Z'}}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ledger
+  name: receipts-1
+  uid: receipts-1
+  creationTimestamp: '2025-12-28T09:00:00Z'
+  labels: {ledger: receipts, role: primary}
+  ownerReferences: [{apiVersion: ledgers.example.test/v1, kind: Ledger, name: receipts, uid: receipts, controller: true}]
+spec:
+  nodeName: node-beta
+  containers: [{name: store, image: example.test/ledger-engine:2}]
+  volumes: [{name: data, persistentVolumeClaim: {claimName: data-receipts-1}}]
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.24}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: store, ready: true, restartCount: 0, image: example.test/ledger-engine:2, imageID: '', state: {running: {}}}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {namespace: acme-ledger, name: data-journal-1}
+spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 2Gi}}}
+status: {phase: Bound, capacity: {storage: 2Gi}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {namespace: acme-ledger, name: data-journal-2}
+spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 2Gi}}}
+status: {phase: Bound, capacity: {storage: 2Gi}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {namespace: acme-ledger, name: data-journal-3}
+spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 2Gi}}}
+status: {phase: Bound, capacity: {storage: 2Gi}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {namespace: acme-ledger, name: data-journal-4}
+spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 2Gi}}}
+status: {phase: Bound, capacity: {storage: 2Gi}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {namespace: acme-ledger, name: data-receipts-1}
+spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 1Gi}}}
+status: {phase: Bound, capacity: {storage: 1Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {namespace: acme-ledger, name: journal-rw}
+spec: {selector: {ledger: journal, role: primary}, ports: [{port: 7000}], clusterIP: 10.96.0.31}
+---
+apiVersion: v1
+kind: Service
+metadata: {namespace: acme-ledger, name: journal-ro}
+spec: {selector: {ledger: journal, role: replica}, ports: [{port: 7000}], clusterIP: 10.96.0.32}
+---
+apiVersion: v1
+kind: Service
+metadata: {namespace: acme-ledger, name: receipts-rw}
+spec: {selector: {ledger: receipts, role: primary}, ports: [{port: 7000}], clusterIP: 10.96.0.33}
+---
+apiVersion: v1
+kind: Service
+metadata: {namespace: acme-ledger, name: receipts-ro}
+spec: {selector: {ledger: receipts, role: replica}, ports: [{port: 7000}], clusterIP: 10.96.0.34}
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata: {namespace: acme-ledger, name: journal-rw-a, labels: {kubernetes.io/service-name: journal-rw}}
+addressType: IPv4
+endpoints: [{addresses: [10.0.0.21], conditions: {ready: true}, targetRef: {kind: Pod, name: journal-1}}]
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata: {namespace: acme-ledger, name: journal-ro-a, labels: {kubernetes.io/service-name: journal-ro}}
+addressType: IPv4
+endpoints:
+- {addresses: [10.0.0.22], conditions: {ready: true}, targetRef: {kind: Pod, name: journal-2}}
+- {addresses: [10.0.0.23], conditions: {ready: true}, targetRef: {kind: Pod, name: journal-3}}
+- {addresses: [10.0.0.25], conditions: {ready: false}, targetRef: {kind: Pod, name: journal-4}}
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata: {namespace: acme-ledger, name: receipts-rw-a, labels: {kubernetes.io/service-name: receipts-rw}}
+addressType: IPv4
+endpoints: [{addresses: [10.0.0.24], conditions: {ready: true}, targetRef: {kind: Pod, name: receipts-1}}]
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata: {namespace: acme-ledger, name: receipts-ro-a, labels: {kubernetes.io/service-name: receipts-ro}}
+addressType: IPv4
+endpoints: []

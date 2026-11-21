@@ -34,7 +34,7 @@ fn reads_a_health_through_a_reference() {
 fn reads_every_field() {
     let knowledge = read(
         "caches.cache.example.io",
-        "{summary: Keeps sessions., layer: platform, healthy: {condition: Ready}, references: [{path: status.primary.node, kind: Node, edge: runs on}, {path: spec.upstream, address: true, label: fills from}, {path: status.display}], writesSecret: spec.credentialsSecret, controller: {image: example/cache-operator}, disruptions: operator, primary: status.currentPrimary, docs: 'https://cache.example.io/docs/'}",
+        "{summary: Keeps sessions., layer: platform, healthy: {condition: Ready}, references: [{path: status.primary.node, kind: Node, edge: runs on}, {path: spec.upstream, address: true, label: fills from}, {path: status.display}], writesSecret: spec.credentialsSecret, controller: {image: example/cache-operator}, disruptions: operator, docs: 'https://cache.example.io/docs/'}",
     )
     .unwrap();
     assert_eq!(
@@ -47,7 +47,6 @@ fn reads_every_field() {
             knowledge.writes_secret.as_deref(),
             knowledge.controller_image.as_deref(),
             knowledge.disruptions,
-            knowledge.primary.as_deref(),
         ),
         (
             "caches",
@@ -58,7 +57,6 @@ fn reads_every_field() {
             Some("spec.credentialsSecret"),
             Some("example/cache-operator"),
             Some(Disruptions::Operator),
-            Some("status.currentPrimary"),
         )
     );
     let references: Vec<(&str, &Target, Kind, Option<&str>)> = knowledge
@@ -100,6 +98,15 @@ fn reads_the_field_that_names_a_node(#[case] spec: &str, #[case] node: Option<&s
 fn reads_the_shape_of_the_kind(#[case] spec: &str, #[case] shape: Option<&str>) {
     let knowledge = read("caches.cache.example.io", spec).unwrap();
     assert_eq!(knowledge.shape.as_deref(), shape);
+}
+
+#[rstest]
+#[case::a_path("{references: [{path: status.writeService, kind: Service}]}", ("status.writeService", false))]
+#[case::a_name("{references: [{name: '{name}-ro', kind: Service}]}", ("{name}-ro", true))]
+fn reads_a_path_or_a_name_template(#[case] spec: &str, #[case] expected: (&str, bool)) {
+    let knowledge = read("caches.cache.example.io", spec).unwrap();
+    let reference = &knowledge.references[0];
+    assert_eq!((reference.path.as_str(), reference.by_name), expected);
 }
 
 #[rstest]
@@ -198,6 +205,34 @@ fn refuses_a_name_that_is_not_plural_dot_group(#[case] name: &str) {
 #[case::a_name_with_no_name(
     "{referencedBy: [{kind: Ingress, annotation: example.com/caches, name: '{namespace}'}]}",
     "referencedBy[0]: name \"{namespace}\" has no {name}"
+)]
+#[case::a_path_and_a_name(
+    "{references: [{path: spec.a, name: '{name}-a', kind: Service}]}",
+    "references[0]: the entry has both path and name"
+)]
+#[case::neither_path_nor_name(
+    "{references: [{kind: Service}]}",
+    "references[0]: the entry has neither path nor name"
+)]
+#[case::a_template_with_no_kind(
+    "{references: [{name: '{name}-ro'}]}",
+    "references[0]: name \"{name}-ro\" names an object, so kind is required"
+)]
+#[case::a_template_with_no_name(
+    "{references: [{name: '{namespace}-ro', kind: Service}]}",
+    "references[0]: name \"{namespace}-ro\" has no {name}"
+)]
+#[case::a_template_with_another_brace(
+    "{references: [{name: '{name}-{role}', kind: Service}]}",
+    "references[0]: name \"{name}-{role}\" has a brace that is not part of"
+)]
+#[case::a_template_with_a_match(
+    "{references: [{name: '{name}-ro', kind: Service, match: status.address}]}",
+    "references[0]: name \"{name}-ro\" names the object, and match reads a field"
+)]
+#[case::the_primary_of_the_proof_of_concept(
+    "{primary: status.currentPrimary}",
+    "primary is now a role of pattern"
 )]
 #[case::an_unknown_role(
     "{referencedBy: [{kind: Ingress, annotation: example.com/caches, name: '{name}', role: guards}]}",

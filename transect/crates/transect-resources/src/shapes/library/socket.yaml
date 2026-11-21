@@ -9,5 +9,5 @@ spec:
   outline: {round: 6}
   text: {inset: [10, 14, 16, 14]}
   pieces:
-    - {name: port, draw: glass, at: {left: 50% - 13, bottom: -1, width: 26, height: 8}, round: [4, 4, 0, 0]}
+    - {name: port, draw: mark, at: {left: 50% - 13, bottom: -1, width: 26, height: 8}, round: [4, 4, 0, 0]}
   ports: {bottom: [47%, 53%]}

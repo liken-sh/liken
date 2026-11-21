@@ -19,7 +19,9 @@ pub struct Sample {
     pub why: Option<&'static str>,
     pub readings: &'static [(&'static str, &'static str)],
     pub shows: &'static [(&'static str, &'static str)],
-    pub stack: u8,
+    /// The names of the parts that a stack stands for, or none for a
+    /// part that stands for one object.
+    pub stack: &'static [&'static str],
     /// Whether the cell draws the shape on its side. Only a shape that
     /// turns has the cell.
     pub turned: bool,
@@ -40,7 +42,7 @@ const PLAIN: Sample = Sample {
         ("load", "42%"),
     ],
     shows: &[],
-    stack: 0,
+    stack: &[],
     turned: false,
 };
 
@@ -131,12 +133,11 @@ pub const CELLS: &[Sample] = &[
     },
     Sample {
         caption: "a stack of alike parts",
-        label: "replicas",
+        label: "replica",
         source: "from status.replicas[]",
-        end: "Pod orders-1",
-        under: Some("ready 2 of 2"),
-        readings: &[],
-        stack: 2,
+        end: "Pod orders-2, Pod orders-3",
+        readings: &[("ready", "1/1 each"), ("node", "alpha, beta")],
+        stack: &["Pod orders-2", "Pod orders-3"],
         ..PLAIN
     },
     Sample {
@@ -199,6 +200,14 @@ impl Sample {
                 reason: reason.into(),
                 message: None,
             }),
+            stack: self
+                .stack
+                .iter()
+                .map(|name| Reference {
+                    text: name.to_string(),
+                    href: None,
+                })
+                .collect(),
         };
         (vec![part], None)
     }

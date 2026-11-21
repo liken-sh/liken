@@ -11,7 +11,9 @@ use transect_resources::knowledge::{Names, Reached, Relation};
 /// One value of a reference's field. It links to the page of the object
 /// it names when that object has one, and a Node links to its machine's
 /// page. `under` is the note under the value: what the value resolves
-/// to, or why it resolves to nothing.
+/// to, or why it resolves to nothing. A value does not say that it
+/// reaches the page's own object, because the page is that object, as a
+/// `Service` that selects the pods of the page's object reaches it.
 pub fn end(relation: &Relation, reached: &Reached, here: Option<&str>, board: &Board) -> End {
     let refer = |end: &Endpoint| refer(end, here, board);
     let (reference, itself) = match &relation.names {
@@ -27,10 +29,11 @@ pub fn end(relation: &Relation, reached: &Reached, here: Option<&str>, board: &B
             None,
         ),
     };
+    let page = Endpoint::Object(board.subject.object.clone());
     let others: Vec<Reference> = reached
         .ends
         .iter()
-        .filter(|end| Some(*end) != itself.as_ref())
+        .filter(|end| Some(*end) != itself.as_ref() && **end != page)
         .map(refer)
         .collect();
     // An address that resolves to exactly one endpoint links to that
@@ -59,6 +62,15 @@ pub fn end(relation: &Relation, reached: &Reached, here: Option<&str>, board: &B
         reference,
         under,
         reaches,
+    }
+}
+
+/// Whether `drawn` and `value` name the same thing: the same page when
+/// both link, and the same text when either does not.
+pub fn same(drawn: &Reference, value: &Reference) -> bool {
+    match (&drawn.href, &value.href) {
+        (Some(drawn), Some(href)) => drawn == href,
+        _ => drawn.text == value.text,
     }
 }
 

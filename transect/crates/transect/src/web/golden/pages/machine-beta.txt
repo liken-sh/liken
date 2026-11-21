@@ -5,7 +5,7 @@ access vulnerabilities kinds
 Search /
 esc
 cluster control plane node-beta workers node-alpha overview if lost
-node-beta Control plane, ready 9 pods in 3 namespaces run here.
+node-beta Control plane, ready 12 pods in 3 namespaces run here.
 cpu
 CPU 0.8 used · 0.0 requested of 4
 mem
@@ -38,6 +38,18 @@ ledger-exporter-rs-one of Deployment ledger-exporter
 mem
 cpu
 mem 32Mi · cpu 10m · no request or limit · not ready · 14 restarts
+journal-2 of Ledger journal
+mem
+cpu
+no request or limit · 0 restarts
+journal-4 of Ledger journal
+mem
+cpu
+no request or limit · not ready · 4 restarts
+receipts-1 of Ledger receipts
+mem
+cpu
+no request or limit · 0 restarts
 ledger-store-0 of StatefulSet ledger-store
 mem
 cpu

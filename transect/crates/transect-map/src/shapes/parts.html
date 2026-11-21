@@ -13,24 +13,32 @@
     title says which object and which reference.
 
     The lines after the label are one group, so a shape that cuts its
-    text can drop the label first and the name last. -#}
+    text can drop the label first and the name last.  A reading that
+    lists several values breaks only between them, and a reading of one
+    value and what the page's own object shows break as any value does.
+
+    A part that stands for a stack of alike parts draws copies of its
+    outline behind it, counts the parts after its label, and names each
+    of them, each linked to its page. -#}
 {%- import "links/link.html" as links -%}
 {%- import "shapes/part.html" as shapes -%}
-{%- macro reading(reading, class) -%}
+{%- macro reading(reading, class, list) -%}
 <div class="shape-reading{{ class }}" title="{% if let Some(from) = reading.from %}{{ from.text }}{% else %}{{ reading.name }} {{ reading.value }}{% endif %}"><span class="shape-reading-name">{{ reading.name }}</span> <span class="shape-reading-value">
 {%- if let Some(from) = reading.from %}{% call links::value_link(reading.value, from.href) %}{% endcall %}
+{%- else if list && reading.items().len() > 1 %}{% for item in reading.items() %}{% if !loop.first %}, {% endif %}<span class="shape-item">{% call links::spelled(item) %}{% endcall %}</span>{% endfor %}
 {%- else %}{% call links::spelled(reading.value) %}{% endcall %}
 {%- endif %}</span></div>
 {%- endmacro -%}
 {%- for part in drawn.parts %}
-{% call shapes::part(drawn.drawing, part.state.class(), drawn.source) %}
-<div class="shape-label">{{ drawn.label }}</div>
+{% call shapes::part(drawn.drawing_of(part), part.state.class(), drawn.source_text()) %}
+<div class="shape-label">{{ drawn.label }}{% if !part.stack.is_empty() %} × {{ part.stack.len() }}{% endif %}</div>
 {%- if let Some(spoken) = part.state.spoken() %}
 <div class="shape-state">{{ spoken }}</div>
 {%- endif %}
 <div class="shape-lines">
 <div class="shape-name" title="{{ part.end.reference.text }}">
-{%- if part.literal %}{% call links::value_link(part.end.reference.text, part.end.reference.href) %}{% endcall %}
+{%- if !part.stack.is_empty() %}{% for name in part.stack %}{% if !loop.first %}, {% endif %}<span class="shape-stacked">{% call links::object_link(name.text, name.href, "") %}{% endcall %}</span>{% endfor %}
+{%- else if part.literal %}{% call links::value_link(part.end.reference.text, part.end.reference.href) %}{% endcall %}
 {%- else %}{% call links::object_link(part.end.reference.text, part.end.reference.href, "") %}{% endcall %}
 {%- endif %}</div>
 {%- if let Some(why) = part.why %}
@@ -41,7 +49,7 @@
 {%- if !part.readings.is_empty() %}
 <div class="shape-readings">
 {%- for reading in part.readings %}
-{% call reading(reading, "") %}{% endcall %}
+{% call reading(reading, "", true) %}{% endcall %}
 {%- endfor %}
 </div>
 {%- endif %}
@@ -49,9 +57,9 @@
 <div class="shape-readings shape-shows">
 {%- for show in part.shows %}
 {%- if show.fallback %}
-{% call reading(show.reading, " shape-fallback") %}{% endcall %}
+{% call reading(show.reading, " shape-fallback", false) %}{% endcall %}
 {%- else %}
-{% call reading(show.reading, "") %}{% endcall %}
+{% call reading(show.reading, "", false) %}{% endcall %}
 {%- endif %}
 {%- endfor %}
 </div>
@@ -64,7 +72,7 @@
 <div class="shape-under">{{ under }}</div>
 {%- endif %}
 </div>
-<div class="shape-source">{{ drawn.source }}</div>
+<div class="shape-source">{% call links::sentence(drawn.source.as_slice()) %}{% endcall %}</div>
 {% endcall %}
 {%- endfor %}
 {%- if let Some(nothing) = drawn.nothing %}

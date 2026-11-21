@@ -4,14 +4,16 @@
 
 use super::super::board::{Board, Subject};
 use super::super::end::refer;
-use super::fill::Found;
+use super::fill::{self, Found};
 use super::nested::NestedPart;
 use super::tracks::{Contact, Footprint, Joins};
-use super::{Lean, empty, part};
+use super::{Lean, empty, fields, part, stack};
 use crate::shapes::text::{Drawn, Part};
-use crate::shapes::{Drawing, Pose};
+use crate::shapes::{Drawing, Pose, stacked};
 use transect_graph::edges::{Endpoint, Object, kind_and_name};
+use transect_graph::links::Reference;
 use transect_resources::knowledge::Grid;
+use transect_resources::knowledge::catalog::Marks;
 use transect_resources::knowledge::role::Role;
 use transect_resources::shapes::{Edge, Shape};
 
@@ -44,6 +46,10 @@ pub struct Fills<'a, 's> {
     pub only_the_page: bool,
     /// Whether a wire meets the role, so its ports are marked.
     pub wired: bool,
+    /// The marks of the page's pattern, when the elevation is the
+    /// pattern's own and not drawn inside a part, because only that
+    /// elevation lists what the pattern expects.
+    pub marks: Option<&'a Marks>,
     /// Whether the elevation is drawn inside a part of the page's own
     /// elevation. `transect` nests one level, so a role of a nested
     /// elevation draws each part in its shape.
@@ -98,7 +104,8 @@ pub fn draw(
 ) -> Option<(SketchRole, Footprint)> {
     let references = &subject.knowledge.references;
     let label = role.label(references);
-    let source = source(role, fills.elsewhere);
+    let source = source(board, subject, role, fills.elsewhere);
+    let source_text = fields::text(&source);
     let shows = part::shows(board, &subject.object, &role.shows);
     let as_elevation = role.elevation.as_deref();
     let as_elevation = as_elevation.filter(|_| !fills.nested && role.unresolved().is_none());
@@ -111,7 +118,7 @@ pub fn draw(
         let built = inner.and_then(|inner| {
             let name = refer(&Endpoint::Object(inner.object.clone()), here, board);
             let name = part::named(&label, &inner.object, name);
-            NestedPart::build(board, &inner, as_elevation?, name, &label, &source)
+            NestedPart::build(board, &inner, as_elevation?, name, &label, &source_text)
         });
         match built {
             Some(one) => nested.push(one),
@@ -122,6 +129,7 @@ pub fn draw(
                 &label,
                 &shows,
                 found,
+                fills.marks,
             )),
         }
     }
@@ -130,13 +138,21 @@ pub fn draw(
             part.end.under = Some(unresolved.into());
         }
     }
+    if role.stack {
+        parts = stack::gather(parts);
+    }
     let empty = parts.is_empty() && nested.is_empty();
     if empty && fills.only_the_page {
         return None;
     }
-    let elsewhere = (!fills.elsewhere.is_empty()).then_some(source.as_str());
+    let elsewhere = (!fills.elsewhere.is_empty()).then_some(source_text.as_str());
     let nothing = match empty {
-        true => Some(empty::nothing(subject, role, elsewhere)?),
+        true => Some(empty::nothing(
+            subject,
+            role,
+            elsewhere,
+            fill::derived(board, subject, role),
+        )?),
         false => None,
     };
     let columns = grid.columns_of(&role.name).unwrap_or_default();
@@ -153,6 +169,7 @@ pub fn draw(
         abutting: shape.joins(Edge::Left) && shape.joins(Edge::Right),
         drawn: Drawn {
             drawing: Drawing::of(&shape, pose),
+            stacked: stacked(&shape, pose),
             label,
             source,
             parts,
@@ -214,9 +231,15 @@ fn footprint(shape: &Shape, parts: &[Part], empty: bool, nested: &[NestedPart]) 
 
 /// Where the role's parts were read: "from Shelf spec.room", followed by
 /// each object that an earlier role draws, as "except Shelf top, which
-/// shelf draws".
-fn source(role: &Role, elsewhere: &[(Object, String)]) -> String {
-    let mut line = format!("from {}", role.fill.fields());
+/// shelf draws", as words and links.
+fn source(
+    board: &Board,
+    subject: &Subject,
+    role: &Role,
+    elsewhere: &[(Object, String)],
+) -> Vec<Reference> {
+    let mut line = vec![fields::words("from ")];
+    line.extend(fields::fields(board, subject, role));
     let others: Vec<String> = elsewhere
         .iter()
         .map(|(object, label)| {
@@ -229,7 +252,7 @@ fn source(role: &Role, elsewhere: &[(Object, String)]) -> String {
             [] => last.clone(),
             _ => format!("{}, and {last}", first.join(", ")),
         };
-        line.push_str(&format!(", except {listed}"));
+        line.push(fields::words(&format!(", except {listed}")));
     }
     line
 }

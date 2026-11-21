@@ -98,7 +98,7 @@ fn annotates(by: &ReferencedBy, object: &Object) -> bool {
 }
 
 /// `template` with `{namespace}` and `{name}` filled from `object`.
-fn render(template: &str, object: &Object) -> String {
+pub(super) fn render(template: &str, object: &Object) -> String {
     let namespace = object.namespace.as_deref().unwrap_or_default();
     template
         .replace("{namespace}", namespace)

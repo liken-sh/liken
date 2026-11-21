@@ -108,6 +108,11 @@
    it, and only the parts take it. */
 .sketch-grid.sketch-wired { --sketch-column-gap: clamp(64px, 7.5%, 104px); }
 
+/* A wire that crosses a gap between rows bends in that gap and carries
+   its words beside it, so the rows of such a grid stand further apart,
+   as the columns of a wired grid do. */
+.sketch-grid.sketch-wired-rows { --sketch-gap: 64px; }
+
 .sketch-wired,
 .sketch-wired .sketch-area { pointer-events: none; }
 
@@ -153,7 +158,7 @@
 
 .sketch-wire:focus { outline: none; }
 
-.sketch-wire:is(:hover, :focus-visible) .sketch-wire-path { stroke: var(--ink); }
+.sketch-wire:is(:hover, :focus-visible) :is(.sketch-wire-path, .sketch-wire-stub) { stroke: var(--ink); }
 
 .sketch-wire-label,
 .sketch-wire-source {
@@ -216,6 +221,14 @@
   align-content: flex-end;
   gap: 14px;
   min-width: 0;
+}
+
+/* An elevation that states `align: top` stands each part at the top
+   of its area, so parts that a wire joins across a row face each other
+   when one area is taller than the other. */
+.sketch-align-top > .sketch-area {
+  align-items: flex-start;
+  align-content: flex-start;
 }
 
 .sketch-lean-start { justify-content: safe flex-start; }
@@ -395,3 +408,74 @@
 
   .sketch-author { margin-left: 0; }
 }
+
+/* The pattern that states an elevation of the catalog names itself on
+   a line of the head, under the question. */
+.sketch-pattern {
+  order: 3;
+  flex-basis: 100%;
+  margin: 0;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+
+.sketch-pattern-name {
+  margin-right: 8px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+/* What a pattern expects is a list under the drawing, in two columns
+   where the frame has room.  A met line is plain, an unmet line is in
+   `--warm`, and a line with no signal or that does not apply is dimmed,
+   as a part at rest is. */
+.sketch-expectations {
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+  font-family: "Source Sans 3", system-ui, sans-serif;
+}
+
+.sketch-expectations-title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.sketch-expected-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+  gap: 6px 32px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.sketch-expected-sign {
+  display: inline-block;
+  width: 1.4em;
+  color: var(--ink-muted);
+}
+
+.sketch-expected-unmet,
+.sketch-expected-unmet .sketch-expected-sign { color: var(--warm); }
+
+.sketch-expected-silent,
+.sketch-expected-moot { color: var(--ink-faint); }
+
+/* A wire to a role that is not missing a part is dashed in the color of
+   rest, as the role's outline is.  A line to a part that warns or fails
+   is in `--warm`, with its arrow, and the lines to the other parts of
+   the role stay plain.  `wires.js` gives each line its class. */
+.sketch-wires .sketch-wire-rests { stroke: var(--shape-rest-edge); }
+
+.sketch-wires .sketch-wire-warm { stroke: var(--shape-warm); }
+
+.sketch-arrow-rests { fill: var(--shape-rest-edge); }
+
+.sketch-arrow-warm { fill: var(--shape-warm); }

@@ -2,21 +2,32 @@
 //! says that its part is missing. A role that the object needs only in
 //! some state, and a role whose objects other roles of the elevation
 //! draw, is drawn empty and at rest, because it is not missing a part. A
-//! role whose fill `Kinds::resolve` could not confirm says why.
+//! role whose fill `Kinds::resolve` could not confirm says why. A role
+//! that a pattern's module derives no part for is drawn at rest with the
+//! module's reason when the role has nothing to do now, and as missing
+//! its part when the knowledge names a part that the cluster does not
+//! have.
 
 use super::super::board::Subject;
 use crate::shapes::text::{Nothing, State};
+use transect_resources::knowledge::catalog::Derived;
 use transect_resources::knowledge::role::{Expected, First, Role};
 
 /// What `role` shows in `subject`'s elevation when it has no part, or
 /// none when the page leaves its area blank. `elsewhere` is the source
 /// line of a role whose objects other roles draw, which names them.
+/// `derived` is what the pattern's module derived for the role.
 ///
 /// The empty place names what is missing: the role's own `label` when
 /// the author gave it one, such as "no keeper", or else the kind of its
 /// parts, such as "no Lamp". The label of a reference is often a verb,
 /// such as "lit by", which does not name a thing.
-pub fn nothing(subject: &Subject, role: &Role, elsewhere: Option<&str>) -> Option<Nothing> {
+pub fn nothing(
+    subject: &Subject,
+    role: &Role,
+    elsewhere: Option<&str>,
+    derived: Option<&Derived>,
+) -> Option<Nothing> {
     let references = &subject.knowledge.references;
     let kind = role.fill.parts_kind(references).map(|(_, kind)| kind);
     let missing_thing = role.label.as_deref().or(kind);
@@ -36,6 +47,11 @@ pub fn nothing(subject: &Subject, role: &Role, elsewhere: Option<&str>) -> Optio
     }
     if role.expected == Expected::Never {
         return None;
+    }
+    match derived {
+        Some(Derived::Nothing(reason)) => return empty(reason.clone(), State::Elsewhere),
+        Some(Derived::Missing(reason)) => return empty(reason.clone(), State::Empty),
+        _ => {}
     }
     if let Some(line) = elsewhere {
         return Some(Nothing {
@@ -75,7 +91,10 @@ fn missing(subject: &Subject, role: &Role) -> String {
     let fill = &role.fill;
     let end = fill.parts_kind(references).map(|(_, kind)| kind);
     match (&fill.first, &fill.through) {
-        (First::Reference(path), None) => format!("{path} names nothing now"),
+        (First::Reference(_), None) => format!(
+            "{} names nothing now",
+            fill.fields_of(references, &subject.object)
+        ),
         (First::NamedBy(named), None) => format!(
             "no {} names this {} in {}",
             named.kind, subject.object.kind, named.path
@@ -90,6 +109,7 @@ fn missing(subject: &Subject, role: &Role) -> String {
             None => format!("no {} names anything in {}", named.kind, through.path),
         },
         (First::Reference(_), Some(_)) => format!("{} names nothing now", fill.fields()),
+        (First::Derived(_) | First::Unfilled, _) => format!("{} has no part now", fill.fields()),
     }
 }
 

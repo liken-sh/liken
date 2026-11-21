@@ -5,16 +5,19 @@
 use super::super::board::Board;
 use super::super::end::{end, refer};
 use super::fill::Found;
-use crate::shapes::text::{End, Part, Reading, Shown, State};
+use crate::shapes::text::{End, Part, Reading, Shown, State, Why};
 use transect_graph::edges::{Endpoint, Object, kind_and_name};
 use transect_graph::links::Reference;
 use transect_resources::knowledge::Names;
+use transect_resources::knowledge::catalog::{Marked, Marks};
 use transect_resources::knowledge::role::{Column, Role, Show};
 
 /// The part for `found`, one part that `role` reads in the elevation of
 /// the object `subject`, whose caption is `label`. Only a part that
 /// names an object shows `shows`, so a role whose reference reads
 /// nothing draws nothing of the object.
+/// `marks` are the marks of the page's pattern, when the elevation is
+/// the pattern's.
 pub fn part(
     board: &Board,
     subject: &Object,
@@ -22,6 +25,7 @@ pub fn part(
     label: &str,
     shows: &[Shown],
     found: &Found,
+    marks: Option<&Marks>,
 ) -> Part {
     let mut end = end_of(board, subject, found);
     let object = match found {
@@ -34,7 +38,7 @@ pub fn part(
         Found::Ambiguous { .. } => return quiet(end, State::Plain, true),
     };
     end.reference = named(label, object, end.reference);
-    described(board, role, shows, end, object)
+    described(board, role, shows, end, object, marks)
 }
 
 /// `reference`, which names `object`, under a caption `label`. When the
@@ -83,8 +87,15 @@ pub fn end_of(board: &Board, subject: &Object, found: &Found) -> End {
 
 /// The part for `object`, which `end` names, in the state that the
 /// cluster gives it, with the columns that `role` reads.
-fn described(board: &Board, role: &Role, shows: &[Shown], mut end: End, object: &Object) -> Part {
-    let (state, why) = (board.standing)(object).state();
+fn described(
+    board: &Board,
+    role: &Role,
+    shows: &[Shown],
+    mut end: End,
+    object: &Object,
+    marks: Option<&Marks>,
+) -> Part {
+    let (state, why) = marked(marks, object, (board.standing)(object).state());
     if state == State::NoObject {
         end.under = Some(format!("the cluster has no such {}", object.kind));
         end.reaches.clear();
@@ -103,6 +114,32 @@ fn described(board: &Board, role: &Role, shows: &[Shown], mut end: End, object: 
         state,
         why,
         literal: false,
+        stack: Vec::new(),
+    }
+}
+
+/// The state of a part whose object one of `marks` marks, from `drawn`,
+/// the state that its health gives. An unmet expectation draws a part
+/// that is plain or at rest as a warning, with the line's words as its
+/// reason, and a plain part that has nothing to do for the page's object
+/// is drawn at rest. A part that its health marks keeps that mark,
+/// because the health says more.
+fn marked(
+    marks: Option<&Marks>,
+    object: &Object,
+    drawn: (State, Option<Why>),
+) -> (State, Option<Why>) {
+    let Some(mark) = marks.and_then(|marks| marks.of(object)) else {
+        return drawn;
+    };
+    let why = Why {
+        reason: mark.why.clone(),
+        message: None,
+    };
+    match (mark.marked, drawn.0) {
+        (Marked::Unmet, State::Plain | State::Resting) => (State::Warning, Some(why)),
+        (Marked::Rests, State::Plain) => (State::Resting, Some(why)),
+        _ => drawn,
     }
 }
 
@@ -168,5 +205,6 @@ fn quiet(end: End, state: State, literal: bool) -> Part {
         state,
         why: None,
         literal,
+        stack: Vec::new(),
     }
 }

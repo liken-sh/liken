@@ -21,6 +21,20 @@ pub use specimen::ShapesPage;
 /// design units.
 const STACK_STEP: f64 = 8.0;
 
+/// The most copies of its outline that a part that stands for a stack
+/// draws behind it. A larger stack draws as many, and its label counts
+/// its parts.
+pub const STACK_COPIES: u8 = 2;
+
+/// The drawings of a stack of `shape`, with each number of copies from
+/// one to `STACK_COPIES`, in `pose` otherwise.
+pub fn stacked(shape: &Shape, pose: Pose) -> Vec<Drawing> {
+    let copies = 1..=STACK_COPIES;
+    copies
+        .map(|stack| Drawing::of(shape, Pose { stack, ..pose }))
+        .collect()
+}
+
 /// A part's drawing, as the values that `part.html` writes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Drawing {
@@ -90,7 +104,7 @@ impl Drawing {
         }
         Self {
             class: class.join(" "),
-            style: style(shape),
+            style: style(shape, pose.stack),
             text: text(shape),
             axis: shape.axis.is_some(),
             layers: layers(shape, pose.stack),
@@ -106,8 +120,11 @@ impl Drawing {
 /// proportions of its body, its narrowest and widest widths, the room
 /// above it, and how far its axis is below the middle of its design.
 /// A part that grows taller for its text grows equally above and below
-/// its axis, so `shapes.css` places the axis from the middle.
-fn style(shape: &Shape) -> String {
+/// its axis, so `shapes.css` places the axis from the middle. The copies
+/// of a stack rise and move right of the body, so a stack keeps that
+/// room above it and at its right, inside its area, where no neighbor
+/// covers them.
+fn style(shape: &Shape, stack: u8) -> String {
     let [narrowest, widest] = shape.size.width;
     let top = match shape.size.share {
         Some(share) => format!("min({share}cqi, {widest}px)"),
@@ -121,9 +138,13 @@ fn style(shape: &Shape) -> String {
         }
         None => style.push("--u: 1px".into()),
     }
-    let above = shape.above();
+    let lift = STACK_STEP * f64::from(stack);
+    let above = shape.above() + lift;
     if above > 0.0 {
         style.push(format!("--room-above: {above}"));
+    }
+    if lift > 0.0 {
+        style.push(format!("--stack-room: {lift}"));
     }
     if let (Some(axis), Some([_, height])) = (shape.axis, shape.size.design) {
         style.push(format!("--axis-shift: {}", axis - height / 2.0));

@@ -6,6 +6,7 @@
 
 use serde_json::Value;
 
+use super::referenced::render;
 use super::{KindKnowledge, Matches, Reference, Target, path};
 use transect_graph::edges::ClusterScoped;
 use transect_graph::edges::{Kind, Object, Provenance};
@@ -59,7 +60,8 @@ pub enum Names {
 ///
 /// A reference without `match` refers to the object named by the value,
 /// in the referring object's namespace unless its kind is
-/// cluster-scoped.
+/// cluster-scoped. A reference by a name template has one value, the
+/// template filled from `object`, so it reads no field.
 pub fn relations(
     knowledge: &KindKnowledge,
     object: &Object,
@@ -70,7 +72,11 @@ pub fn relations(
     let mut found = Vec::new();
     for reference in &knowledge.references {
         let label = reference.label.as_deref().unwrap_or(reference.edge.words());
-        for value in path::read_of(object, data, &reference.path) {
+        let values = match reference.by_name {
+            true => vec![render(&reference.path, object)],
+            false => path::read_of(object, data, &reference.path),
+        };
+        for value in values {
             let Some(value) = capped(&value, VALUE_CHARS) else {
                 continue;
             };
@@ -161,6 +167,18 @@ pub fn target_of<'a>(references: &'a [Reference], path: &str) -> Option<(&'a str
     match &reference.target {
         Target::Object { kind, group } => Some((group.as_deref().unwrap_or_default(), kind)),
         Target::Address | Target::Value => None,
+    }
+}
+
+impl Reference {
+    /// The field as a page names it for the referring `object`: its
+    /// path, or the name that its template makes for the object, so a
+    /// reader sees "orders-ro" and not "{name}-ro".
+    pub fn field_of(&self, object: &Object) -> String {
+        match self.by_name {
+            true => render(&self.path, object),
+            false => self.path.clone(),
+        }
     }
 }
 
@@ -357,6 +375,27 @@ status:
                 .collect::<Vec<_>>(),
             vec![(provenance, "from status.amplifier.name".to_string())]
         );
+    }
+
+    #[rstest]
+    #[case::in_its_namespace(
+        "{references: [{name: '{name}-ro', kind: Service, label: reads through}]}",
+        vec![("{name}-ro", "front-room-ro", object("", "Service", Some("shop"), "front-room-ro"))]
+    )]
+    #[case::with_the_namespace(
+        "{references: [{name: '{namespace}-{name}', kind: Amplifier, group: amps.example.com}]}",
+        vec![("{namespace}-{name}", "shop-front-room", object("amps.example.com", "Amplifier", None, "shop-front-room"))]
+    )]
+    fn reads_the_name_that_a_template_makes(
+        #[case] spec: &str,
+        #[case] expected: Vec<(&str, &str, Names)>,
+    ) {
+        let found = read(spec);
+        let read: Vec<(&str, &str, Names)> = found
+            .iter()
+            .map(|r| (r.path.as_str(), r.value.as_str(), r.names.clone()))
+            .collect();
+        assert_eq!(read, expected);
     }
 
     #[rstest]

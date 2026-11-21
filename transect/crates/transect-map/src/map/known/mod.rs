@@ -27,7 +27,9 @@ pub use board::{Board, Standing, Subject};
 pub use chips::{Chip, chips, every_chip};
 use layout::{Rect, places};
 use ring::{RelationBox, relation_box};
-pub use sketch::{ElevationTab, Head, Lean, NestedPart, Plan, Sketch, SketchRole, SketchWire};
+pub use sketch::{
+    ElevationTab, Expected, Head, Lean, NestedPart, Plan, Sketch, SketchRole, SketchWire,
+};
 use transect_frame::frame::crumbs::Crumb;
 use transect_frame::frame::tabs::{Lens, Tabs};
 use transect_graph::edges::Kind;
@@ -96,15 +98,15 @@ impl KnownPage {
             text: knowledge.name.clone(),
             href: None,
         });
-        let elevations = &knowledge.elevations;
+        let elevations = knowledge.stated();
         let chosen = sketch::choose(
-            elevations,
+            &elevations,
             board.elevation,
             &board.path,
             &object.kind,
             author,
         );
-        let sketch = chosen.map(|(elevation, head)| Sketch::build(&board, elevation, head));
+        let sketch = chosen.map(|(chosen, head)| Sketch::build(&board, chosen, &elevations, head));
         let mut references: Vec<(String, String, Option<Kind>)> = knowledge
             .references
             .iter()
@@ -225,10 +227,7 @@ impl KnownPage {
             .iter()
             .flat_map(|sketch| sketch.plan.references());
         let mut drawn = in_boxes.chain(in_sketch);
-        drawn.any(|end| match (&end.href, &value.href) {
-            (Some(drawn), Some(href)) => drawn == href,
-            _ => end.text == value.text,
-        })
+        drawn.any(|end| end::same(end, value))
     }
 
     /// Whether the page draws a diagram: the ring of boxes or a sketch.

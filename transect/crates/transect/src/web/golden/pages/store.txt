@@ -1,0 +1,110 @@
+Ledger journal · acme-ledger · transect
+transect
+cluster / data / acme-ledger / Ledger journal
+access vulnerabilities kinds
+Search /
+esc
+acme-ledger Ledger journal Ledger receipts ImageReports ×1 overview section logs access
+Edges
+Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+Ledger
+journal
+Ready: running
+the store
+Where do writes and reads go, and which instances follow the primary?
+described by transect
+primary with replicas drawn the same way for every kind that fills its roles
+writes from Service journal-rw to Pod journal-1, read from journal-rw and status.primary, as transect's pattern primary with replicas states
+writes
+read from journal-rw and status.primary, as transect's pattern primary with replicas states
+reads from Service journal-ro to Pod journal-2, Pod journal-3, and Pod journal-4, read from journal-ro and instances-but-primary, which transect derives, as transect's pattern primary with replicas states
+reads
+read from journal-ro and instances-but-primary, which transect derives, as transect's pattern primary with replicas states
+streams from Pod journal-1 to Pod journal-2, Pod journal-3, and Pod journal-4, read from status.primary and instances-but-primary, which transect derives, as transect's pattern primary with replicas states
+streams
+read from status.primary and instances-but-primary, which transect derives, as transect's pattern primary with replicas states
+writes through
+Service journal-rw
+ports 7000
+pods journal-1
+from journal-rw
+reads through
+Service journal-ro
+ports 7000
+pods journal-2
+pods journal-3
+from journal-ro
+primary
+Pod journal-1
+ready 1/1
+node node-alpha
+age 2d
+claim data-journal-1 2Gi
+from status.primary
+replica × 2
+Pod journal-2 , Pod journal-3
+ready 1/1 each
+node node-beta , node-alpha
+age 2d each
+claim data-journal-2 2Gi , data-journal-3 2Gi
+from instances-but-primary, which transect derives
+replica
+warning
+Pod journal-4
+crash looping after 4 restarts
+ready 0/1
+node node-beta
+age 2d
+claim data-journal-4 2Gi
+from instances-but-primary, which transect derives
+operator
+Deployment acme-promoter/promoter
+from controller, which transect derives
+writes from Service journal-rw to Pod journal-1 , read from journal-rw and status.primary, as transect's pattern primary with replicas states
+reads from Service journal-ro to Pod journal-2 , Pod journal-3 , and Pod journal-4 , read from journal-ro and instances-but-primary, which transect derives, as transect's pattern primary with replicas states
+streams from Pod journal-1 to Pod journal-2 , Pod journal-3 , and Pod journal-4 , read from status.primary and instances-but-primary, which transect derives, as transect's pattern primary with replicas states
+What the pattern expects
+✓ met the primary is ready, and it is the operator's target: journal-1
+✓ met writes reach only the primary: journal-rw reaches journal-1
+✗ unmet each replica is ready: 2 of 3, and journal-4 is not ready
+✓ met reads reach only replicas: journal-ro reaches journal-2 and journal-3
+Hover a part or an expectation for the field it was read from. The parts and their states are from the Kubernetes API. Which part has which role is from the KindKnowledge ledgers.ledgers.example.test. The places, the shapes, and the expectations are from transect's pattern primary with replicas, and /shapes draws each shape.
+Status
+Instances 4
+Runs
+image
+repository
+version
+commit
+rolled
+example.test/ledger-engine:2
+not read
+none
+none
+—
+Ledger journal 3 of 4 ready
+A ledger's primary, which takes the writes, and the replicas that stream from it. kind
+no way in · access
+store in journal-4 is crash looping after 4 restarts
+Controlled by
+Deployment acme-promoter/promoter kind
+If it goes down
+Nothing in the cluster depends on it.
+No NetworkPolicy selects its pods, so any pod may call them.
+No readiness probe
+During a rollout, its Service sends requests to each new pod as soon as it starts, before the pod can answer them.
+No PodDisruptionBudget
+No PodDisruptionBudget limits evictions, so a drain can evict all 4 pods at once.
+no GitOps applier's label or annotation is on it
+Described by promoter
+Healthy when its Ready condition is True.
+from the KindKnowledge ledgers.ledgers.example.test
+Marked lines are stored text, not read from the cluster. kind: from the kind knowledge. Hover a mark for its source.

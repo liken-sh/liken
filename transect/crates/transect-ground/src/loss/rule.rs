@@ -3,7 +3,7 @@
 
 use k8s_openapi::api::core::v1::Pod;
 
-use transect_cluster::workloads::{Controller, Workload, pod_ready};
+use transect_cluster::workloads::{Controller, Workload};
 
 /// What a loss leaves of a workload that had a pod on the lost set.  A
 /// workload that keeps as many ready pods as it declares is not
@@ -78,7 +78,9 @@ pub fn state(
     lost: impl Fn(&Pod) -> bool,
     primary_lost: bool,
 ) -> Option<State> {
-    let outside = running.iter().filter(|pod| !lost(pod) && pod_ready(pod));
+    let outside = running
+        .iter()
+        .filter(|pod| !lost(pod) && transect_graph::pods::ready(pod));
     let ready = outside.count() as i32;
     if wanted <= 0 {
         None

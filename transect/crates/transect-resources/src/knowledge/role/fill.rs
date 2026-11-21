@@ -36,6 +36,13 @@ pub enum First {
     Reference(String),
     /// The objects of another kind whose field names the page's object.
     NamedBy(NamedBy),
+    /// The parts that a function of a pattern's module derives, such as
+    /// the instances other than the primary. It holds the name that the
+    /// catalog writes in `derive`.
+    Derived(String),
+    /// A role of a pattern that the kind's `pattern` does not fill. It
+    /// has no part, and the role's `unresolved` says why.
+    Unfilled,
 }
 
 /// The objects of `kind` whose field at `path` names the page's object.
@@ -59,6 +66,15 @@ pub struct WrittenNamedBy {
 }
 
 impl Fill {
+    /// The fill whose first step is `first`, with no `through`, for a
+    /// role of a pattern of the catalog.
+    pub fn of(first: First) -> Self {
+        Self {
+            first,
+            through: None,
+        }
+    }
+
     /// The fill of a role that writes `reference` or `named_by`, and
     /// `through`, checked against `references`, the document's own. A
     /// `namedBy` with no group takes `group`, the group of the
@@ -114,6 +130,7 @@ impl Fill {
         match &self.first {
             First::Reference(path) => target_of(references, path),
             First::NamedBy(named) => Some((&named.group, &named.kind)),
+            First::Derived(_) | First::Unfilled => None,
         }
     }
 
@@ -135,14 +152,32 @@ impl Fill {
     pub fn reference(&self) -> Option<&str> {
         match &self.first {
             First::Reference(path) => Some(path),
-            First::NamedBy(_) => None,
+            First::NamedBy(_) | First::Derived(_) | First::Unfilled => None,
         }
     }
 
     /// The fields that the parts are read from, such as
     /// "Shelf spec.room, then spec.label".
     pub fn fields(&self) -> String {
-        let first = self.first.fields();
+        self.then(self.first.fields())
+    }
+
+    /// The fields as a page names them for the page's object `object`,
+    /// whose knowledge has `references`: a name template is the name
+    /// that it makes for the object.
+    pub fn fields_of(&self, references: &[Reference], object: &Object) -> String {
+        let first = match &self.first {
+            First::Reference(path) => references
+                .iter()
+                .find(|reference| reference.path == *path)
+                .map_or_else(|| path.clone(), |reference| reference.field_of(object)),
+            other => other.fields(),
+        };
+        self.then(first)
+    }
+
+    /// `first`, followed by the reference that `through` follows.
+    fn then(&self, first: String) -> String {
         match &self.through {
             Some(through) => format!("{first}, then {}", through.path),
             None => first,
@@ -157,6 +192,8 @@ impl First {
         match self {
             Self::Reference(path) => path.clone(),
             Self::NamedBy(named) => format!("{} {}", named.kind, named.path),
+            Self::Derived(derive) => format!("{derive}, which transect derives"),
+            Self::Unfilled => "no reference".into(),
         }
     }
 }

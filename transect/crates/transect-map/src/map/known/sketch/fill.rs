@@ -3,11 +3,14 @@
 //! `through`, the objects at the end of one more reference of each.
 //! `knowledge::follow` follows that reference, through the
 //! `ReferenceEnds` that the board gives, so a role follows a reference
-//! the way a reading and a health do.
+//! the way a reading and a health do. A role of a pattern of the catalog
+//! that the pattern derives reads the parts that `catalog::judge`
+//! derived when the page built its board.
 
 use super::super::board::Board;
 use super::super::board::Subject;
 use transect_graph::edges::Object;
+use transect_resources::knowledge::catalog::Derived;
 use transect_resources::knowledge::role::{First, Role};
 use transect_resources::knowledge::{Followed, Names, Reached, Relation, Through};
 
@@ -56,6 +59,11 @@ pub fn found<'s>(board: &Board, subject: &'s Subject, role: &Role) -> Vec<Found<
             let named = (board.named_by)(&subject.object, named);
             named.into_iter().map(Found::Object).collect()
         }
+        First::Derived(_) => match derived(board, subject, role) {
+            Some(Derived::Parts(parts)) => parts.iter().cloned().map(Found::Object).collect(),
+            _ => Vec::new(),
+        },
+        First::Unfilled => Vec::new(),
     };
     let found = match &role.fill.through {
         None => first,
@@ -76,6 +84,16 @@ pub fn found<'s>(board: &Board, subject: &'s Subject, role: &Role) -> Vec<Found<
         }
     }
     once
+}
+
+/// The parts that the pattern's module derived for `role`. Only the
+/// page's own object has a pattern that the board read, so a role of an
+/// elevation drawn inside a part derives nothing.
+pub fn derived<'b>(board: &'b Board, subject: &Subject, role: &Role) -> Option<&'b Derived> {
+    if subject.object != board.subject.object {
+        return None;
+    }
+    board.judged?.derived.of(&role.name)
 }
 
 /// The ends of `through` from `object`. An end is a part whether the

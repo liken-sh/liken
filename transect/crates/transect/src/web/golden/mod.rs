@@ -169,6 +169,14 @@ fn diff(then: &str, now: &str) -> String {
     "sketch-restock",
     "/namespaces/acme-ops/shelves.stock.example.test/top-shelf/elevations/the-restock"
 )]
+#[case::a_store_with_replicas(
+    "store",
+    "/namespaces/acme-ledger/ledgers.ledgers.example.test/journal"
+)]
+#[case::a_store_with_one_instance(
+    "store-alone",
+    "/namespaces/acme-ledger/ledgers.ledgers.example.test/receipts"
+)]
 #[case::the_objects_that_name_this_one(
     "room",
     "/namespaces/acme-ops/rooms.stock.example.test/back-room"

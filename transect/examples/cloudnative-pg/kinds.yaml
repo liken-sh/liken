@@ -8,16 +8,30 @@ spec:
   healthy: {condition: Ready}
   references:
     - {path: status.currentPrimary, kind: Pod, label: primary is}
+    - {path: "status.instanceNames[]", kind: Pod, label: instance}
+    - {path: status.targetPrimary, kind: Pod, label: the operator's target is}
     - {path: status.writeService, kind: Service, label: writes through}
     - {path: status.readService, kind: Service, label: reads through}
+    # status.readService names the `-r` Service, which selects every
+    # instance, the primary included.  The `-ro` Service selects only
+    # the replicas, and no field of the status names it.
+    - {name: "{name}-ro", kind: Service, label: reads from the replicas through}
   controller: {image: cloudnative-pg/cloudnative-pg}
   # CloudNativePG keeps a PodDisruptionBudget on the primary that allows
   # no eviction, and switches the primary to a replica before a drain
   # evicts it. `operator` tells transect to expect that budget.
   disruptions: operator
-  # The primary takes the writes. When it is lost, writes stop until the
-  # operator promotes a replica.
-  primary: status.currentPrimary
+  # A Cluster is transect's primary with replicas.  The primary takes
+  # the writes, and when it is lost, writes stop until the operator
+  # promotes a replica.
+  pattern:
+    name: primary-with-replicas
+    roles:
+      instances:     {reference: "status.instanceNames[]"}
+      primary:       {reference: status.currentPrimary}
+      target:        {reference: status.targetPrimary}
+      write-service: {reference: status.writeService}
+      read-service:  {reference: "{name}-ro"}
   docs: https://cloudnative-pg.io/documentation/current/
 ---
 # These kinds run no pods, so the controller's image is how transect

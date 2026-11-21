@@ -8,7 +8,7 @@ author adds a shape". It defines how every shape of a sketch is
 stated, named, sized, joined to its neighbors, and drawn in each
 state, and it gives the shapes that plans
 [14](14-the-rig-of-a-telescope.md), [15](15-the-elevations-of-a-player.md),
-[16](../16-a-primary-with-replicas.md), and [18](../18-the-speakers-of-a-room.md)
+[16](16-a-primary-with-replicas.md), and [18](../18-the-speakers-of-a-room.md)
 ask for.
 
 ## The problem

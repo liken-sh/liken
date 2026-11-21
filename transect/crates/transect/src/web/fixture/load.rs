@@ -73,6 +73,9 @@ pub fn sort(snapshot: &mut Snapshot, yaml: &str) -> Vec<ResourceSlice> {
             ("v1", "Node") => snapshot.nodes.push(typed(document)),
             ("v1", "Pod") => snapshot.pods.push(typed(document)),
             ("v1", "Service") => snapshot.services.push(typed(document)),
+            ("discovery.k8s.io/v1", "EndpointSlice") => {
+                snapshot.endpoint_slices.push(typed(document))
+            }
             ("v1", "PersistentVolumeClaim") => paged.claims.push(typed(document)),
             ("v1", "PersistentVolume") => paged.volumes.push(typed(document)),
             ("v1", "ServiceAccount") => paged.service_accounts.push(meta(document)),

@@ -94,11 +94,17 @@ fn named(meta: &ObjectMeta, object: &Object) -> bool {
     meta.name.as_deref() == Some(&object.name) && meta.namespace == object.namespace
 }
 
+/// The object of `objects`, the store of one kind, that `object` names.
+pub fn typed<'s, K: Resource>(objects: &'s [Arc<K>], object: &Object) -> Option<&'s K> {
+    let found = objects.iter().find(|found| named(found.meta(), object));
+    found.map(AsRef::as_ref)
+}
+
 /// Finds `object` in `objects` and returns it with only its `status`
 /// field, because its conditions are there.
 fn status<K: Resource + Serialize>(objects: &[Arc<K>], object: &Object) -> Option<Found> {
-    let found = objects.iter().find(|found| named(found.meta(), object))?;
-    let whole = serde_json::to_value(found.as_ref()).unwrap_or_default();
+    let found = typed(objects, object)?;
+    let whole = serde_json::to_value(found).unwrap_or_default();
     let data = match whole.get("status") {
         Some(status) => serde_json::json!({ "status": status }),
         None => Value::Null,
@@ -112,7 +118,7 @@ fn status<K: Resource + Serialize>(objects: &[Arc<K>], object: &Object) -> Optio
 
 /// Finds `object` in `objects` and returns it with only its metadata.
 fn metadata<K: Resource>(objects: &[Arc<K>], object: &Object) -> Option<Found> {
-    let found = objects.iter().find(|found| named(found.meta(), object))?;
+    let found = typed(objects, object)?;
     Some(Found {
         meta: found.meta().clone(),
         data: Value::Null,

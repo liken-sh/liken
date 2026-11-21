@@ -1,20 +1,33 @@
 //! The line under a sketch that names the parts of the roles that the
 //! elevation does not place, as the drawing would name them, and the
 //! elevations that draw them. A reader of one elevation sees what it
-//! leaves out without leaving the page.
+//! leaves out without leaving the page. An object that the elevation
+//! draws in another role is not left out, so the line does not name it.
 
 use super::super::board::Board;
+use super::super::end::same;
 use super::fill;
 use super::head::href;
 use super::part::end_of;
 use super::wires::listed;
 use transect_graph::links::Reference;
-use transect_resources::knowledge::Elevation;
+use transect_resources::knowledge::Stated;
 
 /// The line as words and links: "Not in the wiring: controlled by
 /// Handset a, and holds Claim b. The room draws them." It is none
-/// when every role with a part is placed.
-pub fn line(board: &Board, elevation: &Elevation) -> Option<Vec<Reference>> {
+/// when every role with a part is placed. The roles are those of the
+/// elevation's author, and `all` is every elevation of the page, by its
+/// slug, from which the line links those of the same author that draw
+/// the roles. `drawn` names each object or value that the elevation
+/// draws.
+pub fn line(
+    board: &Board,
+    slug: &str,
+    stated: Stated,
+    all: &[(String, Stated)],
+    drawn: &[&Reference],
+) -> Option<Vec<Reference>> {
+    let elevation = stated.elevation;
     let word = |text: &str| Reference {
         text: text.into(),
         href: None,
@@ -22,7 +35,7 @@ pub fn line(board: &Board, elevation: &Elevation) -> Option<Vec<Reference>> {
     let placed = elevation.grid.names();
     let subject = &board.subject;
     let mut roles = Vec::new();
-    for role in &subject.knowledge.roles {
+    for role in stated.roles {
         if placed.contains(&role.name.as_str()) {
             continue;
         }
@@ -30,6 +43,7 @@ pub fn line(board: &Board, elevation: &Elevation) -> Option<Vec<Reference>> {
         let names: Vec<Reference> = found
             .iter()
             .map(|found| end_of(board, &subject.object, found).reference)
+            .filter(|name| !drawn.iter().any(|drawn| same(drawn, name)))
             .collect();
         if !names.is_empty() {
             let label = role.label(&subject.knowledge.references);
@@ -53,14 +67,17 @@ pub fn line(board: &Board, elevation: &Elevation) -> Option<Vec<Reference>> {
         pieces.extend(listed(names));
     }
     pieces.push(word("."));
-    let elevations = subject.knowledge.elevations.iter().filter(|other| {
-        let names = other.grid.names();
-        other.slug != elevation.slug && roles.iter().any(|(name, ..)| names.contains(name))
+    let author = |other: &Stated| other.pattern.map(|p| p.name.clone());
+    let elevations = all.iter().filter(|(other_slug, other)| {
+        let names = other.elevation.grid.names();
+        other_slug != slug
+            && author(other) == author(&stated)
+            && roles.iter().any(|(name, ..)| names.contains(name))
     });
     let drawn_in: Vec<Reference> = elevations
-        .map(|other| Reference {
-            text: other.name.clone(),
-            href: Some(href(&board.path, &other.slug)),
+        .map(|(other_slug, other)| Reference {
+            text: other.elevation.name.clone(),
+            href: Some(href(&board.path, other_slug)),
         })
         .collect();
     if let Some(first) = drawn_in.first() {

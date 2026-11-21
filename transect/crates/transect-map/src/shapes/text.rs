@@ -15,10 +15,15 @@ use super::Drawing;
 #[derive(Debug, PartialEq)]
 pub struct Drawn {
     pub drawing: Drawing,
+    /// The drawings of a part that stands for a stack of alike parts,
+    /// with one copy of its outline behind it, then with two, and so on
+    /// to `STACK_COPIES`.
+    pub stacked: Vec<Drawing>,
     /// The role's label, such as "shows on".
     pub label: String,
-    /// Where the parts were read, such as "from status.screen.node".
-    pub source: String,
+    /// Where the parts were read, such as "from status.screen.node", as
+    /// words and links.
+    pub source: Vec<Reference>,
     pub parts: Vec<Part>,
     pub nothing: Option<Nothing>,
 }
@@ -53,6 +58,42 @@ pub struct Part {
     pub literal: bool,
     /// Why the object is failing, warning, or at rest.
     pub why: Option<Why>,
+    /// The name of each part that this part stands for, each linked to
+    /// its page, when it is a stack of alike parts. It is empty for a
+    /// part that stands for one object.
+    pub stack: Vec<Reference>,
+}
+
+impl Part {
+    /// The name of each object or value that the part stands for: each
+    /// name of its stack, or its own name.
+    pub fn names(&self) -> Vec<&Reference> {
+        match self.stack.is_empty() {
+            true => vec![&self.end.reference],
+            false => self.stack.iter().collect(),
+        }
+    }
+}
+
+impl Drawn {
+    /// Where the parts were read, as plain text, for a part's title.
+    pub fn source_text(&self) -> String {
+        self.source
+            .iter()
+            .map(|piece| piece.text.as_str())
+            .collect()
+    }
+
+    /// The drawing of `part`: when it is a stack, with one fewer copy of
+    /// its outline behind it than it has parts, so the outlines count the
+    /// parts, up to `STACK_COPIES` copies.
+    pub fn drawing_of(&self, part: &Part) -> &Drawing {
+        let copies = part.stack.len().saturating_sub(1).min(self.stacked.len());
+        match copies {
+            0 => &self.drawing,
+            copies => &self.stacked[copies - 1],
+        }
+    }
 }
 
 /// One printer column of an object that has a value.
@@ -65,6 +106,14 @@ pub struct Reading {
     /// from, when it is not the part's own: its page, and a sentence
     /// such as "Charge of Pad aa-bb, through status.pad".
     pub from: Option<Reference>,
+}
+
+impl Reading {
+    /// The items of a value that lists several, such as the machines of
+    /// a stack's parts, which the page breaks only between.
+    pub fn items(&self) -> Vec<&str> {
+        self.value.split(", ").collect()
+    }
 }
 
 /// One entry of a role's `shows` that has a value.

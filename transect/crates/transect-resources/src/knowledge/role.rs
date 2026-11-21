@@ -9,13 +9,14 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use super::Reference;
-use super::references::target_of;
 use super::through::Through;
 use crate::shapes::{self, library};
 use fill::WrittenNamedBy;
 pub use fill::{Fill, First, NamedBy};
+pub use look::Look;
 
 mod fill;
+pub mod look;
 
 /// One role, such as the screen of a kiosk.
 #[derive(Clone, Debug, PartialEq)]
@@ -49,6 +50,11 @@ pub struct Role {
     /// shows, such as what a kiosk plays on the part that is its
     /// screen.
     pub shows: Vec<Show>,
+    /// Whether the page draws the parts of the role that are alike as
+    /// one part, with each name and each reading's values. A part that
+    /// its health or an unmet expectation marks stands apart from the
+    /// stack, so the reader sees which part deviates.
+    pub stack: bool,
     /// Why `Kinds::resolve` could not confirm the role's `namedBy` or
     /// its `elevation` in the knowledge of another kind. The page shows
     /// it in the role's place. A `through` keeps its own reason.
@@ -89,71 +95,24 @@ pub struct Show {
     pub columns: Vec<Column>,
 }
 
-/// One entry of `roles`, as written in the document.
+/// The fields of a role of a `KindKnowledge` that say where its parts
+/// come from. `look::read` reads the rest of the role.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct Written {
+struct WrittenFill {
     reference: Option<String>,
     named_by: Option<WrittenNamedBy>,
     through: Option<String>,
-    label: Option<String>,
     elevation: Option<String>,
-    shape: Option<String>,
-    expected: Option<serde_yaml::Value>,
-    #[serde(default)]
-    reads: Vec<WrittenColumn>,
-    #[serde(default)]
-    shows: Vec<WrittenShow>,
 }
 
-/// A column as written: its name, or a map with its name and the
-/// reference to follow first. The map is read as a map, because serde
-/// would also read a struct from a list of two names.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum WrittenColumn {
-    Name(String),
-    Through(serde_yaml::Mapping),
-}
+/// The keys of `WrittenFill`, as a document writes them.
+const FILL_KEYS: &[&str] = &["reference", "namedBy", "through", "elevation"];
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WrittenThrough {
-    column: String,
-    through: String,
-}
-
-/// One entry of a role's `shows`, as written: one column, or a list of
-/// columns of which the first with a value is drawn.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum WrittenShow {
-    First(Vec<WrittenColumn>),
-    One(WrittenColumn),
-}
-
-/// The column that `written` names.
-fn column(written: WrittenColumn) -> Result<Column, String> {
-    Ok(match written {
-        WrittenColumn::Name(name) => Column {
-            name,
-            through: None,
-        },
-        WrittenColumn::Through(map) => {
-            let written: WrittenThrough = serde_yaml::from_value(map.into())
-                .map_err(|error| format!("a column with through: {error}"))?;
-            Column {
-                name: written.column,
-                through: Some(Through::new(written.through)),
-            }
-        }
-    })
-}
-
-/// The columns that `written` names.
-fn columns(written: Vec<WrittenColumn>) -> Result<Vec<Column>, String> {
-    written.into_iter().map(column).collect()
-}
+/// The keys of a role of a pattern of the catalog, which says that the
+/// kind's `pattern` fills it or that the pattern derives its parts. A
+/// `KindKnowledge` states neither.
+const CATALOG_KEYS: &[&str] = &["fill", "derive"];
 
 /// The roles of `written`, the document's `spec.roles`, in the order
 /// the document writes them, checked against the kind's `references`.
@@ -165,6 +124,39 @@ pub fn read(
     group: &str,
 ) -> Result<Vec<Role>, String> {
     let mut roles = Vec::new();
+    for (name, mut written) in entries(written)? {
+        let role = (|| {
+            if let Some(key) = CATALOG_KEYS.iter().find(|key| written.contains_key(**key)) {
+                return Err(format!(
+                    "{key} is a field of a role of transect's catalog, and a KindKnowledge fills the roles of its pattern in pattern.roles"
+                ));
+            }
+            let fill: WrittenFill = serde_yaml::from_value(take(&mut written, FILL_KEYS).into())
+                .map_err(|error| error.to_string())?;
+            let look = look::read(written, references)?;
+            let elevation = fill.elevation;
+            let fill = Fill::read(
+                fill.reference,
+                fill.named_by,
+                fill.through,
+                references,
+                group,
+            )?;
+            Role::new(name.clone(), fill, elevation, look, references)
+        })()
+        .map_err(|e| format!("roles.{name}: {e}"))?;
+        roles.push(role);
+    }
+    Ok(roles)
+}
+
+/// Each role of `written` by its name, in the order of the document,
+/// with its fields as a map. A name is checked here, because the page
+/// writes it into the sketch's grid.
+pub fn entries(
+    written: Option<serde_yaml::Mapping>,
+) -> Result<Vec<(String, serde_yaml::Mapping)>, String> {
+    let mut entries = Vec::new();
     for (name, written) in written.unwrap_or_default() {
         let Some(name) = name.as_str().map(String::from) else {
             return Err(format!("roles has the key {name:?}, which is not a name"));
@@ -174,113 +166,80 @@ pub fn read(
                 "roles has the name {name:?}, which is not a lower-case letter followed by lower-case letters, digits, and hyphens"
             ));
         }
-        let written: Written =
-            serde_yaml::from_value(written).map_err(|error| format!("roles.{name}: {error}"))?;
-        let role = role(name.clone(), written, references, group)
-            .map_err(|e| format!("roles.{name}: {e}"))?;
-        roles.push(role);
-    }
-    Ok(roles)
-}
-
-fn role(
-    name: String,
-    written: Written,
-    references: &[Reference],
-    group: &str,
-) -> Result<Role, String> {
-    let fill = Fill::read(
-        written.reference,
-        written.named_by,
-        written.through,
-        references,
-        group,
-    )?;
-    for (field, value) in [("label", &written.label), ("elevation", &written.elevation)] {
-        if value
-            .as_deref()
-            .is_some_and(|value| value.trim().is_empty())
-        {
-            return Err(format!("{field} is empty"));
-        }
-    }
-    if let (Some(elevation), None, None) = (
-        &written.elevation,
-        &fill.through,
-        fill.first_kind(references),
-    ) {
-        return Err(format!(
-            "the role draws each part as {elevation:?}, and the reference {} names no kind, so its parts are values with no elevation",
-            fill.first.fields()
-        ));
-    }
-    let expected = written.expected.map(expected).transpose()?;
-    let reads = columns(written.reads)?;
-    let follows = reads.iter().find(|column| column.through.is_some());
-    if let (Some(column), None, None) = (follows, &fill.through, fill.first_kind(references)) {
-        return Err(format!(
-            "reads {} through a reference of the part's kind, and the reference {} names no kind",
-            column.name,
-            fill.first.fields()
-        ));
-    }
-    let shows = written.shows.into_iter().enumerate().map(|(at, show)| {
-        let columns = match show {
-            WrittenShow::One(written) => vec![column(written)?],
-            WrittenShow::First(written) => columns(written)?,
+        let serde_yaml::Value::Mapping(written) = written else {
+            return Err(format!("roles.{name} is not a map of fields"));
         };
-        if columns.is_empty() {
-            return Err(format!(
-                "shows[{at}] is an empty list, and an entry of shows is a column or a list of one or more columns"
-            ));
-        }
-        let through = columns.iter().filter_map(|column| column.through.as_ref());
-        if let Some(through) = through.into_iter().find(|t| target_of(references, &t.path).is_none()) {
-            return Err(format!(
-                "shows[{at}] follows {}, which is the path of no entry of references that names a kind",
-                through.path
-            ));
-        }
-        Ok(Show { columns })
-    });
-    Ok(Role {
-        name,
-        fill,
-        label: written.label,
-        elevation: written.elevation,
-        shape: written.shape,
-        drawn: library::default(),
-        expected: expected.unwrap_or_default(),
-        reads,
-        shows: shows.collect::<Result<_, _>>()?,
-        unresolved: None,
-    })
+        entries.push((name, written));
+    }
+    Ok(entries)
 }
 
-/// `expected`, as written: `true`, `false`, or `{while: <condition
-/// type>}`.
-fn expected(written: serde_yaml::Value) -> Result<Expected, String> {
-    let fault = || {
-        format!(
-            "expected is {}, and it is true, false, or {{while: <condition type>}}",
-            serde_yaml::to_string(&written).unwrap_or_default().trim()
-        )
-    };
-    match &written {
-        serde_yaml::Value::Bool(true) => Ok(Expected::Always),
-        serde_yaml::Value::Bool(false) => Ok(Expected::Never),
-        serde_yaml::Value::Mapping(map) if map.len() == 1 => {
-            let condition = map.get("while").and_then(serde_yaml::Value::as_str);
-            let condition = condition.filter(|condition| !condition.trim().is_empty());
-            condition
-                .map(|c| Expected::While(c.into()))
-                .ok_or_else(fault)
+/// The fields of `written` whose keys are in `keys`, which it removes
+/// from `written`, so the fields that are left are those that
+/// `look::read` reads.
+pub fn take(written: &mut serde_yaml::Mapping, keys: &[&str]) -> serde_yaml::Mapping {
+    let mut taken = serde_yaml::Mapping::new();
+    for key in keys {
+        if let Some(value) = written.remove(*key) {
+            taken.insert((*key).into(), value);
         }
-        _ => Err(fault()),
     }
+    taken
 }
 
 impl Role {
+    /// The role `name`, whose parts come from `fill`, drawn as `look`
+    /// says, and as the elevation `elevation` of their kind when it is
+    /// some. The checks here need both the fill and the look:
+    /// `references` are the document's own.
+    pub fn new(
+        name: String,
+        fill: Fill,
+        elevation: Option<String>,
+        look: Look,
+        references: &[Reference],
+    ) -> Result<Self, String> {
+        if elevation
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err("elevation is empty".into());
+        }
+        let first_kind = fill.first_kind(references);
+        if let (Some(elevation), None, None) = (&elevation, &fill.through, first_kind) {
+            return Err(format!(
+                "the role draws each part as {elevation:?}, and the reference {} names no kind, so its parts are values with no elevation",
+                fill.first.fields()
+            ));
+        }
+        if let (Some(elevation), true) = (&elevation, look.stack) {
+            return Err(format!(
+                "the role draws each part in full as {elevation:?}, so its parts cannot stack"
+            ));
+        }
+        let follows = look.reads.iter().find(|column| column.through.is_some());
+        if let (Some(column), None, None) = (follows, &fill.through, first_kind) {
+            return Err(format!(
+                "reads {} through a reference of the part's kind, and the reference {} names no kind",
+                column.name,
+                fill.first.fields()
+            ));
+        }
+        Ok(Self {
+            name,
+            fill,
+            label: look.label,
+            elevation,
+            shape: look.shape,
+            drawn: library::default(),
+            expected: look.expected,
+            reads: look.reads,
+            shows: look.shows,
+            stack: look.stack,
+            unresolved: None,
+        })
+    }
+
     /// What a part of the role is called: the role's `label`, the label
     /// of its reference, or for the objects that name the page's object,
     /// their kind in lower-case words, so a `ShelfLabel` is a "shelf
@@ -296,6 +255,7 @@ impl Role {
                 label.unwrap_or_default().to_string()
             }
             First::NamedBy(named) => words(&named.kind),
+            First::Derived(_) | First::Unfilled => String::new(),
         }
     }
 

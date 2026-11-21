@@ -27,8 +27,8 @@ them: what runs on which machine, where each workload keeps its data,
 which pod has claimed which device, which source each object reconciles from,
 and what depends on what.  The map is gray where things are healthy,
 so only a problem is colored.  It shows the descriptions that people
-write, each marked with its source.  It names no patterns, and it does
-not report what is out of place.
+write, each marked with its source.  It names one pattern, a primary
+with replicas, and it does not report what is out of place.
 
 `transect` changes nothing in the cluster.  It reads the Kubernetes API
 and Prometheus, and a directory of its own resources for facts that
@@ -55,7 +55,12 @@ and the product design that new work follows is in
   and a URL for each, and wires between the parts that say what passes
   from one to the next.  A part can be drawn as an elevation of its
   own kind, so the page of a `Telescope` draws the telescope from the
-  side, with each optical train on the mount.
+  side, with each optical train on the mount.  When the knowledge of a
+  kind fills a pattern of `transect`'s catalog, as a database
+  operator's kind fills a primary with replicas, the page draws the pattern
+  as `transect` draws it for every kind that fills it: the `Service`s
+  for writes and reads, the primary, the replicas stacked, and whether
+  the store is as the pattern expects.
 - **Edges**, which you turn on and off from a row above each picture:
   runs on, depends on, authenticates through, stores on, holds,
   reconciles from, controlled by, and allowed to call (from

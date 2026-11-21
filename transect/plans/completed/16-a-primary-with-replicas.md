@@ -1,6 +1,7 @@
 # 16, A primary with replicas
 
-Proposed on 2026-11-21.  Nothing is built.
+Proposed on 2026-11-21.  Built on 2026-11-21.  The switchover drill
+of "How the work is proved" has not run.
 
 Revised on 2026-11-21 for plans 14, 15, 17, and 19 as built.  The
 decisions and the evidence are as they were.  These statements changed:
@@ -33,7 +34,7 @@ decisions and the evidence are as they were.  These statements changed:
 - The fixture's store is a kind that the fixture invents.
 
 This plan builds the first pattern of `transect`'s catalog, as "Who
-draws a pattern" in [00-design.md](00-design.md) describes it.  A
+draws a pattern" in [00-design.md](../00-design.md) describes it.  A
 project states which of its parts has which role, and `transect` draws
 the pattern the same way for every project that has it.  The first
 pattern is a primary with replicas, for a `Cluster` of CloudNativePG
@@ -65,7 +66,7 @@ document's `references` with `reference`, as a role of `spec.roles`
 does, and has no other field, because the catalog states each role's
 shape, label, and readings.  A role of `pattern` takes neither
 `namedBy` nor `through` of
-[plan 14](completed/14-the-rig-of-a-telescope.md), so the entry that
+[plan 14](14-the-rig-of-a-telescope.md), so the entry that
 it names is always in the same document:
 
 ```yaml
@@ -202,7 +203,7 @@ The catalog is a directory of YAML files in `transect-resources`,
 with `include_str!`, as `shapes/library.rs` embeds the library's
 shapes.  A fault in a file of the catalog is a fault of the binary, so
 a test fails when a file does not load.  A file has the form of
-[plan 15](completed/15-the-elevations-of-a-player.md): `roles` states
+[plan 15](15-the-elevations-of-a-player.md): `roles` states
 each role once, and each elevation has a `name`, a `question`, a
 `sketch`, and `wires`.  One parser, `elevation::read` in
 `knowledge/elevation.rs`, reads the elevations of a catalog pattern and
@@ -221,7 +222,7 @@ role of `spec.roles` can have the name of a role of its pattern.
 
 A part takes the shape of its role, then the shape that the knowledge
 of its kind states, then `box`, by
-[plan 19](completed/19-a-kind-states-its-shape.md)'s rule.  The
+[plan 19](19-a-kind-states-its-shape.md)'s rule.  The
 catalog states `drum` and `socket` on its roles, and that is correct
 here.  A `Pod` and a `Service` are core kinds whose knowledge no
 operator ships, so no kind's shape applies, and a `Pod` is an instance
@@ -356,7 +357,7 @@ whose `Pod` is gone each stand apart, and the part shows why.
 
 ### What the shape library gives this pattern
 
-[Plan 17](completed/17-the-shapes-of-a-sketch.md) defines `drum` and
+[Plan 17](17-the-shapes-of-a-sketch.md) defines `drum` and
 `socket` in the library, in `drum.yaml` and `socket.yaml`, because a
 pattern of the catalog draws them, and this plan defines no shape.
 
@@ -633,3 +634,157 @@ against `kubectl get pods -o wide`, `kubectl get endpointslices`, and
 the printer columns of the store.  A switchover that the maintainer
 starts on a store with replicas should show the target line unmet
 until the primary moves, then met with the new primary.
+
+## What the build changed
+
+On 2026-11-21 a workstation ran `transect` against a home cluster with
+the stock CloudNativePG set and the `Redis` file above under
+`--resources`, and read the page of a `Cluster` with two instances, a
+`Cluster` with one, a `Redis` with three, and a `Redis` with one, at
+1680, 800, and 420 pixels in the dark scheme and at 1680 in the light.
+Each primary, replica, machine, age, claim, and size, and each pod
+behind the `-rw` and `-ro` `Service`s, was the one that
+`kubectl get pods -o wide`, `kubectl get endpointslices`, and
+`kubectl get pvc` printed.  Every store was healthy, so every line of
+what the pattern expects was met, or did not apply to a store with one
+instance.  The page of a store with one instance drew its replicas'
+place, its read `Service`, and its operator at rest.  No switchover
+ran that day.  A review of the build on the same day changed the rules
+that several items below record.  After it, the room and the signal
+path of each `Player` and the rig of the `Telescope` drew the same
+sketch as the build before at 1680 pixels in the dark scheme.  Their
+boards list the objects under "managed by it" in order, which before
+changed from one load of the page to the next.  The build differs from
+the proposal in these ways:
+
+- **The catalog is `knowledge/catalog/` in `transect-resources`, not
+  `src/catalog/`.**  The parser of a `KindKnowledge` checks `pattern`
+  against the catalog, and the catalog reads its roles and elevations
+  with the parsers of `knowledge`.  Two sibling modules would depend
+  on each other.
+- **A role that the kind fills states the kind of its parts, with its
+  `group` when it is not the core group, and `instances` states
+  `list: true`.**  The faults of a reference of the wrong kind and of a
+  list read as one value need the catalog to say which kind and which
+  roles read a list, and the proposal's file wrote neither.  The kind
+  is compared with its group, so a `Service` of another group does not
+  fill a role of `Service`s.
+- **`primary` states `failover: true`, a field that any role of a
+  pattern can state.**  The loss of the role's one part stops what the
+  pattern serves until the controller promotes another part, so the
+  loss page reads the part's name from the reference that fills that
+  role.  It is a fact, so it is in the catalog's file, and a pattern
+  has at most one such role.  The pattern's Rust module has only its
+  derived roles and its expectations.
+- **`role/look.rs` reads the fields that both kinds of role have.**
+  `Role::new` then checks what needs both the fill and the look, such
+  as `stack` with `elevation`.  `elevation::read` takes the names of
+  the roles, so it reads a catalog pattern and a `KindKnowledge` alike.
+  A `KindKnowledge` that writes `fill` or `derive` gets a message that
+  says those are fields of the catalog.
+- **`First` has two more steps, `Derived` and `Unfilled`.**  A role
+  that the kind's `pattern` does not fill has the step `Unfilled` and
+  the reason "pattern.roles has no write-service, so the KindKnowledge
+  names no Service for it", which its empty place shows as
+  `Role::unresolved` does.  The line of what the pattern expects says
+  "the KindKnowledge names no Service for writes".
+- **`catalog::judge` runs the pattern's module once, when the page
+  builds the `Board`.**  It takes the `KindKnowledge` and returns a
+  `Judged`: the parts of each derived role, the lines of what the
+  pattern expects, and the parts that the lines mark.  The module reads
+  one `Occurrence`, the object, its knowledge, and the cluster, and the
+  expectations read the derived parts of the same run, so the drawing
+  and the lines agree.  It reads the cluster through the trait
+  `catalog::Cluster`, which extends `ReferenceEnds`, so the instances
+  and the primary are followed by `knowledge::follow`.  The binary
+  answers the controller with `controller`, a pod's readiness with
+  `transect_graph::pods::ready`, the one readiness function of every
+  page, and the pods behind a `Service`'s ready endpoints with
+  `Endpoints::ready_pods`, which the page builds once.
+- **A derived role can be missing its part.**  `Derived::Missing`
+  draws the place as an expected role with no part, as when the
+  knowledge names its controller's image and nothing that runs it
+  controls the object.  `Derived::Nothing` draws it at rest, as for a
+  store with no replica, or for knowledge that names no controller.
+- **The pattern's marks are a `Marks`, which keeps one mark for each
+  part.**  An unmet line's mark replaces a mark at rest.  The page
+  applies them only in the pattern's own elevation, where the lines
+  are listed, so the kind's own elevations draw the same parts as
+  their health says.  On a store with no replica, the read `Service`
+  and the operator are marked at rest with the proposal's words.  An
+  unmet line marks the part that it names with short words, such as
+  "not ready", which name no other object, and the line itself names
+  each object, linked to its page.
+- **The promoter's label is "operator".**  "promoted by" made the
+  empty place read "no promoted by".
+- **The head names the pattern on a short line under the question,**
+  "primary with replicas, drawn the same way for every kind that fills
+  its roles".  The caption under the sketch names the `KindKnowledge`
+  that fills the roles.  The pages do not say "transect's catalog": the
+  fixture has a `Deployment` named `catalog`, and the test that every
+  name with a page is a link counts the word.
+- **A source names the name that a template makes,** such as
+  `orders-ro` for `{name}-ro`, linked to the object, in a part's source
+  line and in a wire's.
+- **The reason on a `Pod` part is brief.**  `Reason::brief` in
+  `transect-observe` leaves out the names of the pod and the container,
+  because the part names its pod.
+- **Each pod behind a `Service` is a reading of its own, `Pods`,
+  linked to the pod, as each claim is.**  `Ports` is written as the
+  `Service`'s box on a workload's page writes it, `6379` and `53/UDP`.
+- **A stack is a part with the names of its parts.**  `Part::stack`
+  has each name, linked, and the label counts them, "replica × 2".  A
+  part stacks when it is drawn plainly.  A reading that every part has
+  with one value is written once, followed by "each", as "ready 1/1
+  each".  Other readings list each part's value in the order of the
+  names, with "—" for a part that has none.  A stack draws one fewer
+  copy of its outline than it has parts, at most two.  The copies stay
+  inside the part: `--room-above` adds their height, and
+  `--stack-room` makes the body narrower by their offset.
+- **An elevation can state `align: top`,** in the one schema of a
+  `KindKnowledge` and the catalog, and the default is `bottom`.  The
+  store states it, so the primary faces the stack when a replica stands
+  apart under it, and the two `Service`s line up.
+- **A grid with a wire that crosses a gap between rows has rows 64
+  pixels apart,** as a wired grid has wider columns, so the wire has
+  room to bend and to carry its words beside it.
+- **Each line of a wire takes the state of the part at its end.**
+  `wires.js` marks a line to a part that warns or fails in
+  `--shape-warm`, with its arrow, and the lines to the other parts of
+  the role stay plain.  A role with several parts gets a bar in the gap
+  12 pixels beyond its area's edge, so no line lies on a part's
+  outline, and an arrow on the short line into each part's port.  A run
+  meets a bar at the place nearest its other end.  A wire that leaves
+  the top or the bottom of its area has its words beside its longest
+  vertical segment, and words stand on no horizontal segment shorter
+  than 48 pixels.  The proposal said that the script does not change.
+- **An empty place that a wire meets stands in the middle of its
+  area,** so the wire does not step sideways.  An empty place that no
+  wire meets stands where it stood, beside the parts it belongs with,
+  so the rig of a `Telescope` does not change.
+- **The reason of a marked part wraps and is never cut, and a reading
+  that lists several values breaks only after ", ".**
+- **The light scheme has inks of its own for a warning's outline and
+  lines, an empty place's dashed outline, and a part at rest,** and the
+  plain fill is lighter.  The port of a `socket` is a `mark`, not
+  `glass`, because a dark port was the heaviest mark on a light page.
+- **A value does not say that it reaches the page's own object,** and
+  the line of the parts that an elevation does not place leaves out an
+  object that the elevation draws in another role.
+- **An entry with `name` also refuses `match`,** which reads a field.
+- **The words of a condition's chip keep an acronym whole,**
+  "Consistent system ID" and not "Consistent system iD".
+- **The fixture's journal has four instances.**  Two replicas are
+  alike, so the page stacks them, and the third crash-loops, so it
+  stands apart and the line "each replica is ready" is unmet.  The
+  replica crash-loops and did not only restart, because `--fixture`
+  reads the wall clock, and a restart at the fixture's time is not
+  recent there.  The journal's `Ledger` states no `disruptions`.
+
+On the home cluster, `transect/local/resources/` had a link
+`00-cloudnative-pg` to `examples/cloudnative-pg` and the file
+`00-redis.yaml`.  `/resources` showed both loaded, and showed the
+cluster's own `kinds/postgres.yaml` and `kinds/redis.yaml` not loaded,
+with the message that `primary` is now a role of `pattern`, because the
+parser refuses them before the loader compares the files.  Those files
+change in the cluster's own repository.

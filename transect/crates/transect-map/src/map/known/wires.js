@@ -5,9 +5,11 @@
 // and this script measures the marks of the parts' ports and writes each
 // path.  A run leaves its port at a right angle and bends halfway
 // between the two areas, so it meets the port wherever the part stands
-// in its area.  A role with several parts gets a bar along its area's
-// edge, with a short line from the bar to each part's port, under the
-// parts.  When a run is the only one at each of its ports and the two
+// in its area.  A role with several parts gets a bar in the gap beside
+// its area's edge, with a short line from the bar to each part's port
+// that ends in an arrow when the wire arrives there.  Each line takes
+// the state of the part at its end, so only the line to a part that
+// warns or fails is marked.  When a run is the only one at each of its ports and the two
 // spans overlap, it runs straight in the overlap, so two parts that
 // stand on one floor have no step between them.
 //
@@ -30,9 +32,20 @@ const onPort = (rect, edge, t, origin) =>
     ? { x: rect.left + rect.width / 2 - origin.left, y: rect.top + rect.height * t - origin.top }
     : { x: rect.left + rect.width * t - origin.left, y: rect.top + rect.height / 2 - origin.top };
 
+// How far a bar stands out from its area's edge, in the gap, so that
+// it and the run do not lie on the outline of a part that stands
+// against that edge.
+const BAR_GAP = 12;
+
+// Whether the part that `mark` marks a port of warns or fails, so the
+// line to it is marked.
+const warm = (mark) => Boolean(mark.closest(".shape-part")?.matches(".shape-warning, .shape-failing, .shape-no-object"));
+
 // One end of a run: the point where it ends, the rectangle of its area,
-// its span when it is the only end at one part's port, and the bar and
-// its short lines when the role has several parts.
+// its span when it is the only end at one part's port, and, when the
+// role has several parts, the bar in the gap beside the area's edge and
+// a short line from the bar to each part's port.  The end and each
+// short line say whether the part at its end warns or fails.
 // The plan's own areas are its grid's children, so an area of the same
 // name in an elevation that a part draws inside the plan is not found.
 const end = (plan, origin, name, edge, slot, of) => {
@@ -54,16 +67,54 @@ const end = (plan, origin, name, edge, slot, of) => {
     const span = side(edge)
       ? [mark.top - origin.top, mark.bottom - origin.top]
       : [mark.left - origin.left, mark.right - origin.left];
-    return { point: ports[0], rect, bars: "", span: of === 1 ? span : null };
+    return { point: ports[0], rect, bar: "", stubs: [], warm: warm(marks[0]), span: of === 1 ? span : null };
   }
-  const at = rect[edge];
+  const outward = edge === "left" || edge === "top" ? -1 : 1;
+  const at = rect[edge] + outward * BAR_GAP;
   const along = ports.map((p) => (side(edge) ? p.y : p.x));
   const [low, high] = [Math.min(...along), Math.max(...along)];
   const middle = (low + high) / 2;
   const point = side(edge) ? { x: at, y: middle } : { x: middle, y: at };
   const bar = side(edge) ? `M${at} ${low}V${high}` : `M${low} ${at}H${high}`;
-  const stubs = ports.map((p) => (side(edge) ? `M${at} ${p.y}H${p.x}` : `M${p.x} ${at}V${p.y}`));
-  return { point, rect, bars: [bar, ...stubs].join(""), span: null };
+  const stubs = ports.map((p, index) => ({
+    d: side(edge) ? `M${at} ${p.y}H${p.x}` : `M${p.x} ${at}V${p.y}`,
+    warm: warm(marks[index]),
+  }));
+  return { point, rect, bar, stubs, warm: false, span: null, range: [low, high] };
+};
+
+// Moves the end of a run on a bar to the place along the bar nearest
+// the other end, so the run meets the bar straight when it can, and
+// bends only as far as the bar needs.
+const meetBar = (bar, other, across) => {
+  if (!bar.range) return;
+  const [low, high] = bar.range;
+  const clamp = (value) => Math.min(Math.max(value, low), high);
+  if (across) bar.point.y = clamp(other.point.y);
+  else bar.point.x = clamp(other.point.x);
+};
+
+// The arrow of a line in its state: marked, at rest, or plain.
+const arrow = (line, marked) => {
+  const state = marked ? "warm" : line.classList.contains("sketch-wire-rests") ? "rests" : "plain";
+  return `url(#sketch-arrow-${state})`;
+};
+
+// Writes the short lines of `end` into `group`, each in the run's class,
+// marked when its part warns or fails, and with an arrow when `end` is
+// where the wire arrives.
+const drawStubs = (group, end, runClass, arrives) => {
+  // Two short lines can share their first stretch, when one part stands
+  // behind another, so a marked line is drawn first and the plain line
+  // over it, and only the stretch to the marked part shows marked.
+  const ordered = [...end.stubs].sort((x, y) => Number(y.warm) - Number(x.warm));
+  for (const stub of ordered) {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    line.setAttribute("class", `sketch-wire-stub ${runClass}${stub.warm ? " sketch-wire-warm" : ""}`);
+    line.setAttribute("d", stub.d);
+    if (arrives) line.setAttribute("marker-end", arrow(line, stub.warm));
+    group.appendChild(line);
+  }
 };
 
 // Moves both ends of a run into the overlap of their spans, when each is
@@ -94,20 +145,31 @@ const points = (a, b, edge) => {
 
 const path = (points) => points.map((p, at) => `${at ? "L" : "M"}${p.x} ${p.y}`).join("");
 
-// The middle of the longest horizontal segment of `segments`, where the
-// label stands, above the line, and the width it has: the segment less
-// 8 pixels at each end, so the label never reaches a bend.  A wire with
-// no horizontal segment has its label beside its first segment.
-const labelAt = (segments) => {
-  const flat = segments.filter(([p, q]) => p.y === q.y);
-  const length = ([p, q]) => Math.abs(q.x - p.x);
-  const longest = flat.sort((a, b) => length(b) - length(a))[0];
+// The shortest horizontal segment that a label stands on.  A shorter
+// one is the small step between two ports that nearly line up, and a
+// word on it would cover the ports.
+const LABEL_ROOM = 48;
+
+// Where the label of a wire stands, and the width it has.  A wire that
+// leaves a side of its area has its label above the middle of its
+// longest horizontal segment, less 8 pixels at each end, so the label
+// never reaches a bend.  A wire that leaves the top or the bottom of its
+// area bends in the gap between two rows, which has no room above the
+// bend for a word, so its label stands beside its longest vertical
+// segment, as it does for a wire with no horizontal segment as long as
+// `LABEL_ROOM`.
+const labelAt = (segments, across) => {
+  const width = ([p, q]) => Math.abs(q.x - p.x);
+  const height = ([p, q]) => Math.abs(q.y - p.y);
+  const flat = segments.filter((segment) => segment[0].y === segment[1].y && width(segment) >= LABEL_ROOM);
+  const longest = across ? flat.sort((a, b) => width(b) - width(a))[0] : undefined;
   if (!longest) {
-    const [p, q] = segments[0];
+    const upright = segments.filter((segment) => segment[0].x === segment[1].x);
+    const [p, q] = upright.sort((a, b) => height(b) - height(a))[0] ?? segments[0];
     return { x: p.x + 8, y: (p.y + q.y) / 2, anchor: "start", width: Infinity };
   }
   const [p, q] = longest;
-  return { x: (p.x + q.x) / 2, y: p.y - 8, anchor: "middle", width: length(longest) - 16 };
+  return { x: (p.x + q.x) / 2, y: p.y - 8, anchor: "middle", width: width(longest) - 16 };
 };
 
 // Writes `words` into `text` as lines no wider than `width`, broken at
@@ -149,14 +211,29 @@ const draw = (plan) => {
       const b = end(plan, origin, data.to, data.toEdge, +data.toSlot, +data.toOf);
       if (!a || !b) continue;
       straighten(a, b, side(data.fromEdge));
+      meetBar(b, a, side(data.fromEdge));
+      meetBar(a, b, side(data.fromEdge));
       const drawn = points(a, b, data.fromEdge);
-      run.querySelector(".sketch-wire-path").setAttribute("d", path(drawn));
+      const line = run.querySelector(".sketch-wire-path");
+      const runClass = line.getAttribute("class").replace("sketch-wire-path ", "").replace(" sketch-wire-warm", "");
+      // The run itself is the line to a part only where its end has one
+      // part, so only then does it take that part's state.
+      const marked = a.warm || b.warm;
+      line.setAttribute("class", `sketch-wire-path ${runClass}${marked ? " sketch-wire-warm" : ""}`);
+      line.setAttribute("d", path(drawn));
+      if (b.stubs.length === 0) line.setAttribute("marker-end", arrow(line, marked));
+      else line.removeAttribute("marker-end");
       run.querySelector(".sketch-wire-hit").setAttribute("d", path(drawn));
-      run.querySelector(".sketch-wire-bars").setAttribute("d", a.bars + b.bars);
+      run.querySelector(".sketch-wire-bars").setAttribute("d", a.bar + b.bar);
+      const group = run.querySelector(".sketch-wire-stubs");
+      group.replaceChildren();
+      drawStubs(group, a, runClass, false);
+      drawStubs(group, b, runClass, true);
       for (let at = 1; at < drawn.length; at += 1) segments.push([drawn[at - 1], drawn[at]]);
     }
     if (segments.length === 0) continue;
-    const at = labelAt(segments);
+    const first = wire.querySelector(".sketch-run")?.dataset.fromEdge;
+    const at = labelAt(segments, side(first));
     const label = wire.querySelector(".sketch-wire-label");
     label.dataset.words ??= label.textContent;
     label.setAttribute("text-anchor", at.anchor);

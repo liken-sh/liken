@@ -1,7 +1,8 @@
-{#- The sketch of one elevation of a kind's knowledge: the head, which
-    names the object, its elevations, the question, and who states it,
-    then the grid that `plan.html` draws, and the line that names the
-    parts that the elevation does not place.  The grid scrolls sideways
+{#- The sketch of one elevation of a kind's knowledge, or of the
+    pattern of the catalog that the kind fills: the head, which names the
+    object, its elevations, the question, who states it, and the pattern,
+    then the grid that `plan.html` draws, the line that names the parts
+    that the elevation does not place, and what the pattern expects.  The grid scrolls sideways
     in its own frame when the frame is narrower than the grid's
     narrowest width, and the head and the line under it stay. -#}
 {%- import "links/link.html" as links -%}
@@ -29,19 +30,35 @@
 {%- endif %}
 <div class="sketch-question">{{ sketch.question }}</div>
 <div class="sketch-author">described by {% call links::object_link(sketch.head.author.text, sketch.head.author.href, "") %}{% endcall %}</div>
+{%- if let Some(pattern) = sketch.head.pattern %}
+<p class="sketch-pattern"><span class="sketch-pattern-name">{{ pattern }}</span> drawn the same way for every kind that fills its roles</p>
+{%- endif %}
 {%- if let Some(missing) = sketch.head.missing %}
 <p class="sketch-missing">{{ missing }}</p>
 {%- endif %}
 </header>
 {#- The arrow at the end of each wire, once on the page, for every plan
-    that the sketch draws.  The SVG takes no room and no screen reader
-    reads it. #}
-<svg class="sketch-markers" width="0" height="0" aria-hidden="true"><defs><marker id="sketch-arrow" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path class="section-arrow" d="M0 0 L4 2 L0 4 Z"/></marker></defs></svg>
+    that the sketch draws: plain, at rest, and marked, because an arrow
+    takes the state of its line.  The SVG takes no room and no screen
+    reader reads it. #}
+<svg class="sketch-markers" width="0" height="0" aria-hidden="true"><defs>
+{%- for state in ["plain", "rests", "warm"] %}<marker id="sketch-arrow-{{ state }}" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path class="section-arrow sketch-arrow-{{ state }}" d="M0 0 L4 2 L0 4 Z"/></marker>{% endfor -%}
+</defs></svg>
 <div class="sketch-scroll">
 {{- sketch.plan|safe }}
 </div>
 {%- if let Some(unplaced) = sketch.unplaced %}
 <p class="sketch-unplaced">{% call links::sentence(unplaced.as_slice()) %}{% endcall %}</p>
+{%- endif %}
+{%- if !sketch.expected.is_empty() %}
+<section class="sketch-expectations" aria-label="What the pattern expects">
+<h3 class="sketch-expectations-title">What the pattern expects</h3>
+<ul class="sketch-expected-list">
+{%- for line in sketch.expected %}
+<li class="{{ line.class }}" title="{{ line.source }}" tabindex="0"><span class="sketch-expected-sign" aria-hidden="true">{{ line.sign }}</span><span class="shape-state">{{ line.spoken }}</span> {% call links::sentence(line.text.as_slice()) %}{% endcall %}</li>
+{%- endfor %}
+</ul>
+</section>
 {%- endif %}
 </section>
 </div>

@@ -88,10 +88,11 @@ impl Snapshot {
         keys
     }
 
-    /// A message for each of `known`'s `references`, `writesSecret`, and
-    /// `primary` paths that no object of the kind has. A kind that is
-    /// not watched whole has only metadata and conditions, so its paths
-    /// cannot be checked and it gets no message.
+    /// A message for each of `known`'s `references` and `writesSecret`
+    /// paths that no object of the kind has. A kind that is not watched
+    /// whole has only metadata and conditions, so its paths cannot be
+    /// checked and it gets no message. An entry by a name template reads
+    /// no field, so it is not checked.
     fn fields(&self, known: &KindKnowledge, of: &KindObjects, whole: bool) -> Vec<String> {
         if !whole {
             return Vec::new();
@@ -100,11 +101,9 @@ impl Snapshot {
             .references
             .iter()
             .enumerate()
+            .filter(|(_, reference)| !reference.by_name)
             .map(|(at, reference)| (format!("references[{at}]"), &reference.path));
-        let named = [
-            ("writesSecret".to_string(), known.writes_secret.as_ref()),
-            ("primary".to_string(), known.primary.as_ref()),
-        ];
+        let named = [("writesSecret".to_string(), known.writes_secret.as_ref())];
         let named = named
             .into_iter()
             .filter_map(|(field, path)| Some((field, path?)));

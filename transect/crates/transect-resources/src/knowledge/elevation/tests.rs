@@ -3,7 +3,7 @@ use std::ops::Range;
 use rstest::rstest;
 
 use super::super::{KindKnowledge, parse};
-use super::slug;
+use super::{Align, slug};
 use crate::resources::DocId;
 use crate::shapes::{Shapes, library};
 
@@ -243,7 +243,19 @@ fn with(name: &str, sketch: &str, more: &str) -> String {
     ),
     "unknown field `colour`"
 )]
+#[case::another_edge(
+    with("a", "face amp", "align: middle"),
+    "elevations[0]: align is \"middle\", and it is \"top\" or \"bottom\""
+)]
 fn refuses_an_elevation_it_cannot_draw(#[case] elevations: String, #[case] error: &str) {
     let found = read(&elevations).unwrap_err();
     assert!(found.contains(error), "{found}");
+}
+
+#[rstest]
+#[case::the_floor_unsaid(one("a", "face amp"), Align::Bottom)]
+#[case::the_top(with("a", "face amp", "align: top"), Align::Top)]
+#[case::the_bottom(with("a", "face amp", "align: bottom"), Align::Bottom)]
+fn reads_the_edge_that_each_part_stands_against(#[case] elevations: String, #[case] align: Align) {
+    assert_eq!(read(&elevations).unwrap().elevations[0].align, align);
 }

@@ -17,7 +17,6 @@ use kube::ResourceExt;
 pub use sentence::{DAEMON_SETS, LEGEND, OTHERS};
 pub use transect_ground::placement::Skip;
 
-use transect_cluster::workloads::pod_ready;
 use transect_graph::edges::{Object, Plurals};
 use transect_graph::pods::finished;
 use transect_ground::placement;
@@ -213,7 +212,7 @@ fn worst(pods: &[&Pod], now: Timestamp) -> Cell {
             restarts: restarts(pod),
         };
     }
-    if pods.iter().all(|pod| pod_ready(pod)) {
+    if pods.iter().all(|pod| transect_graph::pods::ready(pod)) {
         Cell::Ready
     } else {
         Cell::NotReady

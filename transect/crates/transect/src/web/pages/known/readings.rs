@@ -9,6 +9,7 @@ use super::super::super::snapshot::Snapshot;
 use transect_graph::edges::Object;
 use transect_graph::links::Reference;
 use transect_map::map::Reading;
+use transect_network::entry::Endpoints;
 use transect_resources::knowledge::role::Column;
 use transect_resources::knowledge::{ColumnRead, Followed, ReferenceEnds, columns};
 
@@ -16,13 +17,18 @@ use transect_resources::knowledge::{ColumnRead, Followed, ReferenceEnds, columns
 /// with the value that `kubectl get` prints: a column of `object`, or of
 /// the object at the end of the column's reference, which the reading
 /// links to. A reference that `Kinds::resolve` could not confirm shows
-/// why in place of the value.
+/// why in place of the value. A `Pod` and a `Service` read the columns
+/// that `kubectl get` prints for them.
 pub(super) fn readings(
     snapshot: &Snapshot,
+    endpoints: &Endpoints,
     object: &Object,
     columns: &[Column],
     now: Timestamp,
 ) -> Vec<Reading> {
+    if let Some(read) = super::core::readings(snapshot, endpoints, object, columns, now) {
+        return read;
+    }
     let reading = |column: &Column| {
         let Some(through) = &column.through else {
             let found = super::super::object::stored(snapshot, object).flatten()?;
@@ -123,7 +129,13 @@ mod tests {
     ) {
         let object = Object::new(group, kind, Some("acme-shop"), name);
         let reads: Vec<Column> = reads.iter().map(|read| column(read, None)).collect();
-        let found = readings(&fixture::snapshot(), &object, &reads, Timestamp::UNIX_EPOCH);
+        let found = readings(
+            &fixture::snapshot(),
+            &Endpoints::default(),
+            &object,
+            &reads,
+            Timestamp::UNIX_EPOCH,
+        );
         let found: Vec<(&str, &str)> = found
             .iter()
             .map(|r| (r.name.as_str(), r.value.as_str()))
@@ -176,7 +188,13 @@ mod tests {
     ) {
         let object = Object::new("stock.example.test", kind, Some("acme-ops"), name);
         let reads = [column("Temperature", Some(through))];
-        let found = readings(&fixture::snapshot(), &object, &reads, Timestamp::UNIX_EPOCH);
+        let found = readings(
+            &fixture::snapshot(),
+            &Endpoints::default(),
+            &object,
+            &reads,
+            Timestamp::UNIX_EPOCH,
+        );
         let found = found.into_iter().next().map(|reading| {
             let from = reading
                 .from

@@ -7,6 +7,7 @@ use crate::objects::ObjectCard;
 use crate::shapes::text::{Reading, State, Why};
 use transect_graph::edges::{ClusterScoped, Endpoint, Object, Plurals};
 use transect_observe::health::Level;
+use transect_resources::knowledge::catalog::Judged;
 use transect_resources::knowledge::role::Column;
 use transect_resources::knowledge::{self, KindKnowledge, fixtures::knowledge};
 use transect_resources::knowledge::{Names, Reached, Relation};
@@ -97,15 +98,17 @@ pub(super) fn page_at(
 ) -> KnownPage {
     let mut known = knowledge("kiosks.widgets.example.com", spec);
     known.draw_with(shapes, |_, _| None);
-    page_of_known(&known, standing, slug)
+    page_of_known(&known, standing, slug, None)
 }
 
 /// The page of the kiosk with the knowledge `known`, whose shapes are
-/// already found, at the URL of the elevation `slug`.
+/// already found, at the URL of the elevation `slug`, with `judged` as
+/// what the kiosk's pattern says.
 pub(super) fn page_of_known(
     known: &KindKnowledge,
     standing: Standing,
     slug: Option<&str>,
+    judged: Option<&Judged>,
 ) -> KnownPage {
     let data = serde_yaml::from_str(KIOSK).unwrap();
     let relations = knowledge::relations(
@@ -167,6 +170,7 @@ pub(super) fn page_of_known(
         subjects: &|_| None,
         named_by: &|_, _| Vec::new(),
         ends: &knowledge::fixtures::Nowhere,
+        judged,
     };
     KnownPage::build(board, None, card(known))
 }
@@ -387,6 +391,7 @@ mod elevations;
 mod fills;
 mod grid;
 mod nested;
+mod pattern;
 mod shapes;
 mod shows;
 mod stock;

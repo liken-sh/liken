@@ -148,7 +148,10 @@ impl<'a> Workload<'_, 'a> {
             return None;
         }
         let running = self.running();
-        let ready = running.iter().filter(|pod| pod_ready(pod)).count();
+        let ready = running
+            .iter()
+            .filter(|pod| transect_graph::pods::ready(pod))
+            .count();
         Some((ready as i32, running.len() as i32))
     }
 
@@ -254,15 +257,6 @@ impl<'a> Workload<'_, 'a> {
         let cron_jobs = self.parts.iter().map(|part| part.controller);
         !self.parts.is_empty() && cron_jobs.into_iter().all(|c| c == Controller::CronJob)
     }
-}
-
-/// Whether the pod's `Ready` condition is `True`.
-pub fn pod_ready(pod: &Pod) -> bool {
-    let conditions = pod.status.as_ref().and_then(|s| s.conditions.as_ref());
-    conditions
-        .into_iter()
-        .flatten()
-        .any(|condition| condition.type_ == "Ready" && condition.status == "True")
 }
 
 #[cfg(test)]

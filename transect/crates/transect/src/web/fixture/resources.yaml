@@ -446,3 +446,30 @@ spec:
     - {severity: UNKNOWN, path: report.summary.unknownCount}
     items: "report.found[]"
     item: {id: id, severity: severity, score: score, package: package, installed: installed, fixed: fixed, link: link, title: title}
+---
+# A ledger is a store of the pattern `primary-with-replicas`: the
+# primary takes the writes, and the replicas stream from it.  Its
+# operator names the `Service`s for the ledger and records the names in
+# no field, so the knowledge names them by a template.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: ledgers.ledgers.example.test
+spec:
+  summary: A ledger's primary, which takes the writes, and the replicas that stream from it.
+  healthy: {condition: Ready}
+  references:
+    - {path: status.primary, kind: Pod, label: primary is}
+    - {path: 'status.instances[]', kind: Pod, label: instance}
+    - {path: status.target, kind: Pod, label: the operator's target is}
+    - {name: '{name}-rw', kind: Service, label: writes through}
+    - {name: '{name}-ro', kind: Service, label: reads from the replicas through}
+  controller: {image: example.test/promoter-image}
+  pattern:
+    name: primary-with-replicas
+    roles:
+      instances:     {reference: 'status.instances[]'}
+      primary:       {reference: status.primary}
+      target:        {reference: status.target}
+      write-service: {reference: '{name}-rw'}
+      read-service:  {reference: '{name}-ro'}

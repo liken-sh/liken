@@ -81,7 +81,7 @@ warning, because a `Remote` has no condition.
 has a `name`, a `question`, a `sketch` that places the roles it needs,
 and `wires` when it has any. A role that no elevation places is still
 knowledge that an agent can read. The catalog of
-[plan 16](../16-a-primary-with-replicas.md) uses the same form: `roles`
+[plan 16](16-a-primary-with-replicas.md) uses the same form: `roles`
 once at the top of a pattern's file, and elevations with `name`,
 `question`, `sketch`, and `wires`.
 

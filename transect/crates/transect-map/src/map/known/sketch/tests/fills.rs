@@ -21,7 +21,7 @@ fn parts(roles: &str, sketch: &str, stock: &Stock, standing: Standing) -> Parts 
         let end = &part.end;
         (end.reference.text.clone(), end.under.clone(), part.state)
     });
-    (parts.collect(), drawn.source.clone())
+    (parts.collect(), drawn.source_text())
 }
 
 /// What the room's role `area` shows with no part, as its text, its

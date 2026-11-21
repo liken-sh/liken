@@ -23,7 +23,7 @@ mem
 cpu
 250m no request · no limit
 0 restarts no probes
-Runs on node-alpha · worker · 4 cores 10 pods here · not started
+Runs on node-alpha · worker · 4 cores 12 pods here · not started
 Logs the last 5 lines of each container All lines →
 listening on :8080
 [warning] cart cache is slow to answer

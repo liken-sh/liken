@@ -5,8 +5,8 @@
 use serde::Deserialize;
 
 use super::{
-    Disruptions, Duty, Healthy, KindKnowledge, Reference, ReferencedBy, Target, Through, elevation,
-    findings, gitops, role,
+    Disruptions, Duty, Healthy, KindKnowledge, Reference, ReferencedBy, Target, Through, catalog,
+    elevation, findings, gitops, role,
 };
 use crate::resources::DocId;
 use transect_graph::edges::Kind;
@@ -39,7 +39,10 @@ struct Spec {
     writes_secret: Option<String>,
     controller: Option<Controller>,
     disruptions: Option<String>,
-    primary: Option<String>,
+    /// The field of the proof of concept that named the primary pod,
+    /// read only to refuse it.
+    primary: Option<serde_yaml::Value>,
+    pattern: Option<serde_yaml::Value>,
     docs: Option<String>,
     applies: Option<gitops::WrittenApplies>,
     #[serde(default)]
@@ -96,7 +99,10 @@ struct Referrer {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Written {
-    path: String,
+    path: Option<String>,
+    /// The template of the referenced object's name, in place of a
+    /// path.
+    name: Option<String>,
     kind: Option<String>,
     group: Option<String>,
     #[serde(default)]
@@ -120,6 +126,12 @@ pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<KindKnowledge, Stri
         format!("the name {name:?} is not <plural>.<group>, the form of a custom resource definition's name")
     })?;
     let spec = document.spec;
+    if spec.primary.is_some() {
+        return Err(
+            "primary is now a role of pattern: name the pattern primary-with-replicas, and fill its role primary with the reference to the primary pod"
+                .into(),
+        );
+    }
     let references = spec
         .references
         .into_iter()
@@ -129,7 +141,12 @@ pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<KindKnowledge, Stri
         })
         .collect::<Result<Vec<_>, _>>()?;
     let roles = role::read(spec.roles, &references, group)?;
-    let elevations = elevation::read(spec.elevations, &roles)?;
+    let pattern = spec
+        .pattern
+        .map(|written| catalog::fill(written, &references))
+        .transpose()?;
+    let names: Vec<&str> = roles.iter().map(|role| role.name.as_str()).collect();
+    let elevations = elevation::read(spec.elevations, &names)?;
     let healthy = spec
         .healthy
         .map(|written| healthy(written, &references))
@@ -175,7 +192,6 @@ pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<KindKnowledge, Stri
         writes_secret: spec.writes_secret,
         controller_image: spec.controller.map(|controller| controller.image),
         disruptions,
-        primary: spec.primary,
         docs: spec.docs,
         gitops,
         ignore_changes,
@@ -185,6 +201,7 @@ pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<KindKnowledge, Stri
         drawn: None,
         roles,
         elevations,
+        pattern,
     })
 }
 
@@ -252,6 +269,19 @@ fn role(role: Option<&str>) -> Result<Option<Duty>, String> {
 }
 
 fn reference(written: Written) -> Result<Reference, String> {
+    let (path, by_name) = match (written.path, written.name) {
+        (Some(_), Some(_)) => {
+            return Err("the entry has both path and name, and it reads one of them".into());
+        }
+        (None, None) => {
+            return Err("the entry has neither path nor name, so it reads nothing".into());
+        }
+        (Some(path), None) => (path, false),
+        (None, Some(name)) => {
+            template(&name, written.kind.is_some(), written.matched.is_some())?;
+            (name, true)
+        }
+    };
     if written.matched.is_some() && written.kind.is_none() {
         return Err("match reads a field of the referenced object, so kind is required".into());
     }
@@ -282,7 +312,8 @@ fn reference(written: Written) -> Result<Reference, String> {
         })?,
     };
     Ok(Reference {
-        path: written.path,
+        path,
+        by_name,
         target,
         edge,
         label: written.label,
@@ -290,6 +321,37 @@ fn reference(written: Written) -> Result<Reference, String> {
         across_namespaces: written.across_namespaces,
         role,
     })
+}
+
+/// Checks `name`, the template of a referenced object's name. It names
+/// one object of a kind, so the entry needs `kind`, and no `match`,
+/// which reads a field. It needs `{name}`, because without it every
+/// object of the kind would name the same object. A brace is only part
+/// of `{name}` or `{namespace}`, which `render` fills, so a role's
+/// `reference` tells a template from a path, which never has a brace.
+fn template(name: &str, kind: bool, matched: bool) -> Result<(), String> {
+    if !kind {
+        return Err(format!(
+            "name {name:?} names an object, so kind is required"
+        ));
+    }
+    if matched {
+        return Err(format!(
+            "name {name:?} names the object, and match reads a field, so the entry has one of them"
+        ));
+    }
+    if !name.contains("{name}") {
+        return Err(format!(
+            "name {name:?} has no {{name}}, so every object of the kind would name the same object"
+        ));
+    }
+    let rest = name.replace("{name}", "").replace("{namespace}", "");
+    if rest.contains(['{', '}']) {
+        return Err(format!(
+            "name {name:?} has a brace that is not part of {{name}} or {{namespace}}"
+        ));
+    }
+    Ok(())
 }
 
 /// The edge `Kind` for the text of a reference's `edge`. The kinds are

@@ -30,16 +30,19 @@
 <g class="sketch-run" data-from="{{ run.from.area }}" data-from-edge="{{ run.from.edge.word() }}" data-from-slot="{{ run.from.slot }}" data-from-of="{{ run.from.of }}" data-to="{{ run.to.area }}" data-to-edge="{{ run.to.edge.word() }}" data-to-slot="{{ run.to.slot }}" data-to-of="{{ run.to.of }}">
 <path class="sketch-wire-hit"/>
 <path class="sketch-wire-bars {{ run.class() }}"/>
-<path class="sketch-wire-path {{ run.class() }}" marker-end="url(#sketch-arrow)"/>
+<path class="sketch-wire-path {{ run.class() }}"/>
+<g class="sketch-wire-stubs"></g>
 </g>
 {%- endfor %}
 <text class="sketch-wire-label">{{ wire.carries }}</text>
-<text class="sketch-wire-source">{{ wire.source }}</text>
+<text class="sketch-wire-source">
+{%- for piece in wire.source %}{% if let Some(href) = piece.href %}<a href="{{ href }}">{{ piece.text }}</a>{% else %}{{ piece.text }}{% endif %}{% endfor -%}
+</text>
 </g>
 {%- endfor %}
 </svg>
 {%- endif %}
-<div class="sketch-grid{% if !wires.is_empty() %} sketch-wired{% endif %}" style="grid-template-columns: {{ columns }}; grid-template-rows: {{ rows }}; grid-template-areas: {{ areas }}">
+<div class="{{ class }}" style="grid-template-columns: {{ columns }}; grid-template-rows: {{ rows }}; grid-template-areas: {{ areas }}">
 {%- for role in roles %}
 <div class="{{ role.area_class() }}" style="grid-area: {{ role.area }}" data-area="{{ role.area }}">
 {%- for nested in role.nested %}
@@ -66,7 +69,7 @@
 {%- if !wires.is_empty() %}
 <ul class="sketch-wire-list" aria-label="Wires of {{ name }}">
 {%- for wire in wires %}
-<li{% if wire.dashed() %} class="sketch-wire-empty"{% endif %}>{% call links::sentence(wire.sentence.as_slice()) %}{% endcall %}<span class="sketch-wire-from">, {{ wire.source }}</span></li>
+<li{% if wire.dashed() %} class="sketch-wire-empty"{% endif %}>{% call links::sentence(wire.sentence.as_slice()) %}{% endcall %}<span class="sketch-wire-from">, {% call links::sentence(wire.source.as_slice()) %}{% endcall %}</span></li>
 {%- endfor %}
 </ul>
 {%- endif %}

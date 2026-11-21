@@ -6,6 +6,8 @@
 //! - `hardware.yaml`: the machines' devices.
 //! - `storage.yaml`: a CSI driver with a console template.
 //! - `parts.yaml`: a stock room's nested parts.
+//! - `stores.yaml`: two stores that fill the pattern of a primary with
+//!   replicas, one with replicas and one with one instance.
 //! - `flux.yaml`: a GitOps tool and what it applies from.
 //! - `entry.yaml`: the way in through an ingress controller.
 //! - `network.yaml`: `NetworkPolicy` objects, a workload on its
@@ -97,6 +99,8 @@ fn snapshot_with(resources: crate::web::loaded::Loaded) -> Snapshot {
         include_str!("storage.yaml"),
         "---\n",
         include_str!("parts.yaml"),
+        "---\n",
+        include_str!("stores.yaml"),
         "---\n",
         include_str!("flux.yaml"),
         "---\n",

@@ -272,6 +272,7 @@ mod tests {
                 ("Machines", 1, 0),
                 ("Caches", 1, 0),
                 ("Gizmos", 2, 1),
+                ("Ledgers", 2, 0),
                 ("Promotions", 2, 0),
                 ("Gates", 3, 0),
                 ("Handsets", 1, 0),

@@ -21,7 +21,7 @@ acme-shop
 data
 1 namespace
 acme-ledger
-4 workloads it needs
+6 workloads it needs
 operators
 1 namespace
 acme-promoter
@@ -39,13 +39,13 @@ control plane
 node-beta 1 alert
 cpu
 mem
-9 pods · 5 here
+12 pods · 5 here
 holds radio handset-one
 workers
 node-alpha
 cpu
 mem
-10 pods · 2 here
+12 pods · 2 here
 Ground
 1 volume
 The archive NAS ↗ intent

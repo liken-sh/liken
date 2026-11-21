@@ -1,0 +1,40 @@
+# A store with one primary that takes the writes and replicas that
+# stream from it.  A kind fills `instances`, `primary`, and the other
+# roles with `fill` in its `pattern.roles`, and the pattern's module
+# derives `replicas` and `promoter`.  `instances` and `target` are
+# placed by no elevation: the expectations and an agent read them.
+#
+# The operator replaces a lost primary by promoting a replica, so
+# `primary` states `failover`, and the loss page says that writes stop
+# until then.
+#
+# The parts stand at the top of their areas, so the primary faces the
+# replicas when a replica stands apart under their stack, and the
+# `Service`s line up.
+#
+# The middle column has only `.` cells, so it keeps its width and the
+# wire that streams has room for its words.  The promoter is a `tag`,
+# because the operator is in the cluster and not part of the store, so
+# no wire meets it.
+name: primary-with-replicas
+title: primary with replicas
+roles:
+  instances:     {fill: required, kind: Pod, list: true, label: instance}
+  primary:       {fill: required, kind: Pod, failover: true, label: primary, shape: drum, expected: true, reads: [Ready, Node, Age, Claim]}
+  target:        {fill: optional, kind: Pod, label: the operator's target}
+  write-service: {fill: optional, kind: Service, label: writes through, shape: socket, expected: true, reads: [Ports, Pods]}
+  read-service:  {fill: optional, kind: Service, label: reads through, shape: socket, expected: true, reads: [Ports, Pods]}
+  replicas:      {derive: instances-but-primary, label: replica, shape: drum, expected: true, stack: true, reads: [Ready, Node, Age, Claim]}
+  promoter:      {derive: controller, label: operator, shape: tag, expected: true}
+elevations:
+  - name: the store
+    question: Where do writes and reads go, and which instances follow the primary?
+    align: top
+    sketch: |
+      write-service  write-service  .  read-service  read-service
+      primary        primary        .  replicas      replicas
+      promoter       promoter       .  .             .
+    wires:
+      - {from: write-service, to: primary, carries: writes}
+      - {from: read-service, to: replicas, carries: reads}
+      - {from: primary, to: replicas, carries: streams}

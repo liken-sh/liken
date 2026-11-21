@@ -179,6 +179,7 @@ pub fn room_page(room: &str, stock: &Stock, standing: Standing) -> KnownPage {
         subjects: &subject,
         named_by: &named_by,
         ends: &ends,
+        judged: None,
     };
     let card = ObjectCard {
         kind: "Room".into(),

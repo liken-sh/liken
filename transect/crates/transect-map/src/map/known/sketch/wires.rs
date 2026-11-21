@@ -8,6 +8,12 @@
 //!   a part, as two wires. When it has none, the wire runs straight past
 //!   the role's area.
 //! - A run that meets an expected role with no part is dashed.
+//! - A run that meets a role with no part that is not missing one, such
+//!   as a role expected in another state, is dashed in the color of
+//!   rest, as the role's outline is.
+//! - A line takes the state of the part at its end, so only the line to
+//!   a part that warns or fails is marked, and its arrowhead with it.
+//!   `wires.js` draws that, because it draws the short line to each part.
 //! - A run that meets a role the page leaves out is not drawn.
 //!
 //! The page lays the grid out in the browser, so `wires.js` measures the
@@ -27,6 +33,9 @@ pub enum Presence {
     Parts,
     /// The role is expected and draws its empty place.
     Empty,
+    /// The role draws its empty place at rest, because it is not
+    /// missing a part.
+    Elsewhere,
     /// The role is not drawn.
     Absent,
 }
@@ -38,8 +47,9 @@ pub struct Placed {
     /// The role's parts as the drawing names them, each linked to its
     /// page, or what its empty place says, such as "no Lamp".
     pub names: Vec<Reference>,
-    /// The field that the role's parts are read from.
-    pub path: String,
+    /// The fields that the role's parts are read from, as words and
+    /// links.
+    pub fields: Vec<Reference>,
 }
 
 /// One wire of the elevation as the page draws it: one run, or two
@@ -52,8 +62,8 @@ pub struct SketchWire {
     /// words, and each part linked to its page.
     pub sentence: Vec<Reference>,
     /// The fields that the ends were read from, and the knowledge that
-    /// states the wire.
-    pub source: String,
+    /// states the wire, as words and links.
+    pub source: Vec<Reference>,
 }
 
 /// One line that the page draws between two areas.
@@ -68,8 +78,9 @@ pub struct Run {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WireEnd {
     pub area: String,
-    /// The role of the area is expected and has no part.
-    pub empty: bool,
+    /// Whether the role of the area has parts, is expected and has
+    /// none, or has none and is not missing one.
+    pub presence: Presence,
     pub edge: Edge,
     /// The end's place along the edge, from the left or the top.
     pub slot: usize,
@@ -80,15 +91,21 @@ pub struct WireEnd {
 impl Run {
     /// Whether the run meets a role with no part, so it is dashed.
     pub fn dashed(&self) -> bool {
-        self.from.empty || self.to.empty
+        let empty = |end: &WireEnd| end.presence != Presence::Parts;
+        empty(&self.from) || empty(&self.to)
     }
 
     /// The class of the run's path: solid, or dashed when it meets a
-    /// role with no part, as the ring draws its lines.
+    /// role with no part, as the ring draws its lines, and dashed at rest
+    /// when that role is not missing a part.
     pub fn class(&self) -> &'static str {
-        match self.dashed() {
-            true => "section-path section-path-dashed",
-            false => "section-path",
+        let rests = [&self.from, &self.to]
+            .iter()
+            .any(|end| end.presence == Presence::Elsewhere);
+        match (self.dashed(), rests) {
+            (_, true) => "section-path section-path-dashed sketch-wire-rests",
+            (true, false) => "section-path section-path-dashed",
+            (false, false) => "section-path",
         }
     }
 }
@@ -102,10 +119,18 @@ impl SketchWire {
             .collect()
     }
 
+    /// The source as plain text.
+    pub fn source_text(&self) -> String {
+        self.source
+            .iter()
+            .map(|piece| piece.text.as_str())
+            .collect()
+    }
+
     /// What a reader sees while pointing at the wire: the sentence and
     /// its source.
     pub fn title(&self) -> String {
-        format!("{}, {}", self.text(), self.source)
+        format!("{}, {}", self.text(), self.source_text())
     }
 
     /// Whether a run of the wire meets a role with no part.
@@ -115,11 +140,11 @@ impl SketchWire {
 }
 
 /// The wires of `elevation` that the page draws, where `placed` says how
-/// the page draws each role, and `knowledge` names the `KindKnowledge`
-/// that states them.
+/// the page draws each role, and `states` names who states them, such
+/// as "the KindKnowledge k".
 pub fn wires(
     elevation: &Elevation,
-    knowledge: &str,
+    states: &str,
     placed: impl Fn(&str) -> Placed,
 ) -> Vec<SketchWire> {
     let grid = &elevation.grid;
@@ -142,7 +167,7 @@ pub fn wires(
             let (from_edge, to_edge) = grid.facing(pair[0], pair[1])?;
             let end = |area: &str, edge| WireEnd {
                 area: area.into(),
-                empty: placed(area).presence == Presence::Empty,
+                presence: placed(area).presence,
                 edge,
                 slot: 0,
                 of: 1,
@@ -160,7 +185,7 @@ pub fn wires(
         wires.push(SketchWire {
             carries: one.carries.clone(),
             sentence: sentence(&one.carries, &names),
-            source: source(&names, knowledge),
+            source: source(&names, states),
             runs,
         });
     }
@@ -190,16 +215,25 @@ fn sentence(carries: &str, stops: &[Placed]) -> Vec<Reference> {
 
 /// "read from status.a, status.b, and status.c, as the KindKnowledge k
 /// states", with the fields of the roles that a wire passes, in order.
-fn source(stops: &[Placed], knowledge: &str) -> String {
-    let fields: Vec<Reference> = stops
-        .iter()
-        .map(|stop| Reference {
-            text: stop.path.clone(),
-            href: None,
-        })
-        .collect();
-    let fields: String = listed(&fields).iter().map(|p| p.text.as_str()).collect();
-    format!("read from {fields}, as the KindKnowledge {knowledge} states")
+fn source(stops: &[Placed], states: &str) -> Vec<Reference> {
+    let word = |text: &str| Reference {
+        text: text.into(),
+        href: None,
+    };
+    let mut pieces = vec![word("read from ")];
+    let count = stops.len();
+    for (at, stop) in stops.iter().enumerate() {
+        if at > 0 {
+            pieces.push(word(match (count, at + 1 == count) {
+                (2, _) => " and ",
+                (_, true) => ", and ",
+                _ => ", ",
+            }));
+        }
+        pieces.extend(stop.fields.iter().cloned());
+    }
+    pieces.push(word(&format!(", as {states} states")));
+    pieces
 }
 
 /// `names` joined as a list in a sentence: "a", "a and b", or "a, b, and

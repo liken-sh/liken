@@ -21,7 +21,7 @@ acme-shop
 data
 1 namespace
 acme-ledger
-4 workloads
+6 workloads
 operators
 1 namespace
 acme-promoter
@@ -39,12 +39,12 @@ control plane
 node-beta 1 alert
 cpu
 mem
-9 pods
+12 pods
 workers
 node-alpha
 cpu
 mem
-10 pods
+12 pods
 Ground
 1 volume
 The archive NAS ↗ intent · 1 NFS
@@ -63,17 +63,20 @@ CertificateRenewal info
 cluster-wide, firing for 2h
 A certificate renews this week.
 acme-ledger
-ledger-exporter: none of 1 ready main in ledger-exporter-rs-one is crash looping after 14 restarts
+ledger-exporter: none of 1 ready main in ledger-exporter-rs-one is crash looping after 14 restarts store in journal-4 is crash looping after 4 restarts
 Worth knowing
-19 pods request no memory
-5 of them each use 64 Mi or more, and all 19 use 2.1 Gi together. The scheduler places them as if they used no memory, and the kubelet evicts them first.
-1 replicated workload behind a Service has no readiness probe
+24 pods request no memory
+5 of them each use 64 Mi or more, and all 24 use 2.1 Gi together. The scheduler places them as if they used no memory, and the kubelet evicts them first.
+2 replicated workloads behind a Service have no readiness probe
 acme-shop/storefront
+acme-ledger/journal
 During a rollout, their Services send requests to each new pod as soon as it starts, before the pod can answer them.
-1 replicated workload has no PodDisruptionBudget
+2 replicated workloads have no PodDisruptionBudget
 acme-shop/storefront
+acme-ledger/journal
 No PodDisruptionBudget limits their evictions, so a drain can evict all of a workload's pods at once.
 Changed
+11:52 acme-ledger/journal: store in journal-4 restarted (Error, exit 1)
 11:40 alert SessionsSlow started firing: acme-shop · session-cache-set-0
 11:30 alert LedgerExporterDown started firing: acme-ledger · ledger-exporter
 11:00 acme-ops/shop-apps applied main · shop@1111111
@@ -81,5 +84,4 @@ Changed
 10:00 acme-ops/ledger-apps applied a commit · ledger@2222222
 10:00 alert CertificateRenewal started firing: cluster-wide
 09:00 acme-ops/ops-apps applied v3
-07:00 acme-ops/backup-apps applied sha256:4444444444444444444444444444444444444444444444444444444444444444
-All 8 changes in the last 24 hours →
+All 9 changes in the last 24 hours →

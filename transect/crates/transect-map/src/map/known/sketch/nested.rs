@@ -48,8 +48,7 @@ impl NestedPart {
         label: &str,
         source: &str,
     ) -> Option<Self> {
-        let elevations = &subject.knowledge.elevations;
-        let elevation = elevations.iter().find(|e| e.name == elevation)?;
+        let stated = subject.knowledge.own_elevation(elevation)?;
         let (state, why) = (board.standing)(&subject.object).state();
         Some(Self {
             label: label.into(),
@@ -57,7 +56,7 @@ impl NestedPart {
             source: source.into(),
             state,
             why,
-            plan: Plan::build(board, subject, elevation, true),
+            plan: Plan::build(board, subject, stated, true),
             knowledge: subject.knowledge.name.clone(),
         })
     }

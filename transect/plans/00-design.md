@@ -526,6 +526,15 @@ knowledge of an `OpticalTrain` sketches one train, and the page of a
 that name the page's object, follow one more reference, and be
 expected only while a condition of the object is `True`.
 
+[Plan 16](completed/16-a-primary-with-replicas.md), built on
+2026-11-21, draws the first pattern of `transect`'s catalog, a primary
+with replicas.  A `KindKnowledge` names the pattern and says which of
+its references fills each role, and `transect` states the places, the
+shapes, and what the pattern expects, the same for every kind that
+fills it.  A role can stack its parts that are alike.  Which of
+`LogPattern` and the pattern of this document keeps the name is still
+open.
+
 ## Where the knowledge of a pattern ships
 
 The knowledge of a first-party pattern ships with its operator.

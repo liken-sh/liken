@@ -179,6 +179,19 @@ fn reads_each_entry_of_shows_as_a_list_of_alternatives(
     "{face: {reference: status.amp.name, expected: {while: ''}}}",
     "roles.face: expected is while: ''"
 )]
+#[case::a_stack_drawn_as_an_elevation(
+    "{face: {reference: status.amp.name, elevation: the amp, stack: true}}",
+    "roles.face: the role draws each part in full as \"the amp\", so its parts cannot stack"
+)]
+#[case::a_fill_of_the_catalog(
+    "{face: {fill: required}}",
+    "roles.face: fill is a field of a role of transect's catalog"
+)]
+#[case::a_derive_of_the_catalog(
+    "{face: {derive: controller}}",
+    "roles.face: derive is a field of a role of transect's catalog"
+)]
+#[case::a_role_that_is_not_a_map("{face: screen}", "roles.face is not a map of fields")]
 #[case::an_unknown_field_of_a_column(
     "{face: {reference: status.amp.name, reads: [{column: Charge, through: status.cell, colour: red}]}}",
     "roles.face"
@@ -212,4 +225,11 @@ fn reads_when_a_role_is_expected(#[case] written: &str, #[case] expected: Expect
 fn labels_each_part_of_a_role(#[case] written: &str, #[case] label: &str) {
     let known = read(&format!("{{face: {written}}}")).unwrap();
     assert_eq!(known.roles[0].label(&known.references), label);
+}
+
+#[rstest]
+#[case::stacked("{reference: 'spec.handsets[].name', stack: true}", true)]
+#[case::unsaid("{reference: 'spec.handsets[].name'}", false)]
+fn reads_whether_a_role_stacks_its_parts(#[case] written: &str, #[case] stack: bool) {
+    assert_eq!(role(written).stack, stack);
 }

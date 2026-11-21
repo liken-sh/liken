@@ -93,6 +93,9 @@ KindKnowledge
 imagereports.scan.example.test
 loaded
 KindKnowledge
+ledgers.ledgers.example.test
+loaded
+KindKnowledge
 kustomizations.kustomize.toolkit.fluxcd.io
 loaded
 KindKnowledge

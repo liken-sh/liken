@@ -12,6 +12,7 @@
 //! watch event, so `recheck` marks the cluster changed every `RECHECK`.
 
 mod attribute;
+mod brief;
 mod cron_jobs;
 mod earlier;
 #[cfg(test)]

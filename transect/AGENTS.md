@@ -249,7 +249,18 @@ condition of the object is `True`.  An object is a part of one role in
 an elevation, the first in the order of the sketch's cells.  The
 columns of a sketch alternate with gap tracks, as its rows do, so parts
 that join touch across a column, and a row in which they do stands on
-one axis.
+one axis.  Plan 16 builds `transect`'s catalog of patterns in
+`crates/transect-resources/src/knowledge/catalog/`: a YAML file and a
+Rust module of the same name for each pattern, and the first is a
+primary with replicas.  A `KindKnowledge` names a pattern in
+`spec.pattern` and fills its roles from its `references`, and an entry
+of `references` can name its object by a template, `name`.  The
+pattern's elevations follow the kind's own, with `transect` as their
+author.  `catalog::judge`, which the page runs once when it builds the
+`Board`, gives the parts of each derived role, the lines of what the
+pattern expects, and the parts that those lines mark.  A role with
+`stack` draws its plain parts as one part, with copies of its outline
+behind it, and each marked part beside it.
 
 `plans/open-problems/` holds the defects that a test reproduced in the
 code as it is.  Write a plan before you build anything new.

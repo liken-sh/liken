@@ -10,9 +10,11 @@
 
 mod age;
 mod card;
+pub mod catalog;
 pub mod columns;
 mod counts;
 mod defined;
+mod drawing;
 pub mod elevation;
 pub mod findings;
 pub mod gitops;
@@ -28,6 +30,7 @@ mod reach;
 mod referenced;
 mod references;
 pub mod role;
+mod stated;
 pub mod through;
 pub mod wire;
 
@@ -47,6 +50,7 @@ pub use parse::{edge_kind, parse};
 pub use reach::{Reached, edges};
 pub use referenced::{referrals, referred_edges};
 pub use references::{Names, Relation, relations, target_of, written_secret};
+pub use stated::Stated;
 pub use through::{Followed, ReferenceEnds, Through, follow};
 
 use std::sync::Arc;
@@ -80,11 +84,6 @@ pub struct KindKnowledge {
     /// registry host.
     pub controller_image: Option<String>,
     pub disruptions: Option<Disruptions>,
-    /// The field that names the primary pod, for a kind with one
-    /// primary that takes writes and replicas that follow it. Losing the
-    /// primary stops writes until the operator promotes a replica, and
-    /// losing a replica does not.
-    pub primary: Option<String>,
     pub docs: Option<String>,
     /// How the kind applies objects and fetches sources, when it is a
     /// GitOps tool's kind.
@@ -113,6 +112,9 @@ pub struct KindKnowledge {
     /// the author's order. The page of an object draws the first in place
     /// of the ring of boxes, and each at a URL of its own.
     pub elevations: Vec<Elevation>,
+    /// The pattern of `transect`'s catalog that the kind fills, whose
+    /// elevations the page draws after the kind's own.
+    pub pattern: Option<catalog::Pattern>,
 }
 
 /// What says that an object of a kind works.
@@ -134,8 +136,15 @@ pub enum Healthy {
 /// an address, or a value.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Reference {
-    /// A field path, with `[]` for each item of a list.
+    /// A field path, with `[]` for each item of a list, or the template
+    /// of the referenced object's name when `by_name` is set. A role's
+    /// `reference` names the entry by this text.
     pub path: String,
+    /// Whether `path` is a template of the referenced object's name,
+    /// with `{name}` and `{namespace}` for the referring object, which
+    /// reads no field. An operator often names an object for the object
+    /// that owns it and records the name in no field.
+    pub by_name: bool,
     pub target: Target,
     pub edge: Kind,
     /// The phrase that a card shows for the relation, such as "amplified
@@ -230,13 +239,12 @@ pub fn plural_label(kind: &str, plural: Option<&str>) -> String {
 impl KindKnowledge {
     /// Whether the knowledge reads fields that a trimmed watch drops. A
     /// trimmed watch keeps only the metadata, the conditions, and
-    /// `observedGeneration`, so `references`, `writes_secret`,
-    /// `primary`, and a `node` path outside `metadata` need the whole
-    /// object.
+    /// `observedGeneration`, so `references`, `writes_secret`, and a
+    /// `node` path outside `metadata` need the whole object. Each role
+    /// of a `pattern` names an entry of `references`.
     pub fn reads_fields(&self) -> bool {
         !self.references.is_empty()
             || self.writes_secret.is_some()
-            || self.primary.is_some()
             || self
                 .node
                 .as_deref()
@@ -287,70 +295,29 @@ impl KindKnowledge {
     }
 
     /// Finds the shape of each role, and leaves out each wire that meets
-    /// a role whose shape has no port on the facing edge. `of_kind`
-    /// gives the shape that the knowledge of a kind states, by group and
-    /// kind. It returns the message of a condition for each role whose
-    /// shape is not there, and for each wire it left out.
+    /// a role whose shape has no port on the facing edge, for the kind's
+    /// own roles and for the roles of its pattern. `of_kind` gives the
+    /// shape that the knowledge of a kind states, by group and kind. It
+    /// returns the message of a condition for each role whose shape is
+    /// not there, and for each wire it left out.
     pub fn draw_with(
         &mut self,
         shapes: &Shapes,
         of_kind: impl Fn(&str, &str) -> Option<Arc<Shape>>,
     ) -> (Vec<String>, Vec<String>) {
-        let found: Vec<_> = self
-            .roles
-            .iter()
-            .map(|role| self.shape_of(role, shapes, &of_kind))
-            .collect();
-        let mut unknown = Vec::new();
-        for (role, found) in self.roles.iter_mut().zip(found) {
-            role.drawn = found.unwrap_or_else(|message| {
-                unknown.push(message);
-                library::default()
-            });
+        let drawing = drawing::Drawing {
+            group: &self.group,
+            references: &self.references,
+            shapes,
+            of_kind: &of_kind,
+        };
+        let mut faults = drawing.draw(&mut self.roles, &mut self.elevations);
+        if let Some(pattern) = &mut self.pattern {
+            let (unknown, unported) = drawing.draw(&mut pattern.roles, &mut pattern.elevations);
+            faults.0.extend(unknown);
+            faults.1.extend(unported);
         }
-        let mut unported = Vec::new();
-        for elevation in &mut self.elevations {
-            let grid = &elevation.grid;
-            let roles = &self.roles;
-            let shape_of = |name: &str| {
-                let role = roles.iter().find(|role| role.name == name)?;
-                Some(grid.posed(name, &role.drawn))
-            };
-            let faults = wire::leave_unported(&mut elevation.wires, grid, shape_of);
-            let named = faults
-                .into_iter()
-                .map(|f| format!("elevation {:?}: {f}", elevation.name));
-            unported.extend(named);
-        }
-        (unknown, unported)
-    }
-
-    /// The shape that each part of `role` is drawn in: the first of the
-    /// role's `shape`, the shape that the knowledge of the part's kind
-    /// states, and the library's default. The kind is the kind of the
-    /// role's parts, which `Fill::parts_kind` gives, so an expected role
-    /// with no part takes the same shape as its parts would. A reference
-    /// that names no kind reads a value, so only the role can state its
-    /// shape. The error is
-    /// the message of a condition for a role whose shape is not loaded.
-    fn shape_of(
-        &self,
-        role: &role::Role,
-        shapes: &Shapes,
-        of_kind: impl Fn(&str, &str) -> Option<Arc<Shape>>,
-    ) -> Result<Arc<Shape>, String> {
-        if let Some(written) = &role.shape {
-            return shapes.resolve(written, &self.group).cloned().ok_or_else(|| {
-                format!(
-                    "the role {} names the shape {written:?}, which transect has not loaded, so it is drawn as a {}",
-                    role.name,
-                    library::DEFAULT
-                )
-            });
-        }
-        let kind = role.fill.parts_kind(&self.references);
-        let stated = kind.and_then(|(group, kind)| of_kind(group, kind));
-        Ok(stated.unwrap_or_else(library::default))
+        faults
     }
 
     /// The provenance of a fact read through `field` of this knowledge.
@@ -408,7 +375,6 @@ mod tests {
     )]
     #[case::a_healthy_condition("{healthy: {condition: Ready}}", false)]
     #[case::a_reference("{references: [{path: spec.node, kind: Node}]}", true)]
-    #[case::a_primary("{primary: status.currentPrimary}", true)]
     #[case::a_node_by_its_name("{node: metadata.name}", false)]
     #[case::a_node_in_its_status("{node: status.nodeName}", true)]
     #[case::an_elevation(

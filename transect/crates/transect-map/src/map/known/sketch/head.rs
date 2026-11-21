@@ -1,12 +1,16 @@
 //! The head of a sketch: a tab for each elevation of the kind, in the
 //! author's order, with the current one marked, and the author who
-//! states them. Each elevation has a URL of its own under the object's,
+//! states the current one. An elevation of a pattern of the catalog is
+//! stated by `transect`, and its head also names the pattern. Each elevation has a URL of its own under the object's,
 //! and the object's own URL draws the first. An elevation that the URL
 //! names and the kind does not have draws the first, with a line that
 //! says so.
 
 use transect_graph::links::Reference;
-use transect_resources::knowledge::Elevation;
+use transect_resources::knowledge::Stated;
+
+/// The author of an elevation of a pattern of the catalog.
+const TRANSECT: &str = "transect";
 
 /// The head of the sketch of one elevation.
 #[derive(Debug, PartialEq)]
@@ -14,9 +18,14 @@ pub struct Head {
     /// A tab for each elevation, or none when the kind has one, because
     /// a lone tab leads nowhere.
     pub tabs: Vec<ElevationTab>,
-    /// Who states the elevations: the controller that the knowledge
-    /// names, or else the `KindKnowledge`, as the card names it.
+    /// Who states the current elevation: for the kind's own, the
+    /// controller that the knowledge names, or else the
+    /// `KindKnowledge`, as the card names it, and `transect` for an
+    /// elevation of the catalog.
     pub author: Reference,
+    /// The title of the pattern of the catalog that states the current
+    /// elevation, such as "primary with replicas".
+    pub pattern: Option<String>,
     /// The line that says which elevation the URL named, when the kind
     /// has no elevation of that slug.
     pub missing: Option<String>,
@@ -35,39 +44,49 @@ pub fn href(path: &str, slug: &str) -> String {
     format!("{path}/elevations/{slug}")
 }
 
-/// The elevation of `elevations` that the URL names by `slug`, or the
-/// first when it names none or one the kind does not have, with the
-/// head of its sketch. It is none when the kind has no elevation.
-pub fn choose<'a>(
-    elevations: &'a [Elevation],
+/// The elevation of `elevations`, each by its slug, that the URL names
+/// by `slug`, or the first when it names none or one the kind does not
+/// have, with the head of its sketch. `author` states the kind's own
+/// elevations. It is none when the kind has no elevation.
+pub fn choose<'a, 'k>(
+    elevations: &'a [(String, Stated<'k>)],
     slug: Option<&str>,
     path: &str,
     kind: &str,
     author: Reference,
-) -> Option<(&'a Elevation, Head)> {
-    let named = slug.and_then(|slug| elevations.iter().find(|e| e.slug == slug));
-    let elevation = named.or(elevations.first())?;
+) -> Option<(&'a (String, Stated<'k>), Head)> {
+    let named = slug.and_then(|slug| elevations.iter().find(|(s, _)| s == slug));
+    let chosen = named.or(elevations.first())?;
+    let (current, stated) = chosen;
     let missing = slug.filter(|_| named.is_none()).map(|slug| {
         format!(
             "The knowledge of {kind} states no elevation {slug}, so the page draws {}.",
-            elevation.name
+            stated.elevation.name
         )
     });
-    let tabs = elevations.iter().map(|e| ElevationTab {
-        name: e.name.clone(),
-        href: href(path, &e.slug),
-        current: e.slug == elevation.slug,
+    let tabs = elevations.iter().map(|(slug, other)| ElevationTab {
+        name: other.elevation.name.clone(),
+        href: href(path, slug),
+        current: slug == current,
     });
     let tabs = match elevations.len() {
         1 => Vec::new(),
         _ => tabs.collect(),
     };
+    let author = match stated.pattern {
+        Some(_) => Reference {
+            text: TRANSECT.into(),
+            href: None,
+        },
+        None => author,
+    };
     let head = Head {
         tabs,
         author,
         missing,
+        pattern: stated.pattern.map(|pattern| pattern.title.clone()),
     };
-    Some((elevation, head))
+    Some((chosen, head))
 }
 
 #[cfg(test)]
@@ -76,6 +95,8 @@ mod tests {
 
     use super::*;
 
+    use transect_resources::knowledge::Elevation;
+
     fn elevation(name: &str) -> Elevation {
         Elevation {
             name: name.into(),
@@ -83,6 +104,7 @@ mod tests {
             question: "What is it?".into(),
             grid: transect_resources::knowledge::Grid { rows: Vec::new() },
             wires: Vec::new(),
+            align: Default::default(),
         }
     }
 
@@ -122,7 +144,8 @@ mod tests {
         #[case] expected: Chosen,
     ) {
         let elevations: Vec<Elevation> = names.iter().map(|name| elevation(name)).collect();
-        let (chosen, head) = choose(&elevations, slug, "/k", "Kiosk", author()).unwrap();
+        let stated = stated(&elevations);
+        let ((_, chosen), head) = choose(&stated, slug, "/k", "Kiosk", author()).unwrap();
         let tabs = head
             .tabs
             .into_iter()
@@ -130,9 +153,24 @@ mod tests {
             .collect();
         let (name, expected_tabs, missing) = expected;
         assert_eq!(
-            (chosen.name.as_str(), tabs, head.missing.as_deref()),
+            (
+                chosen.elevation.name.as_str(),
+                tabs,
+                head.missing.as_deref()
+            ),
             (name, expected_tabs, missing)
         );
+    }
+
+    /// Each of `elevations` as the kind's own, by its slug.
+    fn stated(elevations: &[Elevation]) -> Vec<(String, Stated<'_>)> {
+        let own = elevations.iter().map(|elevation| Stated {
+            elevation,
+            roles: &[],
+            pattern: None,
+        });
+        own.map(|stated| (stated.elevation.slug.clone(), stated))
+            .collect()
     }
 
     #[rstest]

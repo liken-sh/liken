@@ -26,7 +26,7 @@ use serde_json::Value;
 
 use super::super::model::Model;
 use super::super::snapshot::Snapshot;
-pub use find::stored;
+pub use find::{stored, typed};
 use transect_graph::edges::{Endpoint, Object, Shown};
 use transect_graph::links::Reference;
 use transect_map::objects::kinds::{Catalog, ReadFrom, Served};

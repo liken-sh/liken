@@ -35,7 +35,7 @@ fn lays_the_roles_out_on_the_grid_of_the_sketch() {
             sketch.plan.rows.as_str(),
             drawings,
             areas,
-            sketch.plan.roles[0].drawn.source.as_str(),
+            sketch.plan.roles[0].drawn.source_text().as_str(),
             sketch.caption(),
         ),
         (

@@ -9,7 +9,6 @@
 use serde::Deserialize;
 
 use super::grid::{self, Grid};
-use super::role::Role;
 use super::wire::{self, Wire};
 
 /// One arrangement of roles, such as "the room".
@@ -23,6 +22,27 @@ pub struct Elevation {
     pub question: String,
     pub grid: Grid,
     pub wires: Vec<Wire>,
+    /// The edge of its area that each part stands against.
+    pub align: Align,
+}
+
+/// The edge of its area that a part stands against. A room's parts
+/// stand on its floor, at the bottom of their areas, and the parts of a
+/// row of pictures that a wire joins can face each other at the top.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Align {
+    Top,
+    #[default]
+    Bottom,
+}
+
+impl Align {
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+        }
+    }
 }
 
 /// One `elevations` entry, as written in the document. `roles` is
@@ -35,12 +55,13 @@ pub struct Written {
     sketch: String,
     #[serde(default)]
     wires: Vec<wire::Written>,
+    align: Option<String>,
     roles: Option<serde_yaml::Value>,
 }
 
-/// The elevations of `written`, which place `roles`. The error names
-/// the first fault and the elevation it is in.
-pub fn read(written: Vec<Written>, roles: &[Role]) -> Result<Vec<Elevation>, String> {
+/// The elevations of `written`, which place the roles named in
+/// `roles`. The error names the first fault and the elevation it is in.
+pub fn read(written: Vec<Written>, roles: &[&str]) -> Result<Vec<Elevation>, String> {
     let mut elevations: Vec<Elevation> = Vec::new();
     for (at, one) in written.into_iter().enumerate() {
         let elevation = elevation(one, roles).map_err(|e| format!("elevations[{at}]: {e}"))?;
@@ -55,7 +76,7 @@ pub fn read(written: Vec<Written>, roles: &[Role]) -> Result<Vec<Elevation>, Str
     Ok(elevations)
 }
 
-fn elevation(written: Written, roles: &[Role]) -> Result<Elevation, String> {
+fn elevation(written: Written, roles: &[&str]) -> Result<Elevation, String> {
     if written.roles.is_some() {
         return Err(
             "the elevation has roles, and roles are stated once, in spec.roles, for every elevation to place".into(),
@@ -69,22 +90,28 @@ fn elevation(written: Written, roles: &[Role]) -> Result<Elevation, String> {
         ));
     }
     let grid = grid::read(&written.sketch)?;
-    if let Some(name) = grid
-        .names()
-        .into_iter()
-        .find(|n| !roles.iter().any(|r| r.name == *n))
-    {
+    if let Some(name) = grid.names().into_iter().find(|n| !roles.contains(n)) {
         return Err(format!(
             "the sketch has the name {name}, and spec.roles has no {name}"
         ));
     }
     let wires = wire::read(written.wires, &grid)?;
+    let align = match written.align.as_deref() {
+        None | Some("bottom") => Align::Bottom,
+        Some("top") => Align::Top,
+        Some(other) => {
+            return Err(format!(
+                "align is {other:?}, and it is \"top\" or \"bottom\""
+            ));
+        }
+    };
     Ok(Elevation {
         name: written.name,
         slug,
         question: written.question,
         grid,
         wires,
+        align,
     })
 }
 

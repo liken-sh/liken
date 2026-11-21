@@ -112,7 +112,9 @@ fn lamp(shape: &str) -> Sketch {
     let shapes = Shapes::default();
     let disc = shapes.resolve("disc", "").cloned();
     known.draw_with(&shapes, |_, kind| disc.clone().filter(|_| kind == "Lamp"));
-    page_of_known(&known, Standing::Plain, None).sketch.unwrap()
+    page_of_known(&known, Standing::Plain, None, None)
+        .sketch
+        .unwrap()
 }
 
 #[rstest]

@@ -19,11 +19,20 @@
    `solid`.  In the light scheme it is darker than the panel, and
    `--shape-lift` draws a faint line under each solid body, so a part
    reads as an object and not as an outline.  The dark panel needs
-   neither. */
+   neither.  `--shape-warm` draws the outline of a part that warns or
+   fails, and the lines to it.  The page's `--warm` is darkened for text
+   on a light page, and as a line it reads as brown beside the gray
+   fills, so a line takes a brighter orange, which keeps 3:1 against
+   the panel.  The outlines of an empty place and of a part at rest take
+   inks of their own that keep a dashed line of one pixel visible on a
+   light panel. */
 :root {
-  --shape-body: #e3e6ea;
+  --shape-body: #eaecef;
   --shape-lift: rgb(0 0 0 / 0.14);
-  --shape-rest: #f1f2f3;
+  --shape-rest: #f4f5f6;
+  --shape-warm: #d4731c;
+  --shape-empty-edge: #8d9298;
+  --shape-rest-edge: #b2b7bd;
   --shape-glass: #1a1d22;
   --shape-glass-edge: #0c0d10;
   --shape-glass-shade: rgb(0 0 0 / 0.6);
@@ -42,6 +51,9 @@
     --shape-body: #22252b;
     --shape-lift: transparent;
     --shape-rest: #1e2126;
+    --shape-warm: var(--warm);
+    --shape-empty-edge: var(--rule-strong);
+    --shape-rest-edge: var(--rule);
     --shape-glass: #0f1114;
     --shape-glass-edge: #333940;
     --shape-glass-shade: rgb(0 0 0 / 0.55);
@@ -118,6 +130,7 @@
   display: grid;
   grid-template: auto / minmax(0, 1fr);
   margin-top: calc(var(--u) * var(--above));
+  margin-right: calc(var(--u) * var(--stack-room, 0));
   aspect-ratio: var(--ratio, auto);
 }
 
@@ -228,26 +241,26 @@ svg.shape-draw-mark path { fill: var(--dot); stroke: none; }
    `--warm`, two pixels wide.  A failure outlines it three pixels wide
    and tints its fill.  A name with no object is a warning. */
 .shape-part:is(.shape-warning, .shape-no-object) {
-  --edge: var(--warm);
-  --bezel-edge: var(--warm);
+  --edge: var(--shape-warm);
+  --bezel-edge: var(--shape-warm);
   --weight: 1px;
 }
 
 .shape-part.shape-failing {
-  --edge: var(--warm);
-  --bezel-edge: var(--warm);
+  --edge: var(--shape-warm);
+  --bezel-edge: var(--shape-warm);
   --weight: 2px;
-  --fill: color-mix(in srgb, var(--warm) 10%, var(--shape-body));
-  --bezel: color-mix(in srgb, var(--warm) 24%, var(--shape-bezel));
-  --line-fill: color-mix(in srgb, var(--warm) 8%, transparent);
+  --fill: color-mix(in srgb, var(--shape-warm) 10%, var(--shape-body));
+  --bezel: color-mix(in srgb, var(--shape-warm) 24%, var(--shape-bezel));
+  --line-fill: color-mix(in srgb, var(--shape-warm) 8%, transparent);
 }
 
 /* A part at rest is quieter: a fainter outline and details, and a fill
    nearer the frame's, because being at rest is not a problem. */
 .shape-part.shape-resting {
-  --edge: var(--rule);
-  --detail: var(--rule);
-  --dot: var(--rule);
+  --edge: var(--shape-rest-edge);
+  --detail: var(--shape-rest-edge);
+  --dot: var(--shape-rest-edge);
   --fill: var(--shape-rest);
 }
 
@@ -260,8 +273,8 @@ svg.shape-draw-mark path { fill: var(--dot); stroke: none; }
   --bezel: var(--row);
   --glass: var(--row);
   --line-fill: var(--row);
-  --edge: var(--rule-strong);
-  --bezel-edge: var(--rule-strong);
+  --edge: var(--shape-empty-edge);
+  --bezel-edge: var(--shape-empty-edge);
   --glass-edge: var(--rule);
   --dot: var(--rule);
   --lift: transparent;
@@ -275,9 +288,9 @@ svg.shape-draw-mark path { fill: var(--dot); stroke: none; }
 }
 
 .shape-part.shape-elsewhere {
-  --edge: var(--rule);
-  --bezel-edge: var(--rule);
-  --detail: var(--rule);
+  --edge: var(--shape-rest-edge);
+  --bezel-edge: var(--shape-rest-edge);
+  --detail: var(--shape-rest-edge);
 }
 
 /* An absent part draws its outline and its text and no other piece,
@@ -290,6 +303,13 @@ svg.shape-draw-mark path { fill: var(--dot); stroke: none; }
   flex-basis: var(--w-min);
   max-width: var(--w-min);
 }
+
+/* An empty place that a wire meets, which marks its ports, stands in
+   the middle of its area, so the wire does not step sideways to reach a
+   place that leans to one side.  An empty place that no wire meets
+   stands where its area's parts would, beside the parts it belongs
+   with. */
+.sketch-area > .shape-part:is(.shape-empty, .shape-elsewhere):has(.shape-port) { margin-inline: auto; }
 
 /* A warning puts a ring before the role's label, and a failure a
    filled dot, the marks of the condition chips in the page's head.  So

@@ -11,10 +11,12 @@ use kube::ResourceExt;
 /// The label that holds the name of a slice's `Service`.
 const SERVICE_NAME: &str = "kubernetes.io/service-name";
 
-/// The endpoint count of each `Service`, by namespace and name.
+/// The endpoint count of each `Service`, by namespace and name, and the
+/// pods behind its ready endpoints.
 #[derive(Debug, Default)]
 pub struct Endpoints {
     counts: HashMap<(String, String), Count>,
+    ready: HashMap<(String, String), Vec<String>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -32,6 +34,7 @@ impl Endpoints {
     pub fn build(slices: &[Arc<EndpointSlice>]) -> Self {
         let mut seen: HashMap<(String, String), HashSet<String>> = HashMap::new();
         let mut counts: HashMap<(String, String), Count> = HashMap::new();
+        let mut ready_pods: HashMap<(String, String), Vec<String>> = HashMap::new();
         for slice in slices {
             let (Some(namespace), Some(service)) =
                 (slice.namespace(), slice.labels().get(SERVICE_NAME))
@@ -48,12 +51,31 @@ impl Endpoints {
                     continue;
                 }
                 let ready = endpoint.conditions.as_ref().and_then(|c| c.ready);
+                let ready = ready.unwrap_or(true);
                 let count = counts.entry(key.clone()).or_default();
                 count.total += 1;
-                count.ready += usize::from(ready.unwrap_or(true));
+                count.ready += usize::from(ready);
+                let target = endpoint.target_ref.as_ref();
+                let pod = target.filter(|t| t.kind.as_deref() == Some("Pod"));
+                if let (true, Some(name)) = (ready, pod.and_then(|t| t.name.clone())) {
+                    ready_pods.entry(key.clone()).or_default().push(name);
+                }
             }
         }
-        Self { counts }
+        for pods in ready_pods.values_mut() {
+            pods.sort();
+        }
+        Self {
+            counts,
+            ready: ready_pods,
+        }
+    }
+
+    /// The names of the pods behind the ready endpoints of the `Service`
+    /// `namespace`/`name`, in the order of their names.
+    pub fn ready_pods(&self, namespace: &str, name: &str) -> &[String] {
+        let key = (namespace.to_owned(), name.to_owned());
+        self.ready.get(&key).map_or(&[], Vec::as_slice)
     }
 
     pub fn of(&self, namespace: &str, name: &str) -> Count {
@@ -158,6 +180,30 @@ mod tests {
     #[case::an_empty_slice(vec![slice("web", "[]")], Count::default())]
     fn counts_a_services_endpoints(#[case] slices: Vec<Arc<EndpointSlice>>, #[case] count: Count) {
         assert_eq!(Endpoints::build(&slices).of("shop", "web"), count);
+    }
+
+    #[rstest]
+    #[case::each_ready_pod(
+        vec![slice("web", &format!("[{}, {}]", pod_endpoint("web-2", "10.0.0.2", Some(true)), pod_endpoint("web-1", "10.0.0.1", None)))],
+        &["web-1", "web-2"]
+    )]
+    #[case::not_a_pod_that_is_not_ready(
+        vec![slice("web", &format!("[{}, {}]", pod_endpoint("web-1", "10.0.0.1", Some(true)), pod_endpoint("web-2", "10.0.0.2", Some(false))))],
+        &["web-1"]
+    )]
+    #[case::one_pod_in_two_slices(
+        vec![
+            slice("web", &format!("[{}]", pod_endpoint("web-1", "10.0.0.1", Some(true)))),
+            slice("web", &format!("[{}]", pod_endpoint("web-1", "fd00::1", Some(true)))),
+        ],
+        &["web-1"]
+    )]
+    #[case::no_pod_behind_an_address(vec![slice("web", "[{addresses: [10.0.0.1]}]")], &[])]
+    fn names_the_pods_behind_the_ready_endpoints(
+        #[case] slices: Vec<Arc<EndpointSlice>>,
+        #[case] pods: &[&str],
+    ) {
+        assert_eq!(Endpoints::build(&slices).ready_pods("shop", "web"), pods);
     }
 
     fn with_spec(spec: &str) -> Service {

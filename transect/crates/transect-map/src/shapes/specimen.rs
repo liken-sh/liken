@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use askama::Template;
 
 use super::text::Drawn;
-use super::{Drawing, Pose};
+use super::{Drawing, Pose, stacked};
 use samples::{CELLS, Sample};
 use transect_graph::links::{self, Reference};
 use transect_resources::knowledge::Kinds;
@@ -198,15 +198,19 @@ fn cell(shape: &Shape, sample: &Sample, first: bool) -> Cell {
     let share = shape.size.share.map_or(1.0, |share| share / 100.0);
     let width = (widest.clamp(200.0, 420.0) / share).min(MAX_CELL) + 2.0 * side;
     let pose = Pose {
-        stack: sample.stack,
+        stack: 0,
         ports: first,
     };
     let (parts, nothing) = sample.content();
     Cell {
         drawn: Drawn {
             drawing: Drawing::of(&shape, pose),
+            stacked: stacked(&shape, pose),
             label: sample.label.into(),
-            source: sample.source.into(),
+            source: vec![Reference {
+                text: sample.source.into(),
+                href: None,
+            }],
             parts,
             nothing,
         },

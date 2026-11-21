@@ -101,6 +101,7 @@ fn board(card: Option<WorkloadCard>) -> KnownPage {
         subjects: &|_| None,
         named_by: &|_, _| Vec::new(),
         ends: &transect_resources::knowledge::fixtures::Nowhere,
+        judged: None,
     };
     let object_card = crate::objects::ObjectCard {
         kind: "Jukebox".into(),

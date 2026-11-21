@@ -32,6 +32,16 @@
 
 .shape-name a:hover { text-decoration: underline; }
 
+/* A list of names or values breaks after each ", " before it breaks
+   inside an item, so "Pod a, Pod b" never splits one name across two
+   lines while the whole name would fit on the next.  An item wider
+   than the line still breaks inside. */
+.shape-stacked,
+.shape-item {
+  display: inline-block;
+  max-width: 100%;
+}
+
 .shape-under,
 .shape-none {
   color: var(--ink-muted);
@@ -41,13 +51,12 @@
 .shape-none { font-style: italic; }
 
 /* The reason of the object's health condition is a short line under
-   its name, and its `title` has the condition's message. */
+   its name, and its `title` has the condition's message.  It says why
+   the part is marked, so it wraps and is never cut. */
 .shape-why {
   color: var(--warm);
   font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: break-word;
 }
 
 /* The state is drawn by the outline, so its word is only for a screen

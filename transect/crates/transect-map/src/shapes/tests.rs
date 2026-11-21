@@ -139,6 +139,30 @@ fn draws_a_stack_as_copies_of_the_body_behind_the_part() {
     );
 }
 
+/// A stack keeps its copies inside the part's area: the room above the
+/// part for how far they rise, and the room at its right for how far
+/// they move right, so the part's body is narrower by as much.
+#[rstest]
+#[case::a_part_alone(0, &[])]
+#[case::a_stack(2, &["--room-above: 16", "--stack-room: 16"])]
+fn keeps_the_copies_of_a_stack_inside_the_part(#[case] stack: u8, #[case] room: &[&str]) {
+    let drawing = Drawing::of(
+        &library_shape("drum"),
+        Pose {
+            stack,
+            ports: false,
+        },
+    );
+    let kept: Vec<&str> = drawing
+        .style
+        .split("; ")
+        .filter(|property| {
+            property.starts_with("--room-above") || property.starts_with("--stack-room")
+        })
+        .collect();
+    assert_eq!(kept, room);
+}
+
 #[rstest]
 fn turns_the_path_of_a_piece_with_its_shape() {
     let shape = authored(
@@ -214,4 +238,63 @@ fn writes_only_numbers_and_fixed_words_into_the_markup(#[case] shape: Shape) {
         .filter(|text| !text.chars().all(allowed))
         .collect();
     assert_eq!(odd, Vec::<&str>::new());
+}
+
+/// A stack draws one fewer copy of its outline than it has parts, at
+/// most `STACK_COPIES`, so a stack of two is two outlines.
+#[rstest]
+#[case::one_part(1, 0)]
+#[case::two_parts(2, 1)]
+#[case::three_parts(3, 2)]
+#[case::five_parts(5, 2)]
+fn draws_one_fewer_copy_than_a_stack_has_parts(#[case] parts: usize, #[case] copies: usize) {
+    let shape = library_shape("drum");
+    let drawn = text::Drawn {
+        drawing: Drawing::of(&shape, Pose::default()),
+        stacked: stacked(&shape, Pose::default()),
+        label: "replica".into(),
+        source: Vec::new(),
+        parts: Vec::new(),
+        nothing: None,
+    };
+    let name = |at: usize| transect_graph::links::Reference {
+        text: format!("Pod a-{at}"),
+        href: None,
+    };
+    let part = text::Part {
+        end: text::End {
+            reference: name(0),
+            under: None,
+            reaches: Vec::new(),
+        },
+        readings: Vec::new(),
+        shows: Vec::new(),
+        state: text::State::Plain,
+        literal: false,
+        why: None,
+        stack: match parts {
+            1 => Vec::new(),
+            parts => (0..parts).map(name).collect(),
+        },
+    };
+    let drawn_copies = drawn
+        .drawing_of(&part)
+        .layers
+        .iter()
+        .filter(|layer| layer.class.contains("shape-copy"))
+        .count();
+    assert_eq!(drawn_copies, copies);
+}
+
+#[rstest]
+#[case::one_value("Denon AVR-X1700H", &["Denon AVR-X1700H"])]
+#[case::a_list("data-a 1Gi, data-b 1Gi", &["data-a 1Gi", "data-b 1Gi"])]
+#[case::a_comma_with_no_space("FL,FR", &["FL,FR"])]
+fn splits_a_reading_into_the_items_it_lists(#[case] value: &str, #[case] items: &[&str]) {
+    let reading = text::Reading {
+        name: "claim".into(),
+        value: value.into(),
+        from: None,
+    };
+    assert_eq!(reading.items(), items);
 }

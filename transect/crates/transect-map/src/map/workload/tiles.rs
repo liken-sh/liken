@@ -7,7 +7,6 @@ use k8s_openapi::jiff::Timestamp;
 use kube::ResourceExt;
 
 use super::super::bar::Bar;
-use transect_cluster::workloads::pod_ready;
 use transect_graph::pods::finished;
 use transect_ground::machines::{pod_limits, pod_requests};
 use transect_observe::health::minutes_between;
@@ -86,7 +85,7 @@ pub fn tile(pod: &Pod, usage: Option<&Usage>, now: Timestamp) -> PodTile {
         .sum();
     let state = if finished(pod) {
         State::Finished
-    } else if pod_ready(pod) {
+    } else if transect_graph::pods::ready(pod) {
         State::Ready
     } else {
         State::NotReady

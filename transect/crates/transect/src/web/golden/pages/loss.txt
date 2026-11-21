@@ -21,7 +21,7 @@ catalog down · storefront 1/2 · can't reach ledger-db
 data
 1 namespace
 acme-ledger
-ledger-db down
+journal no primary · ledger-db down
 operators
 1 namespace
 acme-promoter
@@ -39,15 +39,15 @@ control plane
 node-beta 1 alert
 cpu
 mem
-9 pods
+12 pods
 workers
 node-alpha if lost
-10 pods run here
+12 pods run here
 Ground
 1 volume
 The archive NAS ↗ intent · 1 NFS
 If node-alpha were lost
-10 pods run there.
+12 pods run there.
 transect cannot tell whether this loss stops alerts: a MetricsSource's alerts.service would name the Service of Alertmanager.
 Down until it returns
 acme-ledger : ledger-db , its only instance. It is a StatefulSet's pod, which is not replaced until node-alpha confirms it gone.
@@ -55,12 +55,14 @@ Down until replaced elsewhere
 acme-ops : device-hub , its only instance
 acme-promoter : promoter , its only instance
 acme-shop : catalog , its only instance
+No writes until a replica is promoted
+acme-ledger : journal 's primary; its operator promotes its replica
 Running short
 acme-shop : storefront 1 of 2
 5 DaemonSets' pods are lost with it
 What else fails with it
 acme-shop : storefront can't reach acme-ledger/ledger-db ; catalog.example.test stops answering
-Until acme-promoter/promoter returns, nothing reconciles 2 Promotions .
+Until acme-promoter/promoter returns, nothing reconciles Ledger acme-ledger/receipts and 2 Promotions .
 What happens next
 now Its pods are evicted at once, then the replicas that can start elsewhere do.
 stuck A StatefulSet replaces its pod only once node-alpha confirms it gone: ledger-db .

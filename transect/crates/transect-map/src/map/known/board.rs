@@ -9,6 +9,7 @@ use crate::objects::Condition;
 use crate::shapes::text::{Reading, State, Why};
 use transect_graph::edges::{Object, Plurals};
 use transect_observe::health::Level;
+use transect_resources::knowledge::catalog::Judged;
 use transect_resources::knowledge::role::{Column, NamedBy};
 use transect_resources::knowledge::{Count, KindKnowledge, Reached, ReferenceEnds, Relation};
 
@@ -56,6 +57,11 @@ pub struct Board<'a> {
     /// The ends of the references of objects, for a role that follows
     /// one more reference.
     pub ends: &'a dyn ReferenceEnds,
+    /// The pattern of the catalog that the kind of the page's object
+    /// fills, as `catalog::judge` read it for that object: the parts of
+    /// each derived role, what the pattern expects, and the parts that
+    /// those lines mark. It is none for a kind with no pattern.
+    pub judged: Option<&'a Judged>,
 }
 
 /// An object whose elevation a sketch draws, with what the sketch reads

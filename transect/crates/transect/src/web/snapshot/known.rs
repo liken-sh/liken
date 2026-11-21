@@ -120,13 +120,14 @@ impl Snapshot {
     }
 
     /// Maps each custom resource to the name of its primary pod, the
-    /// pod that accepts writes, read from the field at its kind
-    /// knowledge's `primary` path.
+    /// pod that accepts writes, read from the entry of `references` that
+    /// fills the role of its kind's pattern that states `failover`.
     pub fn primaries(&self) -> HashMap<Object, String> {
         let mut primaries = HashMap::new();
         for (resource, objects) in &self.custom {
             let known = self.kinds.of(&resource.group, &resource.kind);
-            let Some(path) = known.and_then(|known| known.primary.as_deref()) else {
+            let pattern = known.and_then(|known| known.pattern.as_ref());
+            let Some(path) = pattern.and_then(|pattern| pattern.failover()) else {
                 continue;
             };
             for found in objects {
@@ -136,9 +137,10 @@ impl Snapshot {
                 };
                 let namespace = meta.namespace.as_deref();
                 let object = Object::new(&resource.group, &resource.kind, namespace, name);
-                let read = knowledge::path::read_of(&object, &found.data, path);
-                if let Some(pod) = read.into_iter().next() {
-                    primaries.insert(object, pod);
+                let relations = self.relations.get(&object).into_iter().flatten();
+                let mut read = relations.filter(|relation| relation.path == path);
+                if let Some(pod) = read.next() {
+                    primaries.insert(object, pod.value.clone());
                 }
             }
         }
