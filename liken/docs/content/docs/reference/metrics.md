@@ -10,7 +10,9 @@ The machine operator and the cluster operator each serve Prometheus
 metrics at `/metrics` on port 9200. A cluster does not need Prometheus
 to run. If you run the prometheus-operator, add
 [the `monitoring` component](#the-monitoring-component), which has a
-`PodMonitor` for each operator and Grafana dashboards.
+`PodMonitor` for each operator and Grafana dashboards. On a cluster
+with more than one leader, each leader also serves
+[the metrics of its etcd member](#etcd).
 
 ## Ports
 
@@ -140,6 +142,92 @@ a stronger access point every 30 seconds.
 
 Without Prometheus, read the same endpoint through the API server, as
 for the clock, and filter for `^liken_wireless_`.
+
+## etcd
+
+A cluster with more than one leader keeps its datastore in etcd, and
+each leader runs one etcd member inside k3s. Each member serves etcd's
+own Prometheus metrics at `http://<node IP>:2381/metrics`. Scrape them
+to see whether a slow control plane has a slow disk or a slow network
+under etcd. For example, `etcd_disk_wal_fsync_duration_seconds` is how
+long each write to etcd's log waits for the disk, and
+`etcd_network_peer_round_trip_time_seconds` is the delay between two
+members. etcd names and describes these series in
+[its own documentation](https://etcd.io/docs/latest/metrics/).
+
+The port is plain HTTP with no authentication, as the operators' ports
+are. etcd listens on the leader's node IP and on the loopback address,
+and on no other address of the machine. The port serves `/metrics` and
+etcd's health paths, `/health`, `/livez`, and `/readyz`. The metrics
+show the member IDs, the size of the datastore, and the counts and
+durations of requests. They show no key and no value of the datastore.
+A pod on the host network of a leader cannot listen on 2381.
+
+A cluster with one leader keeps its datastore in sqlite and runs no
+etcd, so no machine listens on the port there. A follower never
+listens on it.
+
+k3s sets the label `node-role.kubernetes.io/etcd=true` on the `Node`
+of each etcd member. This Prometheus scrape job finds every `Node`,
+keeps the ones with that label, and scrapes port 2381 at the
+`InternalIP` of each. It gives each series a `node` label, as the
+`PodMonitor`s of the monitoring component do:
+
+```yaml
+scrape_configs:
+  - job_name: etcd
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_node_label_node_role_kubernetes_io_etcd]
+        regex: "true"
+        action: keep
+      - source_labels: [__meta_kubernetes_node_address_InternalIP]
+        target_label: __address__
+        replacement: $1:2381
+      - source_labels: [__meta_kubernetes_node_name]
+        target_label: node
+```
+
+With the prometheus-operator, apply the same job as a `ScrapeConfig`.
+The monitoring component does not include it, because `ScrapeConfig`
+is a `v1alpha1` kind that an older prometheus-operator does not serve.
+Your `Prometheus` reads the object only when its
+`spec.scrapeConfigSelector` selects it, so add the labels that your
+selector needs:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: liken-etcd
+  namespace: monitoring
+spec:
+  jobName: etcd
+  kubernetesSDConfigs:
+    - role: Node
+  relabelings:
+    - sourceLabels: [__meta_kubernetes_node_label_node_role_kubernetes_io_etcd]
+      regex: "true"
+      action: keep
+    - sourceLabels: [__meta_kubernetes_node_address_InternalIP]
+      targetLabel: __address__
+      replacement: $1:2381
+    - sourceLabels: [__meta_kubernetes_node_name]
+      targetLabel: node
+```
+
+Both jobs need a Prometheus whose `ServiceAccount` can list and watch
+`Node`s, which the kube-prometheus-stack grants.
+
+To read the metrics of one member without Prometheus, run `curl` in a
+pod:
+
+```sh
+kubectl run etcd-metrics --rm -i --restart=Never \
+  --image=curlimages/curl --command -- \
+  curl -s http://<node IP>:2381/metrics | grep '^etcd_disk_wal_fsync'
+```
 
 ## The monitoring component
 
