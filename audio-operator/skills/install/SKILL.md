@@ -207,7 +207,9 @@ describes.
 
 Every container of the pod runs the same image. The `declare` init
 container writes the PipeWire sink declarations. PipeWire and
-WirePlumber run as sidecars. The `operator` container publishes what
+WirePlumber run as sidecars. Every container drops all capabilities,
+and the `pipewire` container adds `SYS_NICE` back, so PipeWire can run
+the thread that writes to the card at realtime priority. The `operator` container publishes what
 they report, and the `capture` container serves the taps that
 `audio-api` forwards to. On the machine with the card, the operator's
 log shows the slice that it wrote:
@@ -232,6 +234,22 @@ settings, for example `clock.force-quantum`.
     kubectl -n liken-system exec ds/audio-operator -c operator -- pw-top -b -n 1
     kubectl -n liken-system exec ds/audio-operator -c operator -- pw-cli info 0
     kubectl -n liken-system exec ds/audio-operator -c operator -- pw-metadata -n settings
+
+When the sound drops out, look for underruns in PipeWire's log. An
+underrun is a moment when the card runs out of samples. With PCM it is
+a short gap, and with a bitstream the receiver mutes until it finds the
+stream again. PipeWire logs one line for each underrun, and `count` is
+the number of underruns on that sink since PipeWire started:
+
+    kubectl -n liken-system logs ds/audio-operator -c pipewire | grep XRun
+    [I][14:09:27.588955] pw.node | [ impl-node.c: 2258 node_xrun()] (liken.audio.card0-pcm3-29) XRun! rate:4096/192000 count:3 time:163089016944 delay:16 max:53 (0 suppressed)
+
+Use `pw-top -b -n 1` for a short reading, and the log for anything
+longer. A command that you run with `kubectl exec` runs inside the
+container, and its memory counts against the container's limit. A
+`pw-top -b` or `pw-dump -m` left running for an hour can make the
+kernel stop the `pipewire` container, and every stream on the machine
+then stops.
 
 ## 5. See the devices
 

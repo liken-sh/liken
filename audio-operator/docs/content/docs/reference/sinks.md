@@ -506,6 +506,11 @@ While a bitstream plays through a sink:
 * The sink's level and mute have no effect, because PipeWire cannot
   scale a bitstream. Only the receiver's own volume changes the
   level.
+* An underrun, a moment when the card runs out of samples, breaks the
+  bitstream's framing, and the receiver mutes until it finds the
+  stream again. With PCM the same underrun is a gap of a few
+  milliseconds. PipeWire logs each one, as the
+  [install guide](/docs/guides/install/) shows.
 * The bitstream has the sink to itself. PipeWire refuses a second
   stream to the sink, and a tap of the sink through `audio-api`, until
   the bitstream ends. When a stream or a tap is already using the

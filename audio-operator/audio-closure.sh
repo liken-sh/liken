@@ -25,8 +25,11 @@ stdbuf=$(dpkg -L coreutils | grep '/libstdbuf\.so$')
 # and copying them with their libraries would make the image larger.
 #
 # pipewire loads the modules named in its packaged pipewire.conf,
-# except the ones marked ifexists (rt, portal, x11-bell,
-# jackdbus-detect), which it skips when the file is absent.
+# except the ones marked ifexists (portal, x11-bell, jackdbus-detect),
+# which it skips when the file is absent. rt is marked ifexists too,
+# and it is listed, because without it PipeWire's data thread runs at
+# normal priority and a bitstream drops out at each underrun
+# (50-pipewire-realtime.conf).
 #
 # wireplumber loads the modules that its main-embedded profile needs.
 # The operator's configuration disables the monitors whose modules are
@@ -103,6 +106,7 @@ $lib/pipewire-0.3/libpipewire-module-link-factory.so
 $lib/pipewire-0.3/libpipewire-module-metadata.so
 $lib/pipewire-0.3/libpipewire-module-profiler.so
 $lib/pipewire-0.3/libpipewire-module-protocol-native.so
+$lib/pipewire-0.3/libpipewire-module-rt.so
 $lib/pipewire-0.3/libpipewire-module-session-manager.so
 $lib/pipewire-0.3/libpipewire-module-spa-device-factory.so
 $lib/pipewire-0.3/libpipewire-module-spa-node-factory.so

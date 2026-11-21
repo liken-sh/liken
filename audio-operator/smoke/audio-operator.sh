@@ -33,6 +33,15 @@
 #   capture container runs for each tap. `libstdbuf.so` is loaded
 #   through `LD_PRELOAD`, so ldd does not find it either.
 #
+# - PipeWire's rt module. This run maps it, but pipewire.conf loads it
+#   only when the file exists, so an image without it would pass the
+#   check of mapped files and run PipeWire at normal priority.
+#
+# PipeWire runs with the capabilities that the pod gives it, all
+# dropped and SYS_NICE added, and the check fails unless its data
+# thread runs at SCHED_FIFO. That shows that the rt module loads and
+# that the capability is enough for it.
+#
 # The two daemons run in separate containers that share one volume, as
 # in the pod. The image has no shell, so each container runs a binary
 # directly.
@@ -83,7 +92,8 @@ for path in \
   /usr/lib/x86_64-linux-gnu/spa-0.2/bluez5/libspa-bluez5.so \
   /usr/lib/x86_64-linux-gnu/spa-0.2/bluez5/libspa-codec-bluez5-sbc.so \
   /usr/share/spa-0.2/bluez5/bluez-hardware.conf \
-  /usr/share/wireplumber/scripts/liken/restore-device-ports.lua
+  /usr/share/wireplumber/scripts/liken/restore-device-ports.lua \
+  /usr/lib/x86_64-linux-gnu/pipewire-0.3/libpipewire-module-rt.so
 do
   grep -qx "$path" "$work/image-files.txt" \
     || { echo "the image has no $path"; exit 1; }
@@ -91,14 +101,18 @@ done
 
 docker volume create "$run" > /dev/null
 # start NAME BINARY [ARGS...] runs BINARY from the image in a
-# container named $run-NAME, with the shared runtime volume.
+# container named $run-NAME, with the shared runtime volume. The
+# options in the array named by $docker_options, when set, go to
+# docker run.
 start() {
   name=$1
   shift
   docker run -d --name "$run-$name" -v "$run:$runtime" \
     -e PIPEWIRE_RUNTIME_DIR="$runtime" -e XDG_RUNTIME_DIR="$runtime" \
+    "${docker_options[@]}" \
     --entrypoint "$1" "$image" "${@:2}" > /dev/null
 }
+docker_options=()
 # Runs one client to completion, and succeeds only if it exits 0
 # within 20 seconds. A client that never returns is a failure this
 # check must catch, so the wait has a limit.
@@ -129,7 +143,9 @@ answers() {
   return 1
 }
 
+docker_options=(--cap-drop ALL --cap-add SYS_NICE --security-opt no-new-privileges)
 start pipewire /usr/bin/pipewire
+docker_options=()
 answers /usr/bin/pw-dump \
   || { docker logs "$run-pipewire"; echo "pw-dump never connected"; exit 1; }
 start wireplumber /usr/bin/wireplumber --profile=main-embedded
@@ -226,6 +242,16 @@ for name in pipewire wireplumber; do
   [ "$(docker inspect -f '{{.State.Running}}' "$run-$name")" = true ] \
     || { docker logs "$run-$name"; echo "$name is not running"; exit 1; }
 done
+
+# ps reads the scheduling class of each thread from /proc, and FF is
+# SCHED_FIFO. PipeWire names its realtime thread data-loop.0.
+pid=$(docker inspect -f '{{.State.Pid}}' "$run-pipewire")
+ps -L -o cls=,comm= -p "$pid" | grep -Eq '^ *FF +data-loop' || {
+  ps -L -o tid,cls,rtprio,ni,comm -p "$pid"
+  docker logs "$run-pipewire"
+  echo "PipeWire's data thread does not run at SCHED_FIFO"
+  exit 1
+}
 
 # /proc/<pid>/maps shows paths as the process sees them, so they match
 # the image's file list. The filter drops the shared volume and the

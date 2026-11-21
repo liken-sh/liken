@@ -89,6 +89,7 @@ COPY config/51-access-rules.conf /usr/share/wireplumber/wireplumber.conf.d/
 # finds a script by its path under /usr/share/wireplumber/scripts.
 COPY config/restore-device-ports.lua /usr/share/wireplumber/scripts/liken/
 COPY config/50-pipewire-access.conf /usr/share/pipewire/pipewire.conf.d/
+COPY config/50-pipewire-log.conf /usr/share/pipewire/pipewire.conf.d/
 
 COPY --from=build /audio-operator /audio-operator
 COPY --from=build /notices /

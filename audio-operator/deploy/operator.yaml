@@ -167,13 +167,25 @@ spec:
           securityContext:
             # PipeWire and WirePlumber reach hardware only through the
             # device nodes the claim delivers: the card's control node,
-            # its PCM nodes, and the input nodes of its jacks. The image
-            # leaves out PipeWire's rt module, which pipewire.conf loads
-            # only when the file exists, so PipeWire runs at normal
-            # priority and needs no SYS_NICE. No process changes user,
-            # so no capability is added back.
+            # its PCM nodes, and the input nodes of its jacks.
+            #
+            # SYS_NICE lets PipeWire's rt module run the thread that
+            # writes to the card at SCHED_FIFO priority 88, and the main
+            # thread at nice -11. At normal priority the thread can start
+            # late while the node is busy, and the card then runs out of
+            # samples. With PCM an underrun is a gap of a few
+            # milliseconds. With a bitstream it breaks the IEC 61937
+            # framing, and the receiver mutes until it finds the stream
+            # again. The liken kernel is built without RT group
+            # scheduling, so a container's cgroup needs no realtime
+            # budget of its own. The kernel still reserves part of each
+            # second for threads at normal priority, so a realtime
+            # thread that never sleeps cannot stop the machine. No
+            # process changes user, so no other capability is added
+            # back.
             capabilities:
               drop: ["ALL"]
+              add: ["SYS_NICE"]
             privileged: false
             allowPrivilegeEscalation: false
           resources:
