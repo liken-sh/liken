@@ -79,7 +79,7 @@ this cluster.
   receiver, and the remote. They keep `tag` for the idle screen's
   controller, the message bus, and the `ResourceClaim`.
 
-[Plan 14](../14-the-rig-of-a-telescope.md) is written after this one, so
+[Plan 14](14-the-rig-of-a-telescope.md) is written after this one, so
 the knowledge of each kind of the observatory states its shape, and
 the roles of a train state none.
 

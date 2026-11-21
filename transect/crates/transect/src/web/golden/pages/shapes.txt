@@ -72,7 +72,7 @@ no Supply
 spec.supply names nothing now
 an expected role with no part
 served by
-empty, expected in another state
+empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
@@ -147,7 +147,7 @@ no Supply
 spec.supply names nothing now
 an expected role with no part
 served by
-empty, expected in another state
+empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
@@ -221,7 +221,7 @@ no Supply
 spec.supply names nothing now
 an expected role with no part
 served by
-empty, expected in another state
+empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
@@ -295,7 +295,7 @@ no Supply
 spec.supply names nothing now
 an expected role with no part
 served by
-empty, expected in another state
+empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
@@ -369,7 +369,7 @@ no Supply
 spec.supply names nothing now
 an expected role with no part
 served by
-empty, expected in another state
+empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
@@ -443,7 +443,7 @@ no Supply
 spec.supply names nothing now
 an expected role with no part
 served by
-empty, expected in another state
+empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
@@ -517,7 +517,7 @@ no Supply
 spec.supply names nothing now
 an expected role with no part
 served by
-empty, expected in another state
+empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
@@ -596,7 +596,7 @@ no Supply
 spec.supply names nothing now
 an expected role with no part
 served by
-empty, expected in another state
+empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state
@@ -672,7 +672,7 @@ no Supply
 spec.supply names nothing now
 an expected role with no part
 served by
-empty, expected in another state
+empty, not missing a part
 no Service
 status.service names nothing now
 a role expected in another state

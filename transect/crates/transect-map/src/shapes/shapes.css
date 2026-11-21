@@ -34,6 +34,7 @@
   --shape-glass-faint: #959ca4;
   --shape-glass-link: #bccca2;
   --shape-glass-warm: #ec9645;
+  --shape-faint: #666;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -51,6 +52,7 @@
     --shape-glass-faint: #8b929a;
     --shape-glass-link: #b4c49a;
     --shape-glass-warm: #e0872f;
+    --shape-faint: var(--ink-faint);
   }
 }
 
@@ -72,6 +74,7 @@
   --dash: solid;
   --lift: var(--shape-lift);
   --above: var(--room-above, 0);
+  --ink-faint: var(--shape-faint);
   flex: 0 1 var(--w-top);
   max-width: var(--w-top);
   min-width: min(var(--w-min), 100%);
@@ -89,27 +92,36 @@
   container-type: normal;
 }
 
-/* The axis is the part's first baseline: a line of no height at
-   `--axis` units from the top of the body, which takes no room.  A row
-   of parts that aligns on baselines stands on their axes. */
+/* The body is one cell that its drawing, its text, and its axis share.
+   The axis is the part's first baseline: a line of no height in the
+   cell, first in order, which takes no room.  It is centered in the
+   body and moved by `--axis-shift` units, so when text makes the body
+   taller than its design, the body grows equally above and below its
+   axis.  A centered item moves by half its margin, so the margin is
+   twice the shift.  A row of parts that aligns on baselines stands on
+   their axes. */
 .shape-axis {
+  grid-area: 1 / 1;
+  order: -1;
+  align-self: center;
   display: block;
   height: 0;
   font-size: 0;
   line-height: 0;
-  margin-top: calc(var(--u) * (var(--above) + var(--axis)));
-  margin-bottom: calc(var(--u) * (var(--above) + var(--axis)) * -1);
+  margin-top: calc(var(--u) * 2 * var(--axis-shift, 0));
 }
 
 .shape-body {
   position: relative;
   isolation: isolate;
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template: auto / minmax(0, 1fr);
   margin-top: calc(var(--u) * var(--above));
   aspect-ratio: var(--ratio, auto);
 }
+
+.shape-body > .shape-text { grid-area: 1 / 1; }
 
 .shape-drawing {
   position: absolute;
@@ -140,7 +152,6 @@
   --source-line: 16px;
   position: relative;
   z-index: 4;
-  flex: 1;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -269,17 +280,16 @@ svg.shape-draw-mark path { fill: var(--dot); stroke: none; }
   --detail: var(--rule);
 }
 
-.shape-part:is(.shape-empty, .shape-elsewhere) div.shape-piece.shape-draw-mark {
-  background: none;
-  border: 1px dashed var(--detail);
-}
+/* An absent part draws its outline and its text and no other piece,
+   because its feet, lights, and knobs are details of a thing that is not
+   there.  It stands at its shape's narrowest width, so an empty place
+   does not outweigh the parts that are there. */
+.shape-part:is(.shape-empty, .shape-elsewhere) .shape-piece { display: none; }
 
-.shape-part:is(.shape-empty, .shape-elsewhere) svg.shape-draw-mark path {
-  fill: none;
-  stroke: var(--detail);
+.shape-part:is(.shape-empty, .shape-elsewhere) {
+  flex-basis: var(--w-min);
+  max-width: var(--w-min);
 }
-
-.shape-part:is(.shape-empty, .shape-elsewhere) svg path { stroke-dasharray: 4 3; }
 
 /* A warning puts a ring before the role's label, and a failure a
    filled dot, the marks of the condition chips in the page's head.  So

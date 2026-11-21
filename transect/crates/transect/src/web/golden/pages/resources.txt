@@ -38,6 +38,9 @@ KindKnowledge
 rooms.stock.example.test
 loaded
 KindKnowledge
+keepers.stock.example.test
+loaded
+KindKnowledge
 thermostats.stock.example.test
 loaded
 KindKnowledge

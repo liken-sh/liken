@@ -123,6 +123,15 @@ spec:
 # The stock room's shelves and bins. Each is part of the one above it.
 # Every sketch draws a room as the `crate` of its own group, the stock
 # that it keeps, unless a role of the sketch states another shape.
+#
+# A room's page draws the shelves that name it, each as the shelf's own
+# elevation, with the bins that name the shelf.  A shelf's room is the
+# page's room, so the shelf's elevation leaves it out.  A room needs a
+# keeper only while it is open, so the keeper is expected while the
+# room's `Open` condition is `True`.  The back room is open and has no
+# keeper, so its keeper's place says that one is missing.  The front
+# room is closed, so its keeper's place is drawn at rest, and it has no
+# shelf.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -132,6 +141,26 @@ spec:
   shape: crate
   references:
     - {path: spec.thermostat, kind: Thermostat, group: stock.example.test, label: kept warm by}
+  roles:
+    shelves:    {namedBy: {kind: Shelf, path: spec.room}, elevation: the shelf, expected: true}
+    thermostat: {reference: spec.thermostat, reads: [Temperature]}
+    keeper:     {namedBy: {kind: Keeper, path: spec.room}, expected: {while: Open}}
+  elevations:
+    - name: the stock room
+      question: Which shelves are in this room, and who keeps it?
+      sketch: |
+        shelves  shelves  shelves  thermostat
+        keeper   .        .        .
+---
+# A keeper looks after one room.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: keepers.stock.example.test
+spec:
+  summary: A person who keeps a stock room.
+  references:
+    - {path: spec.room, kind: Room, group: stock.example.test, edge: part of}
 ---
 # A thermostat sleeps between readings, so Sleeping is calm.  It is a
 # round dial on a wall, so a sketch draws it as the library's `disc`.
@@ -145,7 +174,9 @@ spec:
   healthy: {condition: Online, calm: [Sleeping]}
 ---
 # A vent has no condition of its own, so it is as healthy as the
-# thermostat that it names.
+# thermostat that it names.  A vent is part of a room, and the room's
+# sketch does not draw vents, so the board under the room's sketch keeps
+# the vent as a part of the room.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -155,6 +186,7 @@ spec:
   healthy: {through: spec.thermostat}
   references:
     - {path: spec.thermostat, kind: Thermostat, group: stock.example.test, label: opened by}
+    - {path: spec.room, kind: Room, group: stock.example.test, edge: part of}
 ---
 # A shelf's page draws a sketch in place of the ring, with a tab for
 # each elevation.  The top shelf names its room, an electronic label,
@@ -169,7 +201,8 @@ spec:
 # names one, and straight to the room when it names none.  The spill
 # room is drawn in the shape that the knowledge of a room states.  The
 # `room` role states `box`, so the room that the shelf stands in is
-# drawn as a plain box in place of the room's `crate`.
+# drawn as a plain box in place of the room's `crate`.  The bins that
+# name the shelf stand beside its label, and the low shelf has none.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -188,12 +221,13 @@ spec:
     spill: {reference: spec.spill}
     lamp: {reference: spec.lamp, expected: true}
     ladder: {reference: spec.ladder}
+    bins: {namedBy: {kind: Bin, path: spec.shelf}, expected: true, reads: [Holds]}
   elevations:
     - name: the shelf
       question: Where is this shelf, and what does it need?
       sketch: |
-        room   room   label
-        spill  lamp   ladder
+        room   room   label   bins
+        spill  lamp   ladder  bins
     - name: the restock
       question: How does stock reach this shelf, and what lights its label?
       sketch: |
@@ -236,6 +270,7 @@ metadata:
   name: bins.stock.example.test
 spec:
   summary: A bin on a shelf.
+  healthy: {condition: Ready}
   references:
     - {path: spec.shelf, kind: Shelf, group: stock.example.test, edge: part of}
     - {path: spec.overflow, kind: Shelf, group: stock.example.test, edge: part of}

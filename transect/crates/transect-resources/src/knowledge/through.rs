@@ -21,8 +21,13 @@ pub struct Through {
     pub path: String,
     /// Why `Kinds::resolve` could not confirm the reference in the
     /// knowledge of the kind it starts from. The page shows it in place
-    /// of the reading or the health that the reference leads to.
+    /// of the reading, the health, or the parts that the reference leads
+    /// to.
     pub unresolved: Option<String>,
+    /// The group and the kind that the reference names, which
+    /// `Kinds::resolve` finds in the knowledge of the kind it starts
+    /// from. A role draws its parts in the shape of this kind.
+    pub target: Option<(String, String)>,
 }
 
 impl Through {
@@ -31,6 +36,7 @@ impl Through {
         Self {
             path: path.into(),
             unresolved: None,
+            target: None,
         }
     }
 }

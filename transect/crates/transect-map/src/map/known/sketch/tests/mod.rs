@@ -1,13 +1,15 @@
 use askama::Template;
 use rstest::rstest;
 
-use super::super::{Board, KnownPage};
+use super::super::super::{Board, KnownPage, Standing, Subject};
 use super::*;
-use crate::objects::{Center, ObjectCard, Section, Side};
-use transect_graph::edges::{ClusterScoped, Endpoint, Plurals};
+use crate::objects::ObjectCard;
+use crate::shapes::text::{Reading, State, Why};
+use transect_graph::edges::{ClusterScoped, Endpoint, Object, Plurals};
 use transect_observe::health::Level;
 use transect_resources::knowledge::role::Column;
 use transect_resources::knowledge::{self, KindKnowledge, fixtures::knowledge};
+use transect_resources::knowledge::{Names, Reached, Relation};
 use transect_resources::shapes::Shapes;
 
 pub(super) const REFERENCES: &str = "references: [
@@ -26,7 +28,8 @@ pub(super) const ROLES: &str = "roles: {
       bus: {reference: status.bus.address, expected: true},
       bell: {reference: status.bell.name}}";
 
-const ELEVATION: &str = "elevations: [{name: the kiosk, question: What is this kiosk made of?,
+pub(super) const ELEVATION: &str =
+    "elevations: [{name: the kiosk, question: What is this kiosk made of?,
     sketch: \"face face amp\\nhand lamp bell\\nbus . .\"}]";
 
 const KIOSK: &str = "
@@ -74,7 +77,7 @@ const OWN: &[(&str, &str)] = &[
 /// Every object it names stands as `standing`, and each of its columns
 /// reads "on". The kiosk's own columns read as `OWN` says. Handsets have
 /// pages.
-fn page_of(spec: &str, standing: Standing) -> KnownPage {
+pub(super) fn page_of(spec: &str, standing: Standing) -> KnownPage {
     page_with(spec, standing, &Shapes::default())
 }
 
@@ -141,12 +144,15 @@ pub(super) fn page_of_known(
         read.collect()
     };
     let board = Board {
-        object: &kiosk(),
-        knowledge: known,
+        subject: Subject {
+            object: kiosk(),
+            knowledge: known,
+            reached: relations.iter().map(|r| (r, reach(r))).collect(),
+            conditions: Vec::new(),
+        },
         layer: "apps".into(),
         path: "/namespaces/shop/kiosks.widgets.example.com/front".into(),
         elevation: slug,
-        reached: relations.iter().map(|r| (r, reach(r))).collect(),
         column: Vec::new(),
         counts: Vec::new(),
         chips: Vec::new(),
@@ -158,6 +164,9 @@ pub(super) fn page_of_known(
         device: &|device| device.short(),
         standing: &|_| standing.clone(),
         readings: &readings,
+        subjects: &|_| None,
+        named_by: &|_, _| Vec::new(),
+        ends: &knowledge::fixtures::Nowhere,
     };
     KnownPage::build(board, None, card(known))
 }
@@ -176,7 +185,7 @@ fn card(known: &KindKnowledge) -> ObjectCard {
     }
 }
 
-fn sketch(standing: Standing) -> Sketch {
+pub(super) fn sketch(standing: Standing) -> Sketch {
     let spec = format!("{{{REFERENCES}, {ROLES}, {ELEVATION}}}");
     page_of(&spec, standing).sketch.unwrap()
 }
@@ -187,6 +196,7 @@ type Drawn<'a> = (&'a str, &'a str, Vec<(&'a str, Option<&'a str>)>);
 fn draws_each_role_with_a_part_for_each_value_and_leaves_an_unexpected_empty_role_out() {
     let sketch = sketch(Standing::Plain);
     let roles: Vec<Drawn> = sketch
+        .plan
         .roles
         .iter()
         .map(|role| {
@@ -237,13 +247,20 @@ fn draws_an_expected_role_with_no_part_as_nothing(
     #[case] nothing: Option<(&str, &str)>,
 ) {
     let sketch = sketch(Standing::Plain);
-    let role = sketch.roles.iter().find(|role| role.area == area).unwrap();
+    let role = sketch
+        .plan
+        .roles
+        .iter()
+        .find(|role| role.area == area)
+        .unwrap();
     let found = role.drawn.nothing.as_ref();
     let found = found.map(|n| (n.text.as_str(), n.note.as_str()));
     assert_eq!(found, nothing);
 }
 
-fn why() -> Why {
+/// The reason of an object that does not answer, for a part that
+/// deviates.
+pub(super) fn why() -> Why {
     Why {
         reason: "Unreachable".into(),
         message: Some("the amp does not answer".into()),
@@ -263,6 +280,7 @@ fn takes_a_parts_state_and_its_reason_from_the_object_it_names(
 ) {
     let sketch = sketch(standing);
     let states: Vec<(&str, State, Option<Why>)> = sketch
+        .plan
         .roles
         .iter()
         .flat_map(|role| {
@@ -294,69 +312,6 @@ fn names_each_state_for_a_screen_reader(#[case] state: State, #[case] spoken: Op
     assert_eq!(state.spoken(), spoken);
 }
 
-/// The sketch of the kiosk whose amp role has the `shows` that `shows`
-/// writes in YAML, with every named object standing as `standing`.
-fn showing(shows: &str, standing: Standing) -> Sketch {
-    let roles = ROLES.replace(
-        "reads: [Model, Power]}",
-        &format!("reads: [Model, Power], shows: {shows}}}"),
-    );
-    let spec = format!("{{{REFERENCES}, {roles}, {ELEVATION}}}");
-    page_of(&spec, standing).sketch.unwrap()
-}
-
-fn shown(part: &Part) -> Vec<(&str, &str)> {
-    let shows = part.shows.iter();
-    shows
-        .map(|s| (s.reading.name.as_str(), s.reading.value.as_str()))
-        .collect()
-}
-
-#[rstest]
-#[case::one_column("[Mode]", vec![("Mode", "attract")])]
-#[case::the_first_alternative_with_a_value("[[Mode, Stock]]", vec![("Mode", "attract")])]
-#[case::the_next_when_the_first_is_empty("[[Sale, Stock]]", vec![("Stock", "full")])]
-#[case::nothing_when_every_alternative_is_empty("[[Sale, Gone]]", vec![])]
-#[case::each_entry_in_order("[Stock, [Sale, Mode]]", vec![("Stock", "full"), ("Mode", "attract")])]
-fn shows_the_columns_of_the_pages_own_object(
-    #[case] shows: &str,
-    #[case] expected: Vec<(&str, &str)>,
-) {
-    let sketch = showing(shows, Standing::Plain);
-    assert_eq!(shown(&sketch.roles[1].drawn.parts[0]), expected);
-}
-
-#[rstest]
-#[case::one_column("[Mode]", vec![false])]
-#[case::the_first_alternative("[[Mode, Stock]]", vec![false])]
-#[case::a_later_alternative("[[Sale, Stock]]", vec![true])]
-#[case::each_entry("[Stock, [Sale, Mode]]", vec![false, true])]
-fn marks_a_column_that_is_not_the_first_of_its_entry_as_a_fallback(
-    #[case] shows: &str,
-    #[case] fallbacks: Vec<bool>,
-) {
-    let sketch = showing(shows, Standing::Plain);
-    let shown = sketch.roles[1].drawn.parts[0].shows.iter();
-    assert_eq!(shown.map(|s| s.fallback).collect::<Vec<_>>(), fallbacks);
-}
-
-#[rstest]
-fn shows_nothing_of_the_pages_own_object_on_a_value() {
-    let roles = ROLES.replace(
-        "shape: screen, expected: true}",
-        "shape: screen, expected: true, shows: [Mode]}",
-    );
-    let spec = format!("{{{REFERENCES}, {roles}, {ELEVATION}}}");
-    let sketch = page_of(&spec, Standing::Plain).sketch.unwrap();
-    assert_eq!(shown(&sketch.roles[0].drawn.parts[0]), vec![]);
-}
-
-#[rstest]
-fn shows_nothing_of_the_pages_own_object_on_a_name_with_no_object() {
-    let sketch = showing("[Mode]", Standing::Missing);
-    assert_eq!(shown(&sketch.roles[1].drawn.parts[0]), vec![]);
-}
-
 #[rstest]
 #[case::a_value("face", Some("not an object in the cluster"), vec![])]
 #[case::an_object_with_readings("amp", None, vec![("model", "on"), ("power", "on")])]
@@ -367,7 +322,12 @@ fn notes_and_reads_each_part(
     #[case] readings: Vec<(&str, &str)>,
 ) {
     let sketch = sketch(Standing::Plain);
-    let role = sketch.roles.iter().find(|role| role.area == area).unwrap();
+    let role = sketch
+        .plan
+        .roles
+        .iter()
+        .find(|role| role.area == area)
+        .unwrap();
     let part = &role.drawn.parts[0];
     let read = part.readings.iter();
     let read: Vec<(&str, &str)> = read.map(|r| (r.name.as_str(), r.value.as_str())).collect();
@@ -380,7 +340,12 @@ fn notes_and_reads_each_part(
 #[case::an_object_with_a_page("hand", false)]
 fn spells_out_a_part_that_is_not_an_object(#[case] area: &str, #[case] literal: bool) {
     let sketch = sketch(Standing::Plain);
-    let role = sketch.roles.iter().find(|role| role.area == area).unwrap();
+    let role = sketch
+        .plan
+        .roles
+        .iter()
+        .find(|role| role.area == area)
+        .unwrap();
     assert_eq!(role.drawn.parts[0].literal, literal);
 }
 
@@ -407,7 +372,7 @@ fn breaks_values_after_each_separator_and_escapes_them() {
 #[rstest]
 fn notes_a_name_the_cluster_has_no_object_for() {
     let sketch = sketch(Standing::Missing);
-    let amp = &sketch.roles[1].drawn.parts[0];
+    let amp = &sketch.plan.roles[1].drawn.parts[0];
     assert_eq!(
         (
             amp.end.under.as_deref(),
@@ -418,86 +383,10 @@ fn notes_a_name_the_cluster_has_no_object_for() {
     );
 }
 
-#[rstest]
-fn lays_the_roles_out_on_the_grid_of_the_sketch() {
-    let sketch = sketch(Standing::Plain);
-    let drawn_in = |name: &str| {
-        let shape = Shapes::default().resolve(name, "").unwrap().clone();
-        crate::shapes::Drawing::of(&shape, crate::shapes::Pose::default())
-    };
-    let drawings: Vec<&crate::shapes::Drawing> =
-        sketch.roles.iter().map(|r| &r.drawn.drawing).collect();
-    let shapes = ["screen", "box", "handheld", "speaker", "box"].map(drawn_in);
-    let areas: Vec<String> = sketch.roles.iter().map(SketchRole::area_class).collect();
-    assert_eq!(
-        (
-            sketch.name.as_str(),
-            sketch.question.as_str(),
-            sketch.columns,
-            sketch.areas.as_str(),
-            sketch.rows.as_str(),
-            drawings,
-            areas,
-            sketch.roles[0].drawn.source.as_str(),
-            sketch.caption(),
-        ),
-        (
-            "the kiosk",
-            "What is this kiosk made of?",
-            3,
-            r#""face face amp" ". . ." "hand lamp bell" ". . ." "bus . .""#,
-            "auto var(--sketch-gap) auto var(--sketch-gap) auto",
-            shapes.iter().collect::<Vec<_>>(),
-            vec![
-                "sketch-area".to_string(),
-                "sketch-area sketch-lean-start".into(),
-                "sketch-area sketch-lean-end".into(),
-                "sketch-area".into(),
-                "sketch-area sketch-lean-end".into(),
-            ],
-            "from status.screen.monitor",
-            "Hover a part for the field it was read from. The places are from the KindKnowledge kiosks.widgets.example.com. A part's shape is from it or from the KindKnowledge of the part's kind, and /shapes draws each shape.".to_string(),
-        )
-    );
-}
-
-#[rstest]
-#[case::with_an_elevation(format!("{{{REFERENCES}, {ROLES}, {ELEVATION}}}"), true, 0)]
-#[case::without_one(format!("{{{REFERENCES}}}"), false, 6)]
-fn draws_a_sketch_in_place_of_the_ring(
-    #[case] spec: String,
-    #[case] sketched: bool,
-    #[case] boxes: usize,
-) {
-    let page = page_of(&spec, Standing::Plain);
-    assert_eq!(
-        (page.sketch.is_some(), page.boxes.len(), page.diagram()),
-        (sketched, boxes, true)
-    );
-}
-
-#[rstest]
-fn leaves_out_of_the_board_each_value_the_sketch_shows() {
-    let spec = format!("{{{REFERENCES}, {ROLES}, {ELEVATION}}}");
-    let page = page_of(&spec, Standing::Plain);
-    let center = Center {
-        kind: "Kiosk".into(),
-        name: "front".into(),
-        level: None,
-        resting: None,
-        note: None,
-        chips: Vec::new(),
-        messages: Vec::new(),
-    };
-    let section = Section::new("Refers to", Side::Out)
-        .literals("shows on", vec!["tv-1".into()])
-        .literals("sells", vec!["tea".into()]);
-    let page = page.with_board(center, vec![section]);
-    let board = &page.board;
-    let facts = board.right.iter().flat_map(|section| &section.facts);
-    let labels: Vec<&str> = facts.map(|fact| fact.label.as_str()).collect();
-    assert_eq!((board.center.is_none(), labels), (true, vec!["sells"]));
-}
-
 mod elevations;
+mod fills;
+mod grid;
+mod nested;
 mod shapes;
+mod shows;
+mod stock;

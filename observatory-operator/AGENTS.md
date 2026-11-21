@@ -78,3 +78,13 @@ does not include the `Firmware`s for the bare QHY chips, because the
   and fails when a reading costs more than its limit.
 - Most tests use `examples/simulators.yaml` as their inventory, so a
   change to the example changes those tests.
+- `transect/` contains the kind knowledge that `transect` reads for the
+  kinds of this operator, in `kinds.yaml`, and the shapes of a
+  telescope's parts, in `shapes.yaml`. The page of a `Telescope` draws
+  the rig: the objects that name the telescope in `spec.telescope`, with
+  each `OpticalTrain` drawn as the train's own elevation, the guide
+  train that the `Guider` names on the main train, and the mount under
+  them. The INDI server is expected while the telescope's `Active`
+  condition is `True`. A change to a condition, a printer column, a
+  parent field, or a status field that the file names also changes the
+  file.

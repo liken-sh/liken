@@ -104,7 +104,9 @@ impl Drawing {
 
 /// The part's custom properties: the size of a design unit, the
 /// proportions of its body, its narrowest and widest widths, the room
-/// above it, and its axis.
+/// above it, and how far its axis is below the middle of its design.
+/// A part that grows taller for its text grows equally above and below
+/// its axis, so `shapes.css` places the axis from the middle.
 fn style(shape: &Shape) -> String {
     let [narrowest, widest] = shape.size.width;
     let top = match shape.size.share {
@@ -123,8 +125,8 @@ fn style(shape: &Shape) -> String {
     if above > 0.0 {
         style.push(format!("--room-above: {above}"));
     }
-    if let Some(axis) = shape.axis {
-        style.push(format!("--axis: {axis}"));
+    if let (Some(axis), Some([_, height])) = (shape.axis, shape.size.design) {
+        style.push(format!("--axis-shift: {}", axis - height / 2.0));
     }
     style.join("; ")
 }
@@ -156,7 +158,20 @@ fn layers(shape: &Shape, stack: u8) -> Vec<Layer> {
     });
     let mut layers: Vec<Layer> = copies.collect();
     layers.push(body("shape-outline", &outline.at));
-    layers.extend(shape.pieces.iter().map(piece));
+    let [width, height] = shape.size.design.unwrap_or_default();
+    let body = outline.at.rect(width, height);
+    layers.extend(shape.pieces.iter().map(|one| {
+        let at = one.at.rect(width, height);
+        let inside = at.left >= body.left
+            && at.right <= body.right
+            && at.top >= body.top
+            && at.bottom <= body.bottom;
+        let mut layer = piece(one);
+        if !inside {
+            layer.class.push_str(" shape-outside");
+        }
+        layer
+    }));
     layers
 }
 

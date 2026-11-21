@@ -1,0 +1,84 @@
+Room back-room · acme-ops · transect
+transect
+cluster / platform / acme-ops / Room back-room
+access vulnerabilities kinds
+Search /
+esc
+acme-ops Room back-room Room front-room Kustomizations ×4 Buckets ×1 GitRepositories ×2 HelmRepositories ×1 OCIRepositories ×1 Gates ×3 Bins ×2 Shelves ×2 Thermostats ×1 Vents ×2
+Edges
+Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+Room
+back-room
+Ready Open: staffed
+the stock room
+Which shelves are in this room, and who keeps it?
+described by rooms.stock.example.test
+labeled by
+empty
+nothing
+spec.label names nothing now
+bin
+empty
+no Bin
+no Bin names this Shelf in spec.shelf
+lit by
+Lamp strip-light
+from spec.lamp
+reached by
+Ladder step-ladder
+from spec.ladder
+shelf
+low-shelf
+labeled by
+not an object
+A-1
+not an object in the cluster
+from spec.label
+bin
+failing
+bolt-bin
+Jammed
+holds bolts
+from Bin spec.shelf
+bin
+screw-bin
+holds screws
+from Bin spec.shelf
+spills into
+no such object
+Room cellar
+the cluster has no such Room
+from spec.spill
+lit by
+empty
+no Lamp
+spec.lamp names nothing now
+shelf
+top-shelf
+kept warm by
+at rest
+Thermostat back-thermostat
+Sleeping
+temperature 18C
+from spec.thermostat
+keeper
+empty
+no Keeper
+no Keeper names this Room in spec.room
+Hover a part for the field it was read from. The places are from the KindKnowledge rooms.stock.example.test. The places inside a part drawn as an elevation of its kind are from the KindKnowledge shelves.stock.example.test. A part's shape is from it or from the KindKnowledge of the part's kind, and /shapes draws each shape.
+Status
+Floor ground
+Its parts
+Vent east-vent
+Room back-room healthy
+Described by rooms.stock.example.test
+A room the shop keeps stock in.
+from the KindKnowledge rooms.stock.example.test

@@ -518,6 +518,14 @@ part's kind.  A `KindKnowledge` states `spec.shape`, and a part takes
 the shape of its role, then the shape of its kind, then `box`.
 `/shapes` lists the kinds whose knowledge states each shape.
 
+[Plan 14](completed/14-the-rig-of-a-telescope.md), built on
+2026-11-21, settles the repeated arrangement.  A role with `elevation`
+draws each of its parts as that elevation of the part's kind, so the
+knowledge of an `OpticalTrain` sketches one train, and the page of a
+`Telescope` draws it once for each train.  A role can read the objects
+that name the page's object, follow one more reference, and be
+expected only while a condition of the object is `True`.
+
 ## Where the knowledge of a pattern ships
 
 The knowledge of a first-party pattern ships with its operator.
@@ -574,7 +582,10 @@ exist.  The knowledge of the `Player` is now in
 built on 2026-11-21, adds the signal path of a `Player`, the first
 view in the pipeline form, and follows a reference for a reading and
 for a health, so a `Remote` is drawn at rest while its `Peripheral`
-sleeps.
+sleeps.  [Plan 14](completed/14-the-rig-of-a-telescope.md), built on
+2026-11-21, moves the knowledge of the observatory to
+`observatory-operator/transect/` and draws the page of a `Telescope`
+as the instrument from the side.
 
 `LogPattern` in `transect-observe` uses the word "pattern" for a filter
 on log lines.  One of the two names must change before the code has a

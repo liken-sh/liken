@@ -10,15 +10,17 @@ use super::WorkloadAt;
 use super::object::card;
 use super::read_workloads;
 use k8s_openapi::jiff::Timestamp;
+use transect_graph::edges::Graph;
 use transect_graph::edges::{Object, Shown};
 use transect_map::map::{
-    Board, EdgeRow, KnownEntry, KnownPage, Standing, Why, every_chip, has_page, known_chips,
-    known_through, workload_card,
+    Board, EdgeRow, KnownEntry, KnownPage, Standing, Subject, Why, every_chip, has_page,
+    known_chips, known_through, workload_card,
 };
 use transect_map::objects::{self, Center, ObjectCard};
 use transect_observe::health::{Deciding, Level, Reason};
 use transect_observe::usage;
 use transect_resources::knowledge::plural_label;
+use transect_resources::knowledge::role::NamedBy;
 use transect_resources::layers::Layers;
 
 /// The page for the custom resource `namespace/name` whose kind is
@@ -101,13 +103,13 @@ pub fn known_page(
                     .then(|| transect_graph::links::page(other, plurals))
                     .flatten()
             };
+            let subjects = |other: &Object| subject(snapshot, contents.graph, other);
+            let named_by = |named: &Object, by: &NamedBy| named_by(snapshot, named, by);
             let board = Board {
-                object: &object,
-                knowledge,
+                subject: subject(snapshot, contents.graph, &object)?,
                 layer,
                 path,
                 elevation,
-                reached: snapshot.relations_reached(&object, contents.graph),
                 column,
                 counts: counts.collect(),
                 chips: known_chips(&found.data, &Deciding::of(&snapshot.kinds, &object)),
@@ -124,6 +126,9 @@ pub fn known_page(
                 device: &|device| snapshot.devices.named(device, &snapshot.resources.devices),
                 standing: &|other| standing(snapshot, other),
                 readings: &|other, reads| readings::readings(snapshot, other, reads, now),
+                subjects: &subjects,
+                named_by: &named_by,
+                ends: snapshot,
             };
             // The card is on the object's own page, so its title does not
             // link.
@@ -175,6 +180,33 @@ pub fn known_page(
     }
     let row = EdgeRow::build(&snapshot.offered(), shown, &page.path);
     Some(page.with_edge_row(row))
+}
+
+/// What a sketch reads of `object`, for a part that it draws as an
+/// elevation of the part's kind: the knowledge of its kind, its
+/// relations, and its conditions. It is none for an object that no store
+/// holds or whose kind has no knowledge.
+fn subject<'a>(snapshot: &'a Snapshot, graph: &Graph, object: &Object) -> Option<Subject<'a>> {
+    let knowledge = snapshot.kinds.of_object(object)?;
+    let found = super::object::stored(snapshot, object)??;
+    let deciding = Deciding::of(&snapshot.kinds, object);
+    Some(Subject {
+        object: object.clone(),
+        knowledge,
+        reached: snapshot.relations_reached(object, graph),
+        conditions: objects::conditions(&found.data, &deciding),
+    })
+}
+
+/// The objects that name `named` at the path of `by`, in the order of
+/// their namespaces and names, so the parts of a role stand in the same
+/// order on every load.
+fn named_by(snapshot: &Snapshot, named: &Object, by: &NamedBy) -> Vec<Object> {
+    let relations = snapshot.relations.iter();
+    let naming = relations.filter(|(referrer, relations)| by.names(referrer, relations, named));
+    let mut found: Vec<Object> = naming.map(|(referrer, _)| referrer.clone()).collect();
+    found.sort_by(|a, b| (&a.namespace, &a.name).cmp(&(&b.namespace, &b.name)));
+    found
 }
 
 /// What the cluster says about `object`, which a part of a sketch names,

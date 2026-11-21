@@ -96,8 +96,9 @@ pub struct Nothing {
     pub text: String,
     /// "<path> names nothing now".
     pub note: String,
-    /// `Empty`, or `Elsewhere` for a role that is expected in another
-    /// state of its object.
+    /// `Empty`, or `Elsewhere` for a role that is not missing a part: one
+    /// that is expected in another state of its object, or whose objects
+    /// another role of the elevation draws.
     pub state: State,
 }
 
@@ -118,8 +119,9 @@ pub enum State {
     NoObject,
     /// An expected role with no part, drawn dashed.
     Empty,
-    /// A role with no part that is expected in another state of its
-    /// object, drawn dashed and quieter.
+    /// A role with no part that is not missing one, because it is
+    /// expected in another state of its object, or another role of the
+    /// elevation draws its objects. It is drawn dashed and quieter.
     Elsewhere,
 }
 
@@ -136,7 +138,7 @@ impl State {
             Self::Value => Some("not an object"),
             Self::NoObject => Some("no such object"),
             Self::Empty => Some("empty"),
-            Self::Elsewhere => Some("empty, expected in another state"),
+            Self::Elsewhere => Some("empty, not missing a part"),
         }
     }
 

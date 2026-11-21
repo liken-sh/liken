@@ -6,8 +6,8 @@ use askama::Template;
 use rstest::rstest;
 
 use super::super::super::KnownPage;
-use super::super::*;
 use super::{REFERENCES, ROLES, page_at};
+use crate::map::known::Standing;
 use transect_resources::shapes::Shapes;
 
 /// The kiosk with two elevations: the kiosk, which places every role
@@ -90,7 +90,7 @@ fn names_the_author_and_links_each_tab() {
 #[rstest]
 fn draws_the_wires_of_the_elevation() {
     let page = page(Some("the-wiring"));
-    let wires = page.sketch.unwrap().wires;
+    let wires = page.sketch.unwrap().plan.wires;
     let words: Vec<(String, bool)> = wires.iter().map(|w| (w.text(), w.dashed())).collect();
     assert_eq!(
         words,
@@ -111,7 +111,7 @@ fn marks_the_ports_of_each_role_a_wire_meets(
     #[case] expected: Vec<(&str, bool)>,
 ) {
     let sketch = page(slug).sketch.unwrap();
-    let roles = sketch.roles.iter();
+    let roles = sketch.plan.roles.iter();
     let marked = roles.map(|role| (role.area.as_str(), !role.drawn.drawing.ports.is_empty()));
     assert_eq!(marked.collect::<Vec<_>>(), expected);
 }

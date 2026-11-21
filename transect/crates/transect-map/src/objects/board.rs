@@ -59,6 +59,31 @@ pub struct Part {
     pub parts: Vec<Reference>,
 }
 
+impl Nesting {
+    /// The nesting without what a drawing of the object already shows:
+    /// a part's own part goes when `shown` says the drawing shows it, and
+    /// a part goes when the drawing shows it and it has no own part
+    /// left. A part keeps the box of its whole while one of its own
+    /// parts stays. What the object is part of stays, because a drawing
+    /// of the object shows what it is made of.
+    pub fn without(self, shown: impl Fn(&Reference) -> bool) -> Self {
+        let parts = self.parts.into_iter().filter_map(|part| {
+            let own: Vec<Reference> = part.parts.into_iter().filter(|p| !shown(p)).collect();
+            match own.is_empty() && shown(&part.reference) {
+                true => None,
+                false => Some(Part {
+                    reference: part.reference,
+                    parts: own,
+                }),
+            }
+        });
+        Self {
+            parts: parts.collect(),
+            ..self
+        }
+    }
+}
+
 impl ObjectBoard {
     /// The board for `sections` around `center`. A section with nothing
     /// to show is left out, and the `BelongsTo` sections come first.
@@ -171,5 +196,66 @@ mod tests {
         let board = board();
         let row: Vec<&str> = board.row().iter().map(|s| s.title.as_str()).collect();
         assert_eq!(row, ["Belongs to", "Referred to by", "Status", "Refers to"]);
+    }
+
+    fn named(text: &str) -> Reference {
+        Reference {
+            text: text.into(),
+            href: Some(format!("/{text}")),
+        }
+    }
+
+    /// A room is part of a store, and has a shelf with a bin and a
+    /// lamp, and a ladder with no parts.
+    fn nesting() -> Nesting {
+        let part = |name: &str, own: &[&str]| Part {
+            reference: named(name),
+            parts: own.iter().map(|o| named(o)).collect(),
+        };
+        Nesting {
+            frame: Some(named("store")),
+            also: vec![named("mall")],
+            parts: vec![part("shelf", &["bin", "lamp"]), part("ladder", &[])],
+        }
+    }
+
+    type Nested = (Option<String>, Vec<String>, Vec<(String, Vec<String>)>);
+
+    fn nested(nesting: Nesting) -> Nested {
+        let text = |r: Reference| r.text;
+        let parts = nesting.parts.into_iter();
+        let parts = parts.map(|p| (p.reference.text, p.parts.into_iter().map(text).collect()));
+        (
+            nesting.frame.map(text),
+            nesting.also.into_iter().map(text).collect(),
+            parts.collect(),
+        )
+    }
+
+    fn own(entries: &[(&str, &[&str])]) -> Vec<(String, Vec<String>)> {
+        let entries = entries.iter();
+        let entries = entries.map(|(name, own)| {
+            (
+                name.to_string(),
+                own.iter().map(|o| o.to_string()).collect(),
+            )
+        });
+        entries.collect()
+    }
+
+    #[rstest]
+    #[case::nothing_shown(&[], own(&[("shelf", &["bin", "lamp"]), ("ladder", &[])]))]
+    #[case::an_own_part(&["bin"], own(&[("shelf", &["lamp"]), ("ladder", &[])]))]
+    #[case::a_part_with_an_own_part_left(&["shelf", "bin"], own(&[("shelf", &["lamp"]), ("ladder", &[])]))]
+    #[case::a_part_and_all_its_own_parts(&["shelf", "bin", "lamp"], own(&[("ladder", &[])]))]
+    #[case::a_part_with_no_own_parts(&["ladder"], own(&[("shelf", &["bin", "lamp"])]))]
+    #[case::what_the_object_is_part_of(&["store", "mall"], own(&[("shelf", &["bin", "lamp"]), ("ladder", &[])]))]
+    fn leaves_out_of_the_nesting_each_part_that_a_drawing_shows(
+        #[case] shown: &[&str],
+        #[case] parts: Vec<(String, Vec<String>)>,
+    ) {
+        let found = nesting().without(|value| shown.contains(&value.text.as_str()));
+        let expected = (Some("store".to_string()), vec!["mall".to_string()], parts);
+        assert_eq!(nested(found), expected);
     }
 }

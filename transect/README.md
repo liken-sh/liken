@@ -53,7 +53,9 @@ and the product design that new work follows is in
   of a kind states elevations, such as the room and the signal path of
   a `Player`, the page draws each as a sketch of its parts, with a tab
   and a URL for each, and wires between the parts that say what passes
-  from one to the next.
+  from one to the next.  A part can be drawn as an elevation of its
+  own kind, so the page of a `Telescope` draws the telescope from the
+  side, with each optical train on the mount.
 - **Edges**, which you turn on and off from a row above each picture:
   runs on, depends on, authenticates through, stores on, holds,
   reconciles from, controlled by, and allowed to call (from

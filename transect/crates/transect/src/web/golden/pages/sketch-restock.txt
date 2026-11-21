@@ -4,7 +4,7 @@ cluster / platform / acme-ops / Shelf top-shelf
 access vulnerabilities kinds
 Search /
 esc
-acme-ops Shelf low-shelf Shelf top-shelf Kustomizations ×4 Buckets ×1 GitRepositories ×2 HelmRepositories ×1 OCIRepositories ×1 Gates ×3 Bins ×1 Rooms ×1 Thermostats ×1 Vents ×2
+acme-ops Shelf low-shelf Shelf top-shelf Kustomizations ×4 Buckets ×1 GitRepositories ×2 HelmRepositories ×1 OCIRepositories ×1 Gates ×3 Bins ×2 Rooms ×2 Thermostats ×1 Vents ×2
 Edges
 Edges
 runs on A pod runs on a machine.
@@ -50,6 +50,7 @@ not an object in the cluster
 from spec.label
 stock from Room cellar to Room back-room , read from spec.spill and spec.room, as the KindKnowledge shelves.stock.example.test states
 light from no Lamp to A-1 , read from spec.lamp and spec.label, as the KindKnowledge shelves.stock.example.test states
+Not in the restock: bin Bin bolt-bin and Bin screw-bin . The shelf draws them.
 Hover a part for the field it was read from. The places are from the KindKnowledge shelves.stock.example.test. A part's shape is from it or from the KindKnowledge of the part's kind, and /shapes draws each shape.
 Part of Room back-room
 Status
@@ -57,6 +58,7 @@ Aisle 7
 Sale —
 Stock full
 Its parts
+Bin bolt-bin
 Bin screw-bin
 Shelf top-shelf healthy
 Described by shelves.stock.example.test

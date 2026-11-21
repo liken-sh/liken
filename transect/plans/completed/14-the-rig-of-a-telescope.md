@@ -1,14 +1,14 @@
 # 14, The rig of a telescope
 
-Proposed on 2026-11-21. Nothing is built.
+Proposed and built on 2026-11-21.
 
 This plan draws the page of a `Telescope` from the side, the second
-sketch that an author states after [plan 13](completed/13-sketches.md)'s
-room, as "Who draws a pattern" in [00-design.md](00-design.md) asks. It
+sketch that an author states after [plan 13](13-sketches.md)'s
+room, as "Who draws a pattern" in [00-design.md](../00-design.md) asks. It
 adds a role that the objects which name this one fill, an arrangement
 that repeats, and a role expected only in some state, and it ships the
-rig's shapes in the forms of [plan 17](completed/17-the-shapes-of-a-sketch.md)
-and [plan 19](completed/19-a-kind-states-its-shape.md).
+rig's shapes in the forms of [plan 17](17-the-shapes-of-a-sketch.md)
+and [plan 19](19-a-kind-states-its-shape.md).
 
 ## The problem
 
@@ -30,7 +30,7 @@ mark every idle telescope as missing its server.
 ## The design
 
 Roles are in `spec.roles`, and an elevation has a `name`, a `question`,
-a `sketch`, and `wires`, as [plan 15](completed/15-the-elevations-of-a-player.md)
+a `sketch`, and `wires`, as [plan 15](15-the-elevations-of-a-player.md)
 built them. This plan adds fields to a role and rules to every sketch.
 
 ### A role filled by the objects that name this one
@@ -416,3 +416,155 @@ between reservations and during one. The rig is read at 1272, 1000,
 and 800 pixels wide, where the trains touch, the guide train stands on
 the main tube, the main tube stands on the mount, and no text is
 hidden, and at 420 pixels, where nothing joins.
+
+## What the build changed
+
+On 2026-11-21 a workstation ran `transect` against a home cluster with
+`observatory-operator/transect/` linked under `--resources`, and read
+the page of its `Telescope` and of each `OpticalTrain` between
+reservations, at 1680, 1272, 1000, 800, and 420 pixels in the dark
+scheme and at 1680 in the light. The rig drew the guide train on the
+main tube and the main tube on the mount's saddle, with the rings of
+each tube on the part under it, and every device of the rig at rest.
+The empty INDI server was drawn dashed and at rest, at its shape's
+narrowest width, with "no INDI server" and "expected while Active, now
+Deactivated". No reservation
+ran that day, so the page was not read during one. The room and the
+signal path of a `Player` drew the same sketch as before the change,
+at 1680 pixels, except for the live state of a remote. A review of the
+build on the same day changed the rules that the last items below
+record. The build differs from the proposal in these ways:
+
+- **The columns of a sketch alternate with gap tracks, as its rows
+  do.** A gap between two columns closes when every pair of areas that
+  face each other across it join, by the rule that plan 17 built for
+  rows, and a column of roles that the page leaves out takes no width.
+  Plan 17's sketch had one `column-gap`, so two areas in a row could not
+  touch. A grid in which no pair joins draws the same widths as before.
+- **In a row on one axis, a part whose shape joins on its left and its
+  right fills its area.** Each column is a share of the sketch's width,
+  so a drawtube narrower than its column left a gap to one of its
+  neighbors. A part that joins on one side stands against that side.
+- **Each column of a sketch keeps the narrowest width of the parts in
+  it.** At 1272 and 800 pixels the guide train's camera and guider were
+  narrower than their text, and the guider's last line stood under the
+  main tube. The page writes each column as `minmax(<narrowest>, 1fr)`:
+  the areas of one column first, and an area across several columns
+  adds what it still needs to each in equal shares, as CSS sizes a track
+  for an item that spans several. A part's narrowest width includes
+  the room that a piece outside its box takes on either side, such as a
+  mount's counterweight, because the part can stand in the middle of
+  its area. A part drawn as an elevation needs its grid's narrowest
+  width and its name's.
+- **A sketch wider than its frame scrolls sideways in its own frame.**
+  The grid of a page's sketch is never narrower than its narrowest
+  width, and where its frame is narrower, the grid and its wires scroll
+  inside the frame, under the head, and the page does not. The signal
+  path of a `Player` does at 800 and 1000 pixels, and the fixture's
+  stock room at 800. The narrow form, which stacks the parts and lists
+  the wires, still starts at a frame of 640 pixels. Starting it at each
+  sketch's own narrowest width needs a container query whose width the
+  server writes, which CSS does not have, or the narrow form's rules
+  written once more for each width. A container that is narrower than
+  the frame by the sketch's narrowest width would let the rules stay
+  written once, but the share of a screen's width is measured against
+  the nearest container, so that container would change the size of a
+  `Player`'s screen.
+- **The negative block margin is on the areas of a row on one axis**,
+  where the areas align on the baselines of their parts, and only on an
+  edge where the row touches the row beyond it. An edge of a nested
+  grid takes it when the area around the grid touches the area beyond,
+  so a part never stands past the sketch's frame, as a camera on the
+  page of its train did at 800 pixels.
+- **The shapes and the train differ from the prototype.** The train's
+  sketch gives the tube four of its columns, not three, because in
+  three of six columns at 1680 pixels the focuser and the filter wheel
+  were each wider than the tube was tall. The rings stand 35% from each
+  end of the tube, not 30%, and the saddle spans the head less 6 units
+  on each side, not 20, because at 1680 pixels a ring at 30% missed the
+  saddle by a few pixels. The drawtube's design is 112 by 64 units, not
+  76 high. The tube is at least 180 pixels wide, not 200, and the
+  camera at least 100, not 90, so its text fits, and the rig fits its
+  frame at 800 pixels. The camera's axis is 56 of its 96 units from
+  its top, so a camera taller than a small guide tube stands past the
+  tube's top and not over the main tube.
+- **The name of a part drawn as an elevation is at most 120 pixels
+  wide**, a small caption over the name as a link, with the reason of
+  its health under it, and below 640 pixels it stands under the part's
+  grid. The rig's main train is labeled "imaging train".
+- **`Elsewhere` is the state of a role that is not missing a part.**
+  It covers a role expected in another state and an expected role
+  whose objects other roles draw, which shows "no other OpticalTrain".
+  An empty place names the role's own `label` when the role states
+  one, such as "no INDI server", and the kind of its parts otherwise,
+  because the label of a reference is often a verb, such as "lit by".
+  A role expected in another state says "expected while Active, now",
+  then the condition's message, or its reason when it has none.
+  Its word for a screen reader is "empty, not missing a part", in place
+  of "empty, expected in another state".
+- **A role keeps the reason of a `namedBy` or an `elevation` that does
+  not resolve in `Role::unresolved`, and `Through::target` keeps the
+  kind at the end of a `through`.** `Kinds::resolve` finds that kind in
+  the knowledge of the first step's kind, and the role's parts take its
+  shape. A role whose `namedBy` or `through` does not resolve draws its
+  empty place with the reason. A role whose `elevation` does not
+  resolve draws its parts in their shape, with the reason as each
+  part's note.
+- **`ReferenceEnds` does not change.** The board gives the sketch the
+  objects that name an object through `Board::named_by`, which the
+  binary answers with `NamedBy::names` over the snapshot's relations,
+  in the order of their namespaces and names. So the health code of
+  `transect-observe` does not change. `Board::subject` gives the page
+  object's knowledge, relations, and conditions as a `Subject`, and
+  `Board::subjects` gives the same for a part drawn as an elevation.
+  `Plan::build` takes a `Subject`, so it draws the page's elevation and
+  each nested one.
+- **A value of `through` that matches several objects is named after
+  the reference and the object it was read from**, such as
+  "spec.opticalTrain of Guider a", because `Followed::Ambiguous` has no
+  value, and plan 13's note under it says how many objects match.
+- **The line under a sketch names the knowledge of each nested
+  elevation.**
+- **The test that loads each first-party `transect/` directory resolves
+  them together with `examples/`**, with the kinds and plurals of the
+  custom resource definitions in each component's `deploy/` directory,
+  and fails on `Unresolved`, `UnknownShape`, and `NoPort`. The
+  knowledge of a `Peripheral`, which a `Remote`'s health follows, is in
+  `examples/liken/`.
+- **The fixture's vent is part of the back room.** The room's sketch
+  draws its shelves and their bins, so the board under it would have no
+  part left, and the vent shows a part that the sketch does not draw.
+  A bolt bin on the top shelf is jammed, so a nested elevation draws a
+  failing part. The test of an elevation URL for a kind with no
+  elevation reads a thermostat, because a room now states one.
+- **A nested elevation's wires are not exercised.** No first-party
+  train has wires.
+- **A part does not say its kind twice.** When a role's caption and the
+  kind of its object are the same words, compared without case, spaces,
+  or hyphens, the part's name is the object's name alone, so a camera
+  is "CAMERA" over "asi183", and not over "Camera asi183".
+- **A shape that cuts its text cuts it by whole lines**, the caption
+  first and the name last, so a small filter wheel shows its name, and
+  no line is cut through its letters.
+- **A part grows equally above and below its axis.** The axis is
+  placed from the middle of the body, so a part that its text makes
+  taller stays centered on the light's axis.
+- **A number stays with its sign and its unit.** In a reading, a space
+  after a digit is a no-break space, and a hyphen that starts a number
+  is a minus sign, so "setpoint −10 °C" does not break into "−" and
+  "10".
+- **An absent part draws its outline and its text and no other piece**,
+  at its shape's narrowest width.
+- **Below 640 pixels a sketch draws no piece outside a part's
+  outline**, so a tube's rings do not read as feet under a part on the
+  next line. A box's feet are left out there too.
+- **A `Guider` is a `tag`**, because it is software and not equipment
+  at the end of the light's path.
+- **The dew shield of a tube spans the outline's height** and 12 units
+  past it at each end, so it grows with the body.
+- **Text that a part at rest draws in the faint ink keeps 4.5:1 in the
+  light scheme**, with a darker faint ink inside a part.
+- **An `elevation` on a role whose parts are values is `Invalid`**,
+  because the document alone shows the fault.
+- **The arrow of a wire is defined once on the page**, so a nested
+  elevation with wires does not repeat its id.

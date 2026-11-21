@@ -238,7 +238,18 @@ kind, so the operator that owns a kind states how every sketch draws
 its objects.  A `KindKnowledge` states `spec.shape`, and a part takes
 its role's shape, then its kind's, then `box`.  `Kinds::find_shapes`
 finds the kinds' shapes first and then the roles', and `/shapes` lists
-the kinds whose knowledge states each shape.
+the kinds whose knowledge states each shape.  Plan 14 draws the page
+of a `Telescope` from the side.  A role's parts can be the objects that
+name the page's object, `namedBy`, and a role can follow one more
+reference with `through`, which `knowledge::follow` follows.  A role
+with `elevation` draws each part as that elevation of the part's kind,
+with `Plan::build` in `sketch/plan.rs`, the code that draws every
+elevation, one level deep.  A role can be expected only while a
+condition of the object is `True`.  An object is a part of one role in
+an elevation, the first in the order of the sketch's cells.  The
+columns of a sketch alternate with gap tracks, as its rows do, so parts
+that join touch across a column, and a row in which they do stands on
+one axis.
 
 `plans/open-problems/` holds the defects that a test reproduced in the
 code as it is.  Write a plan before you build anything new.

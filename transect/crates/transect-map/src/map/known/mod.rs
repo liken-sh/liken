@@ -9,9 +9,12 @@
 //! states elevations, the page draws the sketch of one in place of the
 //! ring: the first at the object's URL, and each at a URL of its own.
 
+mod board;
 mod chips;
+mod end;
 mod fit;
 mod layout;
+mod ring;
 mod sketch;
 
 use askama::Template;
@@ -20,16 +23,17 @@ use super::EdgeRow;
 use crate::cards::WorkloadCard;
 use crate::objects::{Center, ObjectBoard, ObjectCard, Section};
 pub use crate::shapes::text::{End, Reading, Why};
+pub use board::{Board, Standing, Subject};
 pub use chips::{Chip, chips, every_chip};
-use layout::{Place, Rect, places};
-pub use sketch::{ElevationTab, Head, Lean, Sketch, SketchRole, SketchWire, Standing};
+use layout::{Rect, places};
+use ring::{RelationBox, relation_box};
+pub use sketch::{ElevationTab, Head, Lean, NestedPart, Plan, Sketch, SketchRole, SketchWire};
 use transect_frame::frame::crumbs::Crumb;
 use transect_frame::frame::tabs::{Lens, Tabs};
-use transect_graph::edges::{Endpoint, Kind, Object, Plurals};
+use transect_graph::edges::Kind;
 use transect_graph::links::Reference;
 use transect_observe::health::Level;
-use transect_resources::knowledge::role::Column;
-use transect_resources::knowledge::{Count, KindKnowledge, KnownThrough, Names, Reached, Relation};
+use transect_resources::knowledge::{Count, KnownThrough};
 
 #[derive(Template)]
 #[template(path = "map/known/known.html", blocks = ["main"])]
@@ -79,72 +83,20 @@ pub struct Entry {
     pub current: bool,
 }
 
-/// The box for one reference: its label, the values in its field, and
-/// in `source`, the path of that field.
-#[derive(Debug, PartialEq)]
-pub struct RelationBox {
-    pub rect: Rect,
-    pub arrow: &'static str,
-    pub line: Option<String>,
-    /// How the line is drawn: dashed for `DependsOn` and
-    /// `AuthenticatesThrough` references, faint for a reference whose
-    /// target is a value and for the `Secret` that `writes_secret` names,
-    /// and solid for the rest.
-    pub line_class: &'static str,
-    pub label: String,
-    pub ends: Vec<End>,
-    pub source: String,
-}
-
-/// What `KnownPage::build` needs to draw the page of one object.
-pub struct Board<'a> {
-    pub object: &'a Object,
-    pub knowledge: &'a KindKnowledge,
-    pub layer: String,
-    /// The object's path.
-    pub path: String,
-    /// The slug of the elevation that the URL names, or none at the
-    /// object's own URL.
-    pub elevation: Option<&'a str>,
-    /// Each relation read from the object's fields, with what it
-    /// resolves to.
-    pub reached: Vec<(&'a Relation, Reached)>,
-    pub column: Vec<Entry>,
-    pub counts: Vec<Count>,
-    pub chips: Vec<Chip>,
-    pub level: Level,
-    pub resting: Option<String>,
-    pub plurals: &'a Plurals,
-    /// The page URL of an object, when it has a page.
-    pub page: &'a dyn Fn(&Object) -> Option<String>,
-    /// The URL of the ground page of a system outside the cluster, by
-    /// the name of its `Endpoint::Outside`, when it has one.
-    pub ground: &'a dyn Fn(&str) -> Option<String>,
-    /// The text that names a device on a line.
-    pub device: &'a dyn Fn(&transect_graph::edges::Device) -> String,
-    /// What the cluster says about an object that a part of the sketch
-    /// names.
-    pub standing: &'a dyn Fn(&Object) -> Standing,
-    /// The readings of an object: each of the columns in the list that
-    /// has a value, of the object or of the object at the end of the
-    /// column's reference, in the list's order. A sketch reads the
-    /// objects that its parts name and the page's own object.
-    pub readings: &'a dyn Fn(&Object, &[Column]) -> Vec<Reading>,
-}
-
 impl KnownPage {
     /// The page of `board`'s object, with the workload's card when it
     /// runs pods and `object_card` when it does not.
     pub fn build(board: Board, card: Option<WorkloadCard>, object_card: ObjectCard) -> Self {
-        let object = board.object;
+        let object = &board.subject.object;
         let namespace = object.namespace.clone().unwrap_or_default();
         let described = card.as_ref().and_then(|card| card.known.as_ref());
         let described = described.or(object_card.known.as_ref());
+        let knowledge = board.subject.knowledge;
         let author = described.map(KnownThrough::through).unwrap_or(Reference {
-            text: board.knowledge.name.clone(),
+            text: knowledge.name.clone(),
             href: None,
         });
-        let elevations = &board.knowledge.elevations;
+        let elevations = &knowledge.elevations;
         let chosen = sketch::choose(
             elevations,
             board.elevation,
@@ -153,8 +105,7 @@ impl KnownPage {
             author,
         );
         let sketch = chosen.map(|(elevation, head)| Sketch::build(&board, elevation, head));
-        let mut references: Vec<(String, String, Option<Kind>)> = board
-            .knowledge
+        let mut references: Vec<(String, String, Option<Kind>)> = knowledge
             .references
             .iter()
             .filter(|r| r.edge != Kind::PartOf)
@@ -167,7 +118,7 @@ impl KnownPage {
                 (r.path.clone(), label, edge)
             })
             .collect();
-        if let Some(path) = &board.knowledge.writes_secret {
+        if let Some(path) = &knowledge.writes_secret {
             references.push((path.clone(), "writes".into(), None));
         }
         // A sketch takes the place of the ring, so the page has no boxes.
@@ -238,32 +189,46 @@ impl KnownPage {
 
     /// Adds the boxes that every object page has. Without a diagram, the
     /// boxes draw the object in the middle as `center`. With one, they
-    /// leave out each value that a relation box already shows.
+    /// leave out each value that the diagram already shows.
     pub fn with_board(self, center: Center, sections: Vec<Section>) -> Self {
         if !self.diagram() {
             let board = ObjectBoard::build(Some(center), sections);
             return Self { board, ..self };
         }
-        let in_boxes = self.boxes.iter().flat_map(|relation| &relation.ends);
-        let roles = self.sketch.iter().flat_map(|sketch| &sketch.roles);
-        let in_parts = roles.flat_map(|role| role.drawn.parts.iter().map(|part| &part.end));
-        let drawn: Vec<&Reference> = in_boxes.chain(in_parts).map(|end| &end.reference).collect();
-        let shown = |value: &Reference| {
-            drawn.iter().any(|end| match (&end.href, &value.href) {
-                (Some(drawn), Some(href)) => drawn == href,
-                _ => end.text == value.text,
-            })
-        };
-        let sections = sections.into_iter().map(|section| section.without(shown));
+        let sections = sections
+            .into_iter()
+            .map(|section| section.without(|value| self.draws(value)));
         let board = ObjectBoard::build(None, sections.collect());
         Self { board, ..self }
     }
 
     /// Nests the boxes inside what the object is part of, and around the
-    /// object's parts.
+    /// object's parts. A sketch draws what the object is made of, so a
+    /// part that the sketch draws is not nested again, and what the
+    /// object is part of stays.
     pub fn with_nesting(self, nesting: crate::objects::Nesting) -> Self {
+        let nesting = match &self.sketch {
+            Some(_) => nesting.without(|value| self.draws(value)),
+            None => nesting,
+        };
         let board = self.board.with_nesting(nesting);
         Self { board, ..self }
+    }
+
+    /// Whether the diagram draws `value`: the same page when both link,
+    /// and the same text when either does not.
+    fn draws(&self, value: &Reference) -> bool {
+        let in_boxes = self.boxes.iter().flat_map(|relation| &relation.ends);
+        let in_boxes = in_boxes.map(|end| &end.reference);
+        let in_sketch = self
+            .sketch
+            .iter()
+            .flat_map(|sketch| sketch.plan.references());
+        let mut drawn = in_boxes.chain(in_sketch);
+        drawn.any(|end| match (&end.href, &value.href) {
+            (Some(drawn), Some(href)) => drawn == href,
+            _ => end.text == value.text,
+        })
     }
 
     /// Whether the page draws a diagram: the ring of boxes or a sketch.
@@ -320,114 +285,6 @@ impl KnownPage {
 }
 
 const CLOSING: &str = "Each relation names the field it was read from.";
-
-impl RelationBox {
-    fn at(self, place: Place) -> Self {
-        Self {
-            rect: place.rect,
-            arrow: place.arrow,
-            line: place.line,
-            ..self
-        }
-    }
-}
-
-/// The box for the reference at `path`, with a value for each end,
-/// before `places` assigns its position.
-fn relation_box(board: &Board, path: &str, label: String, edge: Option<Kind>) -> RelationBox {
-    let here = board.object.namespace.as_deref();
-    let ends = board
-        .reached
-        .iter()
-        .filter(|(relation, _)| relation.path == path)
-        .map(|(relation, reached)| end(relation, reached, here, board))
-        .collect();
-    let line_class = match edge {
-        None => "section-path known-path-value",
-        Some(Kind::DependsOn | Kind::AuthenticatesThrough) => "section-path section-path-dashed",
-        Some(_) => "section-path",
-    };
-    RelationBox {
-        rect: Rect::default(),
-        arrow: "",
-        line: None,
-        line_class,
-        label,
-        ends,
-        source: format!("from {path}"),
-    }
-}
-
-/// One value of a reference's field. It links to the page of the object
-/// it names when that object has one, and a Node links to its machine's
-/// page. `under` is the note under the value: what the value resolves
-/// to, or why it resolves to nothing.
-fn end(relation: &Relation, reached: &Reached, here: Option<&str>, board: &Board) -> End {
-    let refer = |end: &Endpoint| {
-        let mut reference = Reference::to_end(end, here, board.plurals);
-        reference.href = match end {
-            Endpoint::Object(object)
-                if (object.group.as_str(), object.kind.as_str()) == ("", "Node") =>
-            {
-                Some(format!("/machines/{}", object.name))
-            }
-            Endpoint::Object(object) => (board.page)(object),
-            Endpoint::Machine(machine) => Some(transect_graph::links::machine(machine)),
-            Endpoint::Outside(name) => (board.ground)(name),
-            Endpoint::Device(device) => transect_graph::links::device(device),
-        };
-        if let Endpoint::Device(device) = end {
-            reference.text = (board.device)(device);
-        }
-        reference
-    };
-    let (reference, itself) = match &relation.names {
-        Names::Object(object) => {
-            let end = Endpoint::Object(object.clone());
-            (refer(&end), Some(end))
-        }
-        Names::Address | Names::Value | Names::Ambiguous(_) => (
-            Reference {
-                text: relation.value.clone(),
-                href: None,
-            },
-            None,
-        ),
-    };
-    let others: Vec<Reference> = reached
-        .ends
-        .iter()
-        .filter(|end| Some(*end) != itself.as_ref())
-        .map(refer)
-        .collect();
-    // An address that resolves to exactly one endpoint links to that
-    // endpoint's page, because that is the page a reader who follows the
-    // address is looking for.
-    let reference = match (&relation.names, &others[..]) {
-        (Names::Address, [one]) => Reference {
-            href: one.href.clone(),
-            ..reference
-        },
-        _ => reference,
-    };
-    let texts: Vec<&str> = others.iter().map(|other| other.text.as_str()).collect();
-    let under = match (&relation.names, others.is_empty()) {
-        (Names::Value, _) => Some("not an object in the cluster".into()),
-        (Names::Ambiguous(count), _) => Some(format!("matches {count} objects, so none is drawn")),
-        (Names::Address, true) => Some("an address transect does not resolve".into()),
-        (_, true) => None,
-        (_, false) => Some(format!("reaches {}", texts.join(", "))),
-    };
-    let reaches = match relation.names {
-        Names::Value => Vec::new(),
-        _ => others,
-    };
-    End {
-        reference,
-        under,
-        reaches,
-    }
-}
 
 #[cfg(test)]
 mod tests;

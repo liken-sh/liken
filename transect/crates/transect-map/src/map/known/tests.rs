@@ -1,8 +1,8 @@
 use rstest::rstest;
 
 use super::*;
-use transect_graph::edges::ClusterScoped;
-use transect_resources::knowledge::{self, fixtures::knowledge};
+use transect_graph::edges::{ClusterScoped, Endpoint, Object, Plurals};
+use transect_resources::knowledge::{self, Names, Reached, Relation, fixtures::knowledge};
 
 const SPEC: &str = "{references: [
     {path: 'spec.dials[].name', kind: Dial, group: widgets.example.com, label: controlled by},
@@ -78,12 +78,15 @@ fn board(card: Option<WorkloadCard>) -> KnownPage {
             .flatten()
     };
     let board = Board {
-        object: &jukebox(),
-        knowledge: &known,
+        subject: super::Subject {
+            object: jukebox(),
+            knowledge: &known,
+            reached: relations.iter().map(|r| (r, reach(r))).collect(),
+            conditions: Vec::new(),
+        },
         layer: "apps".into(),
         path: "/namespaces/shop/jukeboxes.widgets.example.com/front-room".into(),
         elevation: None,
-        reached: relations.iter().map(|r| (r, reach(r))).collect(),
         column: Vec::new(),
         counts: Vec::new(),
         chips: Vec::new(),
@@ -95,6 +98,9 @@ fn board(card: Option<WorkloadCard>) -> KnownPage {
         device: &|device| device.short(),
         standing: &|_| Standing::Plain,
         readings: &|_, _| Vec::new(),
+        subjects: &|_| None,
+        named_by: &|_, _| Vec::new(),
+        ends: &transect_resources::knowledge::fixtures::Nowhere,
     };
     let object_card = crate::objects::ObjectCard {
         kind: "Jukebox".into(),

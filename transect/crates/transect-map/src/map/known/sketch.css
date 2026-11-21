@@ -89,28 +89,44 @@
 
 .sketch-head.sketch-failing .known-name { color: var(--warm); }
 
-/* The rows of the sketch alternate with gap tracks, which the page
-   writes in `grid-template-rows`.  A gap track is `--sketch-gap`, or
-   zero between two areas whose parts touch.  The grid stands over the
-   wires, so a wire that runs under a part to its port is hidden where
-   the part is. */
+/* The rows and the columns of the sketch alternate with gap tracks,
+   which the page writes in `grid-template-rows` and
+   `grid-template-columns`.  A gap track between rows is `--sketch-gap`,
+   and one between columns `--sketch-column-gap`, or zero between two
+   areas whose parts touch.  The grid stands over the wires, so a wire
+   that runs under a part to its port is hidden where the part is. */
 .sketch-grid {
   --sketch-gap: 28px;
+  --sketch-column-gap: 20px;
   position: relative;
   display: grid;
-  column-gap: 20px;
 }
 
 /* A sketch with wires leaves room between its columns for a wire to
    bend and for the words it carries.  A reader points at a wire under
    the grid, so a wired grid and its areas let the pointer through to
    it, and only the parts take it. */
-.sketch-grid.sketch-wired { column-gap: clamp(64px, 7.5%, 104px); }
+.sketch-grid.sketch-wired { --sketch-column-gap: clamp(64px, 7.5%, 104px); }
 
 .sketch-wired,
 .sketch-wired .sketch-area { pointer-events: none; }
 
 .sketch-wired .shape-part { pointer-events: auto; }
+
+/* Each column of the grid keeps the narrowest width of its parts, so
+   the grid has a narrowest width of its own.  The page's plan is never
+   narrower than that, and where the frame is narrower, the plan scrolls
+   sideways inside this frame, with its wires, and the page does not.
+   A scroll container clips what stands past its edges, so its padding
+   keeps room for the feet under the last row and for a piece above the
+   first, and its margin takes the padding back out of the layout. */
+.sketch-scroll {
+  overflow-x: auto;
+  padding: 8px 0;
+  margin: -8px 0;
+}
+
+.sketch-scroll > .sketch-plan { min-width: min-content; }
 
 .sketch-plan { position: relative; }
 
@@ -206,31 +222,124 @@
 
 .sketch-lean-end { justify-content: safe flex-end; }
 
+/* A part that a role draws as an elevation of its kind fills the
+   role's area with that elevation's grid, and names the part after the
+   grid's last column, as the head of a sketch names its object: its
+   role as a small caption, and its name as a link.  The grid around the
+   part keeps room for the part's narrowest width, which the page writes
+   in the grid's columns, and for the name, whose width and gap the
+   page writes in the part's style.  The name is marked as the head is
+   when the part fails or warns. */
+.sketch-nested {
+  flex: 1 1 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.sketch-nested > .sketch-plan {
+  flex: 1;
+  min-width: 0;
+}
+
+.sketch-nested > .sketch-wire-list { flex-basis: 100%; }
+
+.sketch-nested-name {
+  flex: none;
+  max-width: var(--name-width);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+.sketch-nested-label {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.sketch-nested-link a { font-weight: 400; }
+
+.sketch-nested-why { color: var(--ink-muted); }
+
+.sketch-nested.sketch-warning > .sketch-nested-name,
+.sketch-nested.sketch-failing > .sketch-nested-name {
+  padding-left: 10px;
+  box-shadow: inset 2px 0 0 var(--warm);
+}
+
+.sketch-nested.sketch-failing > .sketch-nested-name { box-shadow: inset 4px 0 0 var(--warm); }
+
+.sketch-nested.sketch-failing > .sketch-nested-name :is(a, .sketch-nested-why) { color: var(--warm); }
+
+.sketch-markers {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
 /* Contact is a fact of the wide layout.  The parts of an area that
    touches the area above stand at its top, and need no room above them
    for a piece that the part above covers.  The parts of a role whose
    shape joins on its left and right touch each other and stand on
-   their axes. */
+   their axes.  In a row on one axis, the parts of such a role fill
+   their area, so they touch a neighbor on either side whatever the
+   width, and the parts of another role stand against the side where
+   they touch a neighbor.
+
+   The areas of a row on one axis align on the baselines of their parts,
+   which are the parts' axes.  On an edge of the row that a part joins,
+   each other area takes a negative margin larger than any part, so it
+   adds nothing to the row's height there, and the joining part's edge
+   is the row's edge.  A taller part stands past it.  An edge of a grid
+   takes the margin only when the grid is drawn as a part whose area
+   touches the area beyond that edge, so a part never stands past the
+   sketch's frame. */
 @container known not (max-width: 640px) {
   .sketch-joined-above {
     align-items: flex-start;
     align-content: flex-start;
   }
 
-  .sketch-joined-above > .shape-part { --above: 0; }
+  .sketch-joined-above > .shape-part,
+  .sketch-joined-above > .sketch-nested > .sketch-plan > .sketch-grid > .sketch-top-row > .shape-part { --above: 0; }
 
   .sketch-abutting {
     column-gap: 0;
     align-items: baseline;
   }
+
+  .sketch-fill > .shape-part {
+    flex: 1 1 0;
+    max-width: none;
+  }
+
+  .sketch-on-axis {
+    align-self: baseline;
+    align-items: baseline;
+    align-content: normal;
+  }
+
+  .sketch-free-top:not(.sketch-top-row),
+  .sketch-joined-above > .sketch-nested > .sketch-plan > .sketch-grid > .sketch-free-top { margin-top: -10000px; }
+
+  .sketch-free-bottom:not(.sketch-bottom-row),
+  .sketch-joined-below > .sketch-nested > .sketch-plan > .sketch-grid > .sketch-free-bottom { margin-bottom: -10000px; }
 }
 
 /* In a narrow map the columns of the grid are narrow too, so the gaps
    shrink to leave room for the text.  A part's insets scale with it. */
 @container known (max-width: 760px) {
-  .sketch-grid { column-gap: 10px; }
+  .sketch-grid { --sketch-column-gap: 10px; }
 
-  .sketch-grid.sketch-wired { column-gap: 40px; }
+  .sketch-grid.sketch-wired { --sketch-column-gap: 40px; }
 
   .sketch-area { gap: 8px; }
 }
@@ -260,9 +369,15 @@
     justify-content: safe center;
   }
 
-  .sketch-area:has(> .shape-share) { flex-basis: 100%; }
+  .sketch-area:has(> .shape-share, > .sketch-nested) { flex-basis: 100%; }
 
   .sketch-area:has(> .shape-follow) { flex: 0 1 auto; }
+
+  .sketch .shape-outside { display: none; }
+
+  .sketch-nested { flex-wrap: wrap; }
+
+  .sketch-nested > .sketch-plan { flex-basis: 100%; }
 
   .shape-share {
     flex-basis: 100%;

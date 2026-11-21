@@ -4,7 +4,7 @@ cluster / platform / acme-ops / Vent west-vent
 access vulnerabilities kinds
 Search /
 esc
-acme-ops Vent east-vent Vent west-vent Kustomizations ×4 Buckets ×1 GitRepositories ×2 HelmRepositories ×1 OCIRepositories ×1 Gates ×3 Bins ×1 Rooms ×1 Shelves ×2 Thermostats ×1
+acme-ops Vent east-vent Vent west-vent Kustomizations ×4 Buckets ×1 GitRepositories ×2 HelmRepositories ×1 OCIRepositories ×1 Gates ×3 Bins ×2 Rooms ×2 Shelves ×2 Thermostats ×1
 Edges
 Edges
 runs on A pod runs on a machine.

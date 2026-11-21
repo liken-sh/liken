@@ -10,7 +10,10 @@
     A shown value from a column after the first of its entry has
     `shape-fallback`, which a display draws quieter.  A value read
     through a reference links to the object it was read from, and its
-    title says which object and which reference. -#}
+    title says which object and which reference.
+
+    The lines after the label are one group, so a shape that cuts its
+    text can drop the label first and the name last. -#}
 {%- import "links/link.html" as links -%}
 {%- import "shapes/part.html" as shapes -%}
 {%- macro reading(reading, class) -%}
@@ -25,6 +28,7 @@
 {%- if let Some(spoken) = part.state.spoken() %}
 <div class="shape-state">{{ spoken }}</div>
 {%- endif %}
+<div class="shape-lines">
 <div class="shape-name" title="{{ part.end.reference.text }}">
 {%- if part.literal %}{% call links::value_link(part.end.reference.text, part.end.reference.href) %}{% endcall %}
 {%- else %}{% call links::object_link(part.end.reference.text, part.end.reference.href, "") %}{% endcall %}
@@ -59,6 +63,7 @@
 {%- else if let Some(under) = part.end.under %}
 <div class="shape-under">{{ under }}</div>
 {%- endif %}
+</div>
 <div class="shape-source">{{ drawn.source }}</div>
 {% endcall %}
 {%- endfor %}
@@ -68,7 +73,9 @@
 {%- if let Some(spoken) = nothing.state.spoken() %}
 <div class="shape-state">{{ spoken }}</div>
 {%- endif %}
+<div class="shape-lines">
 <div class="shape-none">{{ nothing.text }}</div>
 <div class="shape-under">{% call links::spelled(nothing.note) %}{% endcall %}</div>
+</div>
 {% endcall %}
 {%- endif %}

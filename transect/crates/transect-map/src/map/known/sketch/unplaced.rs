@@ -3,9 +3,11 @@
 //! elevations that draw them. A reader of one elevation sees what it
 //! leaves out without leaving the page.
 
+use super::super::board::Board;
+use super::fill;
 use super::head::href;
+use super::part::end_of;
 use super::wires::listed;
-use super::{Board, end};
 use transect_graph::links::Reference;
 use transect_resources::knowledge::Elevation;
 
@@ -18,27 +20,20 @@ pub fn line(board: &Board, elevation: &Elevation) -> Option<Vec<Reference>> {
         href: None,
     };
     let placed = elevation.grid.names();
-    let here = board.object.namespace.as_deref();
+    let subject = &board.subject;
     let mut roles = Vec::new();
-    for role in &board.knowledge.roles {
+    for role in &subject.knowledge.roles {
         if placed.contains(&role.name.as_str()) {
             continue;
         }
-        let parts = board
-            .reached
+        let found = fill::found(board, subject, role);
+        let names: Vec<Reference> = found
             .iter()
-            .filter(|(r, _)| r.path == role.reference);
-        let names: Vec<Reference> = parts
-            .map(|(relation, reached)| end(relation, reached, here, board).reference)
+            .map(|found| end_of(board, &subject.object, found).reference)
             .collect();
-        let reference = board
-            .knowledge
-            .references
-            .iter()
-            .find(|r| r.path == role.reference);
-        let label = reference.map(|r| r.label.as_deref().unwrap_or(r.edge.words()));
-        if let (false, Some(label)) = (names.is_empty(), label) {
-            roles.push((role.name.as_str(), label.to_string(), names));
+        if !names.is_empty() {
+            let label = role.label(&subject.knowledge.references);
+            roles.push((role.name.as_str(), label, names));
         }
     }
     if roles.is_empty() {
@@ -58,7 +53,7 @@ pub fn line(board: &Board, elevation: &Elevation) -> Option<Vec<Reference>> {
         pieces.extend(listed(names));
     }
     pieces.push(word("."));
-    let elevations = board.knowledge.elevations.iter().filter(|other| {
+    let elevations = subject.knowledge.elevations.iter().filter(|other| {
         let names = other.grid.names();
         other.slug != elevation.slug && roles.iter().any(|(name, ..)| names.contains(name))
     });

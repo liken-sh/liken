@@ -33,8 +33,10 @@ const onPort = (rect, edge, t, origin) =>
 // One end of a run: the point where it ends, the rectangle of its area,
 // its span when it is the only end at one part's port, and the bar and
 // its short lines when the role has several parts.
+// The plan's own areas are its grid's children, so an area of the same
+// name in an elevation that a part draws inside the plan is not found.
 const end = (plan, origin, name, edge, slot, of) => {
-  const area = plan.querySelector(`[data-area="${CSS.escape(name)}"]`);
+  const area = plan.querySelector(`:scope > .sketch-grid > [data-area="${CSS.escape(name)}"]`);
   if (!area) return null;
   const marks = [...area.querySelectorAll(`:scope > .shape-part .shape-port-${edge}`)];
   if (marks.length === 0) return null;

@@ -3,6 +3,7 @@ use rstest::rstest;
 use super::super::super::Healthy;
 use super::super::super::fixtures::knowledge;
 use super::*;
+use crate::knowledge::role::Role;
 use transect_graph::edges::Plurals;
 
 fn plurals() -> Plurals {
@@ -138,4 +139,127 @@ fn resolves_a_reading_through_the_knowledge_of_the_parts_kind(
     #[case] unresolved: Option<&str>,
 ) {
     assert_eq!(reading(through, widget).as_deref(), unresolved);
+}
+
+/// Rooms, shelves, and bins of `stock.example.com`: a shelf names its
+/// room, and a bin names its room and its shelf.
+fn stock() -> Plurals {
+    let served = [("Room", "rooms"), ("Shelf", "shelves"), ("Bin", "bins")];
+    let served = served.map(|(kind, plural)| {
+        (
+            ("stock.example.com".to_string(), kind.to_string()),
+            plural.to_string(),
+        )
+    });
+    Plurals::from(served)
+}
+
+const SHELF: &str = "{references: [{path: spec.room, kind: Room, group: stock.example.com}], elevations: [{name: the shelf, question: What is on it?, sketch: room}], roles: {room: {reference: spec.room}}}";
+
+const BIN: &str = "{references: [{path: spec.room, kind: Room, group: stock.example.com}, {path: spec.shelf, kind: Shelf, group: stock.example.com}, {path: spec.label}]}";
+
+/// The room's only role, `role`, after `Kinds::resolve`, with the shelf's
+/// and the bin's knowledge when each is some, and the messages of the
+/// room's conditions.
+fn room_role(role: &str, shelf: Option<&str>, bin: Option<&str>) -> (Role, Vec<String>) {
+    let mut known = vec![knowledge(
+        "rooms.stock.example.com",
+        &format!("{{roles: {{part: {role}}}}}"),
+    )];
+    known.extend(shelf.map(|spec| knowledge("shelves.stock.example.com", spec)));
+    known.extend(bin.map(|spec| knowledge("bins.stock.example.com", spec)));
+    let kinds = Kinds::resolve(&known, &stock(), &[]);
+    let room = kinds.of("stock.example.com", "Room").unwrap();
+    let messages = kinds.conditions.iter().map(|(_, c)| c.message.clone());
+    (room.roles[0].clone(), messages.collect())
+}
+
+#[rstest]
+#[case::a_reference_to_the_kind("{namedBy: {kind: Shelf, path: spec.room}}", Some(SHELF), None)]
+#[case::a_kind_with_no_knowledge(
+    "{namedBy: {kind: Shelf, path: spec.room}}",
+    None,
+    Some("roles.part is named by Shelf spec.room, and transect has no knowledge of Shelf")
+)]
+#[case::no_reference_at_the_path(
+    "{namedBy: {kind: Shelf, path: spec.aisle}}",
+    Some(SHELF),
+    Some(
+        "roles.part is named by Shelf spec.aisle, and the knowledge of Shelf has no reference at spec.aisle to Room"
+    )
+)]
+#[case::a_reference_to_another_kind(
+    "{namedBy: {kind: Bin, path: spec.shelf}}",
+    Some(SHELF),
+    Some("roles.part is named by Bin spec.shelf, and transect has no knowledge of Bin")
+)]
+fn resolves_the_objects_that_name_this_one_through_the_naming_kinds_knowledge(
+    #[case] role: &str,
+    #[case] shelf: Option<&str>,
+    #[case] unresolved: Option<&str>,
+) {
+    let (role, messages) = room_role(role, shelf, None);
+    let expected: Vec<String> = unresolved.into_iter().map(String::from).collect();
+    assert_eq!(
+        (role.unresolved.as_deref(), messages),
+        (unresolved, expected)
+    );
+}
+
+type Followed = (Option<(String, String)>, Option<String>);
+
+#[rstest]
+#[case::a_reference_of_the_first_kind(
+    "spec.shelf",
+    Some(BIN),
+    (Some(("stock.example.com".into(), "Shelf".into())), None)
+)]
+#[case::a_reference_that_names_no_kind(
+    "spec.label",
+    Some(BIN),
+    (None, Some("roles.part follows spec.label, and the knowledge of Bin has no reference at spec.label that names a kind".into()))
+)]
+#[case::no_reference_at_the_path(
+    "spec.aisle",
+    Some(BIN),
+    (None, Some("roles.part follows spec.aisle, and the knowledge of Bin has no reference at spec.aisle that names a kind".into()))
+)]
+fn resolves_the_reference_that_a_role_follows_and_finds_its_kind(
+    #[case] through: &str,
+    #[case] bin: Option<&str>,
+    #[case] expected: Followed,
+) {
+    let role = format!("{{namedBy: {{kind: Bin, path: spec.room}}, through: {through}}}");
+    let (role, _) = room_role(&role, Some(SHELF), bin);
+    let through = role.fill.through.unwrap();
+    assert_eq!((through.target, through.unresolved), expected);
+}
+
+#[rstest]
+#[case::an_elevation_of_the_parts_kind(
+    "{namedBy: {kind: Shelf, path: spec.room}, elevation: the shelf}",
+    None
+)]
+#[case::an_elevation_of_the_kind_at_the_end_of_through(
+    "{namedBy: {kind: Bin, path: spec.room}, through: spec.shelf, elevation: the shelf}",
+    None
+)]
+#[case::an_elevation_that_a_named_kind_does_not_state(
+    "{namedBy: {kind: Shelf, path: spec.room}, elevation: the aisle}",
+    Some(
+        "roles.part draws each part as \"the aisle\", and the knowledge of Shelf states no elevation \"the aisle\""
+    )
+)]
+#[case::an_elevation_that_a_kind_does_not_state(
+    "{namedBy: {kind: Bin, path: spec.room}, elevation: the bin}",
+    Some(
+        "roles.part draws each part as \"the bin\", and the knowledge of Bin states no elevation \"the bin\""
+    )
+)]
+fn resolves_the_elevation_that_draws_each_part_in_the_parts_kind(
+    #[case] role: &str,
+    #[case] unresolved: Option<&str>,
+) {
+    let (role, _) = room_role(role, Some(SHELF), Some(BIN));
+    assert_eq!(role.unresolved.as_deref(), unresolved);
 }

@@ -201,7 +201,7 @@ fn a_page_is_about_its_subject(#[case] url: &str, #[case] expected: &str) {
     true
 )]
 #[case::a_kind_with_no_elevation(
-    "/namespaces/acme-ops/rooms.stock.example.test/back-room/elevations/the-shelf",
+    "/namespaces/acme-ops/thermostats.stock.example.test/back-thermostat/elevations/the-shelf",
     false
 )]
 fn finds_an_elevation_only_of_a_kind_that_states_elevations(

@@ -1,10 +1,12 @@
-# A stock room with shelves, and a bin on a shelf, joined by the
+# A stock room with shelves, and bins on a shelf, joined by the
 # `part of` references in the kind knowledge, so that a board shows the
-# nesting.  The bin is part of two shelves, and it nests under the shelf
-# of its first reference, spec.shelf.  The room has a thermostat, which
-# sleeps between readings, and each vent is as healthy as the
-# thermostat it names: the east vent's thermostat sleeps, and the west
-# vent's is not in the cluster.
+# nesting.  The screw bin is part of two shelves, and it nests under the
+# shelf of its first reference, spec.shelf.  The bolt bin is jammed.  The
+# room has a thermostat, which sleeps between readings, and each vent is
+# as healthy as the thermostat it names: the east vent's thermostat
+# sleeps, and the west vent's is not in the cluster.  The back room is
+# open and has no keeper, and the front room is closed and has no
+# shelves.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata: {name: rooms.stock.example.test}
@@ -65,13 +67,33 @@ spec:
   group: stock.example.test
   scope: Namespaced
   names: {kind: Bin, plural: bins}
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - {name: Holds, type: string, jsonPath: .spec.holds}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: keepers.stock.example.test}
+spec:
+  group: stock.example.test
+  scope: Namespaced
+  names: {kind: Keeper, plural: keepers}
   versions: [{name: v1, served: true, storage: true}]
 ---
 apiVersion: stock.example.test/v1
 kind: Room
 metadata: {namespace: acme-ops, name: back-room, uid: back-room}
 spec: {floor: ground, thermostat: back-thermostat}
-status: {conditions: [{type: Ready, status: 'True'}]}
+status: {conditions: [{type: Ready, status: 'True'}, {type: Open, status: 'True', reason: Staffed}]}
+---
+apiVersion: stock.example.test/v1
+kind: Room
+metadata: {namespace: acme-ops, name: front-room, uid: front-room}
+spec: {floor: ground}
+status: {conditions: [{type: Ready, status: 'True'}, {type: Open, status: 'False', reason: Closed, message: closed for the night}]}
 ---
 apiVersion: stock.example.test/v1
 kind: Thermostat
@@ -83,7 +105,7 @@ status:
 apiVersion: stock.example.test/v1
 kind: Vent
 metadata: {namespace: acme-ops, name: east-vent, uid: east-vent}
-spec: {thermostat: back-thermostat}
+spec: {thermostat: back-thermostat, room: back-room}
 ---
 apiVersion: stock.example.test/v1
 kind: Vent
@@ -105,5 +127,11 @@ status: {sale: half price, stock: low, conditions: [{type: Ready, status: 'True'
 apiVersion: stock.example.test/v1
 kind: Bin
 metadata: {namespace: acme-ops, name: screw-bin, uid: screw-bin}
-spec: {shelf: top-shelf, overflow: low-shelf}
+spec: {shelf: top-shelf, overflow: low-shelf, holds: screws}
 status: {conditions: [{type: Ready, status: 'True'}]}
+---
+apiVersion: stock.example.test/v1
+kind: Bin
+metadata: {namespace: acme-ops, name: bolt-bin, uid: bolt-bin}
+spec: {shelf: top-shelf, holds: bolts}
+status: {conditions: [{type: Ready, status: 'False', reason: Jammed, message: the lid does not close}]}

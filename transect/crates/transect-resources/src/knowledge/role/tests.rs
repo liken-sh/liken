@@ -1,7 +1,7 @@
 use rstest::rstest;
 
 use super::super::{KindKnowledge, parse};
-use super::{Column, Role};
+use super::{Column, Expected, Role};
 use crate::knowledge::Through;
 use crate::resources::DocId;
 
@@ -31,24 +31,34 @@ fn reads_the_roles_in_the_order_of_the_document() {
         "{hand: {reference: 'spec.handsets[].name', shape: handheld}, face: {reference: status.screen.monitor, shape: screen, expected: true}, amp: {reference: status.amp.name}}",
     )
     .unwrap();
-    let roles: Vec<(&str, &str, Option<&str>, bool)> = known
+    let roles: Vec<(&str, Option<&str>, Option<&str>, &Expected)> = known
         .roles
         .iter()
         .map(|r| {
             (
                 r.name.as_str(),
-                r.reference.as_str(),
+                r.fill.reference(),
                 r.shape.as_deref(),
-                r.expected,
+                &r.expected,
             )
         })
         .collect();
     assert_eq!(
         roles,
         vec![
-            ("hand", "spec.handsets[].name", Some("handheld"), false),
-            ("face", "status.screen.monitor", Some("screen"), true),
-            ("amp", "status.amp.name", None, false),
+            (
+                "hand",
+                Some("spec.handsets[].name"),
+                Some("handheld"),
+                &Expected::Never
+            ),
+            (
+                "face",
+                Some("status.screen.monitor"),
+                Some("screen"),
+                &Expected::Always
+            ),
+            ("amp", Some("status.amp.name"), None, &Expected::Never),
         ]
     );
 }
@@ -124,6 +134,51 @@ fn reads_each_entry_of_shows_as_a_list_of_alternatives(
     "{face: {reference: status.screen.monitor, colour: red}}",
     "roles.face: unknown field `colour`"
 )]
+#[case::both_a_reference_and_named_by(
+    "{face: {reference: status.amp.name, namedBy: {kind: Amp, path: spec.kiosk}}}",
+    "roles.face: the role has both reference and namedBy"
+)]
+#[case::neither_a_reference_nor_named_by(
+    "{face: {shape: screen}}",
+    "roles.face: the role has neither reference nor namedBy"
+)]
+#[case::named_by_with_no_kind(
+    "{face: {namedBy: {path: spec.kiosk}}}",
+    "roles.face: namedBy has no kind"
+)]
+#[case::named_by_with_no_path("{face: {namedBy: {kind: Amp}}}", "roles.face: namedBy has no path")]
+#[case::an_empty_elevation(
+    "{face: {reference: status.amp.name, elevation: ''}}",
+    "roles.face: elevation is empty"
+)]
+#[case::an_empty_label(
+    "{face: {reference: status.amp.name, label: ' '}}",
+    "roles.face: label is empty"
+)]
+#[case::an_empty_through(
+    "{face: {reference: status.amp.name, through: ''}}",
+    "roles.face: through is empty"
+)]
+#[case::through_a_value(
+    "{face: {reference: status.screen.monitor, through: status.cell}}",
+    "roles.face: the role follows status.cell from status.screen.monitor, which names no kind"
+)]
+#[case::an_elevation_of_values(
+    "{face: {reference: status.screen.monitor, elevation: the screen}}",
+    "roles.face: the role draws each part as \"the screen\", and the reference status.screen.monitor names no kind"
+)]
+#[case::expected_as_a_word(
+    "{face: {reference: status.amp.name, expected: sometimes}}",
+    "roles.face: expected is sometimes, and it is true, false, or {while: <condition type>}"
+)]
+#[case::expected_while_with_another_key(
+    "{face: {reference: status.amp.name, expected: {until: Open}}}",
+    "roles.face: expected is until: Open, and it is true"
+)]
+#[case::expected_while_nothing(
+    "{face: {reference: status.amp.name, expected: {while: ''}}}",
+    "roles.face: expected is while: ''"
+)]
 #[case::an_unknown_field_of_a_column(
     "{face: {reference: status.amp.name, reads: [{column: Charge, through: status.cell, colour: red}]}}",
     "roles.face"
@@ -131,4 +186,30 @@ fn reads_each_entry_of_shows_as_a_list_of_alternatives(
 fn refuses_a_role_it_cannot_draw(#[case] roles: &str, #[case] error: &str) {
     let found = read(roles).unwrap_err();
     assert!(found.contains(error), "{found}");
+}
+
+#[rstest]
+#[case::always("true", Expected::Always)]
+#[case::never("false", Expected::Never)]
+#[case::while_a_condition_is_true("{while: Open}", Expected::While("Open".into()))]
+fn reads_when_a_role_is_expected(#[case] written: &str, #[case] expected: Expected) {
+    let role = role(&format!(
+        "{{reference: status.amp.name, expected: {written}}}"
+    ));
+    assert_eq!(role.expected, expected);
+}
+
+#[rstest]
+#[case::the_references_label("{reference: status.screen.monitor}", "shows on")]
+#[case::the_references_edge("{reference: status.amp.name}", "depends on")]
+#[case::the_roles_own("{reference: status.amp.name, label: amplified by}", "amplified by")]
+#[case::a_kind_in_words("{namedBy: {kind: ShelfLabel, path: spec.kiosk}}", "shelf label")]
+#[case::a_kind_in_capitals("{namedBy: {kind: UPS, path: spec.kiosk}}", "ups")]
+#[case::the_roles_own_over_the_kind(
+    "{namedBy: {kind: ShelfLabel, path: spec.kiosk}, label: tag}",
+    "tag"
+)]
+fn labels_each_part_of_a_role(#[case] written: &str, #[case] label: &str) {
+    let known = read(&format!("{{face: {written}}}")).unwrap();
+    assert_eq!(known.roles[0].label(&known.references), label);
 }

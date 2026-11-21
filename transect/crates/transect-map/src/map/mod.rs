@@ -25,7 +25,8 @@ pub use edge_row::{EdgeRow, ON_THE_MAP};
 pub use gitops::GitOpsPage;
 pub use gone::{Above, GonePage, Named as Gone};
 pub use known::{
-    Board, Entry as KnownEntry, KnownPage, Reading, Standing, Why, chips as known_chips, every_chip,
+    Board, Entry as KnownEntry, KnownPage, Reading, Standing, Subject, Why, chips as known_chips,
+    every_chip,
 };
 pub use machine::{
     DevicesRead, Driver, MachinePage, OwnLogs, Reads as MachineReads, Underneath, VolumeLine,

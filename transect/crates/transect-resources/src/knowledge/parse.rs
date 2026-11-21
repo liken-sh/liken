@@ -128,7 +128,7 @@ pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<KindKnowledge, Stri
             reference(written).map_err(|error| format!("references[{at}]: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let roles = role::read(spec.roles, &references)?;
+    let roles = role::read(spec.roles, &references, group)?;
     let elevations = elevation::read(spec.elevations, &roles)?;
     let healthy = spec
         .healthy

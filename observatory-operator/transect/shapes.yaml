@@ -1,0 +1,99 @@
+# The shapes of a telescope's own parts, which the knowledge of each kind
+# in `kinds.yaml` names.  `transect` reads this file as any `Shape` under
+# `--resources`, and a kind in `observatory.liken.sh` that names `tube`
+# finds `tube.observatory.liken.sh` before the library's shapes.
+#
+# Each shape is drawn from the side, with the light entering at the
+# left.  The parts of a train join on their left and right, so they
+# touch end to end, and a row of them aligns on `axis`, the line of the
+# light through the middle of the tube.  A tube also joins on its top
+# and its bottom, and a mount on its top, so the guide train stands on
+# the main tube, and the main tube on the mount's saddle.  A tube's
+# rings are inside its box, under its body, so they meet the tube or
+# the saddle below at every width.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: tube.observatory.liken.sh
+spec:
+  summary: A telescope's tube from the side, with the dew shield at the light's end on the left and two rings under it.
+  size: {design: [512, 150], width: [180, 560]}
+  axis: 60
+  outline: {round: [12, 8, 8, 12], at: {left: 0, right: 0, top: 0, bottom: 30}}
+  text: {inset: [14, 24, 44, 24]}
+  joins: [left, right, top, bottom]
+  pieces:
+    - {name: dew shield, at: {left: 0, width: 48, top: -12, bottom: 18}, round: 12, clear: left}
+    - {name: front ring, behind: true, at: {left: 35%, width: 16, bottom: 0, height: 34}}
+    - {name: back ring, behind: true, at: {right: 35%, width: 16, bottom: 0, height: 34}}
+---
+# A focuser's or a rotator's drawtube is narrower than the tube, and its
+# knob hangs under it.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: drawtube.observatory.liken.sh
+spec:
+  summary: The drawtube of a focuser or a rotator, a short cylinder narrower than the tube, with its knob under it.
+  size: {design: [112, 64], width: [72, 128]}
+  outline: {round: 4}
+  text: {inset: [8, 10, 8, 12]}
+  joins: [left, right]
+  pieces:
+    - {name: knob, behind: true, at: {left: 50% - 10, top: 100% - 2, width: 20, height: 14}, round: [0, 0, 10, 10]}
+---
+# A camera ends the train, so it joins only on its left, where its
+# sensor faces the light.  Its axis is above its middle, so a camera
+# whose text makes it taller than a small guide tube stands past the
+# tube's top, where the rig has room, and not over the main tube under
+# it.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: camera.observatory.liken.sh
+spec:
+  summary: A cooled astronomy camera from the side, its sensor's face at the left and its connector on the back.
+  size: {design: [140, 96], width: [100, 170]}
+  axis: 56
+  outline: {round: [6, 24, 24, 6]}
+  text: {inset: [10, 22, 10, 14]}
+  joins: [left]
+  pieces:
+    - {name: connector, draw: mark, at: {right: -5, top: 50% - 7, width: 6, height: 14}, round: [0, 2, 2, 0]}
+---
+# A dust cap or a flat panel covers the front of the tube, so it joins
+# only on its right.  The slab is too thin for text, so the text stands
+# to its left.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: cover.observatory.liken.sh
+spec:
+  summary: A thin cover across the front of a tube, such as a dust cap or a flat panel.  Its text is to its left, because the slab is too thin to hold it.
+  size: {design: [124, 144], width: [104, 140]}
+  outline: {round: 3, at: {right: 0, width: 14, top: 0, bottom: 0}}
+  text: {inset: [10, 24, 10, 0], align: end}
+  joins: [right]
+---
+# The mount's head carries the saddle on its top, and the tubes stand on
+# the saddle.  The counterweight and its shaft stand to the right of the
+# head, and the tripod under it, behind the head.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: equatorial-mount.observatory.liken.sh
+spec:
+  summary: An equatorial mount from the side, a head with a saddle on top, a counterweight on a shaft, and a tripod under it.
+  size: {design: [240, 280], width: [200, 280]}
+  outline: {round: 8, at: {left: 0, right: 0, top: 14, bottom: 162}}
+  text: {inset: [24, 16, 174, 16]}
+  joins: [top]
+  pieces:
+    - {name: saddle, at: {left: 6, right: 6, top: 0, height: 15}, round: 2}
+    - {name: shaft, behind: true, at: {right: -96, width: 100, top: 58, height: 8}}
+    - {name: counterweight, at: {right: -132, width: 36, top: 36, height: 52}, round: 6}
+    - name: tripod
+      behind: true
+      at: {left: 50% - 150, bottom: 0, width: 300, height: 166}
+      view: [300, 166]
+      path: "M128 0H172L300 166H276L150 34L24 166H0Z"

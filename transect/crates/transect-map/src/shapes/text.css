@@ -117,29 +117,59 @@
 
 .shape-align-end .shape-readings { justify-content: flex-end; }
 
-/* fit: cut.  The part keeps its proportions, each line that is too
-   long is cut, with the whole text in its title, and text that does
-   not fit is cut at the text region, so it never crosses the shape's
-   edge.  The padding keeps a
-   focused link's outline inside the line that clips it, and the margin
-   takes the padding back out of the layout. */
+/* The lines after the label are one group, which takes no box of its
+   own unless the shape cuts its text. */
+.shape-lines { display: contents; }
+
+/* fit: cut.  The part keeps its proportions, and its text is cut by
+   whole lines, so no line is ever cut through its letters.  The label
+   goes first and the name last: the text region lays the group of lines
+   from its top and the label above it, and an item that does not fit
+   moves to a second column outside the region, which the region clips.
+   The group takes the height that the label leaves, so a display can
+   center its title in it.
+   Each line that is too long is cut at its end, with the whole text in
+   its title.  The padding keeps a focused link's outline inside the line
+   that clips it, and the margin takes the padding back out of the
+   layout. */
 .shape-fit-cut .shape-text {
   position: absolute;
   inset: 0;
   overflow: clip;
   overflow-clip-margin: content-box 4px;
+  flex-direction: column-reverse;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: flex-start;
 }
 
-.shape-fit-cut .shape-text > * { flex-shrink: 0; }
+.shape-fit-cut :is(.shape-text, .shape-lines) > * {
+  width: 100%;
+  flex-shrink: 0;
+}
 
-.shape-fit-cut .shape-text > :is(.shape-label, .shape-name, .shape-under),
+.shape-fit-cut .shape-text > .shape-label { order: 2; }
+
+.shape-fit-cut .shape-lines {
+  order: 1;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 4px;
+  max-height: 100%;
+  overflow: clip;
+}
+
+.shape-fit-cut :is(.shape-text, .shape-lines) > :is(.shape-label, .shape-name, .shape-under),
 .shape-fit-cut .shape-readings:not(.shape-shows) .shape-reading {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.shape-fit-cut .shape-text > :is(.shape-name, .shape-under) {
+.shape-fit-cut .shape-lines > :is(.shape-name, .shape-under) {
   padding: 4px;
   margin: -4px;
 }
@@ -235,7 +265,7 @@
   color: var(--ink-muted);
 }
 
-.shape-display-surface .shape-text > .shape-under { order: 2; }
+.shape-display-surface .shape-lines > .shape-under { order: 2; }
 
 /* A link that has focus from the keyboard has an outline in the ink
    around it, so it shows on glass as well as on a panel. */

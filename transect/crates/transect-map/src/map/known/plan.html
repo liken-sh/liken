@@ -1,0 +1,72 @@
+{#- The grid of one elevation, with its roles and its wires: the
+    sketch of the page's object, and each part that a role draws as an
+    elevation of the part's kind.  The author names the area, the shape,
+    and the readings of each role, and what each wire carries.  The
+    areas, the rows, and the columns come from role names that the
+    parser checked and from fixed words, so they are safe in a style
+    attribute.
+
+    An area's class says which edge its parts stand against, so the
+    parts of a row gather toward the middle of the sketch, and how they
+    touch the parts around them.
+
+    A part drawn as an elevation draws this template again, through its
+    plan, and then its label and its name, linked to its page.
+
+    The browser lays the grid out, so `wires.js` measures the ports of
+    the parts and draws the path of each run of a wire in the SVG under
+    the grid.  A wire is hidden until the script has placed it, so its
+    words never show at a corner of the drawing.  Each wire is also a
+    sentence in the list after the plan, which shows until the script
+    has drawn the wires, and which a phone shows in place of them. -#}
+{%- import "links/link.html" as links -%}
+<div class="sketch-plan">
+{%- if !wires.is_empty() %}
+<svg class="sketch-wires" role="list" aria-label="Wires of {{ name }}">
+{%- for wire in wires %}
+<g class="sketch-wire" role="listitem" tabindex="0" visibility="hidden">
+<title>{{ wire.title() }}</title>
+{%- for run in wire.runs %}
+<g class="sketch-run" data-from="{{ run.from.area }}" data-from-edge="{{ run.from.edge.word() }}" data-from-slot="{{ run.from.slot }}" data-from-of="{{ run.from.of }}" data-to="{{ run.to.area }}" data-to-edge="{{ run.to.edge.word() }}" data-to-slot="{{ run.to.slot }}" data-to-of="{{ run.to.of }}">
+<path class="sketch-wire-hit"/>
+<path class="sketch-wire-bars {{ run.class() }}"/>
+<path class="sketch-wire-path {{ run.class() }}" marker-end="url(#sketch-arrow)"/>
+</g>
+{%- endfor %}
+<text class="sketch-wire-label">{{ wire.carries }}</text>
+<text class="sketch-wire-source">{{ wire.source }}</text>
+</g>
+{%- endfor %}
+</svg>
+{%- endif %}
+<div class="sketch-grid{% if !wires.is_empty() %} sketch-wired{% endif %}" style="grid-template-columns: {{ columns }}; grid-template-rows: {{ rows }}; grid-template-areas: {{ areas }}">
+{%- for role in roles %}
+<div class="{{ role.area_class() }}" style="grid-area: {{ role.area }}" data-area="{{ role.area }}">
+{%- for nested in role.nested %}
+<div class="{{ nested.class() }}" style="{{ nested.style() }}">
+{{- nested.plan|safe }}
+<div class="sketch-nested-name" title="{{ nested.source }}">
+<div class="sketch-nested-label">{{ nested.label }}</div>
+{%- if let Some(spoken) = nested.spoken() %}
+<div class="shape-state">{{ spoken }}</div>
+{%- endif %}
+<div class="sketch-nested-link">{% call links::object_link(nested.name.text, nested.name.href, "") %}{% endcall %}</div>
+{%- if let Some(why) = nested.why %}
+<div class="sketch-nested-why"{% if let Some(message) = why.message %} title="{{ message }}"{% endif %}>{{ why.reason }}</div>
+{%- endif %}
+</div>
+</div>
+{%- endfor %}
+{%- let drawn = role.drawn %}
+{%- include "shapes/parts.html" %}
+</div>
+{%- endfor %}
+</div>
+</div>
+{%- if !wires.is_empty() %}
+<ul class="sketch-wire-list" aria-label="Wires of {{ name }}">
+{%- for wire in wires %}
+<li{% if wire.dashed() %} class="sketch-wire-empty"{% endif %}>{% call links::sentence(wire.sentence.as_slice()) %}{% endcall %}<span class="sketch-wire-from">, {{ wire.source }}</span></li>
+{%- endfor %}
+</ul>
+{%- endif %}

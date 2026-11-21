@@ -24,7 +24,7 @@ fn sizes_a_part_from_its_design() {
         (drawing.class.as_str(), drawing.style.as_str(), drawing.axis),
         (
             "shape-part shape-fit-wrap shape-align-start",
-            "--w-min: 160px; --w-top: 460px; --u: calc(100cqi / 460); --ratio: 460 / 153; --axis: 76.5",
+            "--w-min: 160px; --w-top: 460px; --u: calc(100cqi / 460); --ratio: 460 / 153; --axis-shift: 0",
             true
         )
     );
@@ -34,7 +34,7 @@ fn sizes_a_part_from_its_design() {
 #[case::a_share_of_the_sketch(
     "screen",
     "shape-part shape-fit-cut shape-align-start shape-display-surface shape-share",
-    "--w-min: 240px; --w-top: min(62cqi, 600px); --u: calc(100cqi / 600); --ratio: 600 / 338; --axis: 169"
+    "--w-min: 240px; --w-top: min(62cqi, 600px); --u: calc(100cqi / 600); --ratio: 600 / 338; --axis-shift: 0"
 )]
 #[case::as_wide_as_its_text(
     "tag",
@@ -77,6 +77,8 @@ fn moves_the_text_clear_of_a_piece_and_keeps_the_source_line_under_it() {
     );
 }
 
+/// A box's feet stand under its outline, so they are outside it, and a
+/// sketch too narrow to join its parts leaves them out.
 #[rstest]
 fn draws_the_body_and_each_piece_in_order_with_its_material() {
     let drawing = Drawing::of(&library_shape("box"), Pose::default());
@@ -90,8 +92,8 @@ fn draws_the_body_and_each_piece_in_order_with_its_material() {
         vec![
             "shape-outline shape-draw-solid",
             "shape-piece shape-draw-line",
-            "shape-piece shape-draw-solid",
-            "shape-piece shape-draw-solid",
+            "shape-piece shape-draw-solid shape-outside",
+            "shape-piece shape-draw-solid shape-outside",
             "shape-piece shape-draw-mark",
         ]
     );

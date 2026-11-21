@@ -327,10 +327,11 @@ impl KindKnowledge {
 
     /// The shape that each part of `role` is drawn in: the first of the
     /// role's `shape`, the shape that the knowledge of the part's kind
-    /// states, and the library's default. The kind is the one that the
-    /// role's reference names, so an expected role with no part takes
-    /// the same shape as its parts would. A reference that names no kind
-    /// reads a value, so only the role can state its shape. The error is
+    /// states, and the library's default. The kind is the kind of the
+    /// role's parts, which `Fill::parts_kind` gives, so an expected role
+    /// with no part takes the same shape as its parts would. A reference
+    /// that names no kind reads a value, so only the role can state its
+    /// shape. The error is
     /// the message of a condition for a role whose shape is not loaded.
     fn shape_of(
         &self,
@@ -347,7 +348,7 @@ impl KindKnowledge {
                 )
             });
         }
-        let kind = target_of(&self.references, &role.reference);
+        let kind = role.fill.parts_kind(&self.references);
         let stated = kind.and_then(|(group, kind)| of_kind(group, kind));
         Ok(stated.unwrap_or_else(library::default))
     }

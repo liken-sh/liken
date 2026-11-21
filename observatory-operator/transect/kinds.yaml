@@ -1,0 +1,284 @@
+# Kind knowledge that `transect` reads for the kinds of
+# `observatory-operator`.
+#
+# Between reservations each device, train, and telescope has `Ready`
+# `False` with the reason `Idle`, and a device that names no parent has
+# the reason `Inventory`.  Both mean that the object is not in use, not
+# that it is broken, so `calm` lists them, and `transect` draws the
+# object at rest.  They are the phases `PhaseIdle` in
+# `observatory/site.go` and `DeviceInventory` in `observatory/device.go`.
+#
+# Each piece of equipment names what it is part of.  A camera, a filter
+# wheel, a focuser, a rotator, a dust cap, a flat panel, and a guider
+# name their optical train in `spec.opticalTrain`.  A train, a tube, a
+# mount, a guider, a switch, a GPS, and a polar aligner name their
+# telescope in `spec.telescope`, and a telescope names its observatory.
+# So the board of each object nests under the board of the object
+# above it, and the page of a telescope draws the objects that name it.
+#
+# The operator that owns a kind states the shape that every sketch
+# draws its objects in.  `shapes.yaml` beside this file has the shapes
+# of a telescope's own parts: a `tube`, a `drawtube`, a `cover`, a
+# `camera`, and an `equatorial-mount`.  A filter wheel is the library's
+# `disc`.  A `Guider` is software that reads a camera, so it is the
+# library's `tag`, a label beside the picture and not a piece of
+# equipment.  A kind that states no shape, such as a `Switch`, is drawn
+# as the library's `box`.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: cameras.observatory.liken.sh
+spec:
+  shape: camera
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  references:
+    - {path: spec.opticalTrain, kind: OpticalTrain, group: observatory.liken.sh, edge: part of}
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: domes.observatory.liken.sh
+spec:
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: dustcaps.observatory.liken.sh
+spec:
+  shape: cover
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  references:
+    - {path: spec.opticalTrain, kind: OpticalTrain, group: observatory.liken.sh, edge: part of}
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: filterwheels.observatory.liken.sh
+spec:
+  shape: disc
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  references:
+    - {path: spec.opticalTrain, kind: OpticalTrain, group: observatory.liken.sh, edge: part of}
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: flatpanels.observatory.liken.sh
+spec:
+  shape: cover
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  references:
+    - {path: spec.opticalTrain, kind: OpticalTrain, group: observatory.liken.sh, edge: part of}
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: focusers.observatory.liken.sh
+spec:
+  shape: drawtube
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  references:
+    - {path: spec.opticalTrain, kind: OpticalTrain, group: observatory.liken.sh, edge: part of}
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: gpses.observatory.liken.sh
+spec:
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  references:
+    - {path: spec.telescope, kind: Telescope, group: observatory.liken.sh, edge: part of}
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: guiders.observatory.liken.sh
+spec:
+  shape: tag
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  references:
+    - {path: spec.opticalTrain, kind: OpticalTrain, group: observatory.liken.sh, edge: part of}
+    - {path: spec.telescope, kind: Telescope, group: observatory.liken.sh, edge: part of}
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: mounts.observatory.liken.sh
+spec:
+  shape: equatorial-mount
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  references:
+    - {path: spec.telescope, kind: Telescope, group: observatory.liken.sh, edge: part of}
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: observatories.observatory.liken.sh
+spec:
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: polaraligners.observatory.liken.sh
+spec:
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  references:
+    - {path: spec.telescope, kind: Telescope, group: observatory.liken.sh, edge: part of}
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: receivers.observatory.liken.sh
+spec:
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: rotators.observatory.liken.sh
+spec:
+  shape: drawtube
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  references:
+    - {path: spec.opticalTrain, kind: OpticalTrain, group: observatory.liken.sh, edge: part of}
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: switches.observatory.liken.sh
+spec:
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  references:
+    - {path: spec.telescope, kind: Telescope, group: observatory.liken.sh, edge: part of}
+  controller: {image: liken-sh/observatory-operator}
+---
+# The page of a `Telescope` draws the rig: the telescope from the side,
+# with the light entering at the left.  Its parts are the objects that
+# name the telescope, so most roles are `namedBy` a kind and its
+# `spec.telescope`.
+#
+# A telescope has any number of optical trains, and each is drawn as the
+# train's own elevation, "the train", which the knowledge of an
+# `OpticalTrain` below states.  The guide train is the train that the
+# `Guider` names: `guide` reads each `Guider` that names the telescope,
+# and follows its `spec.opticalTrain` to the train.  A sketch draws an
+# object in one role only, the first in the order of the sketch's
+# cells, so `guide` stands above `main`, draws the guide train, and
+# `main`, the imaging train, draws every other train.  With no
+# `Guider`, `main` draws every train.
+#
+# The guide train stands on the main train, and the main train on the
+# mount's saddle, because a tube joins on its top and its bottom and the
+# mount on its top.  The cells beside the mount under the main train are
+# `.`, because a `box` there does not join and would keep a gap between
+# the train and the mount.  The boxes stand beside the mount in the rows
+# under that.
+#
+# The INDI server runs only while a reservation uses the telescope, so
+# `server` is expected while the telescope's `Active` condition is
+# `True`.  Between reservations its place is drawn empty and at rest.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: telescopes.observatory.liken.sh
+spec:
+  summary: A mount and the optical trains on it, with the INDI server that a reservation connects to.
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  references:
+    - {path: spec.observatory, kind: Observatory, group: observatory.liken.sh, edge: part of}
+    - {path: status.server.service, kind: Service, label: INDI server}
+    - {path: status.server.node, kind: Node, edge: runs on}
+    - {path: status.reservation.name, kind: Reservation, group: observatory.liken.sh, label: reserved by}
+  roles:
+    guide:       {namedBy: {kind: Guider, path: spec.telescope}, through: spec.opticalTrain, elevation: the train, label: guide train}
+    main:        {namedBy: {kind: OpticalTrain, path: spec.telescope}, elevation: the train, label: imaging train, expected: true}
+    mount:       {namedBy: {kind: Mount, path: spec.telescope}, expected: true, reads: [State, RA, Dec, Driver]}
+    power:       {namedBy: {kind: Switch, path: spec.telescope}, reads: [On]}
+    gps:         {namedBy: {kind: GPS, path: spec.telescope}, reads: [Fix]}
+    aligner:     {namedBy: {kind: PolarAligner, path: spec.telescope}, reads: [Adjustment]}
+    server:      {reference: status.server.service, label: INDI server, expected: {while: Active}, shows: [Host, Port]}
+    reservation: {reference: status.reservation.name, shape: tag, reads: [Holder, Phase]}
+  elevations:
+    - name: the rig
+      question: What is this telescope made of?
+      sketch: |
+        guide  guide  guide  guide    .            .
+        main   main   main   main     main         main
+        mount  mount  mount  .        .            .
+        mount  mount  mount  power    server       server
+        mount  mount  mount  gps      reservation  reservation
+        mount  mount  mount  aligner  .            .
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: weatherstations.observatory.liken.sh
+spec:
+  healthy: {condition: Ready, calm: [Idle, Inventory]}
+  controller: {image: liken-sh/observatory-operator}
+---
+# The train is the path of light from one tube to a camera, in the order
+# that the light passes the parts: a flat panel and a dust cap in front
+# of the tube, the tube, then a focuser, a rotator, a filter wheel, and a
+# camera, and the guider that reads the camera last.  Each part names
+# the train in `spec.opticalTrain`, except the tube, which the train
+# names.  The parts join end to end, so they touch on the light's axis.
+# A train with no part in a role, such as a guide train with no focuser,
+# draws the next part against the one before it.  Each column of the
+# sketch is a share of the train's width, so the tube has four columns
+# and each device one.
+#
+# The page of a `Telescope` draws this elevation for each of its trains,
+# and the page of an `OpticalTrain` draws it as its only elevation.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: opticaltrains.observatory.liken.sh
+spec:
+  summary: The path of light from one tube to a camera, and the devices on it.
+  healthy: {condition: ParentFound}
+  references:
+    - {path: spec.telescope, kind: Telescope, group: observatory.liken.sh, edge: part of}
+    - {path: spec.opticalTube, kind: OpticalTube, group: observatory.liken.sh, label: optical tube}
+  roles:
+    panel:   {namedBy: {kind: FlatPanel, path: spec.opticalTrain}, reads: [Light, Brightness]}
+    cap:     {namedBy: {kind: DustCap, path: spec.opticalTrain}, reads: [Cover]}
+    tube:    {reference: spec.opticalTube, expected: true, reads: [Aperture, Focal Length]}
+    focuser: {namedBy: {kind: Focuser, path: spec.opticalTrain}, reads: [Position]}
+    rotator: {namedBy: {kind: Rotator, path: spec.opticalTrain}, reads: [Angle]}
+    wheel:   {namedBy: {kind: FilterWheel, path: spec.opticalTrain}, reads: [Filter, Slot]}
+    camera:  {namedBy: {kind: Camera, path: spec.opticalTrain}, expected: true, reads: [Temp, Setpoint, Cooler, Exposure]}
+    guider:  {namedBy: {kind: Guider, path: spec.opticalTrain}, reads: [State, RMS]}
+  elevations:
+    - name: the train
+      question: What does the light pass through, in order?
+      sketch: |
+        panel  cap  tube  tube  tube  tube  focuser  rotator  wheel  camera  guider
+  controller: {image: liken-sh/observatory-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: opticaltubes.observatory.liken.sh
+spec:
+  shape: tube
+  healthy: {condition: ParentFound}
+  references:
+    - {path: spec.telescope, kind: Telescope, group: observatory.liken.sh, edge: part of}
+  controller: {image: liken-sh/observatory-operator}
