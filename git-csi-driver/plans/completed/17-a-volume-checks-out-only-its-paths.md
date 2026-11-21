@@ -3,9 +3,10 @@
 Proposed and built on 2026-11-21. Three reviews of the first draft on
 2026-11-21 ran git 2.53.0 and the image's git 2.55.0 against small
 repositories and a clone of `liken`. Their findings and measurements
-are in this version. The drill on `liken-1` has not run. "What the
-build changed" at the end lists where the code differs from the
-design below.
+are in this version. Drilled on `liken-1` on 2026-11-21, with the
+development build `2026.11.19-002-dev-043-795743be`. "What the build
+changed" lists where the code differs from the design below, and "The
+drill" gives what the drill measured.
 
 ## The problem
 
@@ -341,3 +342,42 @@ directory per application:
 - **Literal pathspecs** come from `GIT_LITERAL_PATHSPECS=1` in git's
   environment, which git documents as the same as
   `--literal-pathspecs`.
+
+## The drill
+
+On `liken-1`, on 2026-11-21, against a `git daemon` in the drill's
+namespace that served a fixture repository of 2,015 files. Each case
+of the table in "The proof" passed, and the drill found no fault in
+the driver.
+
+- **An inline volume** with `paths: apps/one,top.yaml` checked out
+  exactly those entries. A push that changed only files outside them
+  moved the volume's commit within its 30 s pull, and none of the 4
+  inodes changed. A push that changed `apps/one/a.yaml` changed only
+  that file's inode. `../x` and a missing entry were each refused on
+  the pod, with the entry in the message.
+- **A read-only claim** with `pull: on-demand` and `depth: "1"`, read
+  by two pods, posted `GitVolumePathMissing` after the entry
+  `apps/two` was renamed upstream, and both pods kept the old files.
+  Renaming it back posted `GitVolumePathFound`. After the node plugin
+  pod was deleted and came back, the resumed volume changed only the
+  inode of the one file that a push changed inside its entries.
+- **A read-only claim without `paths`** changed 1 inode of 2,015 for a
+  push of one file.
+- **A writeable volume** posted `GitVolumeFileSkipped` for each write
+  outside its entry and did not count it as pending. An armed volume
+  with `ignore: "*.log"` pushed a commit that added only the file
+  inside its entry.
+- **Two writers with disjoint entries** that wrote at the same moment
+  rebased with no side branch, and the metadata record on the forge
+  kept the modes of both volumes' files. A third volume that checked
+  out both entries got those modes. Two writers whose entries overlap
+  diverged to a side branch, and the volume healed after a merge on
+  the forge.
+- **A kept work tree** staged again under a new `PersistentVolume` with
+  other entries checked out only the new entries, from the same git
+  directory. **A pod that deleted every file of its entry** pushed the
+  deletion, and its next pod staged with an empty entry directory.
+
+The volume with `paths: apps/two,top.yaml` was 3 files and 28 KiB on
+the node. The volume without `paths` was 2,015 files and 8,204 KiB.
