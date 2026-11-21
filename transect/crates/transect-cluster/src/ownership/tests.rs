@@ -187,12 +187,11 @@ fn an_owned_object_is_managed_by_its_top_owner() {
         ),
         ("apps", "Deployment", Some("shop"), "web", vec![]),
     ]);
-    let mut edges: Vec<(Endpoint, Endpoint)> = ownership
+    let edges: Vec<(Endpoint, Endpoint)> = ownership
         .edges()
         .into_iter()
         .map(|edge| (edge.from, edge.to))
         .collect();
-    edges.sort_by_key(|(from, _)| format!("{from:?}"));
     let sessions = Endpoint::Object(object("cache.example.io", "Cache", "sessions"));
     assert_eq!(
         edges,
@@ -207,4 +206,26 @@ fn an_owned_object_is_managed_by_its_top_owner() {
             ),
         ]
     );
+}
+
+/// The edges come out in the order of the objects they leave, so a page
+/// that lists what an owner manages lists it in the same order on every
+/// load.
+#[rstest]
+fn lists_the_managed_objects_in_order() {
+    let names = ["web-e", "web-b", "web-d", "web-a", "web-c"];
+    let mut rows: Vec<Row> = names
+        .iter()
+        .map(|name| pod(name, vec![("apps/v1", "Deployment", "web")]))
+        .collect();
+    rows.push(("apps", "Deployment", Some("shop"), "web", vec![]));
+    let ownership = build(&rows);
+    let from: Vec<Endpoint> = ownership
+        .edges()
+        .into_iter()
+        .map(|edge| edge.from)
+        .collect();
+    let mut sorted = from.clone();
+    sorted.sort();
+    assert_eq!(from, sorted);
 }

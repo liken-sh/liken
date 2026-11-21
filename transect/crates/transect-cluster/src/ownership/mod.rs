@@ -18,7 +18,7 @@ mod departed;
 mod generated;
 mod kinds;
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference};
 
@@ -60,8 +60,9 @@ pub struct Entry<'a> {
 pub struct Ownership {
     /// The top owner of each indexed object that has an owner, including
     /// objects that run no pods, such as a `Service` that an operator
-    /// created.
-    top: HashMap<Object, Object>,
+    /// created. It is ordered, so `edges` lists the objects in the same
+    /// order on every build.
+    top: BTreeMap<Object, Object>,
     /// Each namespace's workloads: the top owners of its pods and
     /// built-in workloads.
     workloads: HashMap<String, BTreeSet<Object>>,
