@@ -8,6 +8,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -127,19 +129,35 @@ func (r *repository) resolve(ctx context.Context, ref string) (string, error) {
 	return trimLine(output.stdout), nil
 }
 
-// checkout writes the files of the commit into dir. The index file is
-// written beside dir and deleted afterward, so a pod sees no git
-// metadata in dir.
-func (r *repository) checkout(ctx context.Context, commit, dir string) error {
+// checkout writes the files of the commit at the entries into dir, or
+// the whole tree when entries is empty.
+func (r *repository) checkout(ctx context.Context, commit, dir string, entries []string) error {
+	if len(entries) == 0 {
+		entries = []string{"."}
+	}
+	return r.checkoutFrom(ctx, commit, dir, append([]string{"--"}, entries...))
+}
+
+// checkoutFrom reads the whole tree of the commit into a temporary
+// index, and then checks out the paths that pathspec names from that
+// index into dir. The whole tree is in the index so that a
+// .gitattributes outside the paths, such as a root `* text eol=crlf`,
+// applies to the files it checks out, and a file has the same bytes
+// whatever the volume's paths are. The index file is written beside dir
+// and deleted afterward, so a pod sees no git metadata in dir.
+func (r *repository) checkoutFrom(ctx context.Context, commit, dir string, pathspec []string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	index := dir + ".index"
 	defer os.Remove(index)
+	env := append([]string{"GIT_INDEX_FILE=" + index}, literalPathspecs...)
 
-	_, err := runGit(ctx, r.dir, []string{"GIT_INDEX_FILE=" + index},
-		"--work-tree="+dir, "-c", "core.bare=false",
-		"checkout", "--force", commit, "--", ".")
+	if _, err := runGit(ctx, r.dir, env, "read-tree", commit); err != nil {
+		return err
+	}
+	args := []string{"--work-tree=" + dir, "-c", "core.bare=false", "checkout", "--force"}
+	_, err := runGit(ctx, r.dir, env, append(args, pathspec...)...)
 	return err
 }
 
@@ -147,18 +165,38 @@ func (r *repository) checkout(ctx context.Context, commit, dir string) error {
 // moves the files into the published tree.
 const nextTree = "next"
 
-// place checks the commit out into nextTree and moves its files into
-// tree. When tree does not exist yet, one rename moves the checkout into
-// place. When tree exists, a pod can have it bind-mounted, and a bind
-// mount follows the directory and not its name. Renaming a new
-// directory over tree would leave the pod reading the old files, so
-// replaceTree moves the files into the existing directory.
-func (r *repository) place(ctx context.Context, commit, directory, tree string) error {
+// place moves the published tree to the commit. A commit that lacks an
+// entry of paths changes nothing and returns a *missingPath.
+//
+// When the tree is already at a commit that the repository has, place
+// writes only the files that changed between the two commits, which
+// update describes. Otherwise it checks out every entry into nextTree
+// and moves the files into tree. When tree does not exist yet, one
+// rename moves the checkout into place. When tree exists, a pod can
+// have it bind-mounted, and a bind mount follows the directory and not
+// its name. Renaming a new directory over tree would leave the pod
+// reading the old files, so replaceTree moves the files into the
+// existing directory.
+//
+// place deletes placedFile before it changes the published tree, and
+// writes it again after. A driver that stops or fails during the change
+// leaves a tree with no recorded commit, so the next place checks out
+// every entry again.
+func (r *repository) place(ctx context.Context, commit, directory, tree string, entries []string) error {
+	if err := r.checkEntries(ctx, commit, entries); err != nil {
+		return err
+	}
 	fresh := filepath.Join(directory, nextTree)
 	if err := os.RemoveAll(fresh); err != nil {
 		return err
 	}
-	if err := r.checkout(ctx, commit, fresh); err != nil {
+	if changes, found := r.changesSince(ctx, directory, tree, commit, entries); found {
+		return r.update(ctx, commit, directory, tree, changes)
+	}
+	if err := r.checkout(ctx, commit, fresh, entries); err != nil {
+		return err
+	}
+	if err := forgetPlaced(directory); err != nil {
 		return err
 	}
 	if err := installTree(fresh, tree); err != nil {
@@ -183,7 +221,8 @@ func installTree(fresh, tree string) error {
 // placedFile, beside a read-only volume's tree, holds the commit that
 // the tree was checked out from. The tree has no git directory, so a
 // restarted driver reads the commit from this file and reports it
-// before the next fetch.
+// before the next fetch, and place compares it with the next commit to
+// find the files that changed.
 const placedFile = "commit"
 
 // recordPlaced writes a temporary file and renames it over placedFile,
@@ -195,6 +234,16 @@ func recordPlaced(directory, commit string) error {
 		return err
 	}
 	return os.Rename(next, filepath.Join(directory, placedFile))
+}
+
+// forgetPlaced deletes placedFile. A file that does not exist is not an
+// error, because a tree that place has not finished has none.
+func forgetPlaced(directory string) error {
+	err := os.Remove(filepath.Join(directory, placedFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // placedCommit returns an empty string when placedFile does not exist.

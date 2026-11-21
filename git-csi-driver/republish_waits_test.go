@@ -170,7 +170,7 @@ func TestAPlacementThatCannotRecordItsCommitFails(t *testing.T) {
 			}
 			writeFiles(t, filepath.Join(vol.directory, blocked), map[string]string{"x": "x"})
 
-			if err := repo.place(t.Context(), commit, vol.directory, vol.tree); err == nil {
+			if err := repo.place(t.Context(), commit, vol.directory, vol.tree, nil); err == nil {
 				t.Errorf("place returned no error with %s blocked, want one", blocked)
 			}
 		})

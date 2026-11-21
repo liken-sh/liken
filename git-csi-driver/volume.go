@@ -51,6 +51,10 @@ type volume struct {
 	fetchFault    string
 	pushFault     string
 	upstreamMoved string
+	// pathMissing is the message about the ref's commit that lacks an
+	// entry of paths, and missingCommit is that commit.
+	pathMissing   string
+	missingCommit string
 	// pod is the pod of the last publish. A stage call names no pod.
 	pod podReference
 	// targets maps each target that a read-only claim is bound at on

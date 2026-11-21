@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"sync"
@@ -302,8 +303,12 @@ func (f *follower) snapshot() []*volume {
 }
 
 // refresh fetches the volume's ref and, when the commit changed,
-// places it in the published tree. It returns true when the tree is on
-// the commit that the ref now points at.
+// places it in the published tree. It returns true when the fetch
+// succeeded and the tree is on the commit that the ref now points at,
+// or the tree stays on its commit because the ref's commit lacks an
+// entry of paths. A fetch again cannot add the entry to that commit, so
+// such a refresh satisfies the demands and starts no retry. The next
+// commit of the ref can have the entry.
 //
 // Every return changes the volume's health, so the deferred recordHealth
 // records it once for all of them.
@@ -327,19 +332,67 @@ func (f *follower) refresh(ctx context.Context, vol *volume) bool {
 		f.recordFailure(ctx, vol, err.Error())
 		return false
 	}
-	if current, _ := vol.commitAndFault(); current == commit {
-		f.recordRecovery(vol, commit)
-		return true
-	}
-
-	if err := f.repository.place(ctx, commit, vol.directory, vol.tree); err != nil {
+	placed, err := f.moveTree(ctx, vol, commit)
+	if err != nil {
 		f.recordFailure(ctx, vol, err.Error())
 		return false
 	}
-	f.recordRecovery(vol, commit)
+	f.recordRecovery(vol, placed)
+	return true
+}
+
+// moveTree places the commit in the volume's tree and returns the commit
+// that the tree is on afterward. A commit that lacks an entry of paths
+// leaves the tree on its current commit. moveTree records that fault
+// once for each commit of the ref, so a later pass at the same commit
+// runs no git command and posts no Event.
+func (f *follower) moveTree(ctx context.Context, vol *volume, commit string) (string, error) {
+	current, _ := vol.commitAndFault()
+	switch commit {
+	case current:
+		f.recordPathsFound(vol, commit)
+		return commit, nil
+	case vol.pathMissingAt():
+		return current, nil
+	}
+	err := f.repository.place(ctx, commit, vol.directory, vol.tree, vol.attributes.paths)
+	var missing *missingPath
+	if errors.As(err, &missing) {
+		f.recordPathMissing(ctx, vol, missing, current)
+		return current, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	f.recordPathsFound(vol, commit)
 	f.node.logger.InfoContext(ctx, "The tree of the volume moved",
 		"volume", vol.id, "ref", vol.attributes.ref, "commit", short(commit))
-	return true
+	return commit, nil
+}
+
+// recordPathMissing records that the ref's commit lacks an entry of
+// paths. The first such commit after a commit with every entry posts a
+// Warning Event, and the volume keeps the message in its health report
+// until the tree reaches a commit with every entry.
+func (f *follower) recordPathMissing(ctx context.Context, vol *volume, missing *missingPath, current string) {
+	message := fmt.Sprintf("Commit %s of %s has no %q, so the tree stays at %s",
+		short(missing.commit), vol.attributes.ref, missing.entry, short(current))
+	if vol.reportPathMissing(missing.commit, message) {
+		f.node.postVolumeEvent(vol, corev1.EventTypeWarning, reasonPathMissing, message)
+	}
+	f.node.logger.WarnContext(ctx, "The commit of the ref has no file at an entry of the volume's paths",
+		"volume", vol.id, "ref", vol.attributes.ref, "commit", short(missing.commit), "path", missing.entry)
+}
+
+// recordPathsFound clears the fault of a missing entry when the tree
+// reaches a commit with every entry, and posts a Normal Event, so
+// `kubectl describe` shows when the Warning ended.
+func (f *follower) recordPathsFound(vol *volume, commit string) {
+	if vol.reportPathsFound() {
+		f.node.postVolumeEvent(vol, corev1.EventTypeNormal, reasonPathFound,
+			fmt.Sprintf("The tree is at commit %s of %s, which has every entry of paths again",
+				short(commit), vol.attributes.ref))
+	}
 }
 
 // recordRecovery records the commit of a successful fetch. The first

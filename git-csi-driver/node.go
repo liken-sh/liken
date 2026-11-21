@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -286,8 +287,8 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 		return status.Error(codes.Internal, resolveErr.Error())
 	}
 
-	if err := repo.place(ctx, commit, mounting.directory, mounting.tree); err != nil {
-		return status.Error(codes.Internal, err.Error())
+	if err := repo.place(ctx, commit, mounting.directory, mounting.tree, mounting.attributes.paths); err != nil {
+		return placeRefused(err, mounting.attributes.ref, fetchErr)
 	}
 	mounting.reportCommit(commit)
 	if fetchErr != nil {
@@ -300,6 +301,26 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 	// fetch shows as abnormal before the next fetch.
 	n.recordHealth(ctx, mounting)
 	return nil
+}
+
+// placeRefused returns the error of a stage whose tree was not placed. A
+// commit that lacks an entry of paths is FailedPrecondition, because the
+// stage succeeds when the ref reaches a commit that has the entry. With
+// offline allowStale the commit can be the node's copy from before a
+// fetch that failed, and the remote can have the entry, so the message
+// names the failed fetch too.
+func placeRefused(err error, ref string, fetchErr error) error {
+	var missing *missingPath
+	switch {
+	case !errors.As(err, &missing):
+		return status.Error(codes.Internal, err.Error())
+	case fetchErr != nil:
+		return status.Errorf(codes.FailedPrecondition,
+			"paths: commit %s of %s has no %q, and the node used its copy of %s because the fetch failed: %s",
+			short(missing.commit), ref, missing.entry, ref, fetchErr)
+	}
+	return status.Errorf(codes.FailedPrecondition, "paths: commit %s of %s has no %q",
+		short(missing.commit), ref, missing.entry)
 }
 
 // NodeUnpublishVolume removes one mount, and deletes an inline volume's

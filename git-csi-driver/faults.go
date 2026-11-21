@@ -34,6 +34,37 @@ func (v *volume) reportUpstreamMoved(message string) bool {
 	return v.setFault(&v.upstreamMoved, message)
 }
 
+// reportPathMissing records that the commit lacks an entry of paths, and
+// returns true when no such fault was recorded before. A later commit
+// that lacks an entry too replaces the message and posts no Event.
+func (v *volume) reportPathMissing(commit, message string) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	first := v.pathMissing == ""
+	v.pathMissing = message
+	v.missingCommit = commit
+	return first
+}
+
+// reportPathsFound clears the fault of a missing entry, and returns true
+// when one was recorded.
+func (v *volume) reportPathsFound() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	found := v.pathMissing != ""
+	v.pathMissing = ""
+	v.missingCommit = ""
+	return found
+}
+
+// pathMissingAt returns the commit that lacks an entry of paths, or an
+// empty string when no such fault is recorded.
+func (v *volume) pathMissingAt() string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.missingCommit
+}
+
 func (v *volume) setFault(field *string, message string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -50,8 +81,10 @@ func (v *volume) fault() string {
 		return v.fetchFault
 	case v.pushFault != "":
 		return v.pushFault
+	case v.upstreamMoved != "":
+		return v.upstreamMoved
 	}
-	return v.upstreamMoved
+	return v.pathMissing
 }
 
 // stageFaults returns the faults that the stage found: upstream moved,

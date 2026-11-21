@@ -125,3 +125,13 @@ func TestEveryKindOfVolumeAcceptsPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestAVolumeWithAnInvalidEntryIsRefused(t *testing.T) {
+	_, err := parseVolumeContext(map[string]string{
+		"url": "https://example.com/data.git", "paths": "a,../x",
+	})
+	want := `paths: "../x" has an empty, . or .. component`
+	if status.Code(err) != codes.InvalidArgument || status.Convert(err).Message() != want {
+		t.Errorf("parsing the volume context returned %v, want InvalidArgument with %q", err, want)
+	}
+}

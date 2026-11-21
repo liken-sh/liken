@@ -1,15 +1,66 @@
 package main
 
 // paths.go reads the paths attribute, which limits a volume to some
-// directories and files of its repository.
+// directories and files of its repository, and checks that a commit has
+// each entry.
 
 import (
+	"context"
+	"fmt"
 	"slices"
 	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+// Every git command that takes the entries of paths runs with
+// literalPathspecs in its environment, the same as git's
+// --literal-pathspecs. git then reads each entry as a path and not as a
+// pattern, so "pages/[id]" names one directory and ":odd" names one
+// file.
+
+// missingPath is the error of a commit that has no file, directory,
+// symlink, or submodule at an entry of paths.
+type missingPath struct {
+	entry, commit string
+}
+
+func (m *missingPath) Error() string {
+	return fmt.Sprintf("commit %s has no %q", short(m.commit), m.entry)
+}
+
+// checkEntries returns a *missingPath for the first entry that the
+// commit does not have, and nil when it has every entry or the volume
+// has no paths.
+//
+// One git rev-parse checks every entry. It accepts a submodule entry,
+// which git cat-file -e refuses, because a submodule's commit is in
+// another repository. rev-parse prints one object name for each entry
+// in order. At the first entry that the commit does not have, it
+// prints that argument as it was given and stops, so that line names
+// the entry. Any other failure, such as a repository that git cannot
+// read, prints no such line and is returned as git's own error.
+func (r *repository) checkEntries(ctx context.Context, commit string, entries []string) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	args := []string{"rev-parse"}
+	for _, entry := range entries {
+		args = append(args, commit+":"+entry)
+	}
+	output, err := runGit(ctx, r.dir, literalPathspecs, args...)
+	if err == nil {
+		return nil
+	}
+	printed := strings.Split(output.stdout, "\n")
+	for _, entry := range entries {
+		if slices.Contains(printed, commit+":"+entry) {
+			return &missingPath{entry: entry, commit: commit}
+		}
+	}
+	return err
+}
 
 // parsePaths reads the paths attribute into a sorted list with no
 // duplicates, so two volumes with the same entries in another order

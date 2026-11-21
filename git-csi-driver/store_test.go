@@ -52,7 +52,7 @@ func checkoutOf(t *testing.T, repo *repository, ref string) string {
 		t.Fatalf("resolving the ref: %v", err)
 	}
 	tree := filepath.Join(t.TempDir(), "tree")
-	if err := repo.checkout(t.Context(), commit, tree); err != nil {
+	if err := repo.checkout(t.Context(), commit, tree, nil); err != nil {
 		t.Fatalf("checking out the commit: %v", err)
 	}
 	return tree
@@ -223,11 +223,11 @@ func TestCheckoutReportsATreeItCannotMake(t *testing.T) {
 	}
 	file := filepath.Join(t.TempDir(), "file")
 	writeFiles(t, filepath.Dir(file), map[string]string{"file": ""})
-	if err := repo.checkout(t.Context(), commit, filepath.Join(file, "tree")); err == nil {
+	if err := repo.checkout(t.Context(), commit, filepath.Join(file, "tree"), nil); err == nil {
 		t.Error("checkout returned no error under a file, want one")
 	}
 	if err := repo.checkout(t.Context(), "0000000000000000000000000000000000000000",
-		filepath.Join(t.TempDir(), "tree")); err == nil {
+		filepath.Join(t.TempDir(), "tree"), nil); err == nil {
 		t.Error("checkout returned no error for a commit the store does not have, want one")
 	}
 }

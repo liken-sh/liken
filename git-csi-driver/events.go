@@ -43,6 +43,12 @@ const (
 	// uncommitted changes, and the remote deleted the ref.
 	reasonUpstreamMoved = "GitVolumeUpstreamMoved"
 	reasonRefDeleted    = "GitVolumeRefDeleted"
+	// reasonPathMissing reports that the commit of a read-only volume's
+	// ref lacks an entry of paths, so the tree stays on its commit.
+	// reasonPathFound reports that the tree reached a commit with every
+	// entry again.
+	reasonPathMissing = "GitVolumePathMissing"
+	reasonPathFound   = "GitVolumePathFound"
 	// reasonNoPublishSecret reports a PersistentVolume with a stage
 	// Secret and no publish Secret. After a driver restart, such a volume
 	// does not fetch or push until the kubelet stages it again.
