@@ -10,9 +10,9 @@
 {% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
-{#- A custom resource of a known kind: the object in the middle and a
-    box per reference of its kind's knowledge around it, each naming the
-    field it was read from.
+{#- A custom resource of a known kind: the sketch of its kind's first
+    elevation, or the object in the middle and a box per reference of its
+    kind's knowledge around it, each naming the field it was read from.
     The column, the board, and the card swap as one block. -#}
 <div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
 <main class="known-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
@@ -37,7 +37,9 @@
 {%- endif %}
 </nav>
 {% include "map/edge_row.html" %}
-{%- if diagram() %}
+{%- if let Some(sketch) = sketch %}
+{% include "map/known/sketch.html" %}
+{%- else if diagram() %}
 <div class="known-frame">
 <section class="known-board" aria-label="What {{ kind }} {{ name }} is connected to" style="width: {{ width }}px; height: {{ height }}px">
 {#- The lines are drawn under the boxes, in one SVG at the board's own

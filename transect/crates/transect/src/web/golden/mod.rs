@@ -163,6 +163,7 @@ fn diff(then: &str, now: &str) -> String {
     "known",
     "/namespaces/acme-shop/promotions.promotions.example.test/spring-sale"
 )]
+#[case::a_sketch("sketch", "/namespaces/acme-ops/shelves.stock.example.test/top-shelf")]
 #[case::a_kustomization(
     "kustomization",
     "/namespaces/acme-ops/kustomizations.kustomize.toolkit.fluxcd.io/shop-apps"

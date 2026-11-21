@@ -8,11 +8,13 @@ use std::fmt::Write;
 
 use crate::edges::{Device, Object, Plurals};
 
+mod breaks;
 pub mod kinds;
 mod name;
 mod reference;
 mod sentence;
 
+pub use breaks::pieces;
 pub use name::{kind_and_name_in, name_in};
 pub use reference::{Named, Reference};
 pub use sentence::{Linker, Part, Piece, listed, text};

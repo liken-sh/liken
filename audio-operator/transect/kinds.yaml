@@ -1,0 +1,20 @@
+# Kind knowledge that `transect` reads for the `Sink` of
+# `audio-operator`.  `Connected` reports health because it is `True`
+# while a device that can play sound is on the output.  Each of its
+# `False` reasons is a thing that a person does on purpose: turns off a
+# television, unplugs a jack, or turns off a speaker.  So `calm` lists
+# all of them, and `transect` draws such a `Sink` as at rest.
+#
+# `Ready` is not the condition here, because it is `False` with the one
+# reason `NoNode` both for an output with no device and for a connected
+# device that PipeWire has no node for, and only the second is a fault.
+# `transect` reads one condition for a kind, so it does not show that
+# fault.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: sinks.audio.liken.sh
+spec:
+  summary: One speaker or sound output of a machine, which pods claim to play sound.
+  healthy: {condition: Connected, calm: [NoMonitor, JackEmpty, SpeakerDisconnected]}
+  controller: {image: liken-sh/audio-operator}

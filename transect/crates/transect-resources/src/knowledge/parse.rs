@@ -4,7 +4,9 @@
 
 use serde::Deserialize;
 
-use super::{Disruptions, KindKnowledge, Reference, ReferencedBy, Role, Target, findings, gitops};
+use super::{
+    Disruptions, KindKnowledge, Reference, ReferencedBy, Role, Target, elevation, findings, gitops,
+};
 use crate::resources::DocId;
 use transect_graph::edges::Kind;
 use transect_graph::untrusted::capped;
@@ -52,6 +54,8 @@ struct Spec {
     ignore_changes: Vec<gitops::WrittenIgnore>,
     node: Option<String>,
     findings: Option<findings::Written>,
+    #[serde(default)]
+    elevations: Vec<elevation::Written>,
 }
 
 #[derive(Deserialize)]
@@ -117,7 +121,8 @@ pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<KindKnowledge, Stri
         .map(|(at, written)| {
             reference(written).map_err(|error| format!("references[{at}]: {error}"))
         })
-        .collect::<Result<_, _>>()?;
+        .collect::<Result<Vec<_>, _>>()?;
+    let elevations = elevation::read(spec.elevations, &references)?;
     let referenced_by = spec
         .referenced_by
         .into_iter()
@@ -170,6 +175,7 @@ pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<KindKnowledge, Stri
         ignore_changes,
         node: spec.node,
         findings,
+        elevations,
     })
 }
 

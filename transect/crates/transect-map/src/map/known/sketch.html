@@ -1,0 +1,88 @@
+{#- The sketch of the first elevation of a kind's knowledge. The author
+    names the area, the shape, and the readings of each role, and the
+    classes of a part's state are the same in every sketch. The areas
+    come from role names that the parser checked, so they are safe in a
+    style attribute.
+
+    A part's state is drawn with its outline, so a screen reader would
+    not hear it. Each part that is not plain has its state as a word in
+    `sketch-state`, which the stylesheet hides from view. The field that
+    a part was read from is the part's `title` too, because the line
+    that names it shows only while the reader points at the part.
+
+    An area's class says which edge its parts stand against, so the
+    parts of a row gather toward the middle of the sketch. A shown value
+    from a column after the first of its entry has `sketch-fallback`,
+    which a screen draws quieter. -#}
+<div class="known-frame">
+<section class="sketch" aria-label="{{ sketch.name }} of {{ kind }} {{ name }}">
+<header class="{{ sketch_head_class() }}">
+<div class="known-label">{{ kind }}</div>
+<div class="known-name">{{ name }}</div>
+{%- if let Some(resting) = resting %}
+<div class="known-resting">{{ resting }}</div>
+{%- endif %}
+<div class="known-chips">
+{%- for chip in chips %}
+<span class="known-chip"{% if let Some(title) = chip.title %} title="{{ title }}"{% endif %}><span class="{{ chip.dot_class() }}"></span>{{ chip.text }}</span>
+{%- endfor %}
+</div>
+<div class="sketch-elevation">{{ sketch.name }}</div>
+<div class="sketch-question">{{ sketch.question }}</div>
+</header>
+<div class="sketch-grid" style="grid-template-columns: repeat({{ sketch.columns }}, minmax(0, 1fr)); grid-template-areas: {{ sketch.areas }}">
+{%- for role in sketch.roles %}
+<div class="{{ role.lean.area_class() }}" style="grid-area: {{ role.area }}">
+{%- for part in role.parts %}
+<div class="sketch-part {{ role.shape_class() }} {{ part.state.class() }}" title="{{ role.source }}">
+<div class="known-label">{{ role.label }}</div>
+{%- if let Some(spoken) = part.state.spoken() %}
+<div class="sketch-state">{{ spoken }}</div>
+{%- endif %}
+<div class="known-end" title="{{ part.end.reference.text }}">
+{%- if part.literal %}{% call links::value_link(part.end.reference.text, part.end.reference.href) %}{% endcall %}
+{%- else %}{% call links::object_link(part.end.reference.text, part.end.reference.href, "") %}{% endcall %}
+{%- endif %}</div>
+{%- if let Some(why) = part.why %}
+<div class="sketch-why"{% if let Some(message) = why.message %} title="{{ message }}"{% endif %}>{{ why.reason }}</div>
+{%- endif %}
+{%- if !part.readings.is_empty() || !part.shows.is_empty() %}
+<div class="sketch-display">
+{%- if !part.readings.is_empty() %}
+<div class="sketch-readings">
+{%- for reading in part.readings %}
+<div class="sketch-reading" title="{{ reading.name }} {{ reading.value }}"><span class="sketch-reading-name">{{ reading.name }}</span> <span class="sketch-reading-value">{% call links::spelled(reading.value) %}{% endcall %}</span></div>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if !part.shows.is_empty() %}
+<div class="sketch-readings sketch-shows">
+{%- for show in part.shows %}
+<div class="sketch-reading{% if show.fallback %} sketch-fallback{% endif %}" title="{{ show.name }} {{ show.value }}"><span class="sketch-reading-name">{{ show.name }}</span> <span class="sketch-reading-value">{% call links::spelled(show.value) %}{% endcall %}</span></div>
+{%- endfor %}
+</div>
+{%- endif %}
+</div>
+{%- endif %}
+{%- if !part.end.reaches.is_empty() %}
+<div class="known-under">reaches {% for reached in part.end.reaches %}{% if !loop.first %}, {% endif %}{% call links::object_link(reached.text, reached.href, "") %}{% endcall %}{% endfor %}</div>
+{%- else if let Some(under) = part.end.under %}
+<div class="known-under">{{ under }}</div>
+{%- endif %}
+<div class="known-source">{{ role.source }}</div>
+</div>
+{%- endfor %}
+{%- if let Some(nothing) = role.nothing %}
+<div class="sketch-part {{ role.shape_class() }} sketch-absent">
+<div class="known-label">{{ role.label }}</div>
+<div class="sketch-state">empty</div>
+<div class="known-none">{{ nothing.text }}</div>
+<div class="known-under">{{ nothing.note }}</div>
+</div>
+{%- endif %}
+</div>
+{%- endfor %}
+</div>
+</section>
+</div>
+<p class="known-caption">{{ sketch.caption() }}</p>

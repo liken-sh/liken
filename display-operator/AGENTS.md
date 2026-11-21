@@ -74,3 +74,6 @@ with its speakers.
 - The EDID fixtures in `testdata/` come from real monitors. To read a
   monitor's EDID, run
   `od -An -tx1 /sys/class/drm/<card>-<connector>/edid`.
+- `transect/` contains the kind knowledge that `transect` reads for the
+  `Display`. A change to a condition, a printer column, or a status
+  field that the file names also changes the file.

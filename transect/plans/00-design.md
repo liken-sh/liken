@@ -535,6 +535,12 @@ Each of these lacks a name for its model, and the code or a resource of
 `transect`'s own states each one.  The first new work lays them against
 "A pattern view" and builds what each one lacks.
 
+[Plan 13](completed/13-sketches.md), built on 2026-11-20, draws the
+references of a kind as a sketch when the knowledge of the kind states
+one.  It also marks a reference that names an object that does not
+exist.  The knowledge of the `Player` is now in
+`media-operator/transect/`, with the first sketch.
+
 `LogPattern` in `transect-observe` uses the word "pattern" for a filter
 on log lines.  One of the two names must change before the code has a
 pattern in the sense of this document.

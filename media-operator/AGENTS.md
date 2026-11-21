@@ -70,3 +70,6 @@ operator reads nothing from `library-operator`.
 - `wire.go` and `media-screen/src/wiring.rs` declare the same
   environment variables, so a change to one needs the same change in
   the other.
+- `transect/` contains the kind knowledge that `transect` reads for the
+  `Player` and the `Remote`. A change to a condition, a printer column,
+  or a status field that a file there names also changes that file.

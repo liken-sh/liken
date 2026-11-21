@@ -68,3 +68,6 @@ device publishes that fact as an attribute. `media-operator` owns
 - The ELD fixtures in `testdata/` follow the layout that the kernel's
   `hda_eld.c` writes. They exist because a machine with no monitor
   attached reports no ELD that you could capture.
+- `transect/` contains the kind knowledge that `transect` reads for the
+  `Sink`. A change to a condition, a printer column, or a status field
+  that the file names also changes the file.

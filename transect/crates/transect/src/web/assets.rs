@@ -103,6 +103,21 @@ const ASSETS: &[Asset] = &[
         CSS
     ),
     asset!(
+        "map/known/sketch.css",
+        "transect-map/src/map/known/sketch.css",
+        CSS
+    ),
+    asset!(
+        "map/known/sketch-shapes.css",
+        "transect-map/src/map/known/sketch-shapes.css",
+        CSS
+    ),
+    asset!(
+        "map/known/sketch-states.css",
+        "transect-map/src/map/known/sketch-states.css",
+        CSS
+    ),
+    asset!(
         "objects/objects.css",
         "transect-map/src/objects/objects.css",
         CSS

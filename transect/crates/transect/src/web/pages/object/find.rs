@@ -19,11 +19,19 @@ use transect_map::objects::kinds::{ReadFrom, built_in};
 /// kinds stored as metadata return only their metadata, so no page can
 /// show what a `ConfigMap` contains.
 pub fn found(snapshot: &Snapshot, object: &Object) -> Option<Found> {
+    stored(snapshot, object).flatten()
+}
+
+/// Returns `object` from the store that holds its kind. The outer
+/// `None` means no store holds the kind, so the snapshot cannot say
+/// whether the object exists. The inner `None` means the store has no
+/// such object.
+pub fn stored(snapshot: &Snapshot, object: &Object) -> Option<Option<Found>> {
     let read = built_in(&object.group, &object.kind).and_then(|served| served.read);
     match read {
         None => custom(snapshot, object),
-        Some(ReadFrom::Status) => with_status(snapshot, object)?,
-        Some(ReadFrom::Metadata) => with_metadata(snapshot, object)?,
+        Some(ReadFrom::Status) => with_status(snapshot, object),
+        Some(ReadFrom::Metadata) => with_metadata(snapshot, object),
         Some(ReadFrom::OwnPage | ReadFrom::Get | ReadFrom::Never) => None,
     }
 }
@@ -74,13 +82,12 @@ fn with_metadata(snapshot: &Snapshot, object: &Object) -> Option<Option<Found>> 
     })
 }
 
-/// The custom resource `object`, from the store of its watch.
-fn custom(snapshot: &Snapshot, object: &Object) -> Option<Found> {
+/// The custom resource `object`, from the store of its watch. The
+/// outer `None` means `transect` does not watch the kind.
+fn custom(snapshot: &Snapshot, object: &Object) -> Option<Option<Found>> {
     let (_, objects) = snapshot.custom_kind(&object.group, &object.kind)?;
-    let found = objects
-        .iter()
-        .find(|found| named(&found.metadata, object))?;
-    Some(Found::of(found))
+    let found = objects.iter().find(|found| named(&found.metadata, object));
+    Some(found.map(|found| Found::of(found)))
 }
 
 fn named(meta: &ObjectMeta, object: &Object) -> bool {
@@ -134,6 +141,43 @@ mod tests {
     ) {
         let object = Object::new(group, kind, namespace, name);
         assert_eq!(found(&fixture::snapshot(), &object).is_some(), expected);
+    }
+
+    #[rstest]
+    #[case::a_workload("apps", "StatefulSet", Some("acme-ledger"), "ledger-db", Some(true))]
+    #[case::a_missing_workload("apps", "StatefulSet", Some("acme-ledger"), "gone", Some(false))]
+    #[case::a_custom_resource(
+        "gizmos.example.test",
+        "Gizmo",
+        Some("acme-shop"),
+        "gizmo-red",
+        Some(true)
+    )]
+    #[case::a_missing_custom_resource(
+        "gizmos.example.test",
+        "Gizmo",
+        Some("acme-shop"),
+        "gone",
+        Some(false)
+    )]
+    #[case::a_kind_no_store_holds("", "Secret", Some("acme-shop"), "storefront-tls", None)]
+    #[case::a_custom_kind_not_watched(
+        "gadgets.example.test",
+        "Gadget",
+        Some("acme-shop"),
+        "a",
+        None
+    )]
+    fn says_whether_a_store_holds_the_kind_and_the_object(
+        #[case] group: &str,
+        #[case] kind: &str,
+        #[case] namespace: Option<&str>,
+        #[case] name: &str,
+        #[case] expected: Option<bool>,
+    ) {
+        let object = Object::new(group, kind, namespace, name);
+        let stored = stored(&fixture::snapshot(), &object);
+        assert_eq!(stored.map(|found| found.is_some()), expected);
     }
 
     #[rstest]

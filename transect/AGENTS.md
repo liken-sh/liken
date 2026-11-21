@@ -30,6 +30,15 @@ exists.  Knowledge that a public project would ship, with nothing of
 one cluster in it, goes in `examples/`, one directory per project,
 which a test loads.
 
+A `liken` operator ships the knowledge of its own kinds in a
+`transect/` directory of its own, such as `media-operator/transect/`,
+and none of that knowledge is in this directory.  To read it on a
+workstation, link each operator's `transect/` directory into
+`local/resources/`, because the loader follows a symbolic link.  When
+two files describe one kind, the loader uses the file whose path sorts
+first, so give the links names that sort before the cluster's own
+files.
+
 ## How it is built
 
 - The server is Rust, on kube-rs for watches and caches and axum for
@@ -203,7 +212,10 @@ lens tabs, quick search, and the machine, ground, and volume pages.
 Plan 07 ran `transect` in a cluster.  Plan 08 moved the knowledge of
 particular projects out of the code into resources, plan 09 built the
 access lens, plan 10 the vulnerabilities pages, and plan 12 split the
-crate into the workspace that "Where things live" describes.
+crate into the workspace that "Where things live" describes.  Plan 13
+is the first work under the new design: the knowledge of a kind states
+a sketch, an arrangement of roles in shapes that `transect` draws, and
+the page of an object draws it in place of the ring of boxes.
 
 `plans/open-problems/` holds the defects that a test reproduced in the
 code as it is.  Write a plan before you build anything new.

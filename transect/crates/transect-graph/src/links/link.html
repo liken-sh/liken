@@ -28,6 +28,25 @@
 <span class="object-name{% if !class.is_empty() %} {{ class }}{% endif %}">{% call shown(text) %}{% endcall %}</span>
 {%- endif -%}
 {%- endmacro -%}
+{#- A value that is not an object's name, such as an address or a list
+    of channels, with a `<wbr>` after each `,`, `.`, `/`, `:`, and `-`,
+    so a narrow box breaks it after a separator and not inside a word.
+    `links::pieces` cuts the text, and each piece is escaped. -#}
+{%- macro spelled(text) -%}
+{%- for piece in transect_graph::links::pieces(text) -%}
+{%- if !loop.first %}<wbr>{% endif -%}{{ piece }}
+{%- endfor -%}
+{%- endmacro -%}
+{#- The link of `object_link` for a value that is not an object's name,
+    such as an address that leads to the page of what it reaches. It
+    writes the value with `spelled`. -#}
+{%- macro value_link(text, href) -%}
+{%- if let Some(href) = href -%}
+<a class="object-link" href="{{ href }}" hx-get="{{ href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true">{% call spelled(text) %}{% endcall %}</a>
+{%- else -%}
+<span class="object-name">{% call spelled(text) %}{% endcall %}</span>
+{%- endif -%}
+{%- endmacro -%}
 {#- A sentence with the objects it names linked, from `Linker::link`:
     each name with a page is a link, and the words between are text. -#}
 {%- macro sentence(parts) -%}

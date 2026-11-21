@@ -5,11 +5,13 @@
 //! the `KindKnowledge` lists is a box around it. A reference
 //! whose field is empty still gets its box, so the diagram keeps its
 //! shape while an operator fills in status. The column on the left
-//! lists the kind's objects in the namespace.
+//! lists the kind's objects in the namespace. When the knowledge
+//! states an elevation, the page draws its sketch in place of the ring.
 
 mod chips;
 mod fit;
 mod layout;
+mod sketch;
 
 use askama::Template;
 
@@ -18,6 +20,7 @@ use crate::cards::WorkloadCard;
 use crate::objects::{Center, ObjectBoard, ObjectCard, Section};
 pub use chips::{Chip, chips, every_chip};
 use layout::{Place, Rect, places};
+pub use sketch::{Lean, Nothing, Part, Reading, Shown, Sketch, SketchRole, Standing, State, Why};
 use transect_frame::frame::crumbs::Crumb;
 use transect_frame::frame::tabs::{Lens, Tabs};
 use transect_graph::edges::{Endpoint, Kind, Object, Plurals};
@@ -51,6 +54,9 @@ pub struct KnownPage {
     pub height: i32,
     pub center: Rect,
     pub boxes: Vec<RelationBox>,
+    /// The first elevation of the kind's knowledge, which the page draws
+    /// in place of the boxes when the knowledge states one.
+    pub sketch: Option<Sketch>,
     /// The workload's card, for an object that runs pods.
     pub card: Option<WorkloadCard>,
     /// The object's card, for an object that runs no pods.
@@ -119,6 +125,13 @@ pub struct Board<'a> {
     pub ground: &'a dyn Fn(&str) -> Option<String>,
     /// The text that names a device on a line.
     pub device: &'a dyn Fn(&transect_graph::edges::Device) -> String,
+    /// What the cluster says about an object that a part of the sketch
+    /// names.
+    pub standing: &'a dyn Fn(&Object) -> Standing,
+    /// The readings of an object: each of the printer columns named in
+    /// the list that has a value, in the list's order. A sketch reads
+    /// the objects that its parts name and the page's own object.
+    pub readings: &'a dyn Fn(&Object, &[String]) -> Vec<Reading>,
 }
 
 impl KnownPage {
@@ -127,6 +140,8 @@ impl KnownPage {
     pub fn build(board: Board, card: Option<WorkloadCard>, object_card: ObjectCard) -> Self {
         let object = board.object;
         let namespace = object.namespace.clone().unwrap_or_default();
+        let elevation = board.knowledge.elevations.first();
+        let sketch = elevation.map(|elevation| Sketch::build(&board, elevation));
         let mut references: Vec<(String, String, Option<Kind>)> = board
             .knowledge
             .references
@@ -143,6 +158,10 @@ impl KnownPage {
             .collect();
         if let Some(path) = &board.knowledge.writes_secret {
             references.push((path.clone(), "writes".into(), None));
+        }
+        // A sketch takes the place of the ring, so the page has no boxes.
+        if sketch.is_some() {
+            references.clear();
         }
         let unplaced: Vec<RelationBox> = references
             .into_iter()
@@ -196,6 +215,7 @@ impl KnownPage {
             height,
             center,
             boxes,
+            sketch,
             card,
             known,
             board: ObjectBoard::build(None, Vec::new()),
@@ -206,15 +226,14 @@ impl KnownPage {
     /// boxes draw the object in the middle as `center`. With one, they
     /// leave out each value that a relation box already shows.
     pub fn with_board(self, center: Center, sections: Vec<Section>) -> Self {
-        if self.boxes.is_empty() {
+        if !self.diagram() {
             let board = ObjectBoard::build(Some(center), sections);
             return Self { board, ..self };
         }
-        let drawn: Vec<&Reference> = self
-            .boxes
-            .iter()
-            .flat_map(|relation| relation.ends.iter().map(|end| &end.reference))
-            .collect();
+        let in_boxes = self.boxes.iter().flat_map(|relation| &relation.ends);
+        let roles = self.sketch.iter().flat_map(|sketch| &sketch.roles);
+        let in_parts = roles.flat_map(|role| role.parts.iter().map(|part| &part.end));
+        let drawn: Vec<&Reference> = in_boxes.chain(in_parts).map(|end| &end.reference).collect();
         let shown = |value: &Reference| {
             drawn.iter().any(|end| match (&end.href, &value.href) {
                 (Some(drawn), Some(href)) => drawn == href,
@@ -233,8 +252,9 @@ impl KnownPage {
         Self { board, ..self }
     }
 
+    /// Whether the page draws a diagram: the ring of boxes or a sketch.
     pub fn diagram(&self) -> bool {
-        !self.boxes.is_empty()
+        !self.boxes.is_empty() || self.sketch.is_some()
     }
 
     /// Adds the row of edge kinds above the main column.
@@ -271,6 +291,16 @@ impl KnownPage {
             Level::Failing => "known-object known-failing",
             Level::Warning => "known-object known-warning",
             _ => "known-object",
+        }
+    }
+
+    /// The CSS class of the sketch's head, which marks the object's
+    /// health as `center_class` does on the ring.
+    pub fn sketch_head_class(&self) -> &'static str {
+        match self.level {
+            Level::Failing => "sketch-head sketch-failing",
+            Level::Warning => "sketch-head sketch-warning",
+            _ => "sketch-head",
         }
     }
 }

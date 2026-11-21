@@ -13,6 +13,7 @@ mod card;
 pub mod columns;
 mod counts;
 mod defined;
+pub mod elevation;
 pub mod findings;
 pub mod gitops;
 mod guess;
@@ -32,6 +33,7 @@ pub use card::{KnownThrough, Related};
 pub use columns::{Column, Columns, KEPT, Read as ColumnRead};
 pub use counts::{Count, counts};
 pub use defined::Definitions;
+pub use elevation::{Elevation, Grid, Shape};
 pub use gitops::{GitOpsFields, IgnoreChange, MetaKey};
 pub use guess::{Clue, Hint, clues};
 pub use layer::{Named, named};
@@ -90,6 +92,10 @@ pub struct KindKnowledge {
     /// How to read the findings in an object, when the kind is a
     /// vulnerability scanner's report.
     pub findings: Option<findings::Findings>,
+    /// The arrangements of roles that the author states for the kind.
+    /// The page of an object draws the first in place of the ring of
+    /// boxes.
+    pub elevations: Vec<Elevation>,
 }
 
 /// A field of the kind's spec or status that refers to another object,
@@ -357,6 +363,10 @@ mod tests {
     #[case::a_primary("{primary: status.currentPrimary}", true)]
     #[case::a_node_by_its_name("{node: metadata.name}", false)]
     #[case::a_node_in_its_status("{node: status.nodeName}", true)]
+    #[case::an_elevation(
+        "{references: [{path: spec.node, kind: Node}], elevations: [{name: the rack, question: Where is it?, sketch: node, roles: {node: {reference: spec.node}}}]}",
+        true
+    )]
     fn reports_whether_it_reads_fields_a_trimmed_watch_drops(
         #[case] spec: &str,
         #[case] reads: bool,

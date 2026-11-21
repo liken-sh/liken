@@ -1,0 +1,167 @@
+/*
+ * The states of the parts of a sketch.  A state has one look on every
+ * shape: the shape draws its outline in `--sketch-edge`, with an inner
+ * stroke `--sketch-weight` wide in the same color, and a state changes
+ * those two values, the fill, the marker before the role's label, and
+ * the color of the text.  So a failing screen and a failing speaker are
+ * marked the same way, as a box on the namespace page is.
+ */
+
+/* A warning outlines the shape in `--warm`, two pixels wide, and puts
+   a ring before the role's label.  A failure outlines it three pixels
+   wide, tints its fill, puts a filled dot before the label, and colors
+   the label.  The dot and the ring are the marks of the condition chips
+   in the page's head, so a failure differs from a warning by its shape
+   as well as by its color.  A name with no object is a warning. */
+.sketch-part.sketch-warning,
+.sketch-part.sketch-no-object {
+  --sketch-edge: var(--warm);
+  --sketch-weight: 1px;
+}
+
+.sketch-part.sketch-failing {
+  --sketch-edge: var(--warm);
+  --sketch-weight: 2px;
+  background-color: color-mix(in srgb, var(--warm) 10%, var(--sketch-body));
+}
+
+.sketch-tag.sketch-failing {
+  background-color: color-mix(in srgb, var(--warm) 8%, transparent);
+}
+
+.sketch-screen.sketch-failing {
+  background-color: color-mix(in srgb, var(--warm) 24%, var(--sketch-bezel));
+}
+
+.sketch-part:is(.sketch-failing, .sketch-warning, .sketch-no-object) > .known-label::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--warm);
+  border-radius: 50%;
+}
+
+.sketch-part.sketch-failing > .known-label { color: var(--warm); }
+
+.sketch-part.sketch-failing > .known-label::before { background: var(--warm); }
+
+/* The reason of the object's health condition is a short line under
+   its name, and its `title` has the condition's message. */
+.sketch-why {
+  color: var(--warm);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A part at rest is quieter: a fainter outline, a fill nearer the
+   frame's, and its name in the muted ink, because being at rest is not
+   a problem.  Its text keeps the contrast of the muted ink. */
+.sketch-part.sketch-resting {
+  --sketch-edge: var(--rule);
+  background-color: var(--sketch-rest);
+}
+
+.sketch-screen.sketch-resting {
+  --sketch-edge: var(--sketch-bezel-edge);
+  background-color: var(--sketch-bezel);
+}
+
+.sketch-tag.sketch-resting { background-color: transparent; }
+
+.sketch-part.sketch-resting > .known-end a,
+.sketch-part.sketch-resting > .sketch-why {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
+/* A value that is not an object has an outline and no fill.  Its shape
+   keeps its lines, such as a screen's glass, so it still reads as the
+   thing.  A tag has no fill to begin with, so a tag that is a value
+   has a fainter outline. */
+.sketch-part.sketch-value,
+.sketch-part.sketch-absent { background: none; }
+
+.sketch-screen.sketch-value,
+.sketch-screen.sketch-absent { --sketch-edge: var(--rule-strong); }
+
+.sketch-tag.sketch-value { --sketch-edge: var(--rule); }
+
+.sketch-value.sketch-screen::before,
+.sketch-absent.sketch-screen::before {
+  background: none;
+  border-color: var(--rule);
+  box-shadow: none;
+}
+
+.sketch-value.sketch-screen::after { background: var(--rule-strong); }
+
+/* An expected role with no part keeps its place in its shape, with a
+   dashed outline and muted text. */
+.sketch-part.sketch-absent {
+  border-style: dashed;
+  color: var(--ink-muted);
+}
+
+.sketch-absent.sketch-screen::before,
+.sketch-absent.sketch-speaker::before,
+.sketch-absent.sketch-speaker::after,
+.sketch-absent.sketch-handheld::before,
+.sketch-absent.sketch-box::before {
+  border-style: dashed;
+  background: none;
+  box-shadow: none;
+}
+
+.sketch-absent.sketch-box::after,
+.sketch-absent.sketch-screen::after,
+.sketch-absent.sketch-handheld::after { display: none; }
+
+/* A link in a part has an outline of its own when it has focus from
+   the keyboard, in the ink of the text around it, so it shows on the
+   glass of a screen as well as on a panel. */
+.sketch-part a:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* In forced colors the browser drops box shadows, background images,
+   and the colors above, so each state is a real border in a system
+   color: wider for a warning, double for a failure, gray at rest, and
+   dashed when empty.  The marker before a label keeps its own colors,
+   and the lines of a shape that tell it apart, such as a screen's glass
+   and a speaker's drivers, are borders already. */
+@media (forced-colors: active) {
+  .sketch-part { border: 1px solid CanvasText; }
+
+  .sketch-part.sketch-warning,
+  .sketch-part.sketch-no-object { border-width: 3px; }
+
+  .sketch-part.sketch-failing { border: 5px double CanvasText; }
+
+  .sketch-part.sketch-resting { border-color: GrayText; }
+
+  .sketch-part.sketch-absent { border: 1px dashed GrayText; }
+
+  .sketch-screen::before,
+  .sketch-box .sketch-display,
+  .sketch-box::before,
+  .sketch-speaker::before,
+  .sketch-speaker::after,
+  .sketch-handheld::before { border-color: CanvasText; }
+
+  .sketch-part:is(.sketch-failing, .sketch-warning, .sketch-no-object) > .known-label::before {
+    forced-color-adjust: none;
+    border-color: CanvasText;
+    background: Canvas;
+  }
+
+  .sketch-part.sketch-failing > .known-label::before { background: CanvasText; }
+
+  .sketch-part a:focus-visible { outline-color: Highlight; }
+}

@@ -46,7 +46,7 @@ use transect_graph::pods::finished;
 pub use attribute::by_workload;
 pub use cron_jobs::settled as cron_job_settled;
 pub use earlier::{EARLIER_MINUTES, Earlier, restarts as earlier_restarts};
-pub use known::{Deciding, condition, reported, resting};
+pub use known::{Deciding, at_rest, condition, reported, resting};
 pub use logged::reasons as logged_reasons;
 pub use pods::reasons as pod_reasons;
 pub use recent::{RECENT_MINUTES, is_recent};

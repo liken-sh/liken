@@ -73,3 +73,6 @@ publishes the adapter as a device, and `display-operator` owns the
   none.
 - Load the `receiver-drivers` skill under `.agents/skills` before you
   add a receiver setting or a receiver brand.
+- `transect/` contains the kind knowledge that `transect` reads for the
+  `Receiver`. A change to a condition, a printer column, or a status
+  field that the file names also changes the file.

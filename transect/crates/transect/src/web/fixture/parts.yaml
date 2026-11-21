@@ -9,7 +9,12 @@ spec:
   group: stock.example.test
   scope: Namespaced
   names: {kind: Room, plural: rooms}
-  versions: [{name: v1, served: true, storage: true}]
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - {name: Floor, type: string, jsonPath: .spec.floor}
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -18,7 +23,14 @@ spec:
   group: stock.example.test
   scope: Namespaced
   names: {kind: Shelf, plural: shelves}
-  versions: [{name: v1, served: true, storage: true}]
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - {name: Aisle, type: string, jsonPath: .spec.aisle}
+    - {name: Sale, type: string, jsonPath: .status.sale}
+    - {name: Stock, type: string, jsonPath: .status.stock}
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -32,19 +44,20 @@ spec:
 apiVersion: stock.example.test/v1
 kind: Room
 metadata: {namespace: acme-ops, name: back-room, uid: back-room}
+spec: {floor: ground}
 status: {conditions: [{type: Ready, status: 'True'}]}
 ---
 apiVersion: stock.example.test/v1
 kind: Shelf
 metadata: {namespace: acme-ops, name: top-shelf, uid: top-shelf}
-spec: {room: back-room}
-status: {conditions: [{type: Ready, status: 'True'}]}
+spec: {room: back-room, label: A-1, spill: cellar, aisle: '7'}
+status: {stock: full, conditions: [{type: Ready, status: 'True'}]}
 ---
 apiVersion: stock.example.test/v1
 kind: Shelf
 metadata: {namespace: acme-ops, name: low-shelf, uid: low-shelf}
-spec: {room: back-room}
-status: {conditions: [{type: Ready, status: 'True'}]}
+spec: {room: back-room, lamp: strip-light, ladder: step-ladder, aisle: '7'}
+status: {sale: half price, stock: low, conditions: [{type: Ready, status: 'True'}]}
 ---
 apiVersion: stock.example.test/v1
 kind: Bin

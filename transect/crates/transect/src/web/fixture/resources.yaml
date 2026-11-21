@@ -128,6 +128,14 @@ metadata:
 spec:
   summary: A room the shop keeps stock in.
 ---
+# A shelf's page draws a sketch in place of the ring. The top shelf
+# names its room, an electronic label, and a spill room that the cluster
+# has no object for. It names no lamp and no ladder, so the lamp, which
+# the sketch expects, is drawn as nothing, and the ladder, which it does
+# not expect, leaves its area blank. The low shelf names both, and the
+# cluster serves neither kind, so the page draws them plainly.  The room
+# shows the shelf's own aisle, and its sale when it has one or its
+# stock when it has none.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -136,6 +144,22 @@ spec:
   summary: A shelf in a stock room.
   references:
     - {path: spec.room, kind: Room, group: stock.example.test, edge: part of}
+    - {path: spec.label, label: labeled by}
+    - {path: spec.spill, kind: Room, group: stock.example.test, label: spills into}
+    - {path: spec.lamp, kind: Lamp, group: stock.example.test, label: lit by}
+    - {path: spec.ladder, kind: Ladder, group: stock.example.test, label: reached by}
+  elevations:
+    - name: the shelf
+      question: Where is this shelf, and what does it need?
+      sketch: |
+        room   room   label
+        spill  lamp   ladder
+      roles:
+        room: {reference: spec.room, expected: true, reads: [Floor], shows: [Aisle, [Sale, Stock]]}
+        label: {reference: spec.label, shape: screen, expected: true}
+        spill: {reference: spec.spill}
+        lamp: {reference: spec.lamp, expected: true}
+        ladder: {reference: spec.ladder}
 ---
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge

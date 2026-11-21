@@ -77,13 +77,26 @@ pub fn reported(kinds: &Kinds, object: &Object, resource: &DynamicObject) -> Opt
 /// names is `False` with a calm reason: the condition's message, or its
 /// reason when it has no message.  The page shows it as a gray line.
 pub fn resting(kinds: &Kinds, object: &Object, resource: &DynamicObject) -> Option<String> {
+    let (reason, message) = at_rest(kinds, object, resource)?;
+    Some(message.unwrap_or(reason))
+}
+
+/// The reason and the message of the condition that `object`'s kind
+/// knowledge names, when it is `False` with a calm reason.  A sketch
+/// shows the reason on the part and the message when the reader points
+/// at it.
+pub fn at_rest(
+    kinds: &Kinds,
+    object: &Object,
+    resource: &DynamicObject,
+) -> Option<(String, Option<String>)> {
     let named = kinds.of_object(object)?.healthy.as_deref()?;
     let condition = find(resource, named)?;
     if !calm(kinds, object, condition) {
         return None;
     }
     let text = |key: &str| capped(condition.get(key)?.as_str()?, MESSAGE_CHARS);
-    text("message").or_else(|| text("reason"))
+    Some((text("reason")?, text("message")))
 }
 
 /// Whether `condition` is the condition that `object`'s kind knowledge
@@ -292,6 +305,25 @@ mod tests {
         let kinds = spec.map(kinds).unwrap_or_default();
         let found = resting(&kinds, &widget(), &resource(conditions));
         assert_eq!(found.as_deref(), expected);
+    }
+
+    #[rstest]
+    #[case::with_a_message(
+        "[{type: Spinning, status: 'False', reason: Parked, message: Not reserved}]",
+        Some(("Parked", Some("Not reserved")))
+    )]
+    #[case::with_no_message(
+        "[{type: Spinning, status: 'False', reason: Parked}]",
+        Some(("Parked", None))
+    )]
+    #[case::working("[{type: Spinning, status: 'True'}]", None)]
+    fn gives_the_reason_and_message_of_a_resource_at_rest(
+        #[case] conditions: &str,
+        #[case] expected: Option<(&str, Option<&str>)>,
+    ) {
+        let found = at_rest(&kinds(RESTING), &widget(), &resource(conditions));
+        let found = found.as_ref().map(|(r, m)| (r.as_str(), m.as_deref()));
+        assert_eq!(found, expected);
     }
 
     #[rstest]

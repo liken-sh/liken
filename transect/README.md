@@ -110,7 +110,9 @@ a message that names the resource that turns them on, and a repository
 on a forge that no resource declares is plain text.  [examples/](examples/) contains
 these resources for public projects, such as Flux, cert-manager,
 Traefik, and kube-prometheus, in one directory each.  Copy them into
-your directory and edit them.  The design of the proof of concept
+your directory and edit them.  A `liken` operator ships the
+knowledge of its own kinds in its `transect/` directory, such as
+`media-operator/transect/`.  Copy or link that directory into yours.  The design of the proof of concept
 describes each resource's shape.  `cargo run -- --help` lists every flag, including
 `--alertmanager` for the alerts, registry credentials and mirrors for
 reading image labels, and the address of a log store.

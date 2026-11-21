@@ -92,6 +92,8 @@ fn board(card: Option<WorkloadCard>) -> KnownPage {
         page: &page,
         ground: &|title| Some(format!("/ground/{title}")),
         device: &|device| device.short(),
+        standing: &|_| Standing::Plain,
+        readings: &|_, _| Vec::new(),
     };
     let object_card = crate::objects::ObjectCard {
         kind: "Player".into(),
