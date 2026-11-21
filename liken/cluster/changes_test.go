@@ -62,6 +62,10 @@ func TestRestartAppliesByDomain(t *testing.T) {
 			s.Runtime.K3s.Debug = true
 			s.Runtime.Containerd.LogLevel = "warn"
 		}, true},
+		"etcd's metrics turned off": {func(s *ClusterSpec) {
+			off := false
+			s.Runtime.Etcd.ExposeMetrics = &off
+		}, true},
 		"runtime and a feature": {func(s *ClusterSpec) { s.Runtime.K3s.GoMemoryLimit = "off"; s.Features["traefik"] = &FeatureConfig{} }, true},
 		"features and registries": {func(s *ClusterSpec) {
 			s.Features["traefik"] = &FeatureConfig{}

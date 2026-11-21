@@ -32,7 +32,7 @@ func fullConn(t *testing.T, ifname, cidr string, method machine.AddressMethod) *
 }
 
 func TestRuntimeFactsReportTheImageGCPolicy(t *testing.T) {
-	got := runtimeFacts(imageGCCluster(), 1<<30).Kubelet.ImageGC
+	got := runtimeFacts(imageGCCluster(), api.RoleLeader, 1<<30).Kubelet.ImageGC
 	want := machine.ImageGCStatus{
 		HighThresholdPercent: 70, LowThresholdPercent: 60,
 		MinimumAge: "5m", MaximumAge: "168h",
@@ -48,14 +48,33 @@ func TestRuntimeFactsWithoutAPolicyReportNone(t *testing.T) {
 		"no cluster": nil,
 		"no policy":  labCluster(),
 	} {
-		if got := runtimeFacts(clusterDoc, 1<<30).Kubelet; got != (machine.KubeletRuntimeStatus{}) {
+		if got := runtimeFacts(clusterDoc, api.RoleLeader, 1<<30).Kubelet; got != (machine.KubeletRuntimeStatus{}) {
 			t.Errorf("%s: got %+v, want an empty block", name, got)
 		}
 	}
 }
 
+func TestRuntimeFactsReportWhetherEtcdMetricsAreExposed(t *testing.T) {
+	for name, tc := range map[string]struct {
+		clusterDoc *cluster.Cluster
+		role       api.Role
+		want       bool
+	}{
+		"a leader with no cluster":    {nil, api.RoleLeader, true},
+		"a leader by default":         {labCluster(), api.RoleLeader, true},
+		"a leader with the field off": {etcdMetricsOffCluster(), api.RoleLeader, false},
+		"a follower":                  {labCluster(), api.RoleFollower, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := runtimeFacts(tc.clusterDoc, tc.role, 1<<30).Etcd.ExposeMetrics; got != tc.want {
+				t.Errorf("Etcd.ExposeMetrics is %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRuntimeFactsReportTheLogLevels(t *testing.T) {
-	got := runtimeFacts(debugCluster(), 1<<30)
+	got := runtimeFacts(debugCluster(), api.RoleLeader, 1<<30)
 	if !got.K3s.Debug {
 		t.Error("K3s.Debug is false, want the cluster's debug flag, true")
 	}
@@ -70,7 +89,7 @@ func TestRuntimeFactsWithoutLevelsReportNone(t *testing.T) {
 		"no cluster": nil,
 		"no level":   labCluster(),
 	} {
-		got := runtimeFacts(clusterDoc, 1<<30)
+		got := runtimeFacts(clusterDoc, api.RoleLeader, 1<<30)
 		if got.K3s.Debug {
 			t.Errorf("%s: K3s.Debug is true, want false when the field is unset", name)
 		}

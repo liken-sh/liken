@@ -34,31 +34,6 @@ default-local-storage-path: /var/lib/liken/pod-storage
 # root.
 write-kubeconfig-mode: "0644"
 
-# On a cluster with more than one leader, k3s runs an etcd member in
-# the server process of each leader. etcd serves its Prometheus
-# metrics on port 2381, and k3s binds that port to the loopback
-# address only. With this key, k3s also binds it to the node IP, so a
-# Prometheus that runs in a pod can scrape each leader's etcd with no
-# proxy and no pod on the host network. A person needs these series,
-# such as etcd_disk_wal_fsync_duration_seconds, to learn whether a
-# slow control plane has a slow disk under etcd, and no other port of
-# a liken machine serves them.
-#
-# The port is plain HTTP with no authentication, as the metrics ports
-# of the operators are. It serves /metrics and etcd's health paths
-# (/health, /livez, /readyz). The metrics show the member IDs, the
-# size of the datastore, and the counts and durations of requests.
-# They show no key and no value. etcd's client port and peer port
-# still require a certificate from the cluster's etcd CA.
-#
-# The key is on for every leader, with no field of the Cluster to
-# turn it off, because a person cannot diagnose the datastore of a
-# running cluster without these series. A leader that is the only
-# leader keeps the datastore in sqlite and runs no etcd, so the key
-# does nothing there. A follower reads agent.yaml, which does not
-# have the key, because a k3s agent refuses a server key.
-etcd-expose-metrics: true
-
 # One key a reader might also expect here is kube-proxy-arg, which
 # carries the networks a NodePort service answers on. It is computed
 # too, for the same reason the disable list is: the Cluster's

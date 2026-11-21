@@ -85,7 +85,7 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	tree.WriteModules(in.modules)
 	tree.WriteFeatures(in.features)
 	tree.WriteRegistries(in.registries)
-	tree.WriteRuntime(runtimeFacts(in.clusterDoc, memoryBytes))
+	tree.WriteRuntime(runtimeFacts(in.clusterDoc, in.role, memoryBytes))
 	// Init reads its own limits, because every process on the machine
 	// inherits them from PID 1. in.boot.Rlimits is the spec's set.
 	tree.WriteRlimits(readRlimits(machine.OSRlimits, in.boot.Rlimits))
@@ -114,8 +114,10 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 // that k3sRuntimeEnv computes for GOMEMLIMIT from the same spec and
 // memory size, written with Kubernetes's Mi suffix where GOMEMLIMIT
 // takes MiB. A limit of 0 reports nothing. The other values are copied
-// from the spec, and an unset field reports nothing.
-func runtimeFacts(clusterDoc *cluster.Cluster, memoryBytes uint64) machine.RuntimeStatus {
+// from the spec, and an unset field reports nothing. The etcd value is
+// the exception: it is true when init wrote k3s's etcd-expose-metrics
+// key, which only a leader's configuration has.
+func runtimeFacts(clusterDoc *cluster.Cluster, role api.Role, memoryBytes uint64) machine.RuntimeStatus {
 	spec := clusterDoc.RuntimeSpec()
 	st := machine.RuntimeStatus{}
 	if gc, ok := spec.GoGCPercent(); ok {
@@ -127,6 +129,7 @@ func runtimeFacts(clusterDoc *cluster.Cluster, memoryBytes uint64) machine.Runti
 	}
 	st.K3s.Debug = spec.Debug
 	st.Containerd.LogLevel = clusterDoc.ContainerdSpec().LogLevel
+	st.Etcd.ExposeMetrics = role == api.RoleLeader && clusterDoc.EtcdSpec().MetricsExposed()
 	imageGC := clusterDoc.KubeletSpec().ImageGC
 	if imageGC.HighThresholdPercent != nil {
 		st.Kubelet.ImageGC.HighThresholdPercent = *imageGC.HighThresholdPercent

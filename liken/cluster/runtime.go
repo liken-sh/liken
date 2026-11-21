@@ -8,10 +8,12 @@ package cluster
 // subsection per thing that reads a setting. The k3s subsection is the
 // discipline of the process itself. The kubelet subsection is the
 // configuration of the kubelet, which is a component compiled into
-// that same process rather than a program of its own. The containerd
-// subsection is the configuration of containerd, which is a separate
-// program that k3s starts. The split follows the reader, so a path
-// names the thing that acts on the value:
+// that same process rather than a program of its own. The etcd
+// subsection is the configuration of the etcd member, which is also
+// compiled into that process, on a leader of a cluster with more than
+// one leader. The containerd subsection is the configuration of
+// containerd, which is a separate program that k3s starts. The split
+// follows the reader, so a path names the thing that acts on the value:
 // spec.runtime.k3s.goMemoryLimit reads as "the runtime memory limit of
 // the k3s process", spec.runtime.kubelet.imageGC.maximumAge reads as
 // "the age ceiling of the kubelet's image collector", and
@@ -25,6 +27,9 @@ package cluster
 // subsection. This matters for an upgrade. A cluster that names
 // nothing renders the same bytes it rendered before, so no machine
 // restarts k3s to gain a section it never asked for.
+//
+// spec.runtime.etcd.exposeMetrics is the exception. Unset, it is on,
+// where k3s's own default is off, and EtcdRuntimeSpec gives the reason.
 //
 // Every setting here is also read only when the k3s process starts, so
 // an edit converges by restarting k3s in place, the same tier as a
@@ -56,6 +61,46 @@ type ClusterRuntimeSpec struct {
 	// Containerd is the configuration of containerd, the container
 	// runtime that k3s starts on every machine of the cluster.
 	Containerd ContainerdRuntimeSpec `json:"containerd,omitzero"`
+
+	// Etcd is the configuration of the etcd member that runs inside
+	// the k3s process of a leader, when the cluster has more than one
+	// leader.
+	Etcd EtcdRuntimeSpec `json:"etcd,omitzero"`
+}
+
+// EtcdRuntimeSpec is the configuration of the etcd member inside the
+// k3s process of a leader. A cluster with one leader keeps its
+// datastore in sqlite and runs no etcd, and a follower never runs one,
+// so nothing reads the section there.
+type EtcdRuntimeSpec struct {
+	// ExposeMetrics says whether etcd serves its Prometheus metrics on
+	// port 2381 of the leader's node IP, as well as on the loopback
+	// address, which it always serves them on. It is k3s's
+	// etcd-expose-metrics option.
+	//
+	// Unset, it is on, where every other field of the runtime section
+	// keeps the program's own default. A person needs these series,
+	// such as etcd_disk_wal_fsync_duration_seconds, to learn why a
+	// leader's etcd stalls, and a liken machine has no shell to read
+	// them from the loopback address. If the field had to be turned
+	// on first, a cluster that is failing now would need a k3s restart
+	// on each leader before anyone could see why.
+	//
+	// The port is plain HTTP with no authentication, and every pod and
+	// every device on the node network can reach it. It serves no key
+	// and no value of the datastore, but each request to its /health
+	// and /readyz paths makes etcd run a read through its quorum. A
+	// cluster whose node network has devices or pods that it does not
+	// trust sets the field to false, because a liken machine has no
+	// firewall to close the port with. It is a pointer so that false is
+	// told apart from unset.
+	ExposeMetrics *bool `json:"exposeMetrics,omitempty"`
+}
+
+// MetricsExposed resolves ExposeMetrics: true unless the cluster set
+// the field to false.
+func (e EtcdRuntimeSpec) MetricsExposed() bool {
+	return e.ExposeMetrics == nil || *e.ExposeMetrics
 }
 
 // K3sRuntimeSpec is the runtime discipline of the k3s process itself:

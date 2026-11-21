@@ -137,7 +137,7 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 	s.restarts++
 	s.tree.WriteFeatures(featureStatuses)
 	s.tree.WriteRegistries(registries)
-	s.tree.WriteRuntime(runtimeFacts(clusterDoc, machineMemoryBytes()))
+	s.tree.WriteRuntime(runtimeFacts(clusterDoc, clusterDoc.Role(s.m.Metadata.Name), machineMemoryBytes()))
 	if stagedCreds != nil {
 		s.tree.WriteBootCredentials(machine.ManifestSourceStaged, machine.ManifestHash(stagedCredsRaw))
 	}

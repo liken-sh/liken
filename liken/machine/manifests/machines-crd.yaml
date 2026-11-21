@@ -27,7 +27,7 @@ metadata:
     # (init/schemarevision.go). Raise the revision in
     # the same change that changes the schema. A test checks that the
     # two change together.
-    liken.sh/schema-revision: "13"
+    liken.sh/schema-revision: "14"
 spec:
   group: liken.sh
   names:
@@ -3490,6 +3490,23 @@ spec:
                             containerd runs at. It is absent when the
                             cluster names no level, so containerd uses
                             info.
+                    etcd:
+                      type: object
+                      description: >-
+                        The etcd configuration that init wrote on this
+                        machine, from the Cluster's
+                        `spec.runtime.etcd`. This field is absent on a
+                        follower, and on a leader of a cluster that
+                        sets `exposeMetrics` to `false`.
+                      properties:
+                        exposeMetrics:
+                          type: boolean
+                          description: >-
+                            True when init told k3s to serve etcd's
+                            metrics on port 2381 of this machine's node
+                            IP. It is also true on the leader of a
+                            cluster with one leader, which runs no etcd,
+                            so nothing listens on the port there.
                 lastCrash:
                   type: object
                   description: >-

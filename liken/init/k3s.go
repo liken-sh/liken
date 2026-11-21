@@ -188,6 +188,10 @@ type k3sBootInputs struct {
 	nodeTaints    []machine.NodeTaint
 	kubeletConfig string
 	debug         bool
+
+	// exposeEtcdMetrics is the resolved spec.runtime.etcd.exposeMetrics
+	// of the cluster, which is true when the field is unset.
+	exposeEtcdMetrics bool
 }
 
 // k3sBootConfig renders boot.yaml, where each key is the name of a k3s
@@ -249,6 +253,24 @@ func k3sBootConfig(in k3sBootInputs) string {
 		// with plain flannel.
 		if !clusterDoc.FeatureEnabled("network-policy") {
 			b.WriteString("disable-network-policy: true\n")
+		}
+		// On a cluster with more than one leader, k3s runs an etcd
+		// member in the server process of each leader. etcd serves its
+		// Prometheus metrics on port 2381, and k3s binds that port to
+		// the loopback address only. With this key, k3s also binds it
+		// to the node IP, so a Prometheus that runs in a pod can scrape
+		// each leader's etcd with no proxy and no pod on the host
+		// network. cluster/runtime.go explains why the key is on unless
+		// the cluster turns it off.
+		//
+		// Every leader renders the key, because init cannot tell from
+		// the Cluster whether this leader runs etcd: a cluster that
+		// went from several leaders to one keeps its etcd datastore. A
+		// leader that uses sqlite starts no etcd, and k3s reads the key
+		// nowhere else, so it does nothing there. Only leaders render
+		// it, because an agent refuses it.
+		if in.exposeEtcdMetrics {
+			b.WriteString("etcd-expose-metrics: true\n")
 		}
 		if clusterDoc != nil {
 			// A single leader renders neither key and stays on sqlite.
@@ -628,6 +650,8 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 		nodeTaints:    m.Spec.NodeTaints,
 		kubeletConfig: kubeletConfig,
 		debug:         clusterDoc.RuntimeSpec().Debug,
+
+		exposeEtcdMetrics: clusterDoc.EtcdSpec().MetricsExposed(),
 	})
 	if err := os.WriteFile(filepath.Join(dropInDir, "boot.yaml"), []byte(content), 0o644); err != nil {
 		return role, err

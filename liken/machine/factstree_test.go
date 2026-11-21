@@ -238,6 +238,7 @@ func everythingSet() *MachineStatus {
 				MinimumAge: "5m", MaximumAge: "168h",
 			}},
 			Containerd: ContainerdRuntimeStatus{LogLevel: "warn"},
+			Etcd:       EtcdRuntimeStatus{ExposeMetrics: true},
 		},
 		Boot: BootStatus{
 			Time:           &booted,

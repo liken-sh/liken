@@ -297,6 +297,50 @@ func TestContainerdSpecOnANilCluster(t *testing.T) {
 	}
 }
 
+func TestEtcdSpecOnANilCluster(t *testing.T) {
+	var c *Cluster
+	if !c.EtcdSpec().MetricsExposed() {
+		t.Error("a machine alone does not expose etcd's metrics, want the default, exposed")
+	}
+}
+
+func TestEtcdMetricsAreExposedUnlessTheClusterTurnsThemOff(t *testing.T) {
+	on, off := true, false
+	for name, tc := range map[string]struct {
+		spec EtcdRuntimeSpec
+		want bool
+	}{
+		"unset": {EtcdRuntimeSpec{}, true},
+		"true":  {EtcdRuntimeSpec{ExposeMetrics: &on}, true},
+		"false": {EtcdRuntimeSpec{ExposeMetrics: &off}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := tc.spec.MetricsExposed(); got != tc.want {
+				t.Errorf("MetricsExposed is %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseClusterAcceptsEtcdMetricsTurnedOff(t *testing.T) {
+	c, err := ParseCluster([]byte(`
+apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: lab
+spec:
+  runtime:
+    etcd:
+      exposeMetrics: false
+`))
+	if err != nil {
+		t.Fatalf("parsing the Cluster: %v", err)
+	}
+	if c.EtcdSpec().MetricsExposed() {
+		t.Error("etcd's metrics are exposed, want them off as the document says")
+	}
+}
+
 func TestParseClusterRejectsAnUnknownContainerdLevel(t *testing.T) {
 	_, err := ParseCluster([]byte(`
 apiVersion: liken.sh/v1alpha1

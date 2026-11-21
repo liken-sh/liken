@@ -376,6 +376,7 @@ func (t FactsTree) WriteRuntime(r RuntimeStatus) error {
 		t.writeFact("runtime/k3s/goGC", formatInt(r.K3s.GoGC)),
 		t.writeFact("runtime/k3s/debug", formatBool(r.K3s.Debug)),
 		t.writeFact("runtime/containerd/logLevel", r.Containerd.LogLevel),
+		t.writeFact("runtime/etcd/exposeMetrics", formatBool(r.Etcd.ExposeMetrics)),
 		t.writeFact("runtime/kubelet/imageGC/highThresholdPercent", formatInt(gc.HighThresholdPercent)),
 		t.writeFact("runtime/kubelet/imageGC/lowThresholdPercent", formatInt(gc.LowThresholdPercent)),
 		t.writeFact("runtime/kubelet/imageGC/maximumAge", gc.MaximumAge),

@@ -383,6 +383,65 @@ func TestK3sBootConfigWithoutDebugNamesNone(t *testing.T) {
 
 // The drop-in sets only the level, so it cannot break the
 // configuration that k3s renders for containerd.
+func TestK3sBootConfigExposesEtcdMetricsOnALeader(t *testing.T) {
+	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: haCluster(), haveToken: true, exposeEtcdMetrics: true})
+	if !strings.Contains(got, "etcd-expose-metrics: true\n") {
+		t.Errorf("the leader's config has no etcd-expose-metrics: true, want it:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigWithEtcdMetricsTurnedOffNamesNoKey(t *testing.T) {
+	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: haCluster(), haveToken: true})
+	if strings.Contains(got, "etcd-expose-metrics") {
+		t.Errorf("the leader's config has etcd-expose-metrics, want none when the cluster turns it off:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigFollowersNeverRenderTheEtcdMetricsKey(t *testing.T) {
+	got := k3sBootConfig(k3sBootInputs{role: api.RoleFollower, clusterDoc: haCluster(), haveToken: true, exposeEtcdMetrics: true})
+	if strings.Contains(got, "etcd-expose-metrics") {
+		t.Errorf("the follower's config has etcd-expose-metrics, want none because a k3s agent refuses it:\n%s", got)
+	}
+}
+
+// etcdMetricsOffCluster is the lab cluster with
+// spec.runtime.etcd.exposeMetrics set to false.
+func etcdMetricsOffCluster() *cluster.Cluster {
+	c := labCluster()
+	off := false
+	c.Spec.Runtime.Etcd.ExposeMetrics = &off
+	return c
+}
+
+// leaderBootYAML writes node-1's boot configuration under clusterDoc
+// and returns the drop-in.
+func leaderBootYAML(t *testing.T, clusterDoc *cluster.Cluster) string {
+	t.Helper()
+	serverDropIns, _ := fakeK3sConfigs(t, true)
+	if _, err := writeK3sBootConfig(clusterDoc, bootMachine("node-1", nil), nil); err != nil {
+		t.Fatalf("writing the boot config of node-1: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(serverDropIns, "boot.yaml"))
+	if err != nil {
+		t.Fatalf("reading the leader boot.yaml: %v", err)
+	}
+	return string(raw)
+}
+
+func TestWriteK3sBootConfigExposesEtcdMetricsByDefault(t *testing.T) {
+	got := leaderBootYAML(t, labCluster())
+	if !strings.Contains(got, "etcd-expose-metrics: true\n") {
+		t.Errorf("the leader drop-in has no etcd-expose-metrics: true, want it when the cluster sets nothing:\n%s", got)
+	}
+}
+
+func TestWriteK3sBootConfigKeepsEtcdMetricsOffWhenTheClusterSaysSo(t *testing.T) {
+	got := leaderBootYAML(t, etcdMetricsOffCluster())
+	if strings.Contains(got, "etcd-expose-metrics") {
+		t.Errorf("the leader drop-in has etcd-expose-metrics, want none when spec.runtime.etcd.exposeMetrics is false:\n%s", got)
+	}
+}
+
 func TestContainerdLogLevelDropInSetsOnlyTheLevel(t *testing.T) {
 	got := containerdLogLevelDropIn("warn")
 	for _, want := range []string{

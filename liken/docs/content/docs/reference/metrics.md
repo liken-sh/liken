@@ -163,6 +163,18 @@ show the member IDs, the size of the datastore, and the counts and
 durations of requests. They show no key and no value of the datastore.
 A pod on the host network of a leader cannot listen on 2381.
 
+Every pod and every device on the node network can reach the port, and
+each request to `/health` or `/readyz` makes etcd read through its
+quorum. When the node network has devices or pods that you do not
+trust, set
+[`spec.runtime.etcd.exposeMetrics`](/docs/reference/cluster/#specruntimeetcd)
+of the `Cluster` to `false`. k3s then restarts in place on each
+machine, one leader at a time, and etcd serves its metrics on the
+loopback address only.
+[`status.runtime.etcd.exposeMetrics`](/docs/reference/machine/#statusruntimeetcd)
+of each leader's `Machine` is `true` while the port is open on the node
+IP.
+
 A cluster with one leader keeps its datastore in sqlite and runs no
 etcd, so no machine listens on the port there. A follower never
 listens on it.

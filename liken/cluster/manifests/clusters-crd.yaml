@@ -24,7 +24,7 @@ metadata:
     # (init/schemarevision.go). Raise the number in every change to the
     # schema below. A test fails when the schema changes and the number does
     # not.
-    liken.sh/schema-revision: "5"
+    liken.sh/schema-revision: "6"
 spec:
   group: liken.sh
   names:
@@ -585,13 +585,15 @@ spec:
                     Settings for the k3s process, for the components inside it, and for
                     containerd. The section has a subsection for each program that reads
                     settings: `k3s` for the process itself, `kubelet` for the kubelet
-                    inside it, and `containerd` for the container runtime that k3s starts.
-                    Every field is optional. A field you leave unset applies nothing, so
-                    the program keeps its own default. Every value is read only when the
-                    k3s process starts, so an edit takes effect when k3s restarts in place
-                    on each machine. The restarts are sequenced through the same reboot
-                    turns as a reboot, one leader at a time, and the machine and its pods
-                    stay up. This holds for containerd too, because k3s starts and stops
+                    inside it, `etcd` for the etcd member inside it on a leader, and
+                    `containerd` for the container runtime that k3s starts. Every field is
+                    optional. A field you leave unset applies nothing, so the program
+                    keeps its own default. The exception is `etcd.exposeMetrics`, which is
+                    on when you leave it unset. Every value is read only when the k3s
+                    process starts, so an edit takes effect when k3s restarts in place on
+                    each machine. The restarts are sequenced through the same reboot turns
+                    as a reboot, one leader at a time, and the machine and its pods stay
+                    up. This holds for containerd too, because k3s starts and stops
                     containerd.
                   properties:
                     k3s:
@@ -762,6 +764,33 @@ spec:
                             does not accept containerd's other levels. `trace` writes more than a
                             machine should store on the disk it runs from. `fatal` and `panic`
                             drop the error lines that explain a crash.
+                    etcd:
+                      type: object
+                      description: >-
+                        Settings for etcd. A cluster with more than one leader keeps its
+                        datastore in etcd, and each leader runs one etcd member inside the k3s
+                        process. A cluster with one leader keeps its datastore in sqlite and
+                        runs no etcd, and a follower never runs one, so these settings do
+                        nothing there.
+                      properties:
+                        exposeMetrics:
+                          type: boolean
+                          description: >-
+                            Whether each leader's etcd member serves its Prometheus metrics at
+                            `http://<node IP>:2381/metrics`, like the `etcd-expose-metrics` option
+                            of k3s. When the field is unset, it is `true`.
+                            [The metrics reference](/docs/reference/metrics/#etcd) has a scrape
+                            job for the port. The port is plain HTTP with no authentication, and
+                            every pod and every device on the node network can reach it. It
+                            serves `/metrics` and etcd's health paths, `/health`, `/livez`, and
+                            `/readyz`. The metrics show the member IDs, the size of the
+                            datastore, and the counts and durations of requests, and they show no
+                            key and no value of the datastore. Each request to `/health` or
+                            `/readyz` makes etcd read through its quorum, so a device that sends
+                            many requests adds load to the datastore. Set the field to `false`
+                            when the node network has devices or pods that you do not trust. etcd
+                            then serves its metrics on the loopback address only, where no pod on
+                            the cluster network can read them.
             status:
               type: object
               description: >-

@@ -575,6 +575,7 @@ type RuntimeStatus struct {
 	K3s        K3sRuntimeStatus        `json:"k3s,omitzero"`
 	Kubelet    KubeletRuntimeStatus    `json:"kubelet,omitzero"`
 	Containerd ContainerdRuntimeStatus `json:"containerd,omitzero"`
+	Etcd       EtcdRuntimeStatus       `json:"etcd,omitzero"`
 }
 
 // K3sRuntimeStatus has the settings that init applied to the k3s
@@ -594,6 +595,17 @@ type K3sRuntimeStatus struct {
 // the cluster set none, and then containerd logs at info.
 type ContainerdRuntimeStatus struct {
 	LogLevel string `json:"logLevel,omitempty"`
+}
+
+// EtcdRuntimeStatus is the etcd configuration that init wrote on this
+// boot. ExposeMetrics is true when init wrote the etcd-expose-metrics
+// key of k3s, so the machine's etcd member serves its metrics on port
+// 2381 of the node IP. It is false on a follower, and on a leader of a
+// cluster that set spec.runtime.etcd.exposeMetrics to false. It is
+// also true on a leader that keeps its datastore in sqlite, where no
+// etcd runs and nothing listens on the port.
+type EtcdRuntimeStatus struct {
+	ExposeMetrics bool `json:"exposeMetrics,omitempty"`
 }
 
 // KubeletRuntimeStatus is the kubelet configuration that init wrote on

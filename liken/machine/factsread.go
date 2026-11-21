@@ -136,6 +136,11 @@ func (t FactsTree) readRuntime() (RuntimeStatus, error) {
 	if r.Containerd.LogLevel, err = t.readFact("runtime/containerd/logLevel"); err != nil {
 		return RuntimeStatus{}, err
 	}
+	exposeMetrics, err := t.readFact("runtime/etcd/exposeMetrics")
+	if err != nil {
+		return RuntimeStatus{}, err
+	}
+	r.Etcd.ExposeMetrics = exposeMetrics == "true"
 	gc := &r.Kubelet.ImageGC
 	if gc.HighThresholdPercent, err = t.readInt("runtime/kubelet/imageGC/highThresholdPercent"); err != nil {
 		return RuntimeStatus{}, err

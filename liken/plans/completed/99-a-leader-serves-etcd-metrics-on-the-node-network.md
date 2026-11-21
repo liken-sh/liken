@@ -1,6 +1,6 @@
 # 99. A leader serves etcd's metrics on the node network
 
-Milestone 99. Proposed and built on 2026-11-21. The drill below has
+Milestone 99. Proposed and built on 2026-11-21. The drills below have
 not run, because no machine has booted a release with this change.
 
 On a cluster with more than one leader, each leader runs an etcd
@@ -46,50 +46,65 @@ series. That check was not repeated for this milestone.
 
 ## The design
 
-`image/etc/rancher/k3s/config.yaml`, the static configuration of a
-leader, sets `etcd-expose-metrics: true`. Every leader then serves
-etcd's metrics at `http://<node IP>:2381/metrics`.
+The `Cluster` gets `spec.runtime.etcd.exposeMetrics`, a boolean that
+is `true` when it is unset. While it is `true`, `init` renders
+`etcd-expose-metrics: true` into `boot.yaml` on every leader, and each
+leader serves etcd's metrics at `http://<node IP>:2381/metrics`. When
+the cluster sets it to `false`, `init` renders no key, and etcd serves
+its metrics on the loopback address only, as before this milestone.
 
-The key is in the static file and not in `boot.yaml`, because it is
-the same on every leader and comes from no field of the `Cluster` or
-the `Machine`. `init/k3s.go` renders only what a boot derives.
+`status.runtime.etcd.exposeMetrics` of a `Machine` is `true` when
+`init` wrote the key on that machine, like the other values of
+`status.runtime`.
 
-The key reaches a machine with the release that has it, on the reboot
-that the upgrade already needs. No k3s restart and no step by a person
-is needed.
-
+- **A running fleet** gets the key with the release that has it, on
+  the reboot that the upgrade already needs. No step by a person is
+  needed.
+- **An edit of the field** is a change to `spec.runtime`, so it
+  converges like every other field there: k3s restarts in place on
+  each machine, one leader at a time, and no machine reboots.
 - **A cluster with one leader** uses sqlite, so nothing listens on
-  port 2381 and the machine behaves as before.
+  port 2381. `init` still renders the key, because it cannot tell from
+  the `Cluster` whether a leader runs etcd: a cluster that went from
+  several leaders to one keeps its etcd datastore.
 - **A cluster that grows from one leader to several** converts the
   founder's datastore to etcd on the boot that adds the second leader.
   The key is already set, so the founder serves the metrics from that
   boot, and each new leader serves them from its first boot.
-- **A follower** reads `agent.yaml`, which does not have the key,
-  because a k3s agent refuses a server key. A leader that is demoted
-  boots as a follower, starts no etcd, and serves nothing on the port.
-  k3s removes the `etcd` role label from its `Node`, so a scrape job
-  that selects on the label drops the target.
+- **A follower** never renders the key, because a k3s agent refuses a
+  server key. A leader that is demoted boots as a follower, starts no
+  etcd, and serves nothing on the port. k3s removes the `etcd` role
+  label from its `Node`, so a scrape job that selects on the label
+  drops the target.
 
 ## Choices
 
-**Always on, with no field.** A field of the `Cluster` that defaults
-to on would let a person close the port. It was set aside because the
-metrics ports of the operators have no such field either, and because
-a person who has turned the port off cannot diagnose the datastore of
-a cluster that is failing now: the change needs a reboot of each
-leader. If a cluster needs the port closed, a `NetworkPolicy` cannot
-do it, because the port is on the host. That cluster needs a field,
-which a later milestone can add without a change to this one.
+**On unless the cluster turns it off.** Every other field of
+`spec.runtime` keeps the program's own default when it is unset, and
+the default of k3s is off. This field is the exception, because a
+person needs the metrics when the datastore is already failing, and a
+field that had to be turned on first would need a k3s restart on each
+leader before anyone could see why.
 
-**Plain HTTP with no authentication.** k3s offers no TLS and no
-authentication for this listener. The port is on the node network
-only, and not on the other addresses of a machine. That is narrower
-than `machine-operator`, which serves its metrics on port 9200 of
-every address. The metrics show the member IDs, the size of the
-datastore, the counts and durations of requests, and the Go runtime's
-figures. They show no key and no value of the datastore. The client
-port 2379 and the peer port 2380 still require a certificate from the
-cluster's etcd CA.
+**A field, and not always on.** The first build of this milestone set
+the key in the static `config.yaml` with no field. The port is plain
+HTTP with no authentication, because k3s offers neither for this
+listener. Every pod and every device on the node network can reach it.
+The metrics show the member IDs, the size of the datastore, the counts
+and durations of requests, and the Go runtime's figures, and no key
+and no value of the datastore. But each request to `/health` or
+`/readyz` makes etcd read through its quorum, so anything that can
+reach the port can add load to the datastore without a credential. A
+home cluster's node network is often the house's LAN, and a cluster
+can run pods that its owner does not trust. A `NetworkPolicy` selects
+pods, so it cannot close the port to another machine on the node
+network, and a `liken` machine has no firewall and no shell. The field
+is the only way to close the port.
+
+**A boolean named for the option of k3s.** `exposeMetrics` is the name
+that a person finds in the documentation of k3s, as `debug` is. An
+enumeration of the addresses to bind was set aside, because k3s offers
+two states and no choice of address.
 
 **A scrape job in the manual, and no object in the `monitoring`
 component.** A `ScrapeConfig` of the prometheus-operator would fit
@@ -102,14 +117,23 @@ kind. The manual gives the object for a person to add.
 ## The manual
 
 `docs/content/docs/reference/metrics.md` gets a section on etcd: the
-address, what the port serves, which machines serve it, and a scrape
-job in the plain Prometheus form and as a `ScrapeConfig`.
+address, what the port serves, which machines serve it, how to close
+it, and a scrape job in the plain Prometheus form and as a
+`ScrapeConfig`. The descriptions of the fields in the CRDs generate
+their reference pages.
 
 ## Tests
 
-`init/k3s_static_test.go` reads the static files from the repository.
-One test fails when `config.yaml` does not set the key, and one fails
-when `agent.yaml` sets it.
+- `cluster/runtime_test.go`: the field resolves to `true` when it is
+  unset and on a machine with no cluster document, and a document that
+  sets `false` parses.
+- `cluster/changes_test.go`: an edit of the field is a restart-class
+  change.
+- `init/k3s_test.go`: a leader renders the key by default, a leader of
+  a cluster that sets `false` renders none, and a follower never
+  renders it.
+- `init/facts_test.go` and `machine/factstree_test.go`: the status
+  value for each role, and its path through the facts tree.
 
 ## Drills
 
@@ -117,5 +141,9 @@ when `agent.yaml` sets it.
    the cluster network, `GET http://<leader's InternalIP>:2381/metrics`
    returns `etcd_disk_wal_fsync_duration_seconds`. The same request to
    the follower's address is refused.
-2. On a `lab` fleet with one leader, the request to the leader's
+2. On that fleet, set `spec.runtime.etcd.exposeMetrics` to `false`.
+   Each machine restarts k3s in its turn, the request to each leader's
+   address is then refused, and
+   `status.runtime.etcd.exposeMetrics` of each leader is absent.
+3. On a `lab` fleet with one leader, the request to the leader's
    address is refused.

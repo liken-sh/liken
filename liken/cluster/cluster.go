@@ -574,6 +574,16 @@ func (c *Cluster) ContainerdSpec() ContainerdRuntimeSpec {
 	return c.Spec.Runtime.Containerd
 }
 
+// EtcdSpec is the etcd section, safe on a nil Cluster, like the
+// accessors above. A machine on its own gets the zero section, whose
+// MetricsExposed is true, the default.
+func (c *Cluster) EtcdSpec() EtcdRuntimeSpec {
+	if c == nil {
+		return EtcdRuntimeSpec{}
+	}
+	return c.Spec.Runtime.Etcd
+}
+
 // EndpointOrEmpty is the join URL, safe on a nil Cluster like the
 // accessors above. An empty answer means a machine alone: it is its
 // own cluster and has no endpoint to reach, so nothing about it is
