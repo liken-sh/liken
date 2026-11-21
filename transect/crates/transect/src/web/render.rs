@@ -16,8 +16,8 @@ use super::pages::{
     Focus, Lens, ObjectAt, VolumeAt, WorkloadAt, access_page, accounts_page, changed_page,
     cluster_page, gitops_page, gone_page, ground_page, kind_page, kinds_page, known_page,
     logs_page, machine_page, manages, namespace_access_page, namespace_page, object_page,
-    objects_page, pod_page, resources_page, section_page, service_account_page, subject_page,
-    volume_page, vulnerabilities_page, ways_page, workload_at, workload_page,
+    objects_page, pod_page, resources_page, section_page, service_account_page, shapes_page,
+    subject_page, volume_page, vulnerabilities_page, ways_page, workload_at, workload_page,
 };
 use super::template::{Drawing, template};
 use super::view::{Page, View};
@@ -166,6 +166,7 @@ pub fn draw(
         }
         Page::Resources => Some(template(resources_page(model, usage), part)),
         Page::Kinds => Some(template(kinds_page(model), part)),
+        Page::Shapes => Some(template(shapes_page(model), part)),
         Page::WaysIn => Some(template(ways_page(model), part)),
         Page::Accounts => Some(template(accounts_page(model), part)),
         Page::Vulnerabilities { severities } => {
@@ -356,6 +357,7 @@ fn gone(page: &Page) -> Option<Gone> {
         | Page::Resources
         | Page::Changed
         | Page::Kinds
+        | Page::Shapes
         | Page::WaysIn
         | Page::Accounts
         | Page::Vulnerabilities { .. } => {

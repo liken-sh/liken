@@ -1,0 +1,389 @@
+/*
+ * Every shape, in every state.  A shape's definition states geometry
+ * and the material of each piece, and nothing in this file names a
+ * shape.  `part.html` draws each part as a `.shape-part` with a
+ * `.shape-body`, which holds the outline, the pieces, and the text.
+ * The classes on the part give its state, its fit, its alignment, and
+ * its display.  `text.css` lays out the text of a part, which is the
+ * same block on every shape.
+ *
+ * A length in a definition is in the shape's design units.  `--u` is
+ * one unit at the part's width, so every piece scales with the part by
+ * one factor and the text does not.  The part is a size container for
+ * that reason: `cqi` in its children is a hundredth of its width.
+ */
+
+/* A television is dark glass in a dark bezel in any room, so `dark`
+   and `glass` are dark in both schemes, and the text on glass takes
+   inks of its own that keep 4.5:1 on it.  `--shape-body` is the fill of
+   `solid`.  In the light scheme it is darker than the panel, and
+   `--shape-lift` draws a faint line under each solid body, so a part
+   reads as an object and not as an outline.  The dark panel needs
+   neither. */
+:root {
+  --shape-body: #e3e6ea;
+  --shape-lift: rgb(0 0 0 / 0.14);
+  --shape-rest: #f1f2f3;
+  --shape-glass: #1a1d22;
+  --shape-glass-edge: #0c0d10;
+  --shape-glass-shade: rgb(0 0 0 / 0.6);
+  --shape-bezel: #2b2f36;
+  --shape-bezel-edge: #15171a;
+  --shape-glass-ink: #ececec;
+  --shape-glass-muted: #b3b9c0;
+  --shape-glass-faint: #959ca4;
+  --shape-glass-link: #bccca2;
+  --shape-glass-warm: #ec9645;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --shape-body: #22252b;
+    --shape-lift: transparent;
+    --shape-rest: #1e2126;
+    --shape-glass: #0f1114;
+    --shape-glass-edge: #333940;
+    --shape-glass-shade: rgb(0 0 0 / 0.55);
+    --shape-bezel: #2a2e35;
+    --shape-bezel-edge: #3a3f47;
+    --shape-glass-ink: #e8e8e8;
+    --shape-glass-muted: #a0a6ad;
+    --shape-glass-faint: #8b929a;
+    --shape-glass-link: #b4c49a;
+    --shape-glass-warm: #e0872f;
+  }
+}
+
+/* The frame of a part.  A state sets these properties, and each
+   material reads them.  A part starts at its widest width and shrinks
+   with its area.  `--above` is the room that a piece above the top
+   edge needs.  A part whose top touches the part above sets it to 0. */
+.shape-part {
+  --edge: var(--rule-strong);
+  --weight: 0px;
+  --fill: var(--shape-body);
+  --bezel: var(--shape-bezel);
+  --bezel-edge: var(--shape-bezel-edge);
+  --glass: var(--shape-glass);
+  --glass-edge: var(--shape-glass-edge);
+  --line-fill: transparent;
+  --detail: var(--rule-strong);
+  --dot: var(--rule-strong);
+  --dash: solid;
+  --lift: var(--shape-lift);
+  --above: var(--room-above, 0);
+  flex: 0 1 var(--w-top);
+  max-width: var(--w-top);
+  min-width: min(var(--w-min), 100%);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  container-type: inline-size;
+  overflow-wrap: break-word;
+}
+
+/* A part that follows its text is as wide as its text, so it cannot
+   be a size container, and its units are pixels. */
+.shape-follow {
+  flex: 0 1 auto;
+  container-type: normal;
+}
+
+/* The axis is the part's first baseline: a line of no height at
+   `--axis` units from the top of the body, which takes no room.  A row
+   of parts that aligns on baselines stands on their axes. */
+.shape-axis {
+  display: block;
+  height: 0;
+  font-size: 0;
+  line-height: 0;
+  margin-top: calc(var(--u) * (var(--above) + var(--axis)));
+  margin-bottom: calc(var(--u) * (var(--above) + var(--axis)) * -1);
+}
+
+.shape-body {
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  margin-top: calc(var(--u) * var(--above));
+  aspect-ratio: var(--ratio, auto);
+}
+
+.shape-drawing {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.shape-drawing > * {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.shape-drawing svg { overflow: visible; }
+
+.shape-drawing > .shape-copy { z-index: 0; opacity: 0.85; }
+
+.shape-drawing > .shape-behind { z-index: 1; }
+
+.shape-drawing > .shape-outline:not(.shape-copy) { z-index: 2; }
+
+.shape-drawing > .shape-piece:not(.shape-behind) { z-index: 3; }
+
+/* The text region's insets scale with the part, and keep at least
+   four pixels, so text never touches the outline.  The bottom inset
+   also keeps a line of room for the source line at the inset that the
+   shape states. */
+.shape-text {
+  --source-line: 16px;
+  position: relative;
+  z-index: 4;
+  flex: 1;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding:
+    max(4px, calc(var(--u) * var(--text-top)))
+    max(4px, calc(var(--u) * var(--text-right)))
+    max(4px, calc(var(--u) * var(--text-bottom)), calc(var(--u) * var(--source-bottom) + var(--source-line) + 4px))
+    max(4px, calc(var(--u) * var(--text-left)));
+}
+
+/* solid: the stuff of the body, filled and edged. */
+.shape-outline.shape-draw-solid {
+  background: var(--fill);
+  border: 1px var(--dash) var(--edge);
+  box-shadow: inset 0 0 0 var(--weight) var(--edge), 0 1px 0 var(--lift);
+}
+
+div.shape-piece.shape-draw-solid {
+  background: var(--fill);
+  border: 1px var(--dash) var(--detail);
+}
+
+svg.shape-draw-solid path { fill: var(--fill); stroke: var(--detail); }
+
+/* dark: a body or a detail that is dark in both schemes, such as a
+   bezel or a stand. */
+.shape-outline.shape-draw-dark {
+  background: var(--bezel);
+  border: 1px var(--dash) var(--bezel-edge);
+  box-shadow: inset 0 0 0 var(--weight) var(--edge);
+}
+
+div.shape-piece.shape-draw-dark {
+  background: var(--bezel);
+  border: 1px var(--dash) var(--bezel-edge);
+}
+
+svg.shape-draw-dark path { fill: var(--bezel); stroke: var(--bezel-edge); }
+
+/* glass: a window, dark in both schemes, that text can stand on. */
+.shape-drawing > .shape-draw-glass {
+  background: var(--glass);
+  border: 1px var(--dash) var(--glass-edge);
+  box-shadow: inset 0 2px 12px var(--shape-glass-shade);
+}
+
+svg.shape-draw-glass path { fill: var(--glass); stroke: var(--glass-edge); }
+
+/* line: an edge with no fill, such as a seam, a ring, or a tag. */
+.shape-outline.shape-draw-line {
+  background: var(--line-fill);
+  border: 1px var(--dash) var(--edge);
+  box-shadow: inset 0 0 0 var(--weight) var(--edge);
+}
+
+div.shape-piece.shape-draw-line { border: 1px var(--dash) var(--detail); }
+
+svg.shape-draw-line path { fill: none; stroke: var(--detail); }
+
+/* mark: a small filled detail, such as a button or a light. */
+div.shape-piece.shape-draw-mark { background: var(--dot); }
+
+svg.shape-draw-mark path { fill: var(--dot); stroke: none; }
+
+/* A path's stroke keeps one pixel however the path is stretched. */
+.shape-drawing path {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1px;
+}
+
+/* The states, the same on every shape.  A warning outlines the part in
+   `--warm`, two pixels wide.  A failure outlines it three pixels wide
+   and tints its fill.  A name with no object is a warning. */
+.shape-part:is(.shape-warning, .shape-no-object) {
+  --edge: var(--warm);
+  --bezel-edge: var(--warm);
+  --weight: 1px;
+}
+
+.shape-part.shape-failing {
+  --edge: var(--warm);
+  --bezel-edge: var(--warm);
+  --weight: 2px;
+  --fill: color-mix(in srgb, var(--warm) 10%, var(--shape-body));
+  --bezel: color-mix(in srgb, var(--warm) 24%, var(--shape-bezel));
+  --line-fill: color-mix(in srgb, var(--warm) 8%, transparent);
+}
+
+/* A part at rest is quieter: a fainter outline and details, and a fill
+   nearer the frame's, because being at rest is not a problem. */
+.shape-part.shape-resting {
+  --edge: var(--rule);
+  --detail: var(--rule);
+  --dot: var(--rule);
+  --fill: var(--shape-rest);
+}
+
+/* A value, an empty role, and a role expected in another state have no
+   fill.  No fill is the frame's own color, so a piece that crosses from
+   a neighbor ends at this part's edge.  An empty role is dashed, and a
+   role expected in another state is dashed and fainter. */
+.shape-part:is(.shape-value, .shape-empty, .shape-elsewhere) {
+  --fill: var(--row);
+  --bezel: var(--row);
+  --glass: var(--row);
+  --line-fill: var(--row);
+  --edge: var(--rule-strong);
+  --bezel-edge: var(--rule-strong);
+  --glass-edge: var(--rule);
+  --dot: var(--rule);
+  --lift: transparent;
+}
+
+.shape-part:is(.shape-value, .shape-empty, .shape-elsewhere) .shape-draw-glass { box-shadow: none; }
+
+.shape-part:is(.shape-empty, .shape-elsewhere) {
+  --dash: dashed;
+  color: var(--ink-muted);
+}
+
+.shape-part.shape-elsewhere {
+  --edge: var(--rule);
+  --bezel-edge: var(--rule);
+  --detail: var(--rule);
+}
+
+.shape-part:is(.shape-empty, .shape-elsewhere) div.shape-piece.shape-draw-mark {
+  background: none;
+  border: 1px dashed var(--detail);
+}
+
+.shape-part:is(.shape-empty, .shape-elsewhere) svg.shape-draw-mark path {
+  fill: none;
+  stroke: var(--detail);
+}
+
+.shape-part:is(.shape-empty, .shape-elsewhere) svg path { stroke-dasharray: 4 3; }
+
+/* A warning puts a ring before the role's label, and a failure a
+   filled dot, the marks of the condition chips in the page's head.  So
+   a failure differs from a warning by its mark as well as its color. */
+.shape-part:is(.shape-failing, .shape-warning, .shape-no-object) .shape-label::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--warm);
+  border-radius: 50%;
+}
+
+.shape-part.shape-failing .shape-label { color: var(--warm); }
+
+.shape-part.shape-failing .shape-label::before { background: var(--warm); }
+
+.shape-part.shape-resting :is(.shape-name a, .shape-why) {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
+/* The page of every shape marks the span of each port. */
+.shape-port {
+  z-index: 5;
+  background: var(--link);
+  border-radius: 2px;
+}
+
+.shape-port-left,
+.shape-port-right {
+  width: 4px;
+  min-height: 4px;
+  margin-left: -2px;
+}
+
+.shape-port-top,
+.shape-port-bottom {
+  height: 4px;
+  min-width: 4px;
+  margin-top: -2px;
+}
+
+/* In forced colors the browser drops backgrounds and box shadows and
+   does not force an SVG's fill, so every material is drawn here in
+   system colors: an edge in CanvasText, a fill in Canvas, and a mark
+   filled in CanvasText.  Each state is a real border: wider for a
+   warning, double for a failure, gray at rest, and dashed when
+   empty. */
+@media (forced-colors: active) {
+  .shape-drawing > * { forced-color-adjust: none; }
+
+  .shape-part :is(.shape-outline, div.shape-piece) {
+    background: Canvas;
+    border: 1px solid CanvasText;
+    box-shadow: none;
+  }
+
+  .shape-part :is(.shape-outline, div.shape-piece).shape-draw-line { background: transparent; }
+
+  .shape-part div.shape-piece.shape-draw-mark {
+    background: CanvasText;
+    border-color: CanvasText;
+  }
+
+  .shape-part svg path {
+    fill: Canvas;
+    stroke: CanvasText;
+  }
+
+  .shape-part svg.shape-draw-line path { fill: none; }
+
+  .shape-part svg.shape-draw-mark path {
+    fill: CanvasText;
+    stroke: none;
+  }
+
+  .shape-part:is(.shape-warning, .shape-no-object) .shape-outline:not(.shape-copy) { border-width: 3px; }
+
+  .shape-part.shape-failing .shape-outline:not(.shape-copy) { border: 5px double CanvasText; }
+
+  .shape-part.shape-resting :is(.shape-outline, div.shape-piece) { border-color: GrayText; }
+
+  .shape-part.shape-resting svg path { stroke: GrayText; }
+
+  .shape-part:is(.shape-empty, .shape-elsewhere) :is(.shape-outline, div.shape-piece) {
+    background: Canvas;
+    border: 1px dashed GrayText;
+  }
+
+  .shape-part:is(.shape-empty, .shape-elsewhere) svg path {
+    fill: Canvas;
+    stroke: GrayText;
+  }
+
+  .shape-part:is(.shape-failing, .shape-warning, .shape-no-object) .shape-label::before {
+    forced-color-adjust: none;
+    border-color: CanvasText;
+    background: Canvas;
+  }
+
+  .shape-part.shape-failing .shape-label::before { background: CanvasText; }
+
+  .shape-part a:focus-visible { outline-color: Highlight; }
+}

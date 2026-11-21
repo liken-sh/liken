@@ -1,0 +1,20 @@
+# A handheld is narrower and shorter than a speaker, so beside a box it
+# reads as a remote and not as a second cabinet.  It takes no wire.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: handheld
+spec:
+  summary: A remote control or a game controller, held in one hand, with a pad at the top and buttons under it.
+  size: {design: [116, 200], width: [116, 116]}
+  outline: {round: 30}
+  text: {inset: [16, 10, 18, 10], align: center}
+  pieces:
+    - {name: pad, draw: line, at: {left: 50% - 16, top: 16, width: 32, height: 32}, round: 50%, clear: top}
+    - {name: pad center, draw: mark, at: {left: 50% - 5.5, top: 26.5, width: 11, height: 11}, round: 50%}
+    - name: buttons
+      draw: mark
+      at: {left: 50% - 22.5, bottom: 39, width: 45, height: 30}
+      view: [45, 30]
+      path: "M4.5 7.5a3 3 0 1 0 6 0a3 3 0 1 0-6 0M19.5 7.5a3 3 0 1 0 6 0a3 3 0 1 0-6 0M34.5 7.5a3 3 0 1 0 6 0a3 3 0 1 0-6 0M4.5 22.5a3 3 0 1 0 6 0a3 3 0 1 0-6 0M19.5 22.5a3 3 0 1 0 6 0a3 3 0 1 0-6 0M34.5 22.5a3 3 0 1 0 6 0a3 3 0 1 0-6 0"
+      clear: bottom

@@ -26,6 +26,10 @@ pub struct FileRow {
 pub struct DocumentRow {
     pub kind: String,
     pub name: String,
+    /// The page that draws the document, for a `Shape`: its section of
+    /// `/shapes` when it loaded, and the section of shapes left out when
+    /// it did not.
+    pub href: Option<String>,
     pub conditions: Vec<Condition>,
 }
 
@@ -46,6 +50,7 @@ impl ResourcesPage {
                     .map(|document| DocumentRow {
                         kind: document.kind.clone(),
                         name: document.name.clone(),
+                        href: drawn_at(document),
                         conditions: document.conditions.clone(),
                     })
                     .collect(),
@@ -94,6 +99,20 @@ impl ResourcesPage {
     }
 }
 
+/// Where `/shapes` draws `document`, when it is a `Shape`. A loaded
+/// shape's name passed the parser's check, so it has only lower-case
+/// letters, digits, hyphens, and dots, and is safe in a fragment.
+fn drawn_at(document: &super::Document) -> Option<String> {
+    if document.kind != "Shape" {
+        return None;
+    }
+    let loaded = !document.conditions.iter().any(Condition::trouble);
+    Some(match loaded {
+        true => format!("/shapes#{}", document.name),
+        false => "/shapes#left-out".into(),
+    })
+}
+
 impl DocumentRow {
     pub fn trouble(&self) -> bool {
         self.conditions.iter().any(Condition::trouble)
@@ -139,6 +158,31 @@ mod tests {
             .map(|c| c.reason)
             .collect();
         assert_eq!(reasons, vec!["Loaded", "NoMatch"]);
+    }
+
+    const SHAPE: &str = "apiVersion: transect.liken.sh/v1alpha1\nkind: Shape\nmetadata: {name: plate.example.test}\n";
+
+    #[rstest]
+    #[case::a_shape_that_loaded(SHAPE, Condition::loaded(), Some("/shapes#plate.example.test"))]
+    #[case::a_shape_left_out(
+        SHAPE,
+        Condition::left_out("Invalid", "a color"),
+        Some("/shapes#left-out")
+    )]
+    #[case::another_kind(
+        "apiVersion: v1\nkind: Namespace\nmetadata: {name: shop}\n",
+        Condition::loaded(),
+        None
+    )]
+    fn links_a_shape_to_the_page_that_draws_it(
+        #[case] text: &str,
+        #[case] condition: Condition,
+        #[case] href: Option<&str>,
+    ) {
+        let mut directory = loaded(&[("shapes.yaml", text)]);
+        directory.files[0].documents[0].conditions = vec![condition];
+        let page = ResourcesPage::build(&directory, vec![]);
+        assert_eq!(page.files[0].documents[0].href.as_deref(), href);
     }
 
     #[rstest]

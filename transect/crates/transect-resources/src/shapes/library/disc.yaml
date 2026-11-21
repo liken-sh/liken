@@ -1,0 +1,14 @@
+# A disc stays round, so its text is cut and never makes it taller.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: disc
+spec:
+  summary: A short cylinder seen face on, such as a filter wheel, a fan, or a reel.
+  size: {design: [136, 136], width: [80, 150]}
+  outline: {round: 50%}
+  text: {inset: [30, 18, 30, 18], align: center, fit: cut}
+  joins: [left, right]
+  pieces:
+    - {name: rim, draw: line, at: {left: 7, right: 7, top: 7, bottom: 7}, round: 50%}
+  ports: {left: [40%, 60%], right: [40%, 60%]}

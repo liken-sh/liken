@@ -487,6 +487,13 @@ view, and an agent reads the same roles as a query.
 Settled on 2026-11-20.  The shapes of the library, and the form in
 which an author writes an arrangement or adds a shape, are open.
 
+[Plan 17](completed/17-the-shapes-of-a-sketch.md), built on 2026-11-21,
+settles the shapes of the library and the form in which an author adds
+a shape: a `Shape` resource that states a shape's geometry and
+materials, drawn with the same code and stylesheet as every shape of
+the library.  The form in which an author writes an arrangement is
+still open.
+
 ## Where the knowledge of a pattern ships
 
 The knowledge of a first-party pattern ships with its operator.
@@ -790,7 +797,6 @@ served.
 - What makes parts of the same sort, for likeness.
 - What a pattern's catalog holds first.  The cases will show which
   patterns are real.
-- Which shapes the library has first, and the form in which an author
-  writes an arrangement or adds a shape.
+- The form in which an author writes an arrangement.
 - Which of `LogPattern` and the pattern of this document keeps the
   name.

@@ -1,0 +1,13 @@
+# The port is the only place where a wire leaves a socket.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: socket
+spec:
+  summary: A low plate with a port in its lower edge, such as a socket on a wall or the way into a service.
+  size: {design: [360, 80], width: [200, 400]}
+  outline: {round: 6}
+  text: {inset: [10, 14, 16, 14]}
+  pieces:
+    - {name: port, draw: glass, at: {left: 50% - 13, bottom: -1, width: 26, height: 8}, round: [4, 4, 0, 0]}
+  ports: {bottom: [47%, 53%]}

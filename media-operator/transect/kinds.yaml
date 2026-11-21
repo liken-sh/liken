@@ -25,11 +25,13 @@ spec:
   # on top, the speaker, the receiver, and the remote under it, and the
   # machine and the things a viewer does not see in a row at the bottom.
   # The things a viewer does not see have the shape `tag`, a low outline
-  # that is quieter than the shapes of the room.  A role draws the
-  # objects that its `reference` reads, in its `shape`, with the printer
-  # columns in `reads` as readings.  A role's `shows` names printer
-  # columns of the `Player` itself, and an entry that is a list draws
-  # the first of its columns that has a value.  So the screen shows the
+  # that is quieter than the shapes of the room.  The receiver's shape,
+  # `amplifier`, is in `shapes.yaml` beside this file, and the other
+  # shapes are `transect`'s library, which its page `/shapes` draws.
+  # A role draws the objects that its `reference` reads, in its
+  # `shape`, with the printer columns in `reads` as readings.  A role's
+  # `shows` names printer columns of the `Player` itself, and an entry
+  # that is a list draws the first of its columns that has a value.  So the screen shows the
   # `Player`'s activity, and the play when one plays or the idle screen
   # when none does.  An `expected` role is drawn with a dashed outline
   # when the `Player` names nothing for it, and a role that is not
@@ -43,7 +45,7 @@ spec:
         machine  idle      bus       claim
       roles:
         display:  {reference: status.screen.monitor, shape: screen, expected: true, reads: [Connector, Mode], shows: [Activity, [Play, Idle]]}
-        receiver: {reference: status.receiver.name, shape: box, expected: true, reads: [Model, Power, Input, Volume, Sound]}
+        receiver: {reference: status.receiver.name, shape: amplifier, expected: true, reads: [Model, Power, Input, Volume, Sound]}
         sound:    {reference: "status.sinks[].name", shape: speaker, expected: true, reads: [Layout, Volume, Mute]}
         machine:  {reference: status.screen.node, shape: box, expected: true}
         remote:   {reference: "spec.remotes[].name", shape: handheld, expected: true, reads: [Keymap]}

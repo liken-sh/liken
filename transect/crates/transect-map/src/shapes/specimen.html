@@ -1,0 +1,55 @@
+{% extends "frame/layout.html" %}
+
+{% block title %}shapes · transect{% endblock %}
+
+{% block elevation %}<a href="/">cluster</a><span aria-hidden="true">/</span><a href="/kinds">kinds</a><span aria-hidden="true">/</span><span class="elevation-current">shapes</span>{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- Every shape that transect has loaded, a section for each, under
+    the library or the file it came from.  Each cell draws the shape
+    with one of the same texts, through the same template as a sketch,
+    so a cell shows what a sketch would draw.  A section's id is the
+    shape's name, which the parser limited to lower-case letters,
+    digits, hyphens, and dots, so `/resources` links to it. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="shapes-page">
+<h1 class="shapes-title">Shapes</h1>
+<p class="shapes-lede">A sketch draws each part in a shape. A shape states its size, its pieces, and where its text goes, and transect draws every state and every text the same way on each shape. Each shape is drawn here in each state with the same texts. The bars on its first drawing are its ports, where a wire attaches. A role of a KindKnowledge names a shape, and finds the shape of its kind's own group before the library's.</p>
+{%- for group in groups %}
+<h2 class="shapes-group{% if group.file %} shapes-file{% endif %}">{{ group.heading }}</h2>
+{%- for shape in group.shapes %}
+<section class="shapes-shape" id="{{ shape.name }}" aria-label="{{ shape.name }}">
+<header class="shapes-head">
+<h3 class="shapes-name">{{ shape.name }}</h3>
+<p class="shapes-summary">{{ shape.summary }}</p>
+<p class="shapes-facts">{{ shape.facts }}</p>
+</header>
+<div class="shapes-cells">
+{%- for cell in shape.cells %}
+{%- let drawn = cell.drawn %}
+<figure class="shapes-cell" style="width: {{ cell.width }}px">
+<div class="shapes-area" style="{{ cell.room }}">
+{%- include "shapes/parts.html" %}
+</div>
+<figcaption>{{ cell.caption }}</figcaption>
+</figure>
+{%- endfor %}
+</div>
+</section>
+{%- endfor %}
+{%- endfor %}
+<h2 class="shapes-group" id="left-out">Left out</h2>
+{%- if left_out.is_empty() %}
+<p class="shapes-facts">Every Shape under --resources loaded.</p>
+{%- else %}
+<ul class="shapes-left-out">
+{%- for shape in left_out %}
+<li><b>{% if shape.name.is_empty() %}no name{% else %}{{ shape.name }}{% endif %}</b> in {{ shape.path }}: {{ shape.condition }}</li>
+{%- endfor %}
+</ul>
+{%- endif %}
+</main>
+</div>
+{% endblock %}

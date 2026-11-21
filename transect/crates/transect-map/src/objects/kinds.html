@@ -59,7 +59,7 @@
 <b class="workload-card-name">Kinds</b>
 <span class="workload-card-status">{{ kinds }} kinds, {{ objects }} objects</span>
 </div>
-<div class="card-body">The custom kinds the cluster serves, a box per API group. A kind's page lists its objects in every namespace.</div>
+<div class="card-body">The custom kinds the cluster serves, a box per API group. A kind's page lists its objects in every namespace. A sketch on an object's page draws each part in a shape, and <a href="/shapes" hx-get="/shapes">shapes</a> draws each one in every state.</div>
 {%- let unhealthy = unhealthy() %}
 {%- if !unhealthy.is_empty() %}
 <div class="card-depends">

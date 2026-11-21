@@ -18,9 +18,10 @@ use askama::Template;
 use super::EdgeRow;
 use crate::cards::WorkloadCard;
 use crate::objects::{Center, ObjectBoard, ObjectCard, Section};
+pub use crate::shapes::text::{End, Reading, Why};
 pub use chips::{Chip, chips, every_chip};
 use layout::{Place, Rect, places};
-pub use sketch::{Lean, Nothing, Part, Reading, Shown, Sketch, SketchRole, Standing, State, Why};
+pub use sketch::{Lean, Sketch, SketchRole, Standing};
 use transect_frame::frame::crumbs::Crumb;
 use transect_frame::frame::tabs::{Lens, Tabs};
 use transect_graph::edges::{Endpoint, Kind, Object, Plurals};
@@ -89,18 +90,6 @@ pub struct RelationBox {
     pub label: String,
     pub ends: Vec<End>,
     pub source: String,
-}
-
-/// One value in a reference's field.
-#[derive(Debug, PartialEq)]
-pub struct End {
-    pub reference: Reference,
-    /// A note under the value: what it resolves to, such as the
-    /// workload behind an address, or why it resolves to nothing.
-    pub under: Option<String>,
-    /// What the value resolves to, as `under` lists it, each linked to
-    /// its page.
-    pub reaches: Vec<Reference>,
 }
 
 /// What `KnownPage::build` needs to draw the page of one object.
@@ -232,7 +221,7 @@ impl KnownPage {
         }
         let in_boxes = self.boxes.iter().flat_map(|relation| &relation.ends);
         let roles = self.sketch.iter().flat_map(|sketch| &sketch.roles);
-        let in_parts = roles.flat_map(|role| role.parts.iter().map(|part| &part.end));
+        let in_parts = roles.flat_map(|role| role.drawn.parts.iter().map(|part| &part.end));
         let drawn: Vec<&Reference> = in_boxes.chain(in_parts).map(|end| &end.reference).collect();
         let shown = |value: &Reference| {
             drawn.iter().any(|end| match (&end.href, &value.href) {

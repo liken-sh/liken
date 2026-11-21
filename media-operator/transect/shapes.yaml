@@ -1,0 +1,23 @@
+# The shape that only the knowledge of a `Player` draws: the face of an
+# A/V receiver, with a display window that shows the receiver's
+# readings and a volume knob beside it.  `transect` reads it as any
+# `Shape` under `--resources`, and a role of a kind in
+# `media.liken.sh` that names `amplifier` finds it before the library.
+# Its chassis has the geometry of the library's `box`.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: amplifier.media.liken.sh
+spec:
+  summary: An A/V receiver or an amplifier on a shelf, with a display window and a volume knob on its front.
+  size: {design: [460, 153], width: [160, 460]}
+  outline: {round: 4}
+  text: {inset: [12, 14, 22, 14]}
+  display: window
+  pieces:
+    - {name: front line, draw: line, at: {left: 0, right: 0, bottom: 8, height: 1}, view: [460, 1], path: "M0 0.5H460"}
+    - {name: left foot, at: {left: 12, top: 100%, width: 18, height: 4}, round: [0, 0, 2, 2]}
+    - {name: right foot, at: {right: 12, top: 100%, width: 18, height: 4}, round: [0, 0, 2, 2]}
+    - {name: knob, at: {right: 15, top: 50% - 16, width: 24, height: 24}, round: 50%, clear: right}
+    - {name: knob mark, draw: mark, at: {right: 25, top: 50% - 13, width: 4, height: 4}, round: 50%}
+  ports: {left: [25%, 75%], right: [25%, 75%]}

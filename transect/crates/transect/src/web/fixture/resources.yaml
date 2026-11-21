@@ -157,9 +157,37 @@ spec:
       roles:
         room: {reference: spec.room, expected: true, reads: [Floor], shows: [Aisle, [Sale, Stock]]}
         label: {reference: spec.label, shape: screen, expected: true}
-        spill: {reference: spec.spill}
+        spill: {reference: spec.spill, shape: crate}
         lamp: {reference: spec.lamp, expected: true}
         ladder: {reference: spec.ladder}
+---
+# The shape of the shelf's spill: a role of a kind in
+# `stock.example.test` that names `crate` finds this shape in the kind's
+# own group.  Its handle stands above its top edge, so a part keeps the
+# room above it.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: crate.stock.example.test
+spec:
+  summary: A crate with a slat across its side and a handle on its lid, such as a crate of stock in a store room.
+  size: {design: [240, 120], width: [140, 260]}
+  outline: {round: 2}
+  pieces:
+    - {name: handle, behind: true, at: {left: 50% - 20, width: 40, top: -10, height: 14}, round: [6, 6, 0, 0]}
+    - {name: slat, draw: line, at: {left: 0, right: 0, bottom: 30, height: 1}, view: [240, 1], path: "M0 0.5H240"}
+  ports: {left: [30%, 70%], right: [30%, 70%]}
+---
+# A shape with a field that the form does not have, which transect
+# leaves out with the condition Invalid.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: glowing-crate.stock.example.test
+spec:
+  summary: A crate in a color of its own.
+  size: {design: [240, 120], width: [140, 260]}
+  color: "#ff0000"
 ---
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge

@@ -7,8 +7,9 @@ use crate::objects::{Center, ObjectCard, Section, Side};
 use transect_graph::edges::{ClusterScoped, Endpoint, Plurals};
 use transect_observe::health::Level;
 use transect_resources::knowledge::{self, KindKnowledge, fixtures::knowledge};
+use transect_resources::shapes::Shapes;
 
-const REFERENCES: &str = "references: [
+pub(super) const REFERENCES: &str = "references: [
     {path: status.screen.monitor, label: shows on},
     {path: status.amp.name, kind: Amp, group: amps.example.com, label: amplified by},
     {path: 'spec.handsets[].name', kind: Handset, group: widgets.example.com, label: controlled by},
@@ -72,7 +73,13 @@ const OWN: &[(&str, &str)] = &[
 /// reads "on". The kiosk's own columns read as `OWN` says. Handsets have
 /// pages.
 fn page_of(spec: &str, standing: Standing) -> KnownPage {
-    let known = knowledge("kiosks.widgets.example.com", spec);
+    page_with(spec, standing, &Shapes::default())
+}
+
+/// The page of `page_of`, with each role drawn in a shape of `shapes`.
+pub(super) fn page_with(spec: &str, standing: Standing, shapes: &Shapes) -> KnownPage {
+    let mut known = knowledge("kiosks.widgets.example.com", spec);
+    known.draw_with(shapes);
     let data = serde_yaml::from_str(KIOSK).unwrap();
     let relations = knowledge::relations(
         &known,
@@ -149,11 +156,15 @@ fn draws_each_role_with_a_part_for_each_value_and_leaves_an_unexpected_empty_rol
         .roles
         .iter()
         .map(|role| {
-            let parts = role.parts.iter().map(|part| {
+            let parts = role.drawn.parts.iter().map(|part| {
                 let reference = &part.end.reference;
                 (reference.text.as_str(), reference.href.as_deref())
             });
-            (role.area.as_str(), role.label.as_str(), parts.collect())
+            (
+                role.area.as_str(),
+                role.drawn.label.as_str(),
+                parts.collect(),
+            )
         })
         .collect();
     let handsets = "/namespaces/shop/handsets.widgets.example.com/";
@@ -193,7 +204,7 @@ fn draws_an_expected_role_with_no_part_as_nothing(
 ) {
     let sketch = sketch(Standing::Plain);
     let role = sketch.roles.iter().find(|role| role.area == area).unwrap();
-    let found = role.nothing.as_ref();
+    let found = role.drawn.nothing.as_ref();
     let found = found.map(|n| (n.text.as_str(), n.note.as_str()));
     assert_eq!(found, nothing);
 }
@@ -221,7 +232,8 @@ fn takes_a_parts_state_and_its_reason_from_the_object_it_names(
         .roles
         .iter()
         .flat_map(|role| {
-            role.parts
+            role.drawn
+                .parts
                 .iter()
                 .map(|part| (role.area.as_str(), part.state, part.why.clone()))
         })
@@ -275,7 +287,7 @@ fn shows_the_columns_of_the_pages_own_object(
     #[case] expected: Vec<(&str, &str)>,
 ) {
     let sketch = showing(shows, Standing::Plain);
-    assert_eq!(shown(&sketch.roles[1].parts[0]), expected);
+    assert_eq!(shown(&sketch.roles[1].drawn.parts[0]), expected);
 }
 
 #[rstest]
@@ -288,7 +300,7 @@ fn marks_a_column_that_is_not_the_first_of_its_entry_as_a_fallback(
     #[case] fallbacks: Vec<bool>,
 ) {
     let sketch = showing(shows, Standing::Plain);
-    let shown = sketch.roles[1].parts[0].shows.iter();
+    let shown = sketch.roles[1].drawn.parts[0].shows.iter();
     assert_eq!(shown.map(|s| s.fallback).collect::<Vec<_>>(), fallbacks);
 }
 
@@ -300,13 +312,13 @@ fn shows_nothing_of_the_pages_own_object_on_a_value() {
     );
     let spec = format!("{{{REFERENCES}, {elevation}}}");
     let sketch = page_of(&spec, Standing::Plain).sketch.unwrap();
-    assert_eq!(shown(&sketch.roles[0].parts[0]), vec![]);
+    assert_eq!(shown(&sketch.roles[0].drawn.parts[0]), vec![]);
 }
 
 #[rstest]
 fn shows_nothing_of_the_pages_own_object_on_a_name_with_no_object() {
     let sketch = showing("[Mode]", Standing::Missing);
-    assert_eq!(shown(&sketch.roles[1].parts[0]), vec![]);
+    assert_eq!(shown(&sketch.roles[1].drawn.parts[0]), vec![]);
 }
 
 #[rstest]
@@ -320,7 +332,7 @@ fn notes_and_reads_each_part(
 ) {
     let sketch = sketch(Standing::Plain);
     let role = sketch.roles.iter().find(|role| role.area == area).unwrap();
-    let part = &role.parts[0];
+    let part = &role.drawn.parts[0];
     let read = part.readings.iter();
     let read: Vec<(&str, &str)> = read.map(|r| (r.name.as_str(), r.value.as_str())).collect();
     assert_eq!((part.end.under.as_deref(), read), (under, readings));
@@ -333,7 +345,7 @@ fn notes_and_reads_each_part(
 fn spells_out_a_part_that_is_not_an_object(#[case] area: &str, #[case] literal: bool) {
     let sketch = sketch(Standing::Plain);
     let role = sketch.roles.iter().find(|role| role.area == area).unwrap();
-    assert_eq!(role.parts[0].literal, literal);
+    assert_eq!(role.drawn.parts[0].literal, literal);
 }
 
 /// The page draws each reading's value and each shown value with a
@@ -346,10 +358,10 @@ fn breaks_values_after_each_separator_and_escapes_them() {
     );
     let spec = format!("{{{REFERENCES}, {elevation}}}");
     let html = page_of(&spec, Standing::Plain).render().unwrap();
-    let values = html.split("<span class=\"sketch-reading-value\">").skip(1);
+    let values = html.split("<span class=\"shape-reading-value\">").skip(1);
     let values: Vec<&str> = values.filter_map(|v| v.split("</span>").next()).collect();
     let end =
-        r#"<div class="known-end" title="tv-1"><span class="object-name">tv-<wbr>1</span></div>"#;
+        r#"<div class="shape-name" title="tv-1"><span class="object-name">tv-<wbr>1</span></div>"#;
     assert_eq!(
         (values, html.contains(end)),
         (vec!["on", "on", "FL,<wbr>FR&#38;&#60;LFE"], true)
@@ -359,7 +371,7 @@ fn breaks_values_after_each_separator_and_escapes_them() {
 #[rstest]
 fn notes_a_name_the_cluster_has_no_object_for() {
     let sketch = sketch(Standing::Missing);
-    let amp = &sketch.roles[1].parts[0];
+    let amp = &sketch.roles[1].drawn.parts[0];
     assert_eq!(
         (
             amp.end.under.as_deref(),
@@ -373,40 +385,42 @@ fn notes_a_name_the_cluster_has_no_object_for() {
 #[rstest]
 fn lays_the_roles_out_on_the_grid_of_the_sketch() {
     let sketch = sketch(Standing::Plain);
-    let shapes: Vec<String> = sketch.roles.iter().map(SketchRole::shape_class).collect();
-    let areas: Vec<&str> = sketch.roles.iter().map(|r| r.lean.area_class()).collect();
+    let drawn_in = |name: &str| {
+        let shape = Shapes::default().resolve(name, "").unwrap().clone();
+        crate::shapes::Drawing::of(&shape, crate::shapes::Pose::default())
+    };
+    let drawings: Vec<&crate::shapes::Drawing> =
+        sketch.roles.iter().map(|r| &r.drawn.drawing).collect();
+    let shapes = ["screen", "box", "handheld", "speaker", "box"].map(drawn_in);
+    let areas: Vec<String> = sketch.roles.iter().map(SketchRole::area_class).collect();
     assert_eq!(
         (
             sketch.name.as_str(),
             sketch.question.as_str(),
             sketch.columns,
             sketch.areas.as_str(),
-            shapes,
+            sketch.rows.as_str(),
+            drawings,
             areas,
-            sketch.roles[0].source.as_str(),
+            sketch.roles[0].drawn.source.as_str(),
             sketch.caption(),
         ),
         (
             "the kiosk",
             "What is this kiosk made of?",
             3,
-            r#""face face amp" "hand lamp bell" "bus . .""#,
+            r#""face face amp" ". . ." "hand lamp bell" ". . ." "bus . .""#,
+            "auto var(--sketch-gap) auto var(--sketch-gap) auto",
+            shapes.iter().collect::<Vec<_>>(),
             vec![
-                "sketch-screen".to_string(),
-                "sketch-box".into(),
-                "sketch-handheld".into(),
-                "sketch-speaker".into(),
-                "sketch-box".into(),
-            ],
-            vec![
-                "sketch-area",
-                "sketch-area sketch-lean-start",
-                "sketch-area sketch-lean-end",
-                "sketch-area",
-                "sketch-area sketch-lean-end",
+                "sketch-area".to_string(),
+                "sketch-area sketch-lean-start".into(),
+                "sketch-area sketch-lean-end".into(),
+                "sketch-area".into(),
+                "sketch-area sketch-lean-end".into(),
             ],
             "from status.screen.monitor",
-            "Hover a part for the field it was read from. The places and shapes are from the KindKnowledge kiosks.widgets.example.com.".to_string(),
+            "Hover a part for the field it was read from. The places and shapes are from the KindKnowledge kiosks.widgets.example.com, and /shapes draws each shape.".to_string(),
         )
     );
 }
@@ -448,3 +462,5 @@ fn leaves_out_of_the_board_each_value_the_sketch_shows() {
     let labels: Vec<&str> = facts.map(|fact| fact.label.as_str()).collect();
     assert_eq!((board.center.is_none(), labels), (true, vec!["sells"]));
 }
+
+mod shapes;

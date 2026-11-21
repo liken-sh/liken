@@ -204,8 +204,9 @@ the loader cannot find a library.
 ## Where to start
 
 `transect` as it is now is a proof of concept, and the maintainer
-intends to design its ideas again.  No plan for new work is open.  The
-plans in `plans/completed/` record how each part was built, in order:
+intends to design its ideas again.  The plans at the top of `plans/`
+are open: each is designed and not built.  The plans in
+`plans/completed/` record how each part was built, in order:
 plans 01 through 06 built the elevations, every edge the API gives,
 image provenance, a lost machine, kind knowledge, intent, log sources,
 lens tabs, quick search, and the machine, ground, and volume pages.
@@ -215,7 +216,15 @@ access lens, plan 10 the vulnerabilities pages, and plan 12 split the
 crate into the workspace that "Where things live" describes.  Plan 13
 is the first work under the new design: the knowledge of a kind states
 a sketch, an arrangement of roles in shapes that `transect` draws, and
-the page of an object draws it in place of the ring of boxes.
+the page of an object draws it in place of the ring of boxes.  Plan 17
+made the shapes one system.  A `Shape` resource states a shape's
+geometry and materials and nothing else.  The library's shapes are
+files in `crates/transect-resources/src/shapes/library/`, and an
+operator ships its own shapes in its `transect/` directory.  The
+`shapes` module of `transect-map` draws every part, `shapes.css` draws
+every state, and `/shapes` draws each shape in each state.  No code and
+no rule names a shape: when a shape needs a rule of its own, the form
+of a `Shape` is missing a field.
 
 `plans/open-problems/` holds the defects that a test reproduced in the
 code as it is.  Write a plan before you build anything new.

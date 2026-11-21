@@ -1,0 +1,125 @@
+/*
+ * The page of every shape: a section for each shape, and a cell for
+ * each state.  Nothing here names a shape.  Each cell is a container,
+ * so a part with a share of the sketch's width takes it of the cell.
+ */
+
+.shapes-page {
+  max-width: 1400px;
+  padding: 16px 0 32px 32px;
+}
+
+.shapes-title {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.shapes-lede {
+  max-width: 72ch;
+  margin: 0 0 18px;
+  color: var(--ink-muted);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.shapes-group {
+  margin: 34px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink-faint);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* An author's file keeps the spelling of its path. */
+.shapes-file {
+  font-family: var(--mono);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.shapes-shape {
+  margin: 0 0 26px;
+  scroll-margin-top: 16px;
+}
+
+.shapes-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 12px;
+  margin-bottom: 10px;
+}
+
+.shapes-name {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 16px;
+}
+
+.shapes-summary,
+.shapes-facts {
+  flex-basis: 100%;
+  margin: 4px 0 0;
+  color: var(--ink-muted);
+  font-size: 14px;
+}
+
+.shapes-facts {
+  color: var(--ink-faint);
+  font-size: 13px;
+}
+
+.shapes-cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.shapes-cell {
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 0;
+  padding: 22px 16px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: var(--row);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  container-type: inline-size;
+}
+
+/* The area leaves the room that a piece past a side or below the
+   bottom needs, which the page writes in its padding. */
+.shapes-area {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-height: 40px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+}
+
+.shapes-cell figcaption {
+  margin-top: 8px;
+  color: var(--ink-faint);
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 12px;
+}
+
+.shapes-left-out {
+  color: var(--ink-muted);
+  font-size: 14px;
+}
+
+@media (max-width: 520px) {
+  .shapes-page { padding: 16px; }
+
+  .shapes-cell { width: 100%; }
+}

@@ -40,7 +40,7 @@ lit by
 empty
 no Lamp
 spec.lamp names nothing now
-Hover a part for the field it was read from. The places and shapes are from the KindKnowledge shelves.stock.example.test.
+Hover a part for the field it was read from. The places and shapes are from the KindKnowledge shelves.stock.example.test, and /shapes draws each shape.
 Part of Room back-room
 Status
 Aisle 7

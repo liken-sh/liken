@@ -71,5 +71,7 @@ operator reads nothing from `library-operator`.
   environment variables, so a change to one needs the same change in
   the other.
 - `transect/` contains the kind knowledge that `transect` reads for the
-  `Player` and the `Remote`. A change to a condition, a printer column,
-  or a status field that a file there names also changes that file.
+  `Player` and the `Remote`, in `kinds.yaml`, and in `shapes.yaml` the
+  `amplifier` shape that the `Player`'s receiver is drawn in. A change
+  to a condition, a printer column, or a status field that a file
+  there names also changes that file.

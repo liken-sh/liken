@@ -123,6 +123,7 @@ fn diff(then: &str, now: &str) -> String {
 )]
 #[case::what_changed("changed", "/changed")]
 #[case::the_resources("resources", "/resources")]
+#[case::the_shapes("shapes", "/shapes")]
 #[case::the_ways_in("ways-in", "/access")]
 #[case::a_workloads_access(
     "workload-access",

@@ -1,0 +1,232 @@
+/*
+ * The text of a part, the same block on every shape: the label, the
+ * state word for a screen reader, the name with its link, the reason,
+ * the readings, what the page's own object shows, the note, and the
+ * field it was read from.  A shape's `text` places the block and
+ * chooses its fit, its alignment, and its display, which the classes on
+ * the part name.  `shapes.css` draws the shape and the states.
+ */
+
+/* The role's label is small capitals over the name, and the name is
+   the line to read first. */
+.shape-label {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.shape-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: break-word;
+}
+
+.shape-name a { text-decoration: none; }
+
+.shape-name a:hover { text-decoration: underline; }
+
+.shape-under,
+.shape-none {
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+.shape-none { font-style: italic; }
+
+/* The reason of the object's health condition is a short line under
+   its name, and its `title` has the condition's message. */
+.shape-why {
+  color: var(--warm);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The state is drawn by the outline, so its word is only for a screen
+   reader. */
+.shape-state {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The readings run on as one line that wraps between readings.  The
+   space between two readings separates them, so no mark is left at the
+   end of a line when it wraps.  What the page's own object shows is a
+   second line. */
+.shape-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shape-readings {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 1.2em;
+  color: var(--ink-muted);
+}
+
+.shape-reading { max-width: 100%; }
+
+.shape-reading-name { color: var(--ink-faint); }
+
+.shape-shows .shape-reading-name { text-transform: lowercase; }
+
+/* The field that a part was read from shows only while the reader
+   points at the part or a link in it has focus, because the caption
+   under the sketch says how to see it.  Its line is kept while it is
+   hidden, so the part does not change height.  It stands at the bottom
+   inset that the shape states, under a piece that the rest of the text
+   keeps clear of. */
+.shape-text > .shape-source {
+  position: absolute;
+  bottom: max(4px, calc(var(--u) * var(--source-bottom)));
+  left: max(4px, calc(var(--u) * var(--text-left)));
+  right: max(4px, calc(var(--u) * var(--text-right)));
+  line-height: var(--source-line);
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+}
+
+.shape-part:is(:hover, :focus-within) .shape-source { opacity: 1; }
+
+.shape-align-center .shape-text {
+  text-align: center;
+  align-items: stretch;
+}
+
+.shape-align-center .shape-readings { justify-content: center; }
+
+.shape-align-end .shape-text { text-align: right; }
+
+.shape-align-end .shape-readings { justify-content: flex-end; }
+
+/* fit: cut.  The part keeps its proportions, each line that is too
+   long is cut, with the whole text in its title, and text that does
+   not fit is cut at the text region, so it never crosses the shape's
+   edge.  The padding keeps a
+   focused link's outline inside the line that clips it, and the margin
+   takes the padding back out of the layout. */
+.shape-fit-cut .shape-text {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  overflow-clip-margin: content-box 4px;
+}
+
+.shape-fit-cut .shape-text > * { flex-shrink: 0; }
+
+.shape-fit-cut .shape-text > :is(.shape-label, .shape-name, .shape-under),
+.shape-fit-cut .shape-readings:not(.shape-shows) .shape-reading {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shape-fit-cut .shape-text > :is(.shape-name, .shape-under) {
+  padding: 4px;
+  margin: -4px;
+}
+
+/* A display is where readings show as lit characters: a reading's value
+   takes the main ink and its name stays faint, so the values read at a
+   glance.  A window is a pane of glass in the text. */
+:is(.shape-display-window, .shape-display-surface) .shape-reading-value { color: var(--ink); }
+
+.shape-display-window:not(.shape-value, .shape-empty, .shape-elsewhere) .shape-readout {
+  --ink: var(--shape-glass-ink);
+  --ink-muted: var(--shape-glass-muted);
+  --ink-faint: var(--shape-glass-faint);
+  margin: 4px 0 2px;
+  padding: 5px 9px;
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  border-radius: 3px;
+  box-shadow: inset 0 1px 4px var(--shape-glass-shade);
+}
+
+/* A surface is a display that is the whole text region: all of the text
+   is on glass, its name is one size larger, and what the page's own
+   object shows is the title in the middle, as a television shows a
+   title over its picture, at most two lines. */
+.shape-display-surface:not(.shape-value, .shape-empty, .shape-elsewhere) .shape-text {
+  --ink: var(--shape-glass-ink);
+  --ink-muted: var(--shape-glass-muted);
+  --ink-faint: var(--shape-glass-faint);
+  --link: var(--shape-glass-link);
+  --warm: var(--shape-glass-warm);
+}
+
+.shape-display-surface .shape-name { font-size: 15px; }
+
+.shape-display-surface .shape-readout { display: contents; }
+
+.shape-display-surface .shape-shows {
+  order: 1;
+  margin: auto 0;
+  align-self: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  padding: 8px 0;
+  text-align: center;
+}
+
+.shape-display-surface .shape-shows .shape-reading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.shape-display-surface .shape-shows .shape-reading-name {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.shape-display-surface .shape-shows .shape-reading-value {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+/* A value from a column after the first of its entry, such as the idle
+   screen in place of the play, is smaller and in the muted ink, so a
+   display that plays looks on and a display at rest looks quiet. */
+.shape-display-surface .shape-shows .shape-fallback .shape-reading-value {
+  font-size: 15px;
+  color: var(--ink-muted);
+}
+
+.shape-display-surface .shape-text > .shape-under { order: 2; }
+
+/* A link that has focus from the keyboard has an outline in the ink
+   around it, so it shows on glass as well as on a panel. */
+.shape-part a:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 2px;
+}

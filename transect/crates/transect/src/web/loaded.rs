@@ -3,6 +3,8 @@
 //! must know every domain crate, so it is in the binary. The
 //! `resources` crate reads the directory and applies the overlays.
 
+use std::sync::Arc;
+
 #[cfg(test)]
 mod examples;
 
@@ -17,6 +19,7 @@ use transect_resources::intent::Intent;
 use transect_resources::knowledge::{self, KindKnowledge};
 use transect_resources::layers::{self, Layers};
 use transect_resources::resources::{Condition, Directory, DocId, Sorts};
+use transect_resources::shapes::{self, Shape, Shapes};
 use transect_supply::forge::Forge;
 use transect_supply::images::mirror::{self, RegistryMirror};
 
@@ -27,6 +30,8 @@ pub struct Loaded {
     pub layers: Layers,
     pub intents: Vec<Intent>,
     pub kinds: Vec<KindKnowledge>,
+    /// The authors' shapes. The library's are in the binary.
+    pub shapes: Vec<Arc<Shape>>,
     pub devices: Vec<DeviceKnowledge>,
     pub outsides: Vec<Outside>,
     pub mirrors: Vec<RegistryMirror>,
@@ -40,6 +45,13 @@ pub struct Loaded {
     /// How each load balancer's listeners identify the `Service` they
     /// serve.
     pub load_balancers: Vec<LoadBalancerController>,
+}
+
+impl Loaded {
+    /// The library's shapes and the authors' shapes that loaded.
+    pub fn shapes(&self) -> Shapes {
+        Shapes::with(&self.shapes)
+    }
 }
 
 impl Sorts for Loaded {
@@ -72,6 +84,12 @@ impl Sorts for Loaded {
                 knowledge::parse(doc, value),
                 |a, b| a.name == b.name,
                 |one| format!("{} is described twice", one.name),
+            ),
+            "Shape" => first(
+                &mut self.shapes,
+                shapes::parse(doc, value).map(Arc::new),
+                |a, b| a.name == b.name,
+                |one| format!("the shape {} is defined twice", one.name),
             ),
             "DeviceKnowledge" => first(
                 &mut self.devices,

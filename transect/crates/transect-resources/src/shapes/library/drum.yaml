@@ -1,0 +1,14 @@
+# The ends of a drum are ellipses of a fixed height, so a drum whose
+# text is long grows taller and keeps the same rim.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: drum
+spec:
+  summary: An upright cylinder, the usual drawing of a database or another store of data.
+  size: {design: [360, 150], width: [200, 400]}
+  outline: {round: 50% / 22}
+  text: {inset: [52, 22, 22, 22]}
+  pieces:
+    - {name: rim, draw: line, at: {left: 0, right: 0, top: 0, height: 44}, round: 50%}
+  ports: {top: [30%, 70%], left: [45%, 75%], right: [45%, 75%]}

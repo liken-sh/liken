@@ -276,6 +276,7 @@ impl Snapshot {
             &self.plurals,
             &self.resources.layers.names().collect::<Vec<_>>(),
         );
+        self.kinds.find_shapes(&self.resources.shapes());
         self.intents = Intents::read(
             &self.described(),
             &self.resources.intents,

@@ -21,6 +21,7 @@ use transect_map::map::{
     ClusterMap, ClusterPage, Contents, EdgeRow, GitOpsPage, NamespacePage, ON_THE_MAP, PodContents,
     PodPage, Sidebar, WorkloadContents, WorkloadPage, has_page, workload_card,
 };
+use transect_map::shapes::ShapesPage;
 use transect_network::entry::Endpoints;
 use transect_network::policy::NamespaceReach;
 use transect_observe::health;
@@ -410,6 +411,13 @@ pub fn pod_page(
     let page = PodPage::build(&map, namespace, name, contents)?;
     let row = EdgeRow::build(&snapshot.offered(), shown, &page.path);
     Some(page.with_edge_row(row))
+}
+
+/// The page of every shape that `transect` has loaded, and of each
+/// `Shape` under `--resources` that did not load.
+pub fn shapes_page(model: &Model) -> ShapesPage {
+    let resources = &model.snapshot.resources;
+    ShapesPage::build(&resources.shapes(), &resources.directory)
 }
 
 /// The resources page: `transect`'s own resources, each with the

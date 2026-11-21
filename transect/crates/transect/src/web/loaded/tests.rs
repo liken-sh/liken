@@ -121,6 +121,18 @@ spec: {layers: [{name: apps}]}
     "images",
     "Invalid"
 )]
+#[case::a_shape(
+    "apiVersion: transect.liken.sh/v1alpha1\nkind: Shape\nmetadata: {name: crate.stock.example.test}\nspec: {summary: A crate., size: {design: [100, 50], width: [80, 120]}}\n",
+    "Shape",
+    "crate.stock.example.test",
+    "Loaded"
+)]
+#[case::a_shape_with_a_color(
+    "apiVersion: transect.liken.sh/v1alpha1\nkind: Shape\nmetadata: {name: crate.stock.example.test}\nspec: {summary: A crate., size: {design: [100, 50], width: [80, 120]}, color: red}\n",
+    "Shape",
+    "crate.stock.example.test",
+    "Invalid"
+)]
 #[case::an_overlay(
     "apiVersion: apps/v1\nkind: Deployment\nmetadata: {namespace: shop, name: web, annotations: {transect.liken.sh/why: Sells things.}}\n",
     "Deployment",
@@ -207,6 +219,19 @@ fn keeps_the_first_of_two_descriptions_of_one_kind() {
     let reasons: Vec<_> = read(&loaded).into_iter().map(|(.., r)| r).collect();
     assert_eq!(reasons, vec![vec!["Loaded"], vec!["Duplicate"]]);
     assert_eq!(loaded.kinds.len(), 1);
+}
+
+/// A shape is named once. The document whose path sorts first keeps
+/// the name, and a second document of that name is left out.
+#[rstest]
+fn keeps_the_first_of_two_shapes_of_one_name() {
+    let crate_shape = "apiVersion: transect.liken.sh/v1alpha1\nkind: Shape\nmetadata: {name: crate.stock.example.test}\nspec: {summary: A crate., size: {design: [100, 50], width: [80, 120]}}\n";
+    let loaded = one(&format!("{crate_shape}---\n{crate_shape}"));
+    let reasons: Vec<_> = read(&loaded).into_iter().map(|(.., r)| r).collect();
+    assert_eq!(
+        (reasons, loaded.shapes.len()),
+        (vec![vec!["Loaded"], vec!["Duplicate"]], 1)
+    );
 }
 
 #[rstest]

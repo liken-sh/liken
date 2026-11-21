@@ -13,3 +13,4 @@ pub mod lenses;
 pub mod map;
 pub mod objects;
 pub mod search;
+pub mod shapes;

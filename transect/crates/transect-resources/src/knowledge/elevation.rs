@@ -7,10 +7,12 @@
 
 use std::collections::BTreeMap;
 use std::ops::Range;
+use std::sync::Arc;
 
 use serde::Deserialize;
 
 use super::Reference;
+use crate::shapes::{self, library};
 
 /// One arrangement of roles, such as "the room".
 #[derive(Clone, Debug, PartialEq)]
@@ -42,7 +44,13 @@ pub struct Role {
     /// The `path` of the entry of `references` whose values are the
     /// role's parts.
     pub reference: String,
-    pub shape: Shape,
+    /// The shape's name as the role writes it, or the library's default
+    /// when the role names none.
+    pub shape: String,
+    /// The definition that the page draws the role's parts in.
+    /// `KindKnowledge::draw_with` finds it from `shape`. Until then, and
+    /// when no loaded shape has that name, it is the library's default.
+    pub drawn: Arc<shapes::Shape>,
     /// Whether the page draws the role when its reference reads no
     /// value.
     pub expected: bool,
@@ -65,81 +73,34 @@ pub struct Show {
     pub columns: Vec<String>,
 }
 
-/// The shapes that `transect` draws for a part.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Shape {
-    Screen,
-    #[default]
-    Box,
-    Speaker,
-    Handheld,
-    /// A thing that is in the cluster and not in the picture, such as
-    /// a message bus or a claim, drawn smaller and quieter than the
-    /// things that the picture shows.
-    Tag,
-}
-
-impl Shape {
-    /// The shape that `name` writes in a role, or `None` when
-    /// `transect` draws no such shape.
-    fn named(name: &str) -> Option<Self> {
-        Some(match name {
-            "screen" => Self::Screen,
-            "box" => Self::Box,
-            "speaker" => Self::Speaker,
-            "handheld" => Self::Handheld,
-            "tag" => Self::Tag,
-            _ => return None,
-        })
-    }
-
-    /// The word that a document writes for the shape, which is also the
-    /// end of its CSS class.
-    pub fn word(self) -> &'static str {
-        match self {
-            Self::Screen => "screen",
-            Self::Box => "box",
-            Self::Speaker => "speaker",
-            Self::Handheld => "handheld",
-            Self::Tag => "tag",
-        }
-    }
-}
-
 impl Grid {
     /// The number of cells in each row.
     pub fn columns(&self) -> usize {
         self.rows.first().map_or(0, Vec::len)
     }
 
-    /// The value of the CSS property `grid-template-areas`: one quoted
-    /// string for each row, with `.` for an empty cell. Every name in
-    /// the grid passed the parser's check of a role name, so the value
-    /// contains no quote and no character that CSS reads as syntax.
-    pub fn template_areas(&self) -> String {
-        let rows = self.rows.iter().map(|row| {
-            let cells: Vec<&str> = row
-                .iter()
-                .map(|cell| cell.as_deref().unwrap_or("."))
-                .collect();
-            format!("\"{}\"", cells.join(" "))
-        });
-        rows.collect::<Vec<_>>().join(" ")
-    }
-
     /// The columns that the area of `name` spans, from its left column
     /// to the column after its right one, or `None` when no cell has
     /// the name.
-    pub fn span(&self, name: &str) -> Option<Range<usize>> {
+    pub fn columns_of(&self, name: &str) -> Option<Range<usize>> {
         let cells = self.rows.iter().flat_map(|row| row.iter().enumerate());
         let named = cells.filter(|(_, cell)| cell.as_deref() == Some(name));
         let columns: Vec<usize> = named.map(|(column, _)| column).collect();
         Some(*columns.iter().min()?..columns.iter().max()? + 1)
     }
 
+    /// The rows that the area of `name` spans, from its top row to the
+    /// row after its bottom one, or `None` when no cell has the name.
+    pub fn rows_of(&self, name: &str) -> Option<Range<usize>> {
+        let rows = self.rows.iter().enumerate();
+        let named = rows.filter(|(_, cells)| cells.iter().any(|c| c.as_deref() == Some(name)));
+        let rows: Vec<usize> = named.map(|(row, _)| row).collect();
+        Some(*rows.first()?..rows.last()? + 1)
+    }
+
     /// Each name in the grid once, in the order that its first cell
     /// appears.
-    fn names(&self) -> Vec<&str> {
+    pub fn names(&self) -> Vec<&str> {
         let mut names: Vec<&str> = Vec::new();
         for name in self.rows.iter().flatten().flatten() {
             if !names.contains(&name.as_str()) {
@@ -182,6 +143,32 @@ pub struct WrittenRole {
 enum WrittenShow {
     One(String),
     First(Vec<String>),
+}
+
+impl Elevation {
+    /// Finds each role's shape in `shapes`, for the knowledge of a kind
+    /// in `group`. A role whose shape no loaded shape has keeps the
+    /// library's default, and the result has a message that names the
+    /// role and the shape.
+    pub fn draw_with(&mut self, shapes: &shapes::Shapes, group: &str) -> Vec<String> {
+        let mut unknown = Vec::new();
+        for role in &mut self.roles {
+            role.drawn = match shapes.resolve(&role.shape, group) {
+                Some(shape) => shape.clone(),
+                None => {
+                    unknown.push(format!(
+                        "the role {} of the elevation {:?} names the shape {:?}, which transect has not loaded, so it is drawn as a {}",
+                        role.name,
+                        self.name,
+                        role.shape,
+                        library::DEFAULT
+                    ));
+                    library::default()
+                }
+            };
+        }
+        unknown
+    }
 }
 
 /// The elevations of `written`, checked against the kind's
@@ -243,14 +230,6 @@ fn role(name: String, written: WrittenRole, references: &[Reference]) -> Result<
             written.reference
         ));
     }
-    let shape = match written.shape.as_deref() {
-        None => Shape::default(),
-        Some(shape) => Shape::named(shape).ok_or_else(|| {
-            format!(
-                "roles.{name}: shape {shape:?} is not one of screen, box, speaker, handheld, or tag"
-            )
-        })?,
-    };
     let shows = written.shows.into_iter().enumerate().map(|(at, show)| {
         let columns = match show {
             WrittenShow::One(column) => vec![column],
@@ -267,7 +246,8 @@ fn role(name: String, written: WrittenRole, references: &[Reference]) -> Result<
     Ok(Role {
         name,
         reference: written.reference,
-        shape,
+        shape: written.shape.unwrap_or_else(|| library::DEFAULT.into()),
+        drawn: library::default(),
         expected: written.expected,
         reads: written.reads,
         shows,
@@ -317,8 +297,8 @@ fn grid(sketch: &str) -> Result<Grid, String> {
 }
 
 /// Whether `name` can name a role. The rule keeps a name a valid CSS
-/// identifier, because the page writes it into `grid-template-areas`
-/// and `grid-area`.
+/// identifier with no quote, because the page writes it into
+/// `grid-template-areas` and `grid-area`.
 fn valid_name(name: &str) -> bool {
     let mut chars = name.chars();
     let first = chars.next().is_some_and(|c| c.is_ascii_lowercase());

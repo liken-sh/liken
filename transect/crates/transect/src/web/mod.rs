@@ -179,6 +179,7 @@ fn router(changes: &watch::Sender<()>, sources: Sources) -> Router {
         .route("/resources", get(resources_page))
         .route("/changed", get(changed_page))
         .route("/kinds", get(kinds_list))
+        .route("/shapes", get(shapes_list))
         .route("/access", get(ways_page))
         .route("/access/accounts", get(accounts_page))
         .route(
@@ -230,8 +231,8 @@ fn router(changes: &watch::Sender<()>, sources: Sources) -> Router {
         )
         // A page opens `/events` followed by its own path and query, so
         // the stream renders the same view that the page shows.
-        .route("/events/", get(view_events_at_root))
-        .route("/events/{*path}", get(view_events))
+        .route("/events/", get(events::page_at_root))
+        .route("/events/{*path}", get(events::page))
         .route("/static/{*path}", get(assets::serve))
         .merge(probes::routes())
         .with_state(state)
@@ -304,6 +305,10 @@ async fn changed_page(State(state): State<AppState>, Query(query): Query<view::Q
 
 async fn kinds_list(State(state): State<AppState>, Query(query): Query<view::Query>) -> Response {
     state.whole(Page::Kinds, &query).await
+}
+
+async fn shapes_list(State(state): State<AppState>, Query(query): Query<view::Query>) -> Response {
+    state.whole(Page::Shapes, &query).await
 }
 
 async fn ways_page(State(state): State<AppState>, Query(query): Query<view::Query>) -> Response {
@@ -475,23 +480,4 @@ async fn logs_lens(
         container,
     };
     state.whole_on(model, page, &query).await
-}
-
-async fn view_events_at_root(state: State<AppState>, query: Query<view::Query>) -> Response {
-    view_events(state, Path(String::new()), query).await
-}
-
-async fn view_events(
-    State(state): State<AppState>,
-    Path(path): Path<String>,
-    Query(query): Query<view::Query>,
-) -> Response {
-    let Some(view) = View::at(&path, query) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    // An event stream can connect with no page load before it, or after
-    // `Reads` dropped its copy of the page's object, so read the object
-    // here as a page load would.
-    state.sources.prepare(&view.page).await;
-    events::stream(state.views.subscribe(view).await).into_response()
 }

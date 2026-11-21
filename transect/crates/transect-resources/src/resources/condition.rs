@@ -108,6 +108,17 @@ impl Condition {
         }
     }
 
+    /// A role of an elevation names a shape that `transect` has not
+    /// loaded, so the role is drawn in the default shape.
+    pub fn unknown_shape(message: impl Into<String>) -> Self {
+        Self {
+            kind: "ShapesFound",
+            status: Status::False,
+            reason: "UnknownShape",
+            message: message.into(),
+        }
+    }
+
     /// The log store rejected the resource's last search, or the search
     /// failed.
     pub fn search_failed(message: impl Into<String>) -> Self {
@@ -124,9 +135,11 @@ impl Condition {
     /// when it is `False`.
     pub fn trouble(&self) -> bool {
         match (self.kind, self.reason) {
-            ("Loaded" | "Matched" | "Served" | "LayerDeclared" | "Attached" | "Searched", _) => {
-                self.status == Status::False
-            }
+            (
+                "Loaded" | "Matched" | "Served" | "LayerDeclared" | "Attached" | "Searched"
+                | "ShapesFound",
+                _,
+            ) => self.status == Status::False,
             _ => self.status == Status::True,
         }
     }
@@ -145,6 +158,7 @@ impl Condition {
             ("LayerDeclared", Status::False) => "refers to a layer that Layers does not declare",
             ("Conflict", Status::True) => "set twice",
             ("Searched", Status::False) => "search failed",
+            ("ShapesFound", Status::False) => "names a shape transect has not loaded",
             (_, Status::True) => "true",
             (_, Status::False) => "false",
         };
@@ -186,6 +200,7 @@ mod tests {
     #[case::unattached(Condition::unattached("depends-on on a Service"), true)]
     #[case::an_unknown_layer(Condition::unknown_layer("no layer edge"), true)]
     #[case::a_conflict(Condition::conflict("why is set twice"), true)]
+    #[case::an_unknown_shape(Condition::unknown_shape("the role amp names kettle"), true)]
     fn says_which_conditions_to_act_on(#[case] condition: Condition, #[case] trouble: bool) {
         assert_eq!(condition.trouble(), trouble);
     }

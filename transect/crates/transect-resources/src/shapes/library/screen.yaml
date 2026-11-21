@@ -1,0 +1,18 @@
+# A screen keeps the 16:9 proportions of its panel, so its text is cut
+# and never makes it taller.  Its face is a display: the text on it
+# takes the inks of glass, and what the page's own object shows is the
+# title in the middle of the glass.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: screen
+spec:
+  summary: A television or a monitor, a panel of glass in a bezel on a stand.
+  size: {design: [600, 338], width: [240, 600], share: 62%}
+  outline: {draw: dark, round: 10}
+  text: {inset: [22, 26, 22, 26], fit: cut}
+  display: surface
+  pieces:
+    - {name: glass, draw: glass, at: {left: 10, right: 10, top: 10, bottom: 10}, round: 3}
+    - {name: stand, draw: dark, at: {left: 50% - 54, top: 100% + 1, width: 108, height: 12}, view: [100, 12], path: "M34 0H66V6.6L100 8.4V12H0V8.4L34 6.6Z"}
+  ports: {left: [30%, 70%], right: [30%, 70%]}

@@ -3,7 +3,6 @@ use std::ops::Range;
 use rstest::rstest;
 
 use super::super::{KindKnowledge, parse};
-use super::*;
 use crate::resources::DocId;
 
 const REFERENCES: &str = "references:
@@ -36,13 +35,13 @@ const KIOSK: &str = "
 #[rstest]
 fn reads_the_roles_in_the_order_of_the_sketch() {
     let known = read(KIOSK).unwrap();
-    let roles: Vec<(&str, &str, Shape, bool, Vec<&str>)> = known.elevations[0]
+    let roles: Vec<(&str, &str, &str, bool, Vec<&str>)> = known.elevations[0]
         .roles
         .iter()
         .map(|role| {
             let reads = role.reads.iter().map(String::as_str).collect();
             let (name, reference) = (role.name.as_str(), role.reference.as_str());
-            (name, reference, role.shape, role.expected, reads)
+            (name, reference, role.shape.as_str(), role.expected, reads)
         })
         .collect();
     assert_eq!(
@@ -51,65 +50,72 @@ fn reads_the_roles_in_the_order_of_the_sketch() {
             (
                 "face",
                 "status.screen.monitor",
-                Shape::Screen,
+                "screen",
                 true,
                 vec!["Mode"]
             ),
-            ("amp", "status.amp.name", Shape::Box, false, vec![]),
-            (
-                "hand",
-                "spec.handsets[].name",
-                Shape::Handheld,
-                false,
-                vec![]
-            ),
+            ("amp", "status.amp.name", "box", false, vec![]),
+            ("hand", "spec.handsets[].name", "handheld", false, vec![]),
         ]
     );
 }
 
 #[rstest]
-fn reads_the_sketch_into_the_areas_of_a_grid() {
+fn reads_the_sketch_into_a_grid() {
     let known = read(KIOSK).unwrap();
     let elevation = &known.elevations[0];
+    let rows: Vec<Vec<Option<&str>>> = elevation
+        .grid
+        .rows
+        .iter()
+        .map(|row| row.iter().map(Option::as_deref).collect())
+        .collect();
     assert_eq!(
         (
             elevation.name.as_str(),
             elevation.question.as_str(),
             elevation.grid.columns(),
-            elevation.grid.template_areas(),
+            rows,
         ),
         (
             "the kiosk",
             "What is this kiosk made of?",
             3,
-            r#""face face ." "face face amp" ". hand .""#.to_string(),
+            vec![
+                vec![Some("face"), Some("face"), None],
+                vec![Some("face"), Some("face"), Some("amp")],
+                vec![None, Some("hand"), None],
+            ],
         )
     );
 }
 
 #[rstest]
-#[case::two_columns_of_two_rows("face", Some(0..2))]
-#[case::the_last_column("amp", Some(2..3))]
-#[case::a_middle_column("hand", Some(1..2))]
-#[case::a_name_not_in_the_sketch("bell", None)]
-fn reads_the_columns_that_an_area_spans(#[case] name: &str, #[case] span: Option<Range<usize>>) {
+#[case::two_columns_of_two_rows("face", Some(0..2), Some(0..2))]
+#[case::the_last_column("amp", Some(2..3), Some(1..2))]
+#[case::a_middle_column("hand", Some(1..2), Some(2..3))]
+#[case::a_name_not_in_the_sketch("bell", None, None)]
+fn reads_the_columns_and_rows_that_an_area_spans(
+    #[case] name: &str,
+    #[case] columns: Option<Range<usize>>,
+    #[case] rows: Option<Range<usize>>,
+) {
     let known = read(KIOSK).unwrap();
-    assert_eq!(known.elevations[0].grid.span(name), span);
+    let grid = &known.elevations[0].grid;
+    assert_eq!((grid.columns_of(name), grid.rows_of(name)), (columns, rows));
 }
 
-/// A role's shape is read from its word, and the page's CSS class ends
-/// in the same word.
+/// A role keeps the name of its shape as it wrote it, and names the
+/// library's default when it writes none. `Kinds::resolve` finds the
+/// definition.
 #[rstest]
-#[case::screen("screen", Shape::Screen)]
-#[case::a_box("box", Shape::Box)]
-#[case::speaker("speaker", Shape::Speaker)]
-#[case::handheld("handheld", Shape::Handheld)]
-#[case::tag("tag", Shape::Tag)]
-fn reads_each_shape_by_its_word(#[case] word: &str, #[case] shape: Shape) {
-    let roles = format!("{{face: {{reference: status.screen.monitor, shape: {word}}}}}");
+#[case::a_bare_name(", shape: screen", "screen")]
+#[case::a_whole_name(", shape: crate.widgets.example.com", "crate.widgets.example.com")]
+#[case::none(", reads: []", "box")]
+fn reads_the_name_of_each_roles_shape(#[case] written: &str, #[case] shape: &str) {
+    let roles = format!("{{face: {{reference: status.screen.monitor{written}}}}}");
     let known = read(&one("a", "face", &roles)).unwrap();
-    let read = known.elevations[0].roles[0].shape;
-    assert_eq!((read, read.word()), (shape, word));
+    assert_eq!(known.elevations[0].roles[0].shape, shape);
 }
 
 /// The `shows` of a role whose YAML is `shows`, as the lists of
@@ -193,14 +199,6 @@ const SCREEN: &str = "{face: {reference: status.screen.monitor}}";
 #[case::a_reference_that_is_not_listed(
     one("a", "face", "{face: {reference: status.screen.node}}"),
     "elevations[0]: roles.face: reference status.screen.node is the path of no entry of references"
-)]
-#[case::a_shape_transect_does_not_draw(
-    one(
-        "a",
-        "face",
-        "{face: {reference: status.screen.monitor, shape: circle}}"
-    ),
-    "elevations[0]: roles.face: shape \"circle\" is not one of screen, box, speaker, handheld, or tag"
 )]
 #[case::two_elevations_of_one_name(
     format!("{}{}", one("a", "face", SCREEN), one("a", "face", SCREEN)),

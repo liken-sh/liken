@@ -33,7 +33,7 @@ pub use card::{KnownThrough, Related};
 pub use columns::{Column, Columns, KEPT, Read as ColumnRead};
 pub use counts::{Count, counts};
 pub use defined::Definitions;
-pub use elevation::{Elevation, Grid, Shape};
+pub use elevation::{Elevation, Grid};
 pub use gitops::{GitOpsFields, IgnoreChange, MetaKey};
 pub use guess::{Clue, Hint, clues};
 pub use layer::{Named, named};
@@ -44,6 +44,7 @@ pub use referenced::{referrals, referred_edges};
 pub use references::{Names, Relation, relations, written_secret};
 
 use crate::resources::{Condition, DocId};
+use crate::shapes::Shapes;
 use transect_graph::edges::{Kind, Object, Plurals, Provenance};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -214,6 +215,21 @@ impl Kinds {
         kinds
     }
 
+    /// Finds the shape of each role of each elevation in `shapes`, for
+    /// the pages that draw the elevations. A role whose shape is not
+    /// there is drawn in the default shape, and its knowledge gets the
+    /// condition `UnknownShape`. Only knowledge of a served kind is
+    /// here, so the shapes of a kind the cluster does not serve are not
+    /// checked.
+    pub fn find_shapes(&mut self, shapes: &Shapes) {
+        for one in self.by_kind.values_mut() {
+            for message in one.draw_with(shapes) {
+                let condition = Condition::unknown_shape(message);
+                self.conditions.push((one.doc, condition));
+            }
+        }
+    }
+
     pub fn of(&self, group: &str, kind: &str) -> Option<&KindKnowledge> {
         self.by_kind.get(&(group.to_string(), kind.to_string()))
     }
@@ -281,6 +297,16 @@ impl KindKnowledge {
         gitops.chain(findings).collect()
     }
 
+    /// Finds the shape of each role of each elevation in `shapes`, and
+    /// returns a message for each role whose shape is not there.
+    pub fn draw_with(&mut self, shapes: &Shapes) -> Vec<String> {
+        let group = self.group.clone();
+        let elevations = self.elevations.iter_mut();
+        elevations
+            .flat_map(|e| e.draw_with(shapes, &group))
+            .collect()
+    }
+
     /// The provenance of a fact read through `field` of this knowledge.
     pub fn provenance(&self, field: &str) -> Provenance {
         Provenance::Kinds {
@@ -294,10 +320,13 @@ impl KindKnowledge {
 pub mod fixtures {
     use super::*;
 
-    /// The knowledge `spec` declares for `name`.
+    /// The knowledge `spec` declares for `name`, with each role drawn
+    /// in a shape of the library.
     pub fn knowledge(name: &str, spec: &str) -> KindKnowledge {
         let text = format!("metadata: {{name: {name}}}\nspec: {spec}\n");
-        parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap()
+        let mut known = parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap();
+        known.draw_with(&Shapes::default());
+        known
     }
 
     /// Plurals that serve `widgets.widgets.example.com` as `Widget`.
@@ -338,6 +367,55 @@ mod tests {
         let kinds = resolved(name, spec);
         let widget = kinds.of("widgets.example.com", "Widget");
         assert_eq!((widget.is_some(), reasons(&kinds)), (found, expected));
+    }
+
+    const ELEVATION: &str = "references: [{path: spec.node, kind: Node}], elevations: [{name: the rack, question: Where is it?, sketch: node, roles: {node: {reference: spec.node, shape: SHAPE}}}]";
+
+    /// A role's shape, as `resolve` finds it among the library's shapes
+    /// and one author's shape in the kind's group, with the condition
+    /// for a shape that is not there.
+    #[rstest]
+    #[case::the_library("drum", "drum", vec![])]
+    #[case::the_kinds_own_group("crate", "crate.widgets.example.com", vec![])]
+    #[case::a_whole_name("crate.widgets.example.com", "crate.widgets.example.com", vec![])]
+    #[case::no_such_shape("kettle", "box", vec!["UnknownShape"])]
+    fn draws_each_role_in_the_shape_it_names(
+        #[case] written: &str,
+        #[case] drawn: &str,
+        #[case] expected: Vec<&'static str>,
+    ) {
+        let spec = format!("{{{}}}", ELEVATION.replace("SHAPE", written));
+        let author = crate::shapes::parse(
+            DocId::default(),
+            serde_yaml::from_str(
+                "{metadata: {name: crate.widgets.example.com}, spec: {summary: A crate., size: {design: [100, 50], width: [80, 120]}}}",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let shapes = Shapes::with(&[std::sync::Arc::new(author)]);
+        let mut kinds = Kinds::resolve(
+            &[knowledge("widgets.widgets.example.com", &spec)],
+            &plurals(),
+            &[],
+        );
+        kinds.find_shapes(&shapes);
+        let widget = kinds.of("widgets.example.com", "Widget").unwrap();
+        let role = &widget.elevations[0].roles[0];
+        assert_eq!(
+            (role.drawn.name.as_str(), reasons(&kinds)),
+            (drawn, expected)
+        );
+    }
+
+    /// A document whose kind the cluster does not serve is left out with
+    /// `NotServed`, so its shapes are checked only when it is served.
+    #[rstest]
+    fn checks_no_shape_of_a_kind_the_cluster_does_not_serve() {
+        let spec = format!("{{{}}}", ELEVATION.replace("SHAPE", "kettle"));
+        let mut kinds = resolved("gadgets.widgets.example.com", &spec);
+        kinds.find_shapes(&Shapes::default());
+        assert_eq!(reasons(&kinds), vec!["NotServed"]);
     }
 
     #[rstest]

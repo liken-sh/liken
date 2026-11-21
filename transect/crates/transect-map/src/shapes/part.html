@@ -1,0 +1,31 @@
+{#- One part, drawn in its shape: the axis, then the body with the
+    drawing and the text region, whose contents the caller writes.
+    `state` is the class of the part's state, and `title` the field it
+    was read from, or empty.  Every class and style here is a number or
+    a fixed word from `Drawing`, so nothing that an author writes in a
+    shape reaches the markup.  The axis is an empty line of no height.
+    A flex item with no text takes its baseline from its bottom edge, so
+    the axis is the part's first baseline, and a row of parts can align
+    on it. -#}
+{%- macro part(drawing, state, title) -%}
+<div class="{{ drawing.class }} {{ state }}" style="{{ drawing.style }}"{% if !title.is_empty() %} title="{{ title }}"{% endif %}>
+{%- if drawing.axis %}<i class="shape-axis" aria-hidden="true"></i>{% endif %}
+<div class="shape-body">
+<div class="shape-drawing" aria-hidden="true">
+{%- for layer in drawing.layers %}
+{%- if let Some(path) = layer.art %}
+<svg class="{{ layer.class }}" style="{{ layer.style }}" viewBox="{{ path.view }}" preserveAspectRatio="none"><path d="{{ path.data }}"{% if let Some(transform) = path.transform %} transform="{{ transform }}"{% endif %}/></svg>
+{%- else %}
+<div class="{{ layer.class }}" style="{{ layer.style }}"></div>
+{%- endif %}
+{%- endfor %}
+{%- for port in drawing.ports %}
+<span class="{{ port.class }}" style="{{ port.style }}"></span>
+{%- endfor %}
+</div>
+<div class="shape-text" style="{{ drawing.text }}">
+{{- caller() }}
+</div>
+</div>
+</div>
+{%- endmacro -%}

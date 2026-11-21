@@ -12,7 +12,7 @@
   padding: 16px 0 16px 32px;
   font-family: var(--mono);
   font-size: 12px;
-  container-type: inline-size;
+  container: known / inline-size;
 }
 
 .known-count { color: var(--ink-faint); }

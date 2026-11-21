@@ -28,7 +28,7 @@
 <tr>
 <td class="resources-path">{% if loop.first && file.problem.is_none() %}{{ file.path }}{% endif %}</td>
 <td class="resources-name">{% if document.kind.is_empty() %}<span class="resources-faint">no kind</span>{% else %}{{ document.kind }}{% endif %}</td>
-<td class="resources-name">{% if document.name.is_empty() %}<span class="resources-faint">no name</span>{% else %}{{ document.name }}{% endif %}</td>
+<td class="resources-name">{% if document.name.is_empty() %}<span class="resources-faint">no name</span>{% else if let Some(href) = document.href %}<a href="{{ href }}">{{ document.name }}</a>{% else %}{{ document.name }}{% endif %}</td>
 <td>
 {%- for condition in document.conditions %}
 <div class="resources-condition{% if condition.trouble() %} resources-trouble{% endif %}" title="{{ condition.title() }}">{{ condition.text() }}</div>

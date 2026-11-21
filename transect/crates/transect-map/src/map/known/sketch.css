@@ -1,59 +1,13 @@
 /*
  * The sketch of a known kind's elevation.  The grid's areas come from
  * the sketch in the kind's knowledge, so the browser places each role
- * and sizes each row to its text.  Every rule here keys off a shape
- * class (`sketch-screen`, `sketch-box`, `sketch-speaker`,
- * `sketch-handheld`, `sketch-tag`) or a state class, and never off a
- * role's name, because the same rules draw the sketch of every kind.
- * This file draws the frame that every part shares,
- * `sketch-shapes.css` draws each shape, and `sketch-states.css` draws
- * the states.
+ * and sizes each row to its text.  This file draws the frame, the head,
+ * the grid, and its areas.  `shapes.css` draws the parts, in their
+ * shapes and states, and no rule here names a shape or a role.
  *
  * Every part stands on the bottom of its area, so the parts of one row
  * stand on one floor whatever their heights.
  */
-
-/* A television is dark glass in a dark bezel in any room, so the
-   screen's colors are dark in both schemes, and the text on the glass
-   takes inks of its own that keep 4.5:1 on it.  The display window of
-   a box is the same glass.  `--sketch-body` is the fill of the shapes
-   that stand for equipment.  In the light scheme it is darker than the
-   panel, and `--sketch-lift` draws a faint line under each filled part,
-   so a box and a speaker read as objects and not as outlines.  The dark
-   panel needs neither. */
-:root {
-  --sketch-body: #e3e6ea;
-  --sketch-lift: rgb(0 0 0 / 0.14);
-  --sketch-rest: #f1f2f3;
-  --sketch-glass: #1a1d22;
-  --sketch-glass-edge: #0c0d10;
-  --sketch-glass-shade: rgb(0 0 0 / 0.6);
-  --sketch-bezel: #2b2f36;
-  --sketch-bezel-edge: #15171a;
-  --sketch-glass-ink: #ececec;
-  --sketch-glass-muted: #b3b9c0;
-  --sketch-glass-faint: #959ca4;
-  --sketch-glass-link: #bccca2;
-  --sketch-glass-warm: #ec9645;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --sketch-body: #22252b;
-    --sketch-lift: transparent;
-    --sketch-rest: #1e2126;
-    --sketch-glass: #0f1114;
-    --sketch-glass-edge: #333940;
-    --sketch-glass-shade: rgb(0 0 0 / 0.55);
-    --sketch-bezel: #2a2e35;
-    --sketch-bezel-edge: #3a3f47;
-    --sketch-glass-ink: #e8e8e8;
-    --sketch-glass-muted: #a0a6ad;
-    --sketch-glass-faint: #8b929a;
-    --sketch-glass-link: #b4c49a;
-    --sketch-glass-warm: #e0872f;
-  }
-}
 
 .sketch {
   flex: 1;
@@ -113,14 +67,17 @@
 
 .sketch-head.sketch-failing .known-name { color: var(--warm); }
 
+/* The rows of the sketch alternate with gap tracks, which the page
+   writes in `grid-template-rows`.  A gap track is `--sketch-gap`, or
+   zero between two areas whose parts touch. */
 .sketch-grid {
+  --sketch-gap: 28px;
   display: grid;
   column-gap: 20px;
-  row-gap: 28px;
 }
 
 /* The parts of one role stand side by side in its area, on the area's
-   bottom edge.  A part does not shrink below `--sketch-floor`: the
+   bottom edge.  A part does not shrink below its narrowest width: the
    parts wrap onto another line first.  `safe` keeps a line that is
    still too wide from overflowing to the left, where the frame cannot
    scroll.  The parts of an area that is wholly on one side of the
@@ -141,79 +98,67 @@
 
 .sketch-lean-end { justify-content: safe flex-end; }
 
-.sketch-part {
-  --sketch-edge: var(--rule-strong);
-  --sketch-weight: 0px;
-  --sketch-floor: 110px;
-  flex: 1 1 var(--sketch-floor);
-  min-width: min(var(--sketch-floor), 100%);
-  box-sizing: border-box;
-  position: relative;
-  isolation: isolate;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  overflow-wrap: break-word;
-  background-color: var(--panel);
-  border: 1px solid var(--sketch-edge);
-  border-radius: 6px;
-  box-shadow: inset 0 0 0 var(--sketch-weight) var(--sketch-edge), 0 1px 0 var(--sketch-lift);
+/* Contact is a fact of the wide layout.  The parts of an area that
+   touches the area above stand at its top, and need no room above them
+   for a piece that the part above covers.  The parts of a role whose
+   shape joins on its left and right touch each other and stand on
+   their axes. */
+@container known not (max-width: 640px) {
+  .sketch-joined-above {
+    align-items: flex-start;
+    align-content: flex-start;
+  }
+
+  .sketch-joined-above > .shape-part { --above: 0; }
+
+  .sketch-abutting {
+    column-gap: 0;
+    align-items: baseline;
+  }
 }
 
-/* A tag, a value, and an empty role are outlines with no fill, so they
-   have no line under them. */
-.sketch-tag,
-.sketch-part.sketch-value,
-.sketch-part.sketch-absent { --sketch-lift: transparent; }
+/* In a narrow map the columns of the grid are narrow too, so the gaps
+   shrink to leave room for the text.  A part's insets scale with it. */
+@container known (max-width: 760px) {
+  .sketch-grid { column-gap: 10px; }
 
-/* The state of a part is drawn by its outline, so the word for it is
-   only for a screen reader. */
-.sketch-state {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+  .sketch-area { gap: 8px; }
 }
 
-/* The readings run on as one line that wraps between readings.  The
-   space between two readings separates them, so no mark is left at the
-   end of a line when it wraps.  The columns of the page's own object
-   that a part shows are a second line. */
-.sketch-display {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+/* Below this width the columns of the sketch are too narrow for any
+   shape, so the areas leave the grid and wrap in the order of the
+   sketch, two to a line, and nothing joins.  An area's place on a line
+   no longer follows its columns, so every area centers its parts.  A
+   part with a share of the sketch's width takes a line of its own at
+   the full width, and a part that follows its text keeps its width.  A
+   part on a line of its own grows taller when its text needs more room
+   than its proportions give, even when it cuts its text in the wide
+   layout, because a phone's width is too narrow for the text of a large
+   part. */
+@container known (max-width: 640px) {
+  .sketch-grid {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 24px 10px;
+  }
+
+  .sketch-area {
+    flex: 1 1 calc(50% - 10px);
+    justify-content: safe center;
+  }
+
+  .sketch-area:has(> .shape-share) { flex-basis: 100%; }
+
+  .sketch-area:has(> .shape-follow) { flex: 0 1 auto; }
+
+  .shape-share {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .shape-share.shape-fit-cut .shape-text {
+    position: relative;
+    inset: auto;
+  }
 }
-
-.sketch-readings {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: 1.2em;
-  color: var(--ink-muted);
-}
-
-.sketch-reading { max-width: 100%; }
-
-.sketch-reading-name { color: var(--ink-faint); }
-
-.sketch-shows .sketch-reading-name { text-transform: lowercase; }
-
-/* The field that a part was read from shows only while the reader
-   points at the part or a link in it has focus, because the caption
-   under the sketch says how to see it.  Its line is kept while it is
-   hidden, so the part does not change height. */
-.sketch-part > .known-source {
-  order: 3;
-  margin-top: auto;
-  color: var(--ink-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 0;
-}
-
-.sketch-part:is(:hover, :focus-within) > .known-source { opacity: 1; }

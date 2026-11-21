@@ -36,6 +36,7 @@ parts!(
     transect_map::objects::ObjectPage,
     transect_map::objects::KindsPage,
     transect_map::objects::KindPage,
+    transect_map::shapes::ShapesPage,
     transect_map::lenses::logs::LogsPage,
     transect_resources::resources::ResourcesPage,
     transect_supply::changed::ChangedPage,

@@ -108,13 +108,14 @@ const ASSETS: &[Asset] = &[
         CSS
     ),
     asset!(
-        "map/known/sketch-shapes.css",
-        "transect-map/src/map/known/sketch-shapes.css",
+        "shapes/shapes.css",
+        "transect-map/src/shapes/shapes.css",
         CSS
     ),
+    asset!("shapes/text.css", "transect-map/src/shapes/text.css", CSS),
     asset!(
-        "map/known/sketch-states.css",
-        "transect-map/src/map/known/sketch-states.css",
+        "shapes/specimen.css",
+        "transect-map/src/shapes/specimen.css",
         CSS
     ),
     asset!(
@@ -294,6 +295,19 @@ mod tests {
     ) {
         let headers = sent(url, cached).await;
         assert_eq!(serve(Path(url.into()), headers).await.status(), status);
+    }
+
+    /// Every page loads each file that the frame's head names, so a
+    /// file the head names and this list lacks leaves a page unstyled.
+    #[rstest]
+    fn serves_every_file_that_the_frame_loads() {
+        let head = include_str!("../../../transect-frame/src/frame/layout.html");
+        let named = head.split("\"/static/").skip(1);
+        let named = named.filter_map(|rest| rest.split('"').next());
+        let missing: Vec<&str> = named
+            .filter(|url| !ASSETS.iter().any(|asset| asset.url == *url))
+            .collect();
+        assert_eq!(missing, Vec::<&str>::new());
     }
 
     #[rstest]

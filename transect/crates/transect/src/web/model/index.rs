@@ -17,13 +17,14 @@ mod subjects;
 
 /// The pages that every cluster has, which an empty query lists, as
 /// the name, the path, and other names that also find the page.
-const FIXED: [(&str, &str, &[&str]); 6] = [
+const FIXED: [(&str, &str, &[&str]); 7] = [
     ("cluster", "/", &[]),
     ("access", "/access", &["ways in"]),
     ("accounts", "/access/accounts", &[]),
     ("changed", "/changed", &[]),
     ("kinds", "/kinds", &[]),
     ("resources", "/resources", &[]),
+    ("shapes", "/shapes", &["sketches"]),
 ];
 
 /// Hosts resolve to workloads through `graph`, `access` supplies the

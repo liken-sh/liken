@@ -6,13 +6,18 @@
 //! page.
 
 mod lean;
+mod tracks;
 
 pub use lean::Lean;
+use tracks::{Joins, tracks};
 
-use super::{Board, End, end};
+use super::{Board, end};
+use crate::shapes::text::{Drawn, End, Nothing, Part, Reading, Shown, State, Why};
+use crate::shapes::{Drawing, Pose};
 use transect_graph::edges::Object;
 use transect_resources::knowledge::elevation::{Role, Show};
-use transect_resources::knowledge::{Elevation, Grid, Names, Reached, Relation, Shape, Target};
+use transect_resources::knowledge::{Elevation, Grid, Names, Reached, Relation, Target};
+use transect_resources::shapes::{Edge, Shape};
 
 /// The drawing of one elevation of the page's object.
 #[derive(Debug, PartialEq)]
@@ -24,6 +29,8 @@ pub struct Sketch {
     pub columns: usize,
     /// The value of the grid's `grid-template-areas`.
     pub areas: String,
+    /// The value of the grid's `grid-template-rows`.
+    pub rows: String,
     /// The roles that the page draws, in the order of the sketch. A
     /// role that is not expected and has no part is left out, so its
     /// area stays blank.
@@ -38,90 +45,14 @@ pub struct SketchRole {
     /// The role's name, which is also its `grid-area`.
     pub area: String,
     pub lean: Lean,
-    pub shape: Shape,
-    /// The reference's label, as the ring's box shows it.
-    pub label: String,
-    /// Where the parts were read, such as "from status.screen.node".
-    pub source: String,
-    pub parts: Vec<Part>,
-    /// What an expected role with no part shows.
-    pub nothing: Option<Nothing>,
-}
-
-/// One value that a role's reference reads.
-#[derive(Debug, PartialEq)]
-pub struct Part {
-    pub end: End,
-    /// Each printer column of the role's `reads` that has a value, with
-    /// the column's name in lower case.
-    pub readings: Vec<Reading>,
-    /// Each entry of the role's `shows` that has a value, read from the
-    /// page's own object, with the column's name as its CRD declares
-    /// it. A screen draws these on its glass.
-    pub shows: Vec<Shown>,
-    pub state: State,
-    /// The part names an address or a value and not an object, so its
-    /// text breaks after a separator, as a reading's value does.
-    pub literal: bool,
-    /// Why the object is failing, warning, or at rest.
-    pub why: Option<Why>,
-}
-
-/// One printer column of an object that has a value.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Reading {
-    pub name: String,
-    /// The value that `kubectl get` prints.
-    pub value: String,
-}
-
-/// One entry of a role's `shows` that has a value.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Shown {
-    pub name: String,
-    pub value: String,
-    /// The value is from a column after the first of its entry, such as
-    /// the idle screen in place of the play. A screen draws it quieter,
-    /// so a screen at rest looks different from a screen that plays.
-    pub fallback: bool,
-}
-
-/// The reason that the health condition of a part's object gives.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Why {
-    /// A short line on the part: the condition's reason, such as
-    /// `Unreachable`, or its type and status when it has no reason.
-    pub reason: String,
-    /// The condition's message, which the part shows when the reader
-    /// points at the reason.
-    pub message: Option<String>,
-}
-
-/// What an expected role with no part shows in its shape.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Nothing {
-    /// "no <Kind>" when the reference names a kind, and "nothing" when
-    /// it does not.
-    pub text: String,
-    /// "<path> names nothing now".
-    pub note: String,
-}
-
-/// How a part is drawn.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum State {
-    Plain,
-    Failing,
-    Warning,
-    /// The object's health condition is `False` with a reason that its
-    /// kind's knowledge lists as calm, so it is dimmed.
-    Resting,
-    /// The reference reads a value that is not an object, so the part
-    /// has an outline and no fill.
-    Value,
-    /// The reference names an object of a kind that `transect` watches,
-    /// and the cluster has no such object.
-    NoObject,
+    /// Whether the role's parts touch the parts of the area above.
+    pub joined: bool,
+    /// Whether the role's parts touch each other, because their shape
+    /// joins on its left and its right.
+    pub abutting: bool,
+    /// The role's parts in its shape. Their label is the reference's
+    /// label, as the ring's box shows it.
+    pub drawn: Drawn,
 }
 
 /// What the cluster says about an object that a part names. Only the
@@ -145,14 +76,31 @@ impl Sketch {
     /// The sketch of `elevation` for `board`'s object. Each role's
     /// parts are the relations whose path is the role's reference.
     pub fn build(board: &Board, elevation: &Elevation) -> Self {
-        let roles = elevation.roles.iter();
         let grid = &elevation.grid;
+        let drawn: Vec<(SketchRole, Shape)> = elevation
+            .roles
+            .iter()
+            .filter_map(|role| drawn(board, grid, role))
+            .collect();
+        let joins = |name: &str| {
+            let found = drawn.iter().find(|(role, _)| role.area == name);
+            found.map(|(_, shape)| Joins {
+                top: shape.joins(Edge::Top),
+                bottom: shape.joins(Edge::Bottom),
+            })
+        };
+        let tracks = tracks(grid, joins);
+        let roles = drawn.into_iter().map(|(role, _)| SketchRole {
+            joined: tracks.joined.contains(&role.area),
+            ..role
+        });
         Self {
             name: elevation.name.clone(),
             question: elevation.question.clone(),
             columns: grid.columns(),
-            areas: grid.template_areas(),
-            roles: roles.filter_map(|role| drawn(board, grid, role)).collect(),
+            areas: tracks.areas,
+            rows: tracks.rows,
+            roles: roles.collect(),
             knowledge: board.knowledge.name.clone(),
         }
     }
@@ -160,48 +108,32 @@ impl Sketch {
     /// The line under the sketch.
     pub fn caption(&self) -> String {
         format!(
-            "Hover a part for the field it was read from. The places and shapes are from the KindKnowledge {}.",
+            "Hover a part for the field it was read from. The places and shapes are from the KindKnowledge {}, and /shapes draws each shape.",
             self.knowledge
         )
     }
 }
 
 impl SketchRole {
-    pub fn shape_class(&self) -> String {
-        format!("sketch-{}", self.shape.word())
+    /// The class of the role's area: the edge that its parts stand
+    /// against, and whether they touch the parts above.
+    pub fn area_class(&self) -> String {
+        let mut class = self.lean.area_class().to_string();
+        if self.joined {
+            class.push_str(" sketch-joined-above");
+        }
+        if self.abutting {
+            class.push_str(" sketch-abutting");
+        }
+        class
     }
 }
 
-impl State {
-    /// The state as a word for a screen reader. The page draws the
-    /// state with the part's outline, so the word is not shown. A plain
-    /// part has no word.
-    pub fn spoken(self) -> Option<&'static str> {
-        match self {
-            Self::Plain => None,
-            Self::Failing => Some("failing"),
-            Self::Warning => Some("warning"),
-            Self::Resting => Some("at rest"),
-            Self::Value => Some("not an object"),
-            Self::NoObject => Some("no such object"),
-        }
-    }
-
-    pub fn class(self) -> &'static str {
-        match self {
-            Self::Plain => "sketch-plain",
-            Self::Failing => "sketch-failing",
-            Self::Warning => "sketch-warning",
-            Self::Resting => "sketch-resting",
-            Self::Value => "sketch-value",
-            Self::NoObject => "sketch-no-object",
-        }
-    }
-}
-
-/// `role` as the page draws it, or `None` when it is not expected and
-/// its reference reads no value.
-fn drawn(board: &Board, grid: &Grid, role: &Role) -> Option<SketchRole> {
+/// `role` as the page draws it, with the shape it is drawn in, or
+/// `None` when it is not expected and its reference reads no value. A
+/// shape that turns lies on its side in an area that spans more columns
+/// than rows.
+fn drawn(board: &Board, grid: &Grid, role: &Role) -> Option<(SketchRole, Shape)> {
     let mut references = board.knowledge.references.iter();
     let reference = references.find(|r| r.path == role.reference)?;
     let shows = shows(board, &role.shows);
@@ -220,18 +152,29 @@ fn drawn(board: &Board, grid: &Grid, role: &Role) -> Option<SketchRole> {
             Target::Address | Target::Value => "nothing".into(),
         },
         note: format!("{} names nothing now", role.reference),
+        state: State::Empty,
     });
     let label = reference.label.as_deref().unwrap_or(reference.edge.words());
-    let span = grid.span(&role.name).unwrap_or_default();
-    Some(SketchRole {
+    let columns = grid.columns_of(&role.name).unwrap_or_default();
+    let rows = grid.rows_of(&role.name).unwrap_or_default();
+    let shape = match role.drawn.turns && columns.len() > rows.len() {
+        true => role.drawn.turned(),
+        false => role.drawn.as_ref().clone(),
+    };
+    let drawn = SketchRole {
         area: role.name.clone(),
-        lean: Lean::of(span, grid.columns()),
-        shape: role.shape,
-        label: label.into(),
-        source: format!("from {}", role.reference),
-        parts,
-        nothing,
-    })
+        lean: Lean::of(columns, grid.columns()),
+        joined: false,
+        abutting: shape.joins(Edge::Left) && shape.joins(Edge::Right),
+        drawn: Drawn {
+            drawing: Drawing::of(&shape, Pose::default()),
+            label: label.into(),
+            source: format!("from {}", role.reference),
+            parts,
+            nothing,
+        },
+    };
+    Some((drawn, shape))
 }
 
 /// The part for one value of `role`'s reference. It links and notes the

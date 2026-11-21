@@ -1,0 +1,11 @@
+# A tag is as wide as its text, so a row of tags reads as a caption to
+# the picture and not as part of it.  It takes no wire.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: tag
+spec:
+  summary: A label tied to the picture, for a thing in the cluster that the picture does not show, such as a message bus or a claim.
+  size: {follow: text, width: [80, 320]}
+  outline: {draw: line, round: 8}
+  text: {inset: [8, 12, 8, 12]}

@@ -1,0 +1,21 @@
+# The drivers keep their room at the bottom of the cabinet, so a
+# speaker whose text is long grows taller and its text never covers a
+# driver.  In an area wider than it is tall, the cabinet lies on its
+# side, as a center speaker does under a screen.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Shape
+metadata:
+  name: speaker
+spec:
+  summary: A loudspeaker cabinet with a tweeter and a cone, such as a home theater's speaker or a monitor on a desk.
+  size: {design: [164, 273], width: [130, 164]}
+  outline: {round: 10}
+  text: {inset: [12, 14, 12, 14]}
+  turns: true
+  pieces:
+    - {name: tweeter, draw: line, at: {left: 50% - 11, bottom: 133, width: 22, height: 22}, round: 50%, clear: bottom}
+    - {name: dome, draw: mark, at: {left: 50% - 4.4, bottom: 139.6, width: 8.8, height: 8.8}, round: 50%}
+    - {name: cone, draw: line, at: {left: 50% - 48, bottom: 33, width: 96, height: 96}, round: 50%, clear: bottom}
+    - {name: surround, draw: line, at: {left: 50% - 20, bottom: 61, width: 40, height: 40}, round: 50%}
+    - {name: dust cap, draw: mark, at: {left: 50% - 7.7, bottom: 73.3, width: 15.4, height: 15.4}, round: 50%}
+  ports: {left: [30%, 70%], right: [30%, 70%]}

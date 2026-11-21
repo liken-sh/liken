@@ -40,6 +40,12 @@ loaded
 KindKnowledge
 shelves.stock.example.test
 loaded
+Shape
+crate.stock.example.test
+loaded
+Shape
+glowing-crate.stock.example.test
+not loaded: unknown field `color`, expected one of `summary`, `size`, `axis`, `outline`, `text`, `display`, `pieces`, `joins`, `ports`, `turns`
 KindKnowledge
 bins.stock.example.test
 loaded

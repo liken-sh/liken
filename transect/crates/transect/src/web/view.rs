@@ -48,6 +48,8 @@ pub enum Page {
     Changed,
     /// Every custom kind the cluster serves.
     Kinds,
+    /// Every shape that a sketch can draw a part in, in every state.
+    Shapes,
     /// What may reach each port from outside the cluster.
     WaysIn,
     /// What each account may do, and where.
@@ -209,6 +211,7 @@ impl Page {
             ["resources"] => Some(Self::Resources),
             ["changed"] => Some(Self::Changed),
             ["kinds"] => Some(Self::Kinds),
+            ["shapes"] => Some(Self::Shapes),
             ["access"] => Some(Self::WaysIn),
             ["access", "accounts"] => Some(Self::Accounts),
             ["vulnerabilities"] => Some(Self::Vulnerabilities {
@@ -366,6 +369,7 @@ mod tests {
     #[case::the_resources("resources", None, Some(Page::Resources))]
     #[case::the_changes("changed", None, Some(Page::Changed))]
     #[case::the_kinds("kinds", None, Some(Page::Kinds))]
+    #[case::the_shapes("shapes", None, Some(Page::Shapes))]
     #[case::the_ways_in("access", None, Some(Page::WaysIn))]
     #[case::a_workloads_access("namespaces/shop/deployments/web/access", None, Some(Page::Access { namespace: "shop".into(), resource: "deployments".into(), name: "web".into() }))]
     #[case::the_accounts("access/accounts", None, Some(Page::Accounts))]

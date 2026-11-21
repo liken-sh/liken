@@ -1,0 +1,683 @@
+shapes · transect
+transect
+cluster / kinds / shapes
+access vulnerabilities kinds
+Search /
+esc
+Shapes
+A sketch draws each part in a shape. A shape states its size, its pieces, and where its text goes, and transect draws every state and every text the same way on each shape. Each shape is drawn here in each state with the same texts. The bars on its first drawing are its ports, where a wire attaches. A role of a KindKnowledge names a shape, and finds the shape of its kind's own group before the library's.
+the library
+box
+A piece of equipment on a shelf, such as a computer, a network switch, or a hub.
+wires at left 25% to 75%, right 25% to 75%
+powered by
+Supply bench-supply
+model PS-30
+power On
+output 12 V
+load 42%
+from spec.supply
+plain, with readings, and bars that mark its ports
+runs on
+Node a-machine-with-a-long-name-in-rack-0001
+reaches machine a-machine-with-a-long-name-in-rack-0001
+from status.node
+plain, a long name and no readings
+shows on
+Panel lobby-panel
+connector HDMI-A-1
+mode 1920x1080@60
+Activity Showing
+Title A Tale of Two Cities, in an edition whose title is long
+from status.panel
+plain, with what the page's own object shows
+powered by
+warning
+Supply bench-supply
+Degraded
+model PS-30
+power On
+from spec.supply
+a warning
+powered by
+no such object
+Supply bench-supply
+the cluster has no such Supply
+from spec.supply
+a name with no object, drawn as a warning
+powered by
+failing
+Supply bench-supply
+Unreachable
+model PS-30
+power Off
+from spec.supply
+failing
+cooled by
+at rest
+Fan rack-fan
+Idle
+speed 0 rpm
+from spec.fan
+at rest
+configured from
+not an object
+settings.example.test/lobby
+not an object in the cluster
+from spec.settings
+a value, not an object
+powered by
+empty
+no Supply
+spec.supply names nothing now
+an expected role with no part
+served by
+empty, expected in another state
+no Service
+status.service names nothing now
+a role expected in another state
+replicas
+Pod orders-1
+ready 2 of 2
+from status.replicas[]
+a stack of alike parts
+disc
+A short cylinder seen face on, such as a filter wheel, a fan, or a reel.
+joins on its left, right; wires at left 40% to 60%, right 40% to 60%
+powered by
+Supply bench-supply
+model PS-30
+power On
+output 12 V
+load 42%
+from spec.supply
+plain, with readings, and bars that mark its ports
+runs on
+Node a-machine-with-a-long-name-in-rack-0001
+reaches machine a-machine-with-a-long-name-in-rack-0001
+from status.node
+plain, a long name and no readings
+shows on
+Panel lobby-panel
+connector HDMI-A-1
+mode 1920x1080@60
+Activity Showing
+Title A Tale of Two Cities, in an edition whose title is long
+from status.panel
+plain, with what the page's own object shows
+powered by
+warning
+Supply bench-supply
+Degraded
+model PS-30
+power On
+from spec.supply
+a warning
+powered by
+no such object
+Supply bench-supply
+the cluster has no such Supply
+from spec.supply
+a name with no object, drawn as a warning
+powered by
+failing
+Supply bench-supply
+Unreachable
+model PS-30
+power Off
+from spec.supply
+failing
+cooled by
+at rest
+Fan rack-fan
+Idle
+speed 0 rpm
+from spec.fan
+at rest
+configured from
+not an object
+settings.example.test/lobby
+not an object in the cluster
+from spec.settings
+a value, not an object
+powered by
+empty
+no Supply
+spec.supply names nothing now
+an expected role with no part
+served by
+empty, expected in another state
+no Service
+status.service names nothing now
+a role expected in another state
+replicas
+Pod orders-1
+ready 2 of 2
+from status.replicas[]
+a stack of alike parts
+drum
+An upright cylinder, the usual drawing of a database or another store of data.
+wires at left 45% to 75%, right 45% to 75%, top 30% to 70%
+powered by
+Supply bench-supply
+model PS-30
+power On
+output 12 V
+load 42%
+from spec.supply
+plain, with readings, and bars that mark its ports
+runs on
+Node a-machine-with-a-long-name-in-rack-0001
+reaches machine a-machine-with-a-long-name-in-rack-0001
+from status.node
+plain, a long name and no readings
+shows on
+Panel lobby-panel
+connector HDMI-A-1
+mode 1920x1080@60
+Activity Showing
+Title A Tale of Two Cities, in an edition whose title is long
+from status.panel
+plain, with what the page's own object shows
+powered by
+warning
+Supply bench-supply
+Degraded
+model PS-30
+power On
+from spec.supply
+a warning
+powered by
+no such object
+Supply bench-supply
+the cluster has no such Supply
+from spec.supply
+a name with no object, drawn as a warning
+powered by
+failing
+Supply bench-supply
+Unreachable
+model PS-30
+power Off
+from spec.supply
+failing
+cooled by
+at rest
+Fan rack-fan
+Idle
+speed 0 rpm
+from spec.fan
+at rest
+configured from
+not an object
+settings.example.test/lobby
+not an object in the cluster
+from spec.settings
+a value, not an object
+powered by
+empty
+no Supply
+spec.supply names nothing now
+an expected role with no part
+served by
+empty, expected in another state
+no Service
+status.service names nothing now
+a role expected in another state
+replicas
+Pod orders-1
+ready 2 of 2
+from status.replicas[]
+a stack of alike parts
+handheld
+A remote control or a game controller, held in one hand, with a pad at the top and buttons under it.
+takes no wire
+powered by
+Supply bench-supply
+model PS-30
+power On
+output 12 V
+load 42%
+from spec.supply
+plain, with readings, and bars that mark its ports
+runs on
+Node a-machine-with-a-long-name-in-rack-0001
+reaches machine a-machine-with-a-long-name-in-rack-0001
+from status.node
+plain, a long name and no readings
+shows on
+Panel lobby-panel
+connector HDMI-A-1
+mode 1920x1080@60
+Activity Showing
+Title A Tale of Two Cities, in an edition whose title is long
+from status.panel
+plain, with what the page's own object shows
+powered by
+warning
+Supply bench-supply
+Degraded
+model PS-30
+power On
+from spec.supply
+a warning
+powered by
+no such object
+Supply bench-supply
+the cluster has no such Supply
+from spec.supply
+a name with no object, drawn as a warning
+powered by
+failing
+Supply bench-supply
+Unreachable
+model PS-30
+power Off
+from spec.supply
+failing
+cooled by
+at rest
+Fan rack-fan
+Idle
+speed 0 rpm
+from spec.fan
+at rest
+configured from
+not an object
+settings.example.test/lobby
+not an object in the cluster
+from spec.settings
+a value, not an object
+powered by
+empty
+no Supply
+spec.supply names nothing now
+an expected role with no part
+served by
+empty, expected in another state
+no Service
+status.service names nothing now
+a role expected in another state
+replicas
+Pod orders-1
+ready 2 of 2
+from status.replicas[]
+a stack of alike parts
+screen
+A television or a monitor, a panel of glass in a bezel on a stand.
+wires at left 30% to 70%, right 30% to 70%; display: surface
+powered by
+Supply bench-supply
+model PS-30
+power On
+output 12 V
+load 42%
+from spec.supply
+plain, with readings, and bars that mark its ports
+runs on
+Node a-machine-with-a-long-name-in-rack-0001
+reaches machine a-machine-with-a-long-name-in-rack-0001
+from status.node
+plain, a long name and no readings
+shows on
+Panel lobby-panel
+connector HDMI-A-1
+mode 1920x1080@60
+Activity Showing
+Title A Tale of Two Cities, in an edition whose title is long
+from status.panel
+plain, with what the page's own object shows
+powered by
+warning
+Supply bench-supply
+Degraded
+model PS-30
+power On
+from spec.supply
+a warning
+powered by
+no such object
+Supply bench-supply
+the cluster has no such Supply
+from spec.supply
+a name with no object, drawn as a warning
+powered by
+failing
+Supply bench-supply
+Unreachable
+model PS-30
+power Off
+from spec.supply
+failing
+cooled by
+at rest
+Fan rack-fan
+Idle
+speed 0 rpm
+from spec.fan
+at rest
+configured from
+not an object
+settings.example.test/lobby
+not an object in the cluster
+from spec.settings
+a value, not an object
+powered by
+empty
+no Supply
+spec.supply names nothing now
+an expected role with no part
+served by
+empty, expected in another state
+no Service
+status.service names nothing now
+a role expected in another state
+replicas
+Pod orders-1
+ready 2 of 2
+from status.replicas[]
+a stack of alike parts
+socket
+A low plate with a port in its lower edge, such as a socket on a wall or the way into a service.
+wires at bottom 47% to 53%
+powered by
+Supply bench-supply
+model PS-30
+power On
+output 12 V
+load 42%
+from spec.supply
+plain, with readings, and bars that mark its ports
+runs on
+Node a-machine-with-a-long-name-in-rack-0001
+reaches machine a-machine-with-a-long-name-in-rack-0001
+from status.node
+plain, a long name and no readings
+shows on
+Panel lobby-panel
+connector HDMI-A-1
+mode 1920x1080@60
+Activity Showing
+Title A Tale of Two Cities, in an edition whose title is long
+from status.panel
+plain, with what the page's own object shows
+powered by
+warning
+Supply bench-supply
+Degraded
+model PS-30
+power On
+from spec.supply
+a warning
+powered by
+no such object
+Supply bench-supply
+the cluster has no such Supply
+from spec.supply
+a name with no object, drawn as a warning
+powered by
+failing
+Supply bench-supply
+Unreachable
+model PS-30
+power Off
+from spec.supply
+failing
+cooled by
+at rest
+Fan rack-fan
+Idle
+speed 0 rpm
+from spec.fan
+at rest
+configured from
+not an object
+settings.example.test/lobby
+not an object in the cluster
+from spec.settings
+a value, not an object
+powered by
+empty
+no Supply
+spec.supply names nothing now
+an expected role with no part
+served by
+empty, expected in another state
+no Service
+status.service names nothing now
+a role expected in another state
+replicas
+Pod orders-1
+ready 2 of 2
+from status.replicas[]
+a stack of alike parts
+speaker
+A loudspeaker cabinet with a tweeter and a cone, such as a home theater's speaker or a monitor on a desk.
+wires at left 30% to 70%, right 30% to 70%; lies on its side in a wide area
+powered by
+Supply bench-supply
+model PS-30
+power On
+output 12 V
+load 42%
+from spec.supply
+plain, with readings, and bars that mark its ports
+runs on
+Node a-machine-with-a-long-name-in-rack-0001
+reaches machine a-machine-with-a-long-name-in-rack-0001
+from status.node
+plain, a long name and no readings
+shows on
+Panel lobby-panel
+connector HDMI-A-1
+mode 1920x1080@60
+Activity Showing
+Title A Tale of Two Cities, in an edition whose title is long
+from status.panel
+plain, with what the page's own object shows
+powered by
+warning
+Supply bench-supply
+Degraded
+model PS-30
+power On
+from spec.supply
+a warning
+powered by
+no such object
+Supply bench-supply
+the cluster has no such Supply
+from spec.supply
+a name with no object, drawn as a warning
+powered by
+failing
+Supply bench-supply
+Unreachable
+model PS-30
+power Off
+from spec.supply
+failing
+cooled by
+at rest
+Fan rack-fan
+Idle
+speed 0 rpm
+from spec.fan
+at rest
+configured from
+not an object
+settings.example.test/lobby
+not an object in the cluster
+from spec.settings
+a value, not an object
+powered by
+empty
+no Supply
+spec.supply names nothing now
+an expected role with no part
+served by
+empty, expected in another state
+no Service
+status.service names nothing now
+a role expected in another state
+replicas
+Pod orders-1
+ready 2 of 2
+from status.replicas[]
+a stack of alike parts
+front
+not an object
+center
+from spec.front
+on its side, in a wide area
+tag
+A label tied to the picture, for a thing in the cluster that the picture does not show, such as a message bus or a claim.
+takes no wire
+powered by
+Supply bench-supply
+model PS-30
+power On
+output 12 V
+load 42%
+from spec.supply
+plain, with readings, and bars that mark its ports
+runs on
+Node a-machine-with-a-long-name-in-rack-0001
+reaches machine a-machine-with-a-long-name-in-rack-0001
+from status.node
+plain, a long name and no readings
+shows on
+Panel lobby-panel
+connector HDMI-A-1
+mode 1920x1080@60
+Activity Showing
+Title A Tale of Two Cities, in an edition whose title is long
+from status.panel
+plain, with what the page's own object shows
+powered by
+warning
+Supply bench-supply
+Degraded
+model PS-30
+power On
+from spec.supply
+a warning
+powered by
+no such object
+Supply bench-supply
+the cluster has no such Supply
+from spec.supply
+a name with no object, drawn as a warning
+powered by
+failing
+Supply bench-supply
+Unreachable
+model PS-30
+power Off
+from spec.supply
+failing
+cooled by
+at rest
+Fan rack-fan
+Idle
+speed 0 rpm
+from spec.fan
+at rest
+configured from
+not an object
+settings.example.test/lobby
+not an object in the cluster
+from spec.settings
+a value, not an object
+powered by
+empty
+no Supply
+spec.supply names nothing now
+an expected role with no part
+served by
+empty, expected in another state
+no Service
+status.service names nothing now
+a role expected in another state
+replicas
+Pod orders-1
+ready 2 of 2
+from status.replicas[]
+a stack of alike parts
+resources.yaml
+crate.stock.example.test
+A crate with a slat across its side and a handle on its lid, such as a crate of stock in a store room.
+wires at left 30% to 70%, right 30% to 70%
+powered by
+Supply bench-supply
+model PS-30
+power On
+output 12 V
+load 42%
+from spec.supply
+plain, with readings, and bars that mark its ports
+runs on
+Node a-machine-with-a-long-name-in-rack-0001
+reaches machine a-machine-with-a-long-name-in-rack-0001
+from status.node
+plain, a long name and no readings
+shows on
+Panel lobby-panel
+connector HDMI-A-1
+mode 1920x1080@60
+Activity Showing
+Title A Tale of Two Cities, in an edition whose title is long
+from status.panel
+plain, with what the page's own object shows
+powered by
+warning
+Supply bench-supply
+Degraded
+model PS-30
+power On
+from spec.supply
+a warning
+powered by
+no such object
+Supply bench-supply
+the cluster has no such Supply
+from spec.supply
+a name with no object, drawn as a warning
+powered by
+failing
+Supply bench-supply
+Unreachable
+model PS-30
+power Off
+from spec.supply
+failing
+cooled by
+at rest
+Fan rack-fan
+Idle
+speed 0 rpm
+from spec.fan
+at rest
+configured from
+not an object
+settings.example.test/lobby
+not an object in the cluster
+from spec.settings
+a value, not an object
+powered by
+empty
+no Supply
+spec.supply names nothing now
+an expected role with no part
+served by
+empty, expected in another state
+no Service
+status.service names nothing now
+a role expected in another state
+replicas
+Pod orders-1
+ready 2 of 2
+from status.replicas[]
+a stack of alike parts
+Left out
+glowing-crate.stock.example.test in resources.yaml: not loaded: unknown field `color`, expected one of `summary`, `size`, `axis`, `outline`, `text`, `display`, `pieces`, `joins`, `ports`, `turns`
