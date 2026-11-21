@@ -10,7 +10,7 @@ use transect_resources::knowledge::{self, KindKnowledge, fixtures::knowledge};
 
 const REFERENCES: &str = "references: [
     {path: status.screen.monitor, label: shows on},
-    {path: status.amp.name, kind: Amp, group: amps.example.com, label: plays through},
+    {path: status.amp.name, kind: Amp, group: amps.example.com, label: amplified by},
     {path: 'spec.handsets[].name', kind: Handset, group: widgets.example.com, label: controlled by},
     {path: status.lamp.name, kind: Lamp, group: widgets.example.com, label: lit by},
     {path: status.bus.address, address: true, label: talks over},
@@ -161,7 +161,7 @@ fn draws_each_role_with_a_part_for_each_value_and_leaves_an_unexpected_empty_rol
         roles,
         vec![
             ("face", "shows on", vec![("tv-1", None)]),
-            ("amp", "plays through", vec![("Amp amp-1", None)]),
+            ("amp", "amplified by", vec![("Amp amp-1", None)]),
             (
                 "hand",
                 "controlled by",

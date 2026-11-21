@@ -14,7 +14,7 @@ pub const LEGEND: &str =
 
 /// The heading over the section view. It starts from the workload's
 /// entry when it has one, and from the workload itself when nothing
-/// reaches it from outside, as in a Player's or a Remote's section. It
+/// reaches it from outside, as in a Jukebox's or a Dial's section. It
 /// ends at the workload's storage when it has any, and otherwise at its
 /// machines.
 pub fn subtitle(entry: bool, storage: bool, name: &str) -> String {

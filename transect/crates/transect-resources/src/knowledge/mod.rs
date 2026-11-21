@@ -106,8 +106,8 @@ pub struct Reference {
     pub path: String,
     pub target: Target,
     pub edge: Kind,
-    /// The phrase that a card shows for the relation, such as "plays
-    /// through".
+    /// The phrase that a card shows for the relation, such as "amplified
+    /// by".
     pub label: Option<String>,
     /// The field of the referenced object whose value equals this
     /// field's. It is set for a reference by value, such as an address,
@@ -376,8 +376,8 @@ mod tests {
     }
 
     #[rstest]
-    #[case::an_s("Player", Some("players"), "Players")]
-    #[case::capitals_inside("MediaPreference", Some("mediapreferences"), "MediaPreferences")]
+    #[case::an_s("Dial", Some("dials"), "Dials")]
+    #[case::capitals_inside("DialSetting", Some("dialsettings"), "DialSettings")]
     #[case::the_same("Redis", Some("redis"), "Redis")]
     #[case::a_y_made_ies("BackendTLSPolicy", Some("backendtlspolicies"), "BackendTLSPolicies")]
     #[case::irregular("Person", Some("people"), "People")]

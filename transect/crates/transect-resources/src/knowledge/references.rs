@@ -20,7 +20,7 @@ const WRITES: &str = "writes";
 /// One value of one field, and what it refers to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Relation {
-    /// The verb a card shows, such as "plays through".
+    /// The verb a card shows, such as "amplified by".
     pub label: String,
     /// The field path as the knowledge writes it.
     pub path: String,
@@ -155,7 +155,7 @@ fn referenced_object(
 }
 
 impl Relation {
-    /// Where the value was read, such as "from status.receiver.name".
+    /// Where the value was read, such as "from status.amplifier.name".
     pub fn source(&self) -> String {
         format!("from {}", self.path)
     }
@@ -168,40 +168,46 @@ mod tests {
     use super::super::fixtures::knowledge;
     use super::*;
 
-    const PLAYER: &str = "
+    const JUKEBOX: &str = "
 spec:
-  remotes: [{name: hall}, {name: den}]
-  credentials: player-login
+  dials: [{name: hall}, {name: den}]
+  credentials: jukebox-login
 status:
   screen: {node: alpha, monitor: tv-1}
-  receiver: {name: amp}
+  amplifier: {name: amp}
   bus: {address: 'broker.messages.svc:1883'}
 ";
 
     const REFERENCES: &str = "{references: [
         {path: status.screen.node, kind: Node, edge: runs on},
-        {path: 'spec.remotes[].name', kind: Remote, group: widgets.example.com, label: controlled by},
-        {path: status.receiver.name, kind: Receiver, group: amps.example.com, label: plays through},
+        {path: 'spec.dials[].name', kind: Dial, group: widgets.example.com, label: controlled by},
+        {path: status.amplifier.name, kind: Amplifier, group: amps.example.com, label: amplified by},
         {path: status.screen.monitor, label: shows on},
         {path: status.bus.address, address: true, label: talks over},
-        {path: 'status.sinks[].name', label: sounds through}],
+        {path: 'status.horns[].name', label: heard through}],
       writesSecret: spec.credentials}";
 
-    fn player() -> Object {
-        Object::new("widgets.example.com", "Player", Some("shop"), "front-room")
+    fn jukebox() -> Object {
+        Object::new("widgets.example.com", "Jukebox", Some("shop"), "front-room")
     }
 
     fn scoped() -> ClusterScoped {
         ClusterScoped::from([
             ("".to_string(), "Node".to_string()),
-            ("amps.example.com".to_string(), "Receiver".to_string()),
+            ("amps.example.com".to_string(), "Amplifier".to_string()),
         ])
     }
 
     fn read(spec: &str) -> Vec<Relation> {
-        let knowledge = knowledge("players.widgets.example.com", spec);
-        let data: Value = serde_yaml::from_str(PLAYER).unwrap();
-        relations(&knowledge, &player(), &data, &scoped(), &Matches::default())
+        let knowledge = knowledge("jukeboxes.widgets.example.com", spec);
+        let data: Value = serde_yaml::from_str(JUKEBOX).unwrap();
+        relations(
+            &knowledge,
+            &jukebox(),
+            &data,
+            &scoped(),
+            &Matches::default(),
+        )
     }
 
     type Read<'a> = (&'a str, Option<Kind>, &'a str, Names);
@@ -217,7 +223,7 @@ status:
             .iter()
             .map(|r| (r.label.as_str(), r.edge, r.value.as_str(), r.names.clone()))
             .collect();
-        let remote = |name| object("widgets.example.com", "Remote", Some("shop"), name);
+        let dial = |name| object("widgets.example.com", "Dial", Some("shop"), name);
         assert_eq!(
             read,
             vec![
@@ -227,18 +233,13 @@ status:
                     "alpha",
                     object("", "Node", None, "alpha")
                 ),
+                ("controlled by", Some(Kind::DependsOn), "hall", dial("hall")),
+                ("controlled by", Some(Kind::DependsOn), "den", dial("den")),
                 (
-                    "controlled by",
-                    Some(Kind::DependsOn),
-                    "hall",
-                    remote("hall")
-                ),
-                ("controlled by", Some(Kind::DependsOn), "den", remote("den")),
-                (
-                    "plays through",
+                    "amplified by",
                     Some(Kind::DependsOn),
                     "amp",
-                    object("amps.example.com", "Receiver", None, "amp")
+                    object("amps.example.com", "Amplifier", None, "amp")
                 ),
                 ("shows on", None, "tv-1", Names::Value),
                 (
@@ -250,14 +251,14 @@ status:
                 (
                     "writes",
                     None,
-                    "player-login",
-                    object("", "Secret", Some("shop"), "player-login")
+                    "jukebox-login",
+                    object("", "Secret", Some("shop"), "jukebox-login")
                 ),
             ]
         );
     }
 
-    /// A `Matches` of `Receiver` objects of `amps.example.com`. Each
+    /// A `Matches` of `Amplifier` objects of `amps.example.com`. Each
     /// entry is a name, a namespace or none, and the address in the
     /// object's status.
     fn amps(amps: &[(&str, Option<&str>, &str)]) -> Matches {
@@ -265,8 +266,8 @@ status:
             group: "amps.example.com".into(),
             version: "v1".into(),
             api_version: "amps.example.com/v1".into(),
-            kind: "Receiver".into(),
-            plural: "receivers".into(),
+            kind: "Amplifier".into(),
+            plural: "amplifiers".into(),
         };
         let objects = amps.iter().map(|(name, namespace, address)| {
             let namespace = namespace.map_or(String::new(), |n| format!(", namespace: {n}"));
@@ -276,20 +277,20 @@ status:
         });
         let key = (
             "amps.example.com".to_string(),
-            "Receiver".to_string(),
+            "Amplifier".to_string(),
             "status.address".to_string(),
         );
         Matches::build([key], &[(resource, objects.collect())])
     }
 
-    const BY_ADDRESS: &str = "{references: [{path: status.bus.address, kind: Receiver, group: amps.example.com, match: status.address, label: plays through}]}";
+    const BY_ADDRESS: &str = "{references: [{path: status.bus.address, kind: Amplifier, group: amps.example.com, match: status.address, label: amplified by}]}";
 
-    const ACROSS: &str = "{references: [{path: status.bus.address, kind: Receiver, group: amps.example.com, match: status.address, acrossNamespaces: true}]}";
+    const ACROSS: &str = "{references: [{path: status.bus.address, kind: Amplifier, group: amps.example.com, match: status.address, acrossNamespaces: true}]}";
 
     const BUS: &str = "broker.messages.svc:1883";
 
     fn amp(namespace: Option<&str>, name: &str) -> Names {
-        object("amps.example.com", "Receiver", namespace, name)
+        object("amps.example.com", "Amplifier", namespace, name)
     }
 
     #[rstest]
@@ -324,9 +325,9 @@ status:
         #[case] amps_held: &[(&str, Option<&str>, &str)],
         #[case] expected: Vec<(Option<Kind>, Names)>,
     ) {
-        let knowledge = knowledge("players.widgets.example.com", spec);
-        let data: Value = serde_yaml::from_str(PLAYER).unwrap();
-        let found = relations(&knowledge, &player(), &data, &scoped(), &amps(amps_held));
+        let knowledge = knowledge("jukeboxes.widgets.example.com", spec);
+        let data: Value = serde_yaml::from_str(JUKEBOX).unwrap();
+        let found = relations(&knowledge, &jukebox(), &data, &scoped(), &amps(amps_held));
         let read: Vec<(Option<Kind>, Names)> =
             found.into_iter().map(|r| (r.edge, r.names)).collect();
         assert_eq!(read, expected);
@@ -334,27 +335,27 @@ status:
 
     #[rstest]
     fn marks_each_relation_with_its_field() {
-        let found = read("{references: [{path: status.receiver.name, kind: Receiver}]}");
+        let found = read("{references: [{path: status.amplifier.name, kind: Amplifier}]}");
         let provenance = Provenance::Kinds {
-            knowledge: "players.widgets.example.com".into(),
-            field: "status.receiver.name".into(),
+            knowledge: "jukeboxes.widgets.example.com".into(),
+            field: "status.amplifier.name".into(),
         };
         assert_eq!(
             found
                 .iter()
                 .map(|r| (r.provenance.clone(), r.source()))
                 .collect::<Vec<_>>(),
-            vec![(provenance, "from status.receiver.name".to_string())]
+            vec![(provenance, "from status.amplifier.name".to_string())]
         );
     }
 
     #[rstest]
-    #[case::a_field("{writesSecret: spec.credentials}", "player-login")]
+    #[case::a_field("{writesSecret: spec.credentials}", "jukebox-login")]
     #[case::its_own_name("{writesSecret: metadata.name}", "front-room")]
     fn reads_the_secret_it_writes(#[case] spec: &str, #[case] secret: &str) {
-        let knowledge = knowledge("players.widgets.example.com", spec);
-        let data: Value = serde_yaml::from_str(PLAYER).unwrap();
-        let found = written_secret(&knowledge, &player(), &data).map(|r| r.names);
+        let knowledge = knowledge("jukeboxes.widgets.example.com", spec);
+        let data: Value = serde_yaml::from_str(JUKEBOX).unwrap();
+        let found = written_secret(&knowledge, &jukebox(), &data).map(|r| r.names);
         assert_eq!(found, Some(object("", "Secret", Some("shop"), secret)));
     }
 

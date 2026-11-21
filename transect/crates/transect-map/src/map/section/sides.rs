@@ -156,8 +156,8 @@ pub fn sides(
 
 /// The lines from each device in the right column to the other boxes in
 /// that column that the device's attributes refer to, such as the radio
-/// that a remote pairs through, or the screen that an HDMI sound output
-/// plays through. A device's side line joins its machine, so without
+/// that a handset pairs through, or the screen that an HDMI sound output
+/// amplified by. A device's side line joins its machine, so without
 /// these lines the section would not show how the device relates to the
 /// other boxes. Only edges that leave a device become ties.
 pub fn ties(graph: &Graph, sides: &[SideBox]) -> Vec<Tie> {

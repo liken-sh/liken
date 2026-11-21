@@ -73,7 +73,7 @@ impl Snapshot {
         let namespace_object = Object::new("", "Namespace", None, namespace);
         // A built-in workload has two keys, its name and
         // `owned_key(kind, name)`. A custom workload has only the
-        // `owned_key`, so a `Player` and a `Remote` with the same name
+        // `owned_key`, so a `Jukebox` and a `Dial` with the same name
         // do not overwrite each other.
         let mut whys = HashMap::new();
         for workload in self.ownership.workloads(namespace) {

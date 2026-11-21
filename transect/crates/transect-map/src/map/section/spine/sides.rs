@@ -209,15 +209,15 @@ mod tests {
 
     #[rstest]
     fn the_folded_box_names_each_object_with_its_kind() {
-        let player = Object::new("example.com", "Player", Some("den"), "den");
-        let remote = Object::new("example.com", "Remote", Some("den"), "den");
+        let jukebox = Object::new("example.com", "Jukebox", Some("den"), "den");
+        let dial = Object::new("example.com", "Dial", Some("den"), "den");
         let mut sides: Vec<SideBox> = (0..3).map(|i| caller(&format!("caller-{i}"))).collect();
-        sides.push(caller("den").of(&player));
-        sides.push(caller("den").of(&remote));
+        sides.push(caller("den").of(&jukebox));
+        sides.push(caller("den").of(&dial));
         let found = column(&sides, &Band::Layer("apps".into()), Side::Left);
         assert_eq!(
             found[3].boxed.lines,
-            vec!["Player den, Remote den".to_string()]
+            vec!["Jukebox den, Dial den".to_string()]
         );
     }
 

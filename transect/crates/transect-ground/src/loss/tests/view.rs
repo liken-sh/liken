@@ -118,19 +118,15 @@ fn the_sidebar_lists_a_namespace_in_each_list() {
 
 #[rstest]
 fn a_line_names_the_kinds_of_workloads_that_share_a_name() {
-    let player = Taken {
-        object: Object::new("media.example.com", "Player", Some("media"), "den"),
+    let jukebox = Taken {
+        object: Object::new("media.example.com", "Jukebox", Some("media"), "den"),
         ..taken("media", "den", State::Down { wanted: 1 })
     };
-    let remote = Taken {
-        object: Object::new("media.example.com", "Remote", Some("media"), "den"),
+    let dial = Taken {
+        object: Object::new("media.example.com", "Dial", Some("media"), "den"),
         ..taken("media", "den", State::Down { wanted: 1 })
     };
-    let sidebar = Sidebar::build(&loss(vec![
-        player,
-        remote,
-        taken("media", "web", ONE_SHORT),
-    ]));
+    let sidebar = Sidebar::build(&loss(vec![jukebox, dial, taken("media", "web", ONE_SHORT)]));
     let lines: Vec<String> = sidebar
         .back
         .iter()
@@ -139,7 +135,7 @@ fn a_line_names_the_kinds_of_workloads_that_share_a_name() {
         .collect();
     assert_eq!(
         lines,
-        vec!["Player den and Remote den, one replica each", "web 1 of 2"]
+        vec!["Dial den and Jukebox den, one replica each", "web 1 of 2"]
     );
 }
 

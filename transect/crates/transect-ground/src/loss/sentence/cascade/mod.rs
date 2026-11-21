@@ -430,7 +430,7 @@ fn pieces(hops: &[Hop], here: Option<&str>) -> Vec<Vec<Piece>> {
 }
 
 /// `object`'s kind and name, with its namespace when it is not `here`:
-/// "Player den", "Catalog media/catalog".  The kind is plain words and
+/// "Jukebox den", "Catalog media/catalog".  The kind is plain words and
 /// the name is the link.
 fn kinded(object: &Object, here: Option<&str>) -> Vec<Piece> {
     let full = transect_graph::links::kind_and_name_in(object, here);

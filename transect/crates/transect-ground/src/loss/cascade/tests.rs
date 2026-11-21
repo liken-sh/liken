@@ -23,8 +23,8 @@ fn deployment(namespace: &str, name: &str) -> Object {
     Object::new("apps", "Deployment", Some(namespace), name)
 }
 
-fn player(name: &str) -> Object {
-    Object::new("media.example.com", "Player", Some("media"), name)
+fn jukebox(name: &str) -> Object {
+    Object::new("media.example.com", "Jukebox", Some("media"), name)
 }
 
 fn service(name: &str) -> Object {
@@ -47,7 +47,7 @@ fn edge(kind: Kind, from: Object, to: Object) -> Edge {
 
 /// A shop namespace.  `web`, and `feed` in blog, call its `db`.  Two
 /// hosts and a default backend route to `web` through its `Service`, and
-/// its `operator` controls two Players in media.  No edge arrives at
+/// its `operator` controls two Jukeboxes in media.  No edge arrives at
 /// `cache`.
 struct Shop {
     graph: Graph,
@@ -82,12 +82,12 @@ fn shop() -> Shop {
         edge(Kind::RoutesTo, ingress_object("fallback"), service("web")),
         edge(
             Kind::ControlledBy,
-            player("den"),
+            jukebox("den"),
             deployment("shop", "operator"),
         ),
         edge(
             Kind::ControlledBy,
-            player("attic"),
+            jukebox("attic"),
             deployment("shop", "operator"),
         ),
     ]]);
@@ -124,8 +124,8 @@ impl Shop {
 #[case::custom_resources_it_controls(
     "operator",
     vec![
-        Dependent::Controlled(player("attic")),
-        Dependent::Controlled(player("den")),
+        Dependent::Controlled(jukebox("attic")),
+        Dependent::Controlled(jukebox("den")),
     ]
 )]
 #[case::nothing_arrives(

@@ -45,7 +45,7 @@ pub enum Label {
 }
 
 /// The key in the `whys` map for a workload that is not of a built-in
-/// kind: its kind and name, as in "Player lobby".
+/// kind: its kind and name, as in "Jukebox lobby".
 pub fn owned_key(kind: &str, name: &str) -> String {
     format!("{kind} {name}")
 }
@@ -350,7 +350,7 @@ mod tests {
         at(Level::Failing, owned("Cache", "sessions", true)),
         "chip chip-failing"
     )]
-    #[case::wide(owned("Player", "lobby-speakers", true), "chip chip-wide")]
+    #[case::wide(owned("Jukebox", "lobby-speakers", true), "chip chip-wide")]
     fn a_chip_class_follows_its_width_and_level(#[case] chip: Chip, #[case] class: &str) {
         assert_eq!(chip.class(), class);
     }

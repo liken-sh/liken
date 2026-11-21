@@ -77,7 +77,7 @@
 <div class="known-label">{{ role.label }}</div>
 <div class="sketch-state">empty</div>
 <div class="known-none">{{ nothing.text }}</div>
-<div class="known-under">{{ nothing.note }}</div>
+<div class="known-under">{% call links::spelled(nothing.note) %}{% endcall %}</div>
 </div>
 {%- endif %}
 </div>

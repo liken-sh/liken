@@ -1,7 +1,7 @@
 //! Counts the objects of each kind with kind knowledge that are not
-//! workloads, such as remotes or keymaps. The map draws no box for such
+//! workloads, such as dials or scales. The map draws no box for such
 //! an object, so the namespace shows one count for each kind, such as
-//! "Remotes ×3", that links to the list of those objects in the
+//! "Dials ×3", that links to the list of those objects in the
 //! namespace.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -11,7 +11,7 @@ use transect_graph::edges::{Object, Plurals};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Count {
-    /// The kind's plural, as the count shows it, such as "Remotes".
+    /// The kind's plural, as the count shows it, such as "Dials".
     pub label: String,
     pub count: usize,
     /// The summary from the kind knowledge, shown as the chip's title.
@@ -55,7 +55,7 @@ pub fn counts<'a>(
 }
 
 impl Count {
-    /// "Remotes ×3".
+    /// "Dials ×3".
     pub fn text(&self) -> String {
         format!("{} ×{}", self.label, self.count)
     }

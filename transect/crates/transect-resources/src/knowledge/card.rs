@@ -32,13 +32,13 @@ pub struct KnownThrough {
     pub related: Vec<Related>,
 }
 
-/// One line of the section, such as "plays through Receiver amp, from
-/// status.receiver.name".
+/// One line of the section, such as "amplified by Amplifier amp, from
+/// status.amplifier.name".
 #[derive(Clone, Debug, PartialEq)]
 pub struct Related {
     pub label: String,
     pub reference: Reference,
-    /// "from status.receiver.name".
+    /// "from status.amplifier.name".
     pub source: String,
     pub provenance: Provenance,
 }
@@ -261,7 +261,7 @@ mod tests {
     #[rstest]
     fn shows_one_source_on_the_heading_for_lines_from_one_knowledge() {
         let related = |field: &str| Related {
-            label: "plays through".into(),
+            label: "amplified by".into(),
             reference: Reference {
                 text: "amp".into(),
                 href: None,
@@ -300,8 +300,8 @@ mod tests {
 
     fn relation(names: Names, value: &str) -> Relation {
         Relation {
-            label: "plays through".into(),
-            path: "status.receiver.name".into(),
+            label: "amplified by".into(),
+            path: "status.amplifier.name".into(),
             edge: None,
             value: value.into(),
             names,
@@ -361,7 +361,7 @@ mod tests {
                 related.reference.href.as_deref(),
                 related.source.as_str()
             ),
-            ("plays through", text, href, "from status.receiver.name")
+            ("amplified by", text, href, "from status.amplifier.name")
         );
     }
 }

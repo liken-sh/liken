@@ -13,20 +13,20 @@ use transect_graph::edges::fixtures::device;
 use transect_graph::edges::{Edge, Graph, Kind, Plurals, Provenance};
 use transect_resources::knowledge::edges;
 
-fn player() -> Object {
-    Object::new("widgets.example.com", "Player", Some("shop"), "player-1")
+fn jukebox() -> Object {
+    Object::new("widgets.example.com", "Jukebox", Some("shop"), "jukebox-1")
 }
 
 fn broker() -> Object {
     Object::new("apps", "Deployment", Some("messages"), "broker")
 }
 
-fn remote() -> Object {
-    Object::new("widgets.example.com", "Remote", Some("shop"), "remote-1")
+fn dial() -> Object {
+    Object::new("widgets.example.com", "Dial", Some("shop"), "dial-1")
 }
 
-fn receiver() -> Object {
-    Object::new("amps.example.com", "Receiver", None, "amp")
+fn amplifier() -> Object {
+    Object::new("amps.example.com", "Amplifier", None, "amp")
 }
 
 fn claim() -> Object {
@@ -34,13 +34,13 @@ fn claim() -> Object {
 }
 
 fn idle_pod() -> Object {
-    Object::new("", "Pod", Some("shop"), "player-1-idle")
+    Object::new("", "Pod", Some("shop"), "jukebox-1-idle")
 }
 
-/// A `Player` in `shop` that owns the pod `player-1-idle`, a `Remote`
+/// A `Jukebox` in `shop` that owns the pod `jukebox-1-idle`, a `Dial`
 /// in `shop`, a `Deployment` in `messages` behind the `Service`
 /// `broker`, and the node `alpha`. The `ResourceClaim` `idle` has a
-/// radio and a GPU, and the graph already has the `Player`'s edge to
+/// radio and a GPU, and the graph already has the `Jukebox`'s edge to
 /// the radio.
 struct Cluster {
     addresses: Addresses,
@@ -64,7 +64,7 @@ fn cluster() -> Cluster {
     let mut graph = Graph::new([selects(&services, [(&broker, vec![&broker_labels])])]);
     graph.add(vec![Edge {
         kind: Kind::Holds,
-        from: Endpoint::Object(player()),
+        from: Endpoint::Object(jukebox()),
         to: Endpoint::Device(device("radio.example.com", "alpha", "usb-1")),
         guessed: false,
         provenance: Provenance::Kubernetes,
@@ -72,16 +72,16 @@ fn cluster() -> Cluster {
     let ownership = ownership::fixtures::build(&[
         (
             "widgets.example.com",
-            "Player",
+            "Jukebox",
             Some("shop"),
-            "player-1",
+            "jukebox-1",
             vec![],
         ),
         (
             "widgets.example.com",
-            "Remote",
+            "Dial",
             Some("shop"),
-            "remote-1",
+            "dial-1",
             vec![],
         ),
         ("apps", "Deployment", Some("messages"), "broker", vec![]),
@@ -89,13 +89,13 @@ fn cluster() -> Cluster {
             "",
             "Pod",
             Some("shop"),
-            "player-1-idle",
-            vec![("widgets.example.com/v1", "Player", "player-1")],
+            "jukebox-1-idle",
+            vec![("widgets.example.com/v1", "Jukebox", "jukebox-1")],
         ),
     ]);
     let known = HashSet::from([
-        player(),
-        remote(),
+        jukebox(),
+        dial(),
         broker,
         idle_pod(),
         Object::new("", "Service", Some("messages"), "broker"),
@@ -128,7 +128,7 @@ fn relation(edge: Option<Kind>, value: &str, names: Names) -> Relation {
         value: value.into(),
         names,
         provenance: Provenance::Kinds {
-            knowledge: "players.widgets.example.com".into(),
+            knowledge: "jukeboxes.widgets.example.com".into(),
             field: "status.a".into(),
         },
     }
@@ -151,13 +151,19 @@ impl Cluster {
     }
 
     fn reached(&self, relation: &Relation) -> Reached {
-        reached(relation, &player(), &self.reading(), &self.devices)
+        reached(relation, &jukebox(), &self.reading(), &self.devices)
     }
 
     fn edges(&self, relations: &[Relation]) -> Vec<(Kind, Endpoint)> {
         let reading = self.reading();
-        let owns = |end: &Endpoint| reading.owns(&player(), end);
-        let drawn = edges(&player(), relations, |r| self.reached(r), owns, &self.graph);
+        let owns = |end: &Endpoint| reading.owns(&jukebox(), end);
+        let drawn = edges(
+            &jukebox(),
+            relations,
+            |r| self.reached(r),
+            owns,
+            &self.graph,
+        );
         drawn.into_iter().map(|edge| (edge.kind, edge.to)).collect()
     }
 }
@@ -179,11 +185,11 @@ impl Cluster {
     vec![Endpoint::Outside("api.example.com".into())]
 )]
 #[case::not_one_address(Names::Address, "two words", vec![])]
-#[case::a_watched_object(object(remote()), "remote-1", vec![Endpoint::Object(remote())])]
+#[case::a_watched_object(object(dial()), "dial-1", vec![Endpoint::Object(dial())])]
 #[case::a_kind_transect_does_not_watch(
-    object(receiver()),
+    object(amplifier()),
     "amp",
-    vec![Endpoint::Object(receiver())]
+    vec![Endpoint::Object(amplifier())]
 )]
 #[case::a_claim_is_its_devices(
     object(claim()),
@@ -212,11 +218,11 @@ fn draws_only_edges_the_graph_and_ownership_lack(cluster: Cluster) {
             "alpha",
             object(Object::new("", "Node", None, "alpha")),
         ),
-        relation(Some(Kind::DependsOn), "player-1-idle", object(idle_pod())),
+        relation(Some(Kind::DependsOn), "jukebox-1-idle", object(idle_pod())),
         relation(Some(Kind::Holds), "idle", object(claim())),
         relation(None, "tv-1", Names::Value),
-        relation(Some(Kind::DependsOn), "remote-1", object(remote())),
-        relation(Some(Kind::DependsOn), "remote-1", object(remote())),
+        relation(Some(Kind::DependsOn), "dial-1", object(dial())),
+        relation(Some(Kind::DependsOn), "dial-1", object(dial())),
     ];
     assert_eq!(
         cluster.edges(&relations),
@@ -226,7 +232,7 @@ fn draws_only_edges_the_graph_and_ownership_lack(cluster: Cluster) {
                 Kind::Holds,
                 Endpoint::Device(device("gpu.example.com", "alpha", "card-0"))
             ),
-            (Kind::DependsOn, Endpoint::Object(remote())),
+            (Kind::DependsOn, Endpoint::Object(dial())),
         ]
     );
 }

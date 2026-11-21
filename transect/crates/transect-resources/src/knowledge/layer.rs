@@ -86,7 +86,7 @@ impl Named {
     }
 }
 
-/// "Its Players place it in apps.", or "Its Players place it in apps;
+/// "Its Jukeboxes place it in apps.", or "Its Jukeboxes place it in apps;
 /// its Catalogs name platform." when its kinds name different layers.
 impl fmt::Display for Named {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -108,7 +108,7 @@ impl fmt::Display for Named {
     }
 }
 
-/// "Players", "Players and Catalogs", or "Players, Remotes and Catalogs".
+/// "Jukeboxes", "Jukeboxes and Catalogs", or "Jukeboxes, Dials and Catalogs".
 fn and(labels: &[&str]) -> String {
     match labels {
         [] => String::new(),

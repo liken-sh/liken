@@ -5,33 +5,33 @@ use transect_graph::edges::ClusterScoped;
 use transect_resources::knowledge::{self, fixtures::knowledge};
 
 const SPEC: &str = "{references: [
-    {path: 'spec.remotes[].name', kind: Remote, group: widgets.example.com, label: controlled by},
+    {path: 'spec.dials[].name', kind: Dial, group: widgets.example.com, label: controlled by},
     {path: status.screen.monitor, label: shows on},
-    {path: status.receiver.name, kind: Receiver, group: amps.example.com, label: plays through},
+    {path: status.amplifier.name, kind: Amplifier, group: amps.example.com, label: amplified by},
     {path: status.bus.address, address: true, label: talks over},
     {path: status.screen.node, kind: Node, edge: runs on}]}";
 
-const PLAYER: &str = "
+const JUKEBOX: &str = "
 spec:
-  remotes: [{name: hall}, {name: den}]
+  dials: [{name: hall}, {name: den}]
 status:
   screen: {node: alpha, monitor: tv-1}
   bus: {address: 'broker.messages.svc:1883'}
 ";
 
-fn player() -> Object {
-    Object::new("widgets.example.com", "Player", Some("shop"), "front-room")
+fn jukebox() -> Object {
+    Object::new("widgets.example.com", "Jukebox", Some("shop"), "front-room")
 }
 
 fn plurals() -> Plurals {
     Plurals::from([
         (
-            ("widgets.example.com".to_string(), "Player".to_string()),
-            "players".to_string(),
+            ("widgets.example.com".to_string(), "Jukebox".to_string()),
+            "jukeboxes".to_string(),
         ),
         (
-            ("widgets.example.com".to_string(), "Remote".to_string()),
-            "remotes".to_string(),
+            ("widgets.example.com".to_string(), "Dial".to_string()),
+            "dials".to_string(),
         ),
     ])
 }
@@ -58,30 +58,30 @@ fn reach(relation: &Relation) -> Reached {
     }
 }
 
-/// The page of the Player above. Remotes and the broker's Deployment
+/// The page of the Jukebox above. Dials and the broker's Deployment
 /// have pages, and nothing else does.
 fn board(card: Option<WorkloadCard>) -> KnownPage {
-    let known = knowledge("players.widgets.example.com", SPEC);
-    let data = serde_yaml::from_str(PLAYER).unwrap();
+    let known = knowledge("jukeboxes.widgets.example.com", SPEC);
+    let data = serde_yaml::from_str(JUKEBOX).unwrap();
     let relations = knowledge::relations(
         &known,
-        &player(),
+        &jukebox(),
         &data,
         &ClusterScoped::default(),
         &knowledge::Matches::default(),
     );
     let plurals = plurals();
     let page = |object: &Object| {
-        ["Remote", "Deployment"]
+        ["Dial", "Deployment"]
             .contains(&object.kind.as_str())
             .then(|| transect_graph::links::page(object, &plurals))
             .flatten()
     };
     let board = Board {
-        object: &player(),
+        object: &jukebox(),
         knowledge: &known,
         layer: "apps".into(),
-        path: "/namespaces/shop/players.widgets.example.com/front-room".into(),
+        path: "/namespaces/shop/jukeboxes.widgets.example.com/front-room".into(),
         reached: relations.iter().map(|r| (r, reach(r))).collect(),
         column: Vec::new(),
         counts: Vec::new(),
@@ -96,7 +96,7 @@ fn board(card: Option<WorkloadCard>) -> KnownPage {
         readings: &|_, _| Vec::new(),
     };
     let object_card = crate::objects::ObjectCard {
-        kind: "Player".into(),
+        kind: "Jukebox".into(),
         name: "front-room".into(),
         level: Some(Level::Healthy),
         resting: false,
@@ -133,7 +133,7 @@ fn draws_a_box_for_each_reference_with_what_its_field_names() {
             (b.label.as_str(), b.arrow, ends.collect(), b.source.as_str())
         })
         .collect();
-    let remote = "/namespaces/shop/remotes.widgets.example.com/";
+    let dial = "/namespaces/shop/dials.widgets.example.com/";
     assert_eq!(
         boxes,
         vec![
@@ -141,10 +141,10 @@ fn draws_a_box_for_each_reference_with_what_its_field_names() {
                 "controlled by",
                 "↖",
                 vec![
-                    ("Remote hall", Some(format!("{remote}hall").as_str()), None),
-                    ("Remote den", Some(format!("{remote}den").as_str()), None),
+                    ("Dial hall", Some(format!("{dial}hall").as_str()), None),
+                    ("Dial den", Some(format!("{dial}den").as_str()), None),
                 ],
-                "from spec.remotes[].name"
+                "from spec.dials[].name"
             ),
             (
                 "shows on",
@@ -152,7 +152,7 @@ fn draws_a_box_for_each_reference_with_what_its_field_names() {
                 vec![("tv-1", None, Some("not an object in the cluster"))],
                 "from status.screen.monitor"
             ),
-            ("plays through", "↗", vec![], "from status.receiver.name"),
+            ("amplified by", "↗", vec![], "from status.amplifier.name"),
             (
                 "talks over",
                 "←",
@@ -202,7 +202,7 @@ fn links_each_object_an_end_reaches() {
 #[rstest]
 #[case::a_workload_shows_its_workload_card_and_section_tab(
     true,
-    Some("/namespaces/shop/players.widgets.example.com/front-room/section"),
+    Some("/namespaces/shop/jukeboxes.widgets.example.com/front-room/section"),
     false
 )]
 #[case::an_object_with_no_pods_shows_its_object_card(false, None, true)]

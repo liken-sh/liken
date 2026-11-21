@@ -312,7 +312,7 @@ mod tests {
             groups: [
                 "example.io",
                 "liken.sh",
-                "media.liken.sh",
+                "shop.liken.sh",
                 "monitoring.coreos.com",
             ]
             .map(group)

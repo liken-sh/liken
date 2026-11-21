@@ -149,8 +149,8 @@ mod tests {
         gather.stuck(&workload("shop", "cache"), &Stranded::NoFit);
         gather.stuck(&workload("shop", "cache"), &Stranded::NoFit);
         gather.stuck(&workload("blog", "db"), &Stranded::NeverEvicted);
-        let player = Object::new("example.com", "Player", Some("shop"), "web");
-        gather.stuck(&player, &Stranded::NoFit);
+        let jukebox = Object::new("example.com", "Jukebox", Some("shop"), "web");
+        gather.stuck(&jukebox, &Stranded::NoFit);
         assert_eq!(
             gather.next(false),
             Next {
@@ -161,7 +161,7 @@ mod tests {
                         Stranded::NoFit,
                         vec![
                             named("Deployment web", workload("shop", "web")),
-                            named("Player web", player),
+                            named("Jukebox web", jukebox),
                             named("cache", workload("shop", "cache")),
                         ]
                     ),

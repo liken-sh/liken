@@ -22,8 +22,8 @@ fn caller(namespace: &str, name: &str) -> Dependent {
     Dependent::Caller(deployment(namespace, name))
 }
 
-fn player(namespace: Option<&str>, name: &str) -> Dependent {
-    Dependent::Controlled(Object::new("media.example.com", "Player", namespace, name))
+fn jukebox(namespace: Option<&str>, name: &str) -> Dependent {
+    Dependent::Controlled(Object::new("media.example.com", "Jukebox", namespace, name))
 }
 
 #[rstest]
@@ -43,12 +43,12 @@ fn player(namespace: Option<&str>, name: &str) -> Dependent {
     "wiki loses sign-in"
 )]
 #[case::a_custom_resource(
-    hop(player(Some("shop"), "den"), &[("shop", "operator")]),
-    "Nothing reconciles Player den until operator returns"
+    hop(jukebox(Some("shop"), "den"), &[("shop", "operator")]),
+    "Nothing reconciles Jukebox den until operator returns"
 )]
 #[case::a_cluster_scoped_one(
-    hop(player(None, "den"), &[("shop", "a"), ("shop", "b")]),
-    "Nothing reconciles Player den until a and b return"
+    hop(jukebox(None, "den"), &[("shop", "a"), ("shop", "b")]),
+    "Nothing reconciles Jukebox den until a and b return"
 )]
 fn writes_what_a_dependent_loses(#[case] hop: Hop, #[case] expected: &str) {
     assert_eq!(text(&hop.pieces(Some("shop"), false)), expected);
@@ -82,8 +82,8 @@ fn providing(hop: Hop, text: &str) -> Hop {
     "blog/feed loses order storage and can't reach cache"
 )]
 #[case::a_custom_resource_names_its_controller(
-    providing(hop(player(Some("shop"), "den"), &[("shop", "db")]), "order storage"),
-    "Nothing reconciles Player den until db returns"
+    providing(hop(jukebox(Some("shop"), "den"), &[("shop", "db")]), "order storage"),
+    "Nothing reconciles Jukebox den until db returns"
 )]
 fn writes_the_provides_text_of_a_lost_workload(#[case] hop: Hop, #[case] expected: &str) {
     let marks = match hop.dependent {
@@ -178,13 +178,13 @@ fn two_callers_of_one_name_are_named_by_kind() {
     let hops = Hops {
         namespace: Some("shop".into()),
         hops: vec![
-            hop(custom("Player"), &[("shop", "bus")]),
-            hop(custom("Remote"), &[("shop", "bus")]),
+            hop(custom("Jukebox"), &[("shop", "bus")]),
+            hop(custom("Dial"), &[("shop", "bus")]),
         ],
     };
     assert_eq!(
         hops.to_string(),
-        "Player den can't reach bus; Remote den can't reach bus"
+        "Jukebox den can't reach bus; Dial den can't reach bus"
     );
 }
 
@@ -206,8 +206,8 @@ fn two_callers_of_one_name_are_named_by_kind() {
     None
 )]
 #[case::a_dependent_of_the_lost_ones_name(
-    vec![hop(Dependent::Caller(Object::new("media.example.com", "Player", Some("shop"), "den")), &[("shop", "den")])],
-    vec!["Player den can't reach Deployment den"],
+    vec![hop(Dependent::Caller(Object::new("media.example.com", "Jukebox", Some("shop"), "den")), &[("shop", "den")])],
+    vec!["Jukebox den can't reach Deployment den"],
     None
 )]
 #[case::nothing(

@@ -92,14 +92,14 @@ mod tests {
     }
 
     #[rstest]
-    #[case::one_short_end(vec![end("Remote hall", None)], FRAME + 3 * LINE + 2 * GAP)]
+    #[case::one_short_end(vec![end("Dial hall", None)], FRAME + 3 * LINE + 2 * GAP)]
     #[case::nothing_named(vec![], FRAME + 3 * LINE + 2 * GAP)]
     #[case::an_end_that_reaches_more(
         vec![end("Node alpha", Some("reaches machine alpha"))],
         FRAME + 4 * LINE + 3 * GAP
     )]
     #[case::a_name_that_wraps(
-        vec![end("Sink a-very-long-sink-name-that-runs-past-one-line", None)],
+        vec![end("Horn a-very-long-horn-name-that-runs-past-one-line", None)],
         FRAME + 4 * LINE + 2 * GAP
     )]
     fn sizes_a_relation_by_its_lines(#[case] ends: Vec<End>, #[case] height: i32) {
@@ -113,12 +113,12 @@ mod tests {
         FRAME + LINE + NAME + 2 * CHIP + CHIP_GAP + 2 * GAP
     )]
     fn sizes_the_object_by_its_chips(#[case] chips: Vec<Chip>, #[case] height: i32) {
-        assert_eq!(center("Player", None, &chips), height);
+        assert_eq!(center("Jukebox", None, &chips), height);
     }
 
     #[rstest]
     fn makes_room_for_the_calm_reason() {
-        let resting = center("Player", Some("Not reserved"), &[]);
-        assert_eq!(resting, center("Player", None, &[]) + LINE + GAP);
+        let resting = center("Jukebox", Some("Not reserved"), &[]);
+        assert_eq!(resting, center("Jukebox", None, &[]) + LINE + GAP);
     }
 }
