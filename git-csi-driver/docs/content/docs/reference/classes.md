@@ -29,7 +29,7 @@ message gives the first bad one.
 | `GitVolumePending` | The tree has paths that the driver has not committed. Posted when the first such path appears. |
 | `GitVolumePushed` | A push succeeded, with the commit and the count of paths. |
 | `GitVolumePushFailed` | A push failed, with git's error. |
-| `GitVolumeFileSkipped` | A file over `commit.maxFileSize` was left out of a commit. |
+| `GitVolumeFileSkipped` | A file over `commit.maxFileSize` was left out of a commit, or the pod first wrote a file outside the volume's `paths`, which the driver never commits. |
 | `GitVolumeRebased` | A push was rejected, so the driver rebased the tree onto upstream and pushed again, with the count of commits and the upstream commit. |
 | `GitVolumeDiverged` | The volume moved to its side branch, because a push was still rejected after three rebases, a rebase aborted, or the application and upstream both changed a file. |
 | `GitVolumeHealed` | A person merged the side branch into the ref, so the volume pushes to its ref again and the driver deletes the side branch. |

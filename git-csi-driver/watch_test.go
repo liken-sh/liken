@@ -128,7 +128,7 @@ func TestTheWatchReportsATreeItCannotRead(t *testing.T) {
 	w := &watcher{
 		node:   n,
 		clock:  n.clock,
-		volume: &volume{id: "config", work: holder.workTree(holder.repository("file:///gone"), "config")},
+		volume: &volume{id: "config", work: holder.workTree(holder.repository("file:///gone"), "config", nil)},
 	}
 	w.scan(t.Context())
 	if !strings.Contains(logs.String(), "The pending paths of the volume tree were not read") {
@@ -137,7 +137,7 @@ func TestTheWatchReportsATreeItCannotRead(t *testing.T) {
 }
 
 func TestTheEventsIncludeTheDirectoryThePodCreated(t *testing.T) {
-	w := &watcher{watched: map[int32]string{7: "/store/tree"}}
+	w := &watcher{volume: &volume{tree: "/store/tree"}, watched: map[int32]string{7: "/store/tree"}}
 	buffer := inotifyRecord(7, unix.IN_CREATE|unix.IN_ISDIR, "sub")
 	buffer = append(buffer, inotifyRecord(7, unix.IN_MODIFY, "a.txt")...)
 	buffer = append(buffer, inotifyRecord(7, unix.IN_MODIFY, "")...)

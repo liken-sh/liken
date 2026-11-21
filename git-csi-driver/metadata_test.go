@@ -43,7 +43,7 @@ func TestTheWalkRecordsWhatACheckoutCannotRestore(t *testing.T) {
 		t.Fatalf("chmod: %v", err)
 	}
 
-	records, err := walkTreeMetadata(tree)
+	records, err := walkTreeMetadata(tree, nil)
 	if err != nil {
 		t.Fatalf("walkTreeMetadata: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestTheWalkRecordsWhatACheckoutCannotRestore(t *testing.T) {
 }
 
 func TestTheWalkReportsATreeItCannotRead(t *testing.T) {
-	if _, err := walkTreeMetadata(filepath.Join(t.TempDir(), "gone")); err == nil {
+	if _, err := walkTreeMetadata(filepath.Join(t.TempDir(), "gone"), nil); err == nil {
 		t.Error("walkTreeMetadata returned no error for a tree that is not there")
 	}
 }
@@ -68,7 +68,7 @@ func TestASymbolicLinkIsRecordedNowhere(t *testing.T) {
 	if err := os.Symlink("elsewhere", filepath.Join(tree, "link")); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
-	records, err := walkTreeMetadata(tree)
+	records, err := walkTreeMetadata(tree, nil)
 	if err != nil {
 		t.Fatalf("walkTreeMetadata: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestTheReplayLogsWhatItCannotRestore(t *testing.T) {
 // reads.
 func recordOnRef(t *testing.T, work *workTree, content string) {
 	t.Helper()
-	if err := work.commitMetadata(t.Context(), defaultPolicy(), content); err != nil {
+	if err := work.commitMetadata(t.Context(), defaultPolicy().author(), content, work.refCommit(t.Context(), metadataRef)); err != nil {
 		t.Fatalf("commitMetadata: %v", err)
 	}
 }

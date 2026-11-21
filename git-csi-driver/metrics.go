@@ -128,7 +128,7 @@ func newMetrics() *metrics {
 		pushFailures: prometheus.NewCounterVec(
 			prometheus.CounterOpts{Name: "git_csi_push_failures_total", Help: "Pushes to the remote that failed."}, metricLabels),
 		skipped: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{Name: "git_csi_skipped_files", Help: "Files the last commit left out, over commit.maxFileSize."}, metricLabels),
+			prometheus.GaugeOpts{Name: "git_csi_skipped_files", Help: "Files the commits leave out: files over commit.maxFileSize, and files the pod wrote outside the volume's paths."}, metricLabels),
 		diverged: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{Name: "git_csi_diverged", Help: "One while the volume pushes to its side branch, zero while it pushes to its ref."}, metricLabels),
 		abnormal: prometheus.NewGaugeVec(

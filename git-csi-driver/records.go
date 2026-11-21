@@ -234,7 +234,7 @@ func (n *node) resumeOne(ctx context.Context, rec *record, directory string, mou
 		}
 		return
 	}
-	resumed.work = n.store.workTree(n.store.repository(parsed.url), resumed.id)
+	resumed.work = n.store.workTree(n.store.repository(parsed.url), resumed.id, parsed.paths)
 	if commit, err := resumed.work.head(ctx); err == nil {
 		resumed.commit = commit
 	}

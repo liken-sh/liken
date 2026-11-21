@@ -691,7 +691,7 @@ func TestNodeStageVolumeFailsWhenItCannotUpdatePushedRef(t *testing.T) {
 					t.Fatalf("calling NodeUnstageVolume: %v", err)
 				}
 				work := n.store.workTree(
-					n.store.repository(fileURL(source)), "config")
+					n.store.repository(fileURL(source)), "config", nil)
 				if err := os.Remove(
 					filepath.Join(work.gitDir, filepath.FromSlash(pushedRef))); err != nil {
 					t.Fatalf("removing pushedRef: %v", err)

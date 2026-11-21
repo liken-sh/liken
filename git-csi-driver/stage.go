@@ -72,7 +72,7 @@ func (n *node) NodeStageVolume(
 		credentials: supplied,
 		directory:   directory,
 		tree:        filepath.Join(directory, "tree"),
-		work:        n.store.workTree(repo, id),
+		work:        n.store.workTree(repo, id, parsed.paths),
 		staging:     staging,
 		kind:        writeableVolume,
 		context:     request.GetVolumeContext(),
@@ -111,8 +111,10 @@ func stageKind(capability *csi.VolumeCapability) (volumeKind, error) {
 }
 
 // stageTree fetches the ref into the shared bare repository and brings
-// the work tree to it. A work tree that already exists on the node is
-// reconciled with the fetched commit. When the remote has no ref and
+// the work tree to it. A work tree that already exists on the node
+// first checks out the volume's paths, when a new PersistentVolume
+// names other paths than the tree has, and is then reconciled with the
+// fetched commit. When the remote has no ref and
 // the work tree exists, the tree stays as it is and the driver pushes
 // nothing until the ref exists again. With no work tree, a missing ref
 // fails the stage.
@@ -158,6 +160,9 @@ func (n *node) stageTree(ctx context.Context, staging *volume, repo *repository)
 		n.restore(ctx, staging)
 		staging.reportCommit(commit)
 		return nil
+	}
+	if err := staging.work.changePaths(ctx); err != nil {
+		return err
 	}
 	head, err := staging.work.head(ctx)
 	if err != nil {

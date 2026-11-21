@@ -27,13 +27,17 @@ type workTree struct {
 	directory  string
 	gitDir     string
 	tree       string
+	// paths is the volume's entries, or nil for a volume that checks out
+	// the whole tree. sparse.go describes how a tree keeps to them.
+	paths []string
 
 	mu sync.Mutex
 }
 
-func (s *store) workTree(repo *repository, id string) *workTree {
+func (s *store) workTree(repo *repository, id string, paths []string) *workTree {
 	work := s.tree(id)
 	work.repository = repo
+	work.paths = paths
 	return work
 }
 
@@ -73,7 +77,11 @@ func (w *workTree) exists() bool {
 
 // create initializes the git directory, points HEAD at the ref, and
 // resets the checkout to the commit. The reset writes the index along
-// with the files, so git status is correct from the first stage.
+// with the files, so git status is correct from the first stage. For a
+// volume with paths, the patterns are written before the reset, so the
+// reset writes only the files of the entries. An entry that the commit
+// does not have checks out nothing, and the stage still succeeds,
+// because a new application has no directory until its first commit.
 func (w *workTree) create(ctx context.Context, ref, commit string) error {
 	if err := os.MkdirAll(w.tree, 0o755); err != nil {
 		return err
@@ -91,6 +99,11 @@ func (w *workTree) create(ctx context.Context, ref, commit string) error {
 	}
 	if _, err := w.git(ctx, "symbolic-ref", "HEAD", "refs/heads/"+ref); err != nil {
 		return err
+	}
+	if w.paths != nil {
+		if err := w.sparse(ctx, sparsePatterns(w.paths)); err != nil {
+			return err
+		}
 	}
 	_, err := w.git(ctx, "reset", "--hard", "--quiet", commit)
 	return err
@@ -110,17 +123,31 @@ type change struct {
 	size int64
 }
 
-// pending returns the paths that the pod changed and the driver has not
-// committed. Each untracked file is its own change, not its directory.
+// pending returns the paths inside the volume's paths that the pod
+// changed and the driver has not committed. Each untracked file is its
+// own change, not its directory. A file that the pod writes outside the
+// paths is not a pending change, because the driver never commits it.
+func (w *workTree) pending(ctx context.Context) ([]change, error) {
+	return w.pendingIn(ctx, w.paths)
+}
+
+// pendingIn is pending limited to the entries, or the whole tree when
+// entries is nil. --literal-pathspecs makes git read each entry as a
+// file name, so an entry such as pages/[id] is not a pattern.
 //
 // Without --no-optional-locks, git status refreshes the index and holds
 // index.lock while it does. The watch runs pending in the background,
 // and unwatch kills it when the pod goes away. A kill during the
 // refresh leaves index.lock behind, and every later git add on the
 // volume fails.
-func (w *workTree) pending(ctx context.Context) ([]change, error) {
-	output, err := w.git(ctx, "--no-optional-locks", "status",
-		"--porcelain", "-z", "--untracked-files=all")
+func (w *workTree) pendingIn(ctx context.Context, entries []string) ([]change, error) {
+	args := []string{"--no-optional-locks", "status",
+		"--porcelain", "-z", "--untracked-files=all"}
+	if entries != nil {
+		args = append(append([]string{"--literal-pathspecs"}, args...), "--")
+		args = append(args, entries...)
+	}
+	output, err := w.git(ctx, args...)
 	if err != nil {
 		return nil, err
 	}

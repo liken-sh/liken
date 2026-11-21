@@ -132,9 +132,15 @@ func (w *watcher) add(ctx context.Context, dir string) {
 	}
 }
 
-// read records one write for each batch of inotify events, and adds a
-// watch for each directory the pod created. It returns when run closes
-// the file.
+// read records one write for each batch of inotify events that has an
+// event inside the volume's paths, and adds a watch for each directory
+// the pod created. It returns when run closes the file.
+//
+// An event outside the paths does not restart the quiesce, because the
+// driver never commits what it changed. A pod that writes a log outside
+// its paths all the time would otherwise never be quiet long enough to
+// commit. The first write to each file outside the paths posts an
+// Event.
 func (w *watcher) read(ctx context.Context) {
 	defer w.running.Done()
 	if w.inotify == nil {
@@ -146,20 +152,41 @@ func (w *watcher) read(ctx context.Context) {
 		if err != nil {
 			return
 		}
+		written, outside := false, []string{}
 		for _, event := range w.events(buffer[:count]) {
 			if event.directory != "" {
 				w.add(ctx, event.directory)
 			}
+			switch {
+			case !event.known || inside(w.volume.work.paths, event.path):
+				written = true
+			case event.write:
+				outside = append(outside, event.path)
+			}
 		}
-		w.noteWrite()
+		if written {
+			w.noteWrite()
+		}
+		w.node.skipOutside(w.volume, outside)
 	}
 }
 
-// inotifyEvent.directory is the path of a directory the pod created,
-// or empty for any other event.
+// inotifyEvent is one decoded event. directory is the path of a
+// directory the pod created, or empty for any other event. path is the
+// path that the event names, relative to the root of the tree with
+// forward slashes. known is false when the event names no watched
+// directory, such as the event that says the kernel dropped events,
+// and then path is empty. write is true for an event that created or
+// changed a file that is not a directory.
 type inotifyEvent struct {
 	directory string
+	path      string
+	known     bool
+	write     bool
 }
+
+// writeMask is the events that create or change a file.
+const writeMask = unix.IN_CREATE | unix.IN_MODIFY | unix.IN_CLOSE_WRITE | unix.IN_MOVED_TO
 
 // events decodes the struct inotify_event records in buffer: watch
 // descriptor, mask, cookie, name length, then the name padded with zero
@@ -174,14 +201,28 @@ func (w *watcher) events(buffer []byte) []inotifyEvent {
 		if length > 0 {
 			name = string(trimZeros(buffer[offset+unix.SizeofInotifyEvent : offset+unix.SizeofInotifyEvent+length]))
 		}
-		one := inotifyEvent{}
+		dir, known := w.watched[descriptor]
+		one := inotifyEvent{
+			known: known,
+			write: mask&writeMask != 0 && mask&unix.IN_ISDIR == 0,
+		}
+		if known {
+			one.path = w.relative(filepath.Join(dir, name))
+		}
 		if mask&unix.IN_CREATE != 0 && mask&unix.IN_ISDIR != 0 {
-			one.directory = filepath.Join(w.watched[descriptor], name)
+			one.directory = filepath.Join(dir, name)
 		}
 		found = append(found, one)
 		offset += unix.SizeofInotifyEvent + length
 	}
 	return found
+}
+
+// relative returns the path of a file in the tree relative to the root
+// of the tree, with forward slashes. The root itself is ".".
+func (w *watcher) relative(path string) string {
+	name, _ := filepath.Rel(w.volume.tree, path)
+	return filepath.ToSlash(name)
 }
 
 func trimZeros(name []byte) []byte {
@@ -303,6 +344,7 @@ func (w *watcher) scan(ctx context.Context) {
 			pendingMessage(count))
 	}
 	w.node.pushIfDue(ctx, w.volume, rules, quiet)
+	w.volume.forgetOutside(w.volume.work.present)
 	w.node.metrics.record(w.volume)
 	w.node.recordHealth(ctx, w.volume)
 }

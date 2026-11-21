@@ -25,7 +25,7 @@ func workTreeOf(t *testing.T, source string) (*workTree, string) {
 	if err != nil {
 		t.Fatalf("resolving main: %v", err)
 	}
-	work := stored.workTree(repo, "csi-1")
+	work := stored.workTree(repo, "csi-1", nil)
 	if err := os.MkdirAll(work.directory, 0o700); err != nil {
 		t.Fatalf("making the volume directory: %v", err)
 	}

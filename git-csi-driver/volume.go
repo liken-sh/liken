@@ -89,6 +89,10 @@ type volume struct {
 	unpushed int
 	oldest   time.Time
 	lastPush time.Time
+	// outside is the paths outside the volume's paths that the pod wrote
+	// and that are still in the tree. The driver never commits them, and
+	// posts one Event for each path when it first sees a write to it.
+	outside map[string]bool
 	// diverged is the side branch that pushes go to while both the tree
 	// and upstream have new commits. refDeleted is true when the last
 	// fetch found no ref on the remote.
@@ -304,6 +308,40 @@ func (v *volume) reportSkipped(found []change) []change {
 	return fresh
 }
 
+// reportOutside records the paths outside the volume's paths that the
+// pod wrote, and returns the ones that were not recorded yet, in the
+// order of the writes. The driver posts an Event only for those.
+func (v *volume) reportOutside(written []string) []string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	fresh := []string{}
+	for _, name := range written {
+		if v.outside[name] {
+			continue
+		}
+		if v.outside == nil {
+			v.outside = map[string]bool{}
+		}
+		v.outside[name] = true
+		fresh = append(fresh, name)
+	}
+	return fresh
+}
+
+// forgetOutside removes the paths outside the volume's paths that are
+// no longer in the tree, so a pod that writes a new file at a deleted
+// path gets a new Event, and the set does not grow with each name that
+// a pod ever used.
+func (v *volume) forgetOutside(present func(string) bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	for name := range v.outside {
+		if !present(name) {
+			delete(v.outside, name)
+		}
+	}
+}
+
 func (v *volume) reportUnpushed(count int, oldest time.Time) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -326,11 +364,12 @@ func (v *volume) reportPushed(at time.Time) {
 
 // pushing returns the values of the push gauges: the number of
 // unpushed commits, the time of the last successful push, and the
-// number of skipped paths.
+// number of skipped paths, which counts both the files over
+// commit.maxFileSize and the files outside the volume's paths.
 func (v *volume) pushing() (int, time.Time, int) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	return v.unpushed, v.lastPush, len(v.skipped)
+	return v.unpushed, v.lastPush, len(v.skipped) + len(v.outside)
 }
 
 // overdue reports whether the oldest unpushed commit is older than

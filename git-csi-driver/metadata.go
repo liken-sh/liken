@@ -58,10 +58,14 @@ type metadataRecord struct {
 // walkTreeMetadata returns a record for each path in the tree that has a
 // non-default mode, an owner other than the driver's user and group, or,
 // for a directory, no entries. The records are sorted by path.
-func walkTreeMetadata(tree string) ([]metadataRecord, error) {
+//
+// With entries, it walks only the entries, including each entry itself,
+// so a file that the pod wrote outside the volume's paths gets no
+// record. An entry that is not in the tree has no records.
+func walkTreeMetadata(tree string, entries []string) ([]metadataRecord, error) {
 	records := []metadataRecord{}
 	uid, gid := os.Getuid(), os.Getgid()
-	err := filepath.Walk(tree, func(path string, info os.FileInfo, err error) error {
+	visit := func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -78,9 +82,32 @@ func walkTreeMetadata(tree string) ([]metadataRecord, error) {
 			records = append(records, one)
 		}
 		return nil
-	})
+	}
+	var err error
+	for _, start := range walkStarts(tree, entries) {
+		if err = filepath.Walk(start, visit); err != nil {
+			break
+		}
+	}
 	sort.Slice(records, func(i, j int) bool { return records[i].path < records[j].path })
 	return records, err
+}
+
+// walkStarts returns the directories and files where the walk starts:
+// the tree for a volume with no paths, or each entry that is in the
+// tree and not under another entry.
+func walkStarts(tree string, entries []string) []string {
+	if entries == nil {
+		return []string{tree}
+	}
+	starts := []string{}
+	for _, entry := range topEntries(entries) {
+		start := filepath.Join(tree, filepath.FromSlash(entry))
+		if _, err := os.Lstat(start); !absent(err) {
+			starts = append(starts, start)
+		}
+	}
+	return starts
 }
 
 // pathRecord returns the record for one path, and whether the record is
@@ -180,16 +207,52 @@ func parseMetadataLine(line string) (metadataRecord, bool) {
 
 // recordMetadata commits the tree's current metadata to the metadata
 // ref, unless the ref already holds the same record.
+//
+// Every volume of a URL writes the same ref. A volume with paths walks
+// only its entries, so it keeps the lines of its current record that
+// are outside its entries. Those lines came from the remote's record
+// when the driver last fetched it, at a stage or a rebase, and belong
+// to volumes with other paths.
 func (w *workTree) recordMetadata(ctx context.Context, rules *policy) error {
-	records, err := walkTreeMetadata(w.tree)
+	records, err := walkTreeMetadata(w.tree, w.paths)
 	if err != nil {
 		return err
 	}
-	content := metadataContent(records)
-	if current, err := w.metadataRecord(ctx, metadataRef); err == nil && current == content {
+	current, readErr := w.metadataRecord(ctx, metadataRef)
+	content := w.mergedRecord(current, records)
+	if readErr == nil && current == content {
 		return nil
 	}
-	return w.commitMetadata(ctx, rules, content)
+	return w.commitMetadata(ctx, rules.author(), content, w.refCommit(ctx, metadataRef))
+}
+
+// mergedRecord returns the record that this volume writes: the lines of
+// base outside the volume's paths, followed by the volume's own records
+// inside them. A volume with no paths lists the whole tree, so its
+// record is its own records alone.
+func (w *workTree) mergedRecord(base string, own []metadataRecord) string {
+	if w.paths == nil {
+		return metadataContent(own)
+	}
+	others := []metadataRecord{}
+	for _, one := range parseMetadataContent(base) {
+		if !inside(w.paths, one.path) {
+			others = append(others, one)
+		}
+	}
+	return metadataContent(others) + metadataContent(own)
+}
+
+// recordsInside returns the records inside the volume's paths. The
+// driver never changes a path outside them.
+func (w *workTree) recordsInside(records []metadataRecord) []metadataRecord {
+	found := []metadataRecord{}
+	for _, one := range records {
+		if inside(w.paths, one.path) {
+			found = append(found, one)
+		}
+	}
+	return found
 }
 
 // metadataRecord returns the text of the record at ref, which is
@@ -222,10 +285,12 @@ func (s *gitSteps) run(ctx context.Context, env []string, args ...string) string
 	return trimLine(output.stdout)
 }
 
-// commitMetadata commits content to the metadata ref with git plumbing
-// commands and a separate index file. It never touches the files that
-// the pod writes or the index that holds the pod's staged changes.
-func (w *workTree) commitMetadata(ctx context.Context, rules *policy, content string) error {
+// commitMetadata commits content to the metadata ref, on top of parent,
+// with git plumbing commands and a separate index file. It never
+// touches the files that the pod writes or the index that holds the
+// pod's staged changes. An empty parent makes the first commit of the
+// ref.
+func (w *workTree) commitMetadata(ctx context.Context, author []string, content, parent string) error {
 	record := filepath.Join(w.directory, metadataRecordFile)
 	index := filepath.Join(w.directory, metadataIndexFile)
 	defer func() {
@@ -246,10 +311,10 @@ func (w *workTree) commitMetadata(ctx context.Context, rules *policy, content st
 	args := []string{"commit-tree", "-m", metadataMessage}
 	// The previous record is the parent, so the ref keeps the history of
 	// the metadata.
-	if parent := w.refCommit(ctx, metadataRef); parent != "" {
+	if parent != "" {
 		args = append(args, "-p", parent)
 	}
-	commit := steps.run(ctx, rules.author(), append(args, tree)...)
+	commit := steps.run(ctx, author, append(args, tree)...)
 	steps.run(ctx, nil, "update-ref", metadataRef, commit)
 	return steps.err
 }
@@ -305,14 +370,19 @@ func recordsUnder(records []metadataRecord, changed []string) []metadataRecord {
 }
 
 // reparentMetadata commits the volume's record again with the remote's
-// record as its parent. Each record lists the whole tree, so a rebase
-// only changes the parent and cannot conflict. It does nothing when
-// either side has no record, or when the remote's commit is already an
-// ancestor of the volume's.
+// record as its parent. The record of a volume with no paths lists the
+// whole tree, so a rebase only changes the parent and cannot conflict.
+// A volume with paths writes the remote's lines outside its entries and
+// its own lines inside them, as recordMetadata does. It does nothing
+// when either side has no record, or when the remote's commit is
+// already an ancestor of the volume's.
 func (w *workTree) reparentMetadata(ctx context.Context, author []string) error {
 	remote, local := w.refCommit(ctx, remoteMetadataRef), w.refCommit(ctx, metadataRef)
 	if remote == "" || local == "" || w.ancestor(ctx, remote, local) {
 		return nil
+	}
+	if w.paths != nil {
+		return w.mergeRemoteMetadata(ctx, author, remote)
 	}
 	steps := &gitSteps{work: w}
 	tree := steps.run(ctx, nil, "rev-parse", "--verify", "--end-of-options", local+"^{tree}")
@@ -321,15 +391,33 @@ func (w *workTree) reparentMetadata(ctx context.Context, author []string) error 
 	return steps.err
 }
 
-// replayRecords applies each record to the checkout. It logs a record
-// that it cannot apply and continues with the next.
+// mergeRemoteMetadata commits the remote's lines outside the volume's
+// paths and the volume's own lines inside them, on top of the remote's
+// record.
+func (w *workTree) mergeRemoteMetadata(ctx context.Context, author []string, remote string) error {
+	theirs, err := w.metadataRecord(ctx, remoteMetadataRef)
+	if err != nil {
+		return err
+	}
+	ours, err := w.metadataRecord(ctx, metadataRef)
+	if err != nil {
+		return err
+	}
+	own := w.recordsInside(parseMetadataContent(ours))
+	return w.commitMetadata(ctx, author, w.mergedRecord(theirs, own), remote)
+}
+
+// replayRecords applies each record inside the volume's paths to the
+// checkout. A record outside them belongs to a volume with other paths,
+// and its path is not in this checkout. It logs a record that it cannot
+// apply and continues with the next.
 func (w *workTree) replayRecords(
 	ctx context.Context, logger *slog.Logger, owners bool, records []metadataRecord,
 ) {
 	if !owners {
 		logger.InfoContext(ctx, "Kept the current owners of the checkout, because the driver does not run as root", "tree", w.tree)
 	}
-	for _, one := range records {
+	for _, one := range w.recordsInside(records) {
 		where := filepath.Join(w.tree, filepath.FromSlash(one.path))
 		if one.directory {
 			if err := os.MkdirAll(where, one.mode); err != nil {

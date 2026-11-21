@@ -86,6 +86,24 @@ func (n *node) skipping(v *volume, skipped []change, limit int64) {
 	}
 }
 
+// skipOutside posts one Event for each path outside the volume's paths
+// that the pod wrote for the first time. The driver never commits such a
+// path, so the Event is how a person learns that the pod writes where
+// the volume does not keep its files.
+func (n *node) skipOutside(v *volume, written []string) {
+	fresh := v.reportOutside(written)
+	if len(fresh) == 0 {
+		return
+	}
+	claim, _, _ := v.gaugeValues()
+	for _, name := range fresh {
+		n.report(v, claim, corev1.EventTypeWarning, reasonSkipped,
+			fmt.Sprintf("Skipped %q because it is outside the volume's paths %s",
+				name, describePaths(v.work.paths)))
+	}
+	n.metrics.record(v)
+}
+
 // exclude writes the ignore patterns to the exclude file, and leaves
 // the file unchanged when it already has them.
 func (w *workTree) exclude(patterns []string) error {

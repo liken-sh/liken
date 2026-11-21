@@ -30,7 +30,7 @@ components:
 | git-csi-driver | `git_csi_unpushed_commits{namespace, claim}` | gauge | commits in the tree that are not yet on the remote |
 | git-csi-driver | `git_csi_last_push_timestamp_seconds{namespace, claim}` | gauge | when the last push to the remote succeeded, in seconds since the epoch |
 | git-csi-driver | `git_csi_push_failures_total{namespace, claim}` | counter | pushes to the remote that failed |
-| git-csi-driver | `git_csi_skipped_files{namespace, claim}` | gauge | files that the last commit left out, because they are larger than `commit.maxFileSize` |
+| git-csi-driver | `git_csi_skipped_files{namespace, claim}` | gauge | files that the commits leave out: the files that the last commit left out because they are larger than `commit.maxFileSize`, and the files that the pod wrote outside the volume's `paths` and that are still in the tree |
 | git-csi-driver | `git_csi_diverged{namespace, claim}` | gauge | one while the volume pushes to its side branch, zero while it pushes to its ref |
 | git-csi-driver | `git_csi_volume_abnormal{namespace, volume}` | gauge | one while any problem listed under [the abnormal gauge](../classes/#the-abnormal-gauge) is true for the volume, zero otherwise. `volume` is the `volumeHandle`, so this metric also covers read-only volumes, which have no claim of their own |
 | git-csi-driver | `git_csi_demanded_pulls_total{namespace, volume}` | counter | pulls started by a demand on the volume's `PersistentVolume` |
