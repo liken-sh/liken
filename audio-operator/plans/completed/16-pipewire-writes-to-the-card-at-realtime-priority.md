@@ -3,6 +3,13 @@
 Plan 16. Proposed and built on 2026-11-21. The drill on a receiver has
 not run, and the end of this plan says what it must show.
 
+Status on 2026-11-21: the drill ran on a development build of this
+plan. `data-loop.0` ran at `SCHED_FIFO` priority 88, and the sink
+still underran once in about 12 minutes of E-AC-3, with a dropout
+heard. So realtime priority does not stop the dropouts.
+[Plan 17](17-a-sink-can-keep-headroom-on-its-card.md) adds headroom
+on the sink, which stopped them in a first run.
+
 A sink that plays a bitstream drops out for a moment several times in
 each film. Each dropout is an underrun of the card: PipeWire's thread
 that writes to the card ran late, and the card ran out of samples. This

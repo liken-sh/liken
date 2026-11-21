@@ -209,7 +209,7 @@ func TestSelectLayoutKeepsTheEncodedFormatsUnderEverySource(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := selectLayout(c.output, c.spec, c.declared); !got.equal(c.want) {
+			if got := selectLayout(c.output, layoutSpec{Positions: c.spec}, c.declared); !got.equal(c.want) {
 				t.Errorf("layout = %+v, want %+v", got, c.want)
 			}
 		})

@@ -88,9 +88,9 @@ type EndpointMeta struct {
 // Each field is a pointer, a map, or a slice, so that nil means the
 // spec declares nothing and the operator writes nothing. A person can
 // declare a level of 0 or a mute of false, so a zero value cannot mean
-// absent. Codec applies only to Bluetooth speakers. Layout applies only
-// to ALSA sinks, and an empty list leaves the layout as the hardware
-// has it. SharedClaims is the number of claims that can hold the
+// absent. Codec applies only to Bluetooth speakers. Layout and Headroom
+// apply only to ALSA sinks, and an empty layout leaves the layout as
+// the hardware has it. SharedClaims is the number of claims that can hold the
 // endpoint at once, and the limit is one claim when it is nil
 // (shares.go).
 type SinkSpec struct {
@@ -99,7 +99,14 @@ type SinkSpec struct {
 	Controls     map[string]string `json:"controls,omitempty"`
 	Codec        *string           `json:"codec,omitempty"`
 	Layout       []string          `json:"layout,omitempty"`
+	Headroom     *SinkHeadroom     `json:"headroom,omitempty"`
 	SharedClaims *int              `json:"sharedClaims,omitempty"`
+}
+
+// SinkHeadroom is an object so that a later field can state the
+// headroom as a duration beside Samples (headroom.go).
+type SinkHeadroom struct {
+	Samples int `json:"samples"`
 }
 
 // SinkVolume is in percent. This operator writes Level as the resting

@@ -480,7 +480,7 @@ speaker has now. The card's own outputs get no such write.
 
 A device allocates to one claim at a time, unless its `Sink` or
 `Source` sets `spec.sharedClaims`.
-[Share an endpoint between claims](/docs/guides/rest/#7-share-an-endpoint-between-claims)
+[Share an endpoint between claims](/docs/guides/rest/#share-an-endpoint-between-claims)
 shows how to set it. When the resource sets `spec.sharedClaims`, the
 device in the slice has these fields too:
 

@@ -56,9 +56,9 @@ func TestPlanLayoutsFindsEachLayoutDifference(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			hdmi, _ := layoutEndpoints(t, c.monitor)
 			declared := map[nodeAddress]channelLayout{hdmi.graphAddress(): c.declared}
-			specs := map[nodeAddress][]string{}
+			specs := map[nodeAddress]layoutSpec{}
 			if c.spec != nil {
-				specs[hdmi.graphAddress()] = c.spec
+				specs[hdmi.graphAddress()] = layoutSpec{Positions: c.spec}
 			}
 			changes := planLayouts(declared, []alsaEndpoint{hdmi}, specs)
 			if len(changes) != len(c.want) {

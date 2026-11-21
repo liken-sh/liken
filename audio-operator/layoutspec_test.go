@@ -46,7 +46,7 @@ func TestTheDeclareContainerReadsEachSinksLayout(t *testing.T) {
 	}
 
 	specs := apiSpecs(testClient(t, server.handler()), "liken-1", outputs)
-	if len(specs) != 1 || !slices.Equal(specs[hdmi.graphAddress()], quad) {
+	if len(specs) != 1 || !slices.Equal(specs[hdmi.graphAddress()].Positions, quad) {
 		t.Errorf("specs = %v, want the HDMI slot's alone", specs)
 	}
 }

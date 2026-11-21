@@ -61,7 +61,7 @@ type layoutChange struct {
 // device, and reconcile logs the change in the card's PCM devices once
 // (driftReported).
 func planLayouts(declared map[nodeAddress]channelLayout, endpoints []alsaEndpoint,
-	specs map[nodeAddress][]string) []layoutChange {
+	specs map[nodeAddress]layoutSpec) []layoutChange {
 	var changes []layoutChange
 	for _, endpoint := range endpoints {
 		address := endpoint.graphAddress()
@@ -171,9 +171,10 @@ func (r *reconciler) layoutStates(endpoints []alsaEndpoint, declared map[nodeAdd
 	return states
 }
 
-// specLayouts returns the spec.layout of each Sink, or none when
+// specLayouts returns the spec.layout and spec.headroom of each Sink,
+// or none when
 // control is nil, as in a test of the ResourceSlice alone.
-func (r *reconciler) specLayouts(endpoints []alsaEndpoint) (map[nodeAddress][]string, error) {
+func (r *reconciler) specLayouts(endpoints []alsaEndpoint) (map[nodeAddress]layoutSpec, error) {
 	if r.control == nil {
 		return nil, nil
 	}

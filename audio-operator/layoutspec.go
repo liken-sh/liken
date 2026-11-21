@@ -45,18 +45,28 @@ func readSinks(named []alsaEndpoint, read func(name string) (*Sink, error)) (map
 }
 
 // specLayouts maps the graph address of each named endpoint to its
-// Sink's spec.layout. A Sink with no layout has no entry.
-func specLayouts(named []alsaEndpoint, sinks map[string]Sink) map[nodeAddress][]string {
-	specs := map[nodeAddress][]string{}
+// Sink's spec.layout and spec.headroom. A Sink with neither has no
+// entry.
+func specLayouts(named []alsaEndpoint, sinks map[string]Sink) map[nodeAddress]layoutSpec {
+	specs := map[nodeAddress]layoutSpec{}
 	for _, output := range named {
-		if sink, ok := sinks[output.Name()]; ok && len(sink.Spec.Layout) > 0 {
-			specs[output.graphAddress()] = sink.Spec.Layout
+		sink, ok := sinks[output.Name()]
+		if !ok {
+			continue
+		}
+		spec := layoutSpec{Positions: sink.Spec.Layout}
+		if sink.Spec.Headroom != nil {
+			spec.Headroom = sink.Spec.Headroom.Samples
+		}
+		if len(spec.Positions) > 0 || spec.Headroom > 0 {
+			specs[output.graphAddress()] = spec
 		}
 	}
 	return specs
 }
 
-// declaredSpecs reads every spec.layout for the declare container.
+// declaredSpecs reads every spec.layout and spec.headroom for the
+// declare container.
 //
 // When the Sinks cannot be read it prints why and returns nil, so the
 // layouts come from the ELD and the channel map alone. Waiting for the
@@ -64,7 +74,7 @@ func specLayouts(named []alsaEndpoint, sinks map[string]Sink) map[nodeAddress][]
 // plane is down. The operator container reads the specs again when it
 // runs, and applies any difference when no stream is playing
 // (layoutdrift.go).
-func declaredSpecs(outputs []alsaEndpoint) map[nodeAddress][]string {
+func declaredSpecs(outputs []alsaEndpoint) map[nodeAddress]layoutSpec {
 	machine := os.Getenv("NODE_NAME")
 	if machine == "" {
 		fmt.Fprintf(os.Stderr, "declaring the layouts from the ELD and the channel map alone: "+
@@ -80,9 +90,10 @@ func declaredSpecs(outputs []alsaEndpoint) map[nodeAddress][]string {
 	return apiSpecs(client, machine, outputs)
 }
 
-// apiSpecs reads every spec.layout from the API server. When one
+// apiSpecs reads every spec.layout and spec.headroom from the API
+// server. When one
 // request fails it returns nil, not a partial map.
-func apiSpecs(client *apiclient.Client, machine string, outputs []alsaEndpoint) map[nodeAddress][]string {
+func apiSpecs(client *apiclient.Client, machine string, outputs []alsaEndpoint) map[nodeAddress]layoutSpec {
 	named, _ := nameEndpoints(machine, outputs)
 	sinks, err := readSinks(named, func(name string) (*Sink, error) {
 		return getSink(client, name)

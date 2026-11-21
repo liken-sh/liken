@@ -1,7 +1,7 @@
 ---
 title: Set endpoint volume and controls
 weight: 40
-description: "Set endpoint volume, mute an output, close a microphone, set a sound card control, declare a sink's channel layout, or let several claims share an endpoint, with kubectl and without a claim or an interruption to a playing pod. Use when a speaker needs a different default level, when another operator needs volume control, when a multichannel stream plays in stereo, or when two workloads must play through one speaker at once."
+description: "Set endpoint volume, mute an output, close a microphone, set a sound card control, declare a sink's channel layout, give a sink headroom, or let several claims share an endpoint, with kubectl and without a claim or an interruption to a playing pod. Use when a speaker needs a different default level, when another operator needs volume control, when a multichannel stream plays in stereo, when the sound drops out for a moment, or when two workloads must play through one speaker at once."
 ---
 
 <a id="set-what-an-endpoint-rests-at"></a>
@@ -198,9 +198,53 @@ the layouts the operator selects and the reasons, and its section
 [Encoded formats](/docs/reference/sinks/#encoded-formats) lists the
 formats.
 
+<a id="give-a-sink-headroom"></a>
+
+## 7. Give a sink headroom when it drops out
+
+A sink drops out when its sound card runs out of samples, which is an
+underrun. With PCM an underrun is a gap of a few milliseconds. With a
+bitstream it breaks the stream, and an A/V receiver mutes for a second
+or more until it finds the stream again. PipeWire logs one line for
+each underrun, and `count` is the number of underruns on that sink
+since PipeWire started:
+
+    kubectl -n liken-system logs ds/audio-operator -c pipewire | grep XRun
+    [I][14:09:27.588955] pw.node | [ impl-node.c: 2258 node_xrun()] (liken.audio.card0-pcm3-29) XRun! rate:4096/192000 count:3 time:163089016944 delay:16 max:53 (0 suppressed)
+
+The line names the sink's PipeWire node and its id,
+`liken.audio.card0-pcm3-29` here. The `Sink` whose `status.nodeName` is
+`liken.audio.card0-pcm3` is the one that underruns:
+
+    kubectl get sinks -o custom-columns=NAME:.metadata.name,NODE:.status.node,PIPEWIRE:.status.nodeName
+
+Give that sink headroom: samples that PipeWire keeps queued on the
+card beyond what it needs, so that a small error in PipeWire's
+estimate of the card's position does not empty it:
+
+    kubectl patch sink node-1-pci-0000-00-1f-3-hdmi-0 --type merge \
+      -p '{"spec":{"headroom":{"samples":4096}}}'
+
+The value is in samples at the rate the sink runs, so the same value
+is a different time at each rate:
+
+| `samples` | At 192 kHz, a Dolby Digital Plus or TrueHD bitstream | At 48 kHz, PCM or a Dolby Digital bitstream |
+|---|---|---|
+| 1024 | 5 ms | 21 ms |
+| 4096 | 21 ms | 85 ms |
+
+Every stream on the sink plays later by the headroom, so set it only
+on a sink that underruns, and use the smallest value that stops the
+`XRun!` lines. A new headroom takes effect when PipeWire restarts, so
+the operator waits until nothing plays, as it does for a layout. To
+remove the headroom:
+
+    kubectl patch sink node-1-pci-0000-00-1f-3-hdmi-0 --type json \
+      -p '[{"op":"remove","path":"/spec/headroom"}]'
+
 <a id="share-an-endpoint-between-claims"></a>
 
-## 7. Share an endpoint between claims
+## 8. Share an endpoint between claims
 
 The operator allocates an endpoint to one claim at a time, so a pod
 with a second claim for the same speaker stays Pending until the

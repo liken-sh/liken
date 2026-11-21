@@ -18,6 +18,7 @@ package main
 // stereo.
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 )
@@ -38,14 +39,24 @@ const (
 // PipeWire reads them from the device when it opens the PCM.
 //
 // Encoded lists the encoded formats that the sink passes to its
-// monitor without decoding them (bitstream.go). They are part of the
-// layout because they reach PipeWire through the same drop-in as
-// the positions, so equal detects a change in either and one restart
-// applies both.
+// monitor without decoding them (bitstream.go), and Headroom is the
+// samples that PipeWire keeps queued on the card (headroom.go). They
+// are part of the layout because they reach PipeWire through the same
+// drop-in as the positions, so equal detects a change in any of them
+// and one restart applies them all.
 type channelLayout struct {
 	Source    layoutSource
 	Positions []string
 	Encoded   []string
+	Headroom  int
+}
+
+// layoutSpec is the part of a Sink's spec that the drop-in carries:
+// spec.layout and spec.headroom.samples. Headroom is 0 when the Sink
+// sets no headroom.
+type layoutSpec struct {
+	Positions []string
+	Headroom  int
 }
 
 // source treats an empty Source as None, so a layout that was never set
@@ -63,22 +74,28 @@ func (l channelLayout) source() layoutSource {
 func (l channelLayout) equal(other channelLayout) bool {
 	return l.source() == other.source() &&
 		slices.Equal(l.Positions, other.Positions) &&
-		slices.Equal(l.Encoded, other.Encoded)
+		slices.Equal(l.Encoded, other.Encoded) &&
+		l.Headroom == other.Headroom
 }
 
 // String is the text of the layout in log lines and Event messages.
 func (l channelLayout) String() string {
+	var text string
 	switch l.source() {
 	case layoutNone:
-		return "no positions"
+		text = "no positions"
 	case layoutFromChannelMap:
-		return "the device's channel map"
+		text = "the device's channel map"
+	default:
+		text = strings.Join(l.Positions, ",") + " from " + string(l.Source)
 	}
-	positions := strings.Join(l.Positions, ",") + " from " + string(l.Source)
-	if len(l.Encoded) == 0 {
-		return positions
+	if len(l.Encoded) > 0 {
+		text += ", with " + strings.Join(l.Encoded, ",") + " passed through"
 	}
-	return positions + ", with " + strings.Join(l.Encoded, ",") + " passed through"
+	if l.Headroom > 0 {
+		text += fmt.Sprintf(", with %d samples of headroom", l.Headroom)
+	}
+	return text
 }
 
 // The channel orders of PipeWire's hdmi-surround71, hdmi-surround, and
@@ -137,7 +154,9 @@ func eldPositions(block eld) []string {
 }
 
 // selectLayout returns the layout of one playback endpoint from the first
-// source that has one. spec is the Sink's spec.layout. declared is the
+// source that has one. spec holds the Sink's spec.layout and its
+// headroom, and the headroom applies whatever the source of the
+// positions. declared is the
 // endpoint's layout in the drop-in that PipeWire runs, and is the zero
 // value when the pod starts.
 //
@@ -159,7 +178,13 @@ func eldPositions(block eld) []string {
 // channels in its descriptors, and the kernel builds the PCM channel
 // map from them (sound/usb/stream.c), so for USB the map is correct
 // and PipeWire reads it.
-func selectLayout(output alsaEndpoint, spec []string, declared channelLayout) channelLayout {
+func selectLayout(output alsaEndpoint, spec layoutSpec, declared channelLayout) channelLayout {
+	layout := selectPositions(output, spec.Positions, declared)
+	layout.Headroom = spec.Headroom
+	return layout
+}
+
+func selectPositions(output alsaEndpoint, spec []string, declared channelLayout) channelLayout {
 	switch {
 	case len(spec) > 0:
 		return channelLayout{Source: layoutFromSpec, Positions: spec, Encoded: selectEncoded(output, declared)}
@@ -179,7 +204,7 @@ func selectLayout(output alsaEndpoint, spec []string, declared channelLayout) ch
 // selectLayouts returns the layout of each playback endpoint, keyed by
 // its graph address. specs and declared use the same keys, and either
 // can be nil.
-func selectLayouts(outputs []alsaEndpoint, specs map[nodeAddress][]string,
+func selectLayouts(outputs []alsaEndpoint, specs map[nodeAddress]layoutSpec,
 	declared map[nodeAddress]channelLayout) map[nodeAddress]channelLayout {
 	layouts := map[nodeAddress]channelLayout{}
 	for _, output := range outputs {

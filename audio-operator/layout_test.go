@@ -117,7 +117,7 @@ func TestSelectLayoutTakesTheFirstSourceThatGivesOne(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := selectLayout(c.output, c.spec, c.declared)
+			got := selectLayout(c.output, layoutSpec{Positions: c.spec}, c.declared)
 			if !got.equal(c.want) {
 				t.Errorf("selectLayout = %+v, want %+v", got, c.want)
 			}
@@ -153,6 +153,8 @@ func TestLayoutsCompareBySourceAndPositions(t *testing.T) {
 		{"none and the zero value", channelLayout{Source: layoutNone}, channelLayout{}, true},
 		{"other encoded formats", channelLayout{Source: layoutFromELD, Positions: stereoLayout, Encoded: []string{"AC3"}},
 			channelLayout{Source: layoutFromELD, Positions: stereoLayout}, false},
+		{"another headroom", channelLayout{Source: layoutFromELD, Positions: stereoLayout, Headroom: 4096},
+			channelLayout{Source: layoutFromELD, Positions: stereoLayout}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -173,6 +175,9 @@ func TestLayoutString(t *testing.T) {
 			"FL,FR from ELD, with AC3,EAC3 passed through"},
 		{channelLayout{Source: layoutFromChannelMap}, "the device's channel map"},
 		{channelLayout{}, "no positions"},
+		{channelLayout{Source: layoutFromELD, Positions: stereoLayout, Encoded: []string{"AC3"}, Headroom: 4096},
+			"FL,FR from ELD, with AC3 passed through, with 4096 samples of headroom"},
+		{channelLayout{Source: layoutNone, Headroom: 512}, "no positions, with 512 samples of headroom"},
 	}
 	for _, c := range cases {
 		if got := c.layout.String(); got != c.want {

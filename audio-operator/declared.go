@@ -59,13 +59,14 @@ func parseDeclaration(document string) ([]declaredNode, error) {
 func declaredLayout(args map[string]string) channelLayout {
 	source := layoutSource(args[layoutSourceProperty])
 	if source == "" {
-		return channelLayout{Source: layoutNone}
+		return channelLayout{Source: layoutNone, Headroom: declaredHeadroom(args)}
 	}
 	positions := strings.Fields(strings.Trim(args["audio.position"], "[] "))
 	if len(positions) == 0 {
 		positions = nil
 	}
-	return channelLayout{Source: source, Positions: positions, Encoded: declaredEncoded(args)}
+	return channelLayout{Source: source, Positions: positions, Encoded: declaredEncoded(args),
+		Headroom: declaredHeadroom(args)}
 }
 
 func declaredLayouts(nodes []declaredNode) map[nodeAddress]channelLayout {

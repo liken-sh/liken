@@ -155,6 +155,20 @@ spec:
                         AUX59, AUX60, AUX61, AUX62, AUX63
                       ]
                   description: "The channel position of each PCM slot of an ALSA sink, in slot order, in PipeWire's channel names such as `FL`, `FR`, `FC`, `LFE`, `RL`, `RR`, `SL`, and `SR`. `NA` marks a slot that plays nothing. For a 7.1 receiver on HDMI, write `[FL, FR, RL, RR, FC, LFE, SL, SR]`. When this field is absent, the operator reads the layout from the monitor's ELD on HDMI and DisplayPort and from the device's channel map on USB. On the analog jack it declares no positions, so streams there play in stereo. The number of positions must be a channel count that the device accepts, or PipeWire ignores the layout. A Bluetooth speaker ignores this field."
+                headroom:
+                  type: object
+                  # An object so that a later property can state the
+                  # headroom as a duration beside samples.
+                  required: [samples]
+                  properties:
+                    samples:
+                      type: integer
+                      minimum: 0
+                      # 341 ms at 192 kHz, far more than a card that
+                      # underruns needs.
+                      maximum: 65536
+                      description: "The number of samples, at the rate the sink runs, that PipeWire keeps queued on the card beyond what it needs. 4096 samples is 21 ms of a bitstream at 192 kHz and 85 ms of PCM at 48 kHz. `0` is the same as no headroom."
+                  description: "Extra audio that PipeWire keeps queued on an ALSA sink's card, so that the card does not run out of samples when PipeWire's estimate of the card's position is off. Set it on a sink whose `pipewire` container logs `XRun!` lines for it. Every stream on the sink then plays later by the headroom, so leave it absent on a sink that has no underruns. When this field is absent, PipeWire keeps no headroom. A change waits until no stream plays on the machine, restarts PipeWire, and `LayoutApplied` reports it as it reports a layout change. A Bluetooth speaker ignores this field."
                 sharedClaims:
                   type: integer
                   minimum: 2

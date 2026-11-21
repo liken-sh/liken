@@ -196,6 +196,7 @@ func sinkObject(card, pcm int, layout channelLayout) staticNode {
 	}
 	maps.Copy(node.Args, layoutArgs(layout))
 	maps.Copy(node.Args, bitstreamArgs(card, pcm, layout))
+	maps.Copy(node.Args, headroomArgs(layout))
 	return node
 }
 
