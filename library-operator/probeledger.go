@@ -46,6 +46,12 @@ type probedFile struct {
 	// absent count in it says nothing about the track, and the walk opens
 	// the probe gap again for a record that holds a subtitle track.
 	Counted bool `yaml:"counted,omitempty"`
+	// Measured is true on every record that a probe which measures image
+	// subtitle streams wrote. A record without it predates the measurement,
+	// so the walk opens the probe gap again for a record that holds an image
+	// subtitle stream. An image stream with no measurement in a measured
+	// record gave too few cues, and the probe does not read it again.
+	Measured bool `yaml:"measured,omitempty"`
 	// The change time of the file when a probe found it at a size the record
 	// before it did not hold, which is when a new file took this path. An
 	// attempt of a file fact made before it, and a thumbnail or a tile
@@ -81,6 +87,21 @@ type probedStream struct {
 	// carries no such tag, and an absent count is not a count of zero: a
 	// track of zero events is empty, and a track with no count is unknown.
 	Events *int64 `yaml:"events,omitempty"`
+	// The measurement of an image subtitle stream, PGS or VobSub, from a
+	// sample of its cues. It is absent on every other stream, and on an
+	// image stream that gave too few cues to measure.
+	Image *probedImage `yaml:"image,omitempty"`
+}
+
+// The measurement of one image subtitle stream, in rows of the stream's own
+// canvas. CanvasHeight is the height of the canvas, LineHeight is the height
+// of one line of text that has ascenders and descenders, and InkBottom is
+// the row just below the last row of text of a usual bottom cue.
+// imagemeasure.go has the definitions.
+type probedImage struct {
+	CanvasHeight int `yaml:"canvasHeight"`
+	LineHeight   int `yaml:"lineHeight"`
+	InkBottom    int `yaml:"inkBottom"`
 }
 
 // The three color facts of a video stream. HDR is not one field in ffprobe:

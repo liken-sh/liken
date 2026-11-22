@@ -36,9 +36,11 @@ type fileIdentity struct {
 	// also moves: the probe reads a file again when its modified time changed,
 	// and no other fact does.
 	probeEarlier int64
-	// The record holds a subtitle track and predates the event counts, so
-	// the probe's found attempt at it no longer closes the probe gap.
-	uncounted bool
+	// The record lacks a fact that the probe now writes: it holds a subtitle
+	// track and predates the event counts, or it holds an image subtitle
+	// stream and predates the measurement. So the probe's found attempt at
+	// it no longer closes the probe gap.
+	incomplete bool
 }
 
 // The identity of one file against its record. changed reads the file's
@@ -49,7 +51,7 @@ type fileIdentity struct {
 // A record of size zero holds no size to compare, so it opens nothing. The
 // probe never writes one for a file with bytes in it.
 func identityOf(record probedFile, size, modified int64, changed func() int64) fileIdentity {
-	identity := fileIdentity{recorded: record.Size, found: size, uncounted: record.uncounted()}
+	identity := fileIdentity{recorded: record.Size, found: size, incomplete: record.uncounted() || record.unmeasured()}
 	if !record.Replaced.IsZero() {
 		identity.earlier = record.Replaced.Unix()
 	}
@@ -142,6 +144,13 @@ func (p probedFile) uncounted() bool {
 		return true
 	}
 	return slices.ContainsFunc(p.Streams, func(s probedStream) bool { return s.Kind == fileTypeSubtitle })
+}
+
+// Whether a record holds an image subtitle stream and was written before the
+// probe measured image streams. A text subtitle file and a video with no
+// image stream have nothing for the measurement to add.
+func (p probedFile) unmeasured() bool {
+	return !p.Measured && slices.ContainsFunc(p.Streams, probedStream.isImageSubtitle)
 }
 
 // The probe record one path holds, or false where the ledger holds none.

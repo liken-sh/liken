@@ -298,12 +298,16 @@ spec:
                               events as the largest track in its language as
                               forced, even when no flag or title says so. A
                               track with no entry here is judged by its flags,
-                              title, and file name alone.
+                              title, and file name alone. An entry for an
+                              image track can also carry `image`, the
+                              measurement that the display uses to place the
+                              track.
                             items:
                               type: object
                               description: >-
-                                The event count of one track. Set exactly one
-                                of `stream` and `file` to identify the track.
+                                What the library measured of one track. Set
+                                exactly one of `stream` and `file` to identify
+                                the track.
                               oneOf:
                                 - required: [stream]
                                 - required: [file]
@@ -331,6 +335,43 @@ spec:
                                     The number of subtitle events in the
                                     track. Omit it when the count is unknown,
                                     which is not the same as 0.
+                                image:
+                                  type: object
+                                  description: >-
+                                    Where an image track draws its text and
+                                    how tall the text is, which
+                                    library-operator measures from a sample of
+                                    the track's cues. The display uses it to
+                                    move the track's last line to the same row
+                                    as a text track's and to shrink the line to
+                                    the same height. Set it only for an image
+                                    track, such as a PGS track of a Blu-ray or
+                                    a VobSub track of a DVD. Omit it for a
+                                    track that is not measured, and the display
+                                    draws the track where the disc placed it.
+                                    Every number is in rows of the track's own
+                                    canvas.
+                                  required: [canvasHeight, lineHeight, inkBottom]
+                                  properties:
+                                    canvasHeight:
+                                      type: integer
+                                      minimum: 1
+                                      description: >-
+                                        The height of the track's canvas, such
+                                        as `1080` for a Blu-ray.
+                                    lineHeight:
+                                      type: integer
+                                      minimum: 1
+                                      description: >-
+                                        The height of one line of the track's
+                                        text, from the top of its tallest letter
+                                        to the bottom of its lowest.
+                                    inkBottom:
+                                      type: integer
+                                      minimum: 1
+                                      description: >-
+                                        The row just below the last line of a
+                                        usual cue at the bottom of the canvas.
                 start:
                   type: string
                   description: >-

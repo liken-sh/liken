@@ -73,7 +73,7 @@ pub use mark::Mark;
 pub use progress::{Place, Played, Progress, Reach, Resume, Seen, Touched, Work};
 pub use query::{Answer, Counts, Fold, GenreSort, InSeries, Order, Query, Slot, Sort};
 pub use studio::Studio;
-pub use subtitle::{Subtitle, Track};
+pub use subtitle::{Subtitle, SubtitleImage, Track};
 
 /// How many posters the tile of a library or a genre draws, as a 2x2.
 pub const TILES: usize = 4;

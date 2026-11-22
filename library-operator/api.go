@@ -850,11 +850,27 @@ type PlayPresentation struct {
 // ffprobe reports and mpv calls ff-index, and File is the base name of a
 // subtitle file beside the video. One of the two is set. A pointer keeps
 // stream 0 apart from no stream. Events is how many events the track holds,
-// and absent where the probe read no count, which differs from zero.
+// and absent where the probe read no count, which differs from zero. Image
+// is the probe's measurement of an image track, PGS or VobSub, and absent
+// on every other track and on an image track that the probe has not
+// measured.
 type PlaySubtitle struct {
-	Stream *int   `json:"stream,omitempty"`
-	File   string `json:"file,omitempty"`
-	Events *int64 `json:"events,omitempty"`
+	Stream *int               `json:"stream,omitempty"`
+	File   string             `json:"file,omitempty"`
+	Events *int64             `json:"events,omitempty"`
+	Image  *PlaySubtitleImage `json:"image,omitempty"`
+}
+
+// PlaySubtitleImage is the measurement of one image subtitle track, in rows
+// of the track's own canvas, which media-operator reads to draw the track's
+// last line on the row and at the size of every other subtitle.
+// CanvasHeight is the height of the canvas, LineHeight is the height of one
+// line of text that has ascenders and descenders, and InkBottom is the row
+// just below the last row of text of a usual bottom cue.
+type PlaySubtitleImage struct {
+	CanvasHeight int `json:"canvasHeight"`
+	LineHeight   int `json:"lineHeight"`
+	InkBottom    int `json:"inkBottom"`
 }
 
 // PlayMark is one candidate span of one kind, in media-operator's own field

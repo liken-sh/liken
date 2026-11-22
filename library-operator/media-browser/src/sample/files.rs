@@ -142,6 +142,7 @@ fn encode(title: &str) -> Tracks {
         beside: vec![Subtitle {
             track: Track::File(format!("{title} [{ENCODE}].en.sdh.srt")),
             events: Some(1_415),
+            image: None,
         }],
     }
 }

@@ -136,7 +136,7 @@ func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 	if start := os.Getenv(playStartVariable); start != "" {
 		argv = append(argv, "--start="+start)
 	}
-	// The operator resolved the language, subtitle, and S/PDIF
+	// The operator resolved the language, subtitle, subtitle style, and S/PDIF
 	// passthrough options, and joined them with newlines.
 	if options := os.Getenv(playerOptionsVariable); options != "" {
 		for _, option := range strings.Split(options, "\n") {

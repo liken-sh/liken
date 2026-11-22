@@ -203,8 +203,8 @@ last report counted. The [scanning guide](/docs/guides/scanning/#when-a-scan-run
 says when each one starts.
 
 The phases are `probe`, which reads each video's streams and chapters
-and the cue times of each text subtitle file, and counts the events of
-each subtitle track, `arrival`,
+and the cue times of each text subtitle file, counts the events of
+each subtitle track, and measures each image subtitle track, `arrival`,
 which records when a file was first seen, `identity`, which names each
 title, `nfo`, which fills the `.nfo` file, `art`, which downloads the
 images, `trailer`, which records where each title's trailers are,
@@ -1275,7 +1275,7 @@ spans as the providers gave them, and the player merges those.
 
 The probe reads each video's chapters with `ffprobe -show_chapters`,
 and it reads each `.srt`, `.vtt`, `.ass`, and `.ssa` file beside a video
-for its cue times. It never extracts a subtitle track from inside a
+for its cue times. It reads no cue times from a subtitle track inside a
 video. A line wrapped in a note mark, such as `♪` or `#`, is music and
 counts as no dialogue. Of the subtitle files of one video, the estimate
 reads the file in the first of the household's `subtitleLanguages` in
@@ -1312,6 +1312,81 @@ file's headers again and records the counts. A file with no subtitle
 track is not read again. A file that does not open records an error,
 which lasts its day as any other error does, so you do not need to set
 `spec.refresh` for the counts.
+
+### Image subtitle measurements
+
+`media-operator` draws the last line of every subtitle on one row of the
+screen at one text size. An image subtitle track, the PGS track of a
+Blu-ray or the VobSub track of a DVD, is a set of pictures, and each
+disc's author chose the canvas, the text size, and the row. mpv receives
+the pictures one cue at a time while it plays, so it cannot tell where a
+track usually draws or how tall its text is. The probe measures each
+image subtitle stream inside a video once, records three numbers, and
+the browser sends them with the track on each play request. A track with
+no numbers is drawn where the disc placed it.
+
+The numbers are in rows of the track's own canvas:
+
+- **`canvasHeight`** is the height of the canvas, from the stream's
+  presentation compositions for PGS and from the `size:` line of its
+  extradata for VobSub.
+- **`lineHeight`** is the height of one line of text that has
+  ascenders and descenders: the 90th percentile of the heights of
+  every line of every cue that the probe read.
+- **`inkBottom`** is the row just below the last row of text of a
+  usual bottom cue: the median over the cues in the lower half of the
+  canvas whose last line is a full line.
+
+After the header read, a video with an image subtitle stream gets a
+second `ffprobe` read of the packets of every subtitle stream in a window
+of 300 seconds that starts at a quarter of the video's duration, after
+the opening titles. The probe decodes the pictures in Go and keeps a few
+numbers for each cue and no picture. It stops `ffprobe` when every image
+stream has 20 cues in the lower half of its canvas. A stream with fewer
+than 10 such cues gets a second window at half the duration, and a
+stream that still has fewer than 10 gets no numbers. Each window has the
+one-minute limit of the header read, and the cues that arrived before the
+limit count.
+
+The read costs the bytes of the file in the window, because `ffprobe`
+reads the video and the sound to reach the subtitle packets. A window of
+300 seconds of a film at 8 Mbit/s is about 300 MB. The stop at 20 cues
+ends most reads earlier. A file with many image streams costs one read,
+because one read returns every stream. Plan 97 in
+`library-operator/plans/completed/` records the measured times on a home
+cluster.
+
+Each image stream's entry in `probe.yaml` gets an `image` block, and the
+file's record gets `measured: true`:
+
+```yaml
+streams:
+  - kind: subtitle
+    codec: hdmv_pgs_subtitle
+    language: eng
+    image:
+      canvasHeight: 1080
+      lineHeight: 61
+      inkBottom: 918
+counted: true
+measured: true
+```
+
+The numbers are in the `image_canvas_height`, `image_line_height`, and
+`image_ink_bottom` columns of the `streams` table. Each column holds null
+on a stream that is not an image stream, on an image stream that gave too
+few cues, and on an image stream that the probe has not measured. A
+stream that gave too few cues has no `image` block in a record with
+`measured: true`, and the probe does not read it again.
+
+A record in `probe.yaml` that the probe wrote before it measured image
+streams has no `measured: true`. When such a record holds an image
+subtitle stream, the walk opens the probe gap for its file, and the next
+probe run reads the file again, once. A file with no image subtitle
+stream is not read again. When the window read fails, the probe records
+what the header read found and an error, which lasts its day as any other
+error does, so you do not need to set `spec.refresh` for the
+measurements.
 
 ### Trailer files
 

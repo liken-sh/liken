@@ -482,8 +482,9 @@ type Presentation struct {
 	// them on unchanged, so only the display merges them.
 	Marks []PlayMark `json:"marks,omitempty"`
 
-	// Subtitles is the number of subtitle events in each subtitle
-	// track, which mpv does not report. A forced track with no flag and
+	// Subtitles is what the library measured of each subtitle track,
+	// which mpv does not report: the number of events, and for an image
+	// track the place and height of its text. A forced track with no flag and
 	// no title can be found only by its small event count, and a track
 	// with no events shows nothing. The command sidecar matches each
 	// entry to a track of mpv's `track-list` when it chooses a track.
@@ -492,16 +493,29 @@ type Presentation struct {
 	Subtitles []PlaySubtitle `json:"subtitles,omitempty"`
 }
 
-// PlaySubtitle is the event count of one subtitle track. The CRD
-// requires exactly one of `stream` and `file`. `stream` is the stream
-// index in the container, which ffprobe reports as the index and mpv as
-// `ff-index`. `file` is the base name of a subtitle file beside the
-// media. `events` is nil when the count is unknown, which differs from
-// zero.
+// PlaySubtitle is what the library measured of one subtitle track. The
+// CRD requires exactly one of `stream` and `file`. `stream` is the
+// stream index in the container, which ffprobe reports as the index and
+// mpv as `ff-index`. `file` is the base name of a subtitle file beside
+// the media. `events` is nil when the count is unknown, which differs
+// from zero. `image` is nil for a track that is not an image or that the
+// library did not measure.
 type PlaySubtitle struct {
-	Stream *int   `json:"stream,omitempty"`
-	File   string `json:"file,omitempty"`
-	Events *int64 `json:"events,omitempty"`
+	Stream *int               `json:"stream,omitempty"`
+	File   string             `json:"file,omitempty"`
+	Events *int64             `json:"events,omitempty"`
+	Image  *PlaySubtitleImage `json:"image,omitempty"`
+}
+
+// PlaySubtitleImage is where an image subtitle track draws its text and
+// how tall the text is, in rows of the track's own canvas. The display
+// uses the three numbers to move the track's last line to the house row
+// and shrink it to the house size. The operator copies them to the
+// display and does not read them.
+type PlaySubtitleImage struct {
+	CanvasHeight int `json:"canvasHeight"`
+	LineHeight   int `json:"lineHeight"`
+	InkBottom    int `json:"inkBottom"`
 }
 
 // PlayMark is one candidate span. An absent `start` is the start of the

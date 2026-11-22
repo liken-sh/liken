@@ -111,7 +111,8 @@ func TestAPlayRequestCreatesAPlayOnThePlayerThatAsked(t *testing.T) {
 func TestTheSubtitleTracksTravelThroughTheRequest(t *testing.T) {
 	operator, cluster := playingHouse(t)
 	subtitles := `[{"stream":0,"events":0},{"stream":3,"events":22},` +
-		`{"file":"Some Film (1999).en.hi.srt","events":1054},{"stream":5}]`
+		`{"file":"Some Film (1999).en.hi.srt","events":1054},{"stream":5},` +
+		`{"stream":6,"events":1382,"image":{"canvasHeight":1080,"lineHeight":61,"inkBottom":918}}]`
 	payload := `{"library":"` + testLibraryKey + `","items":[{"path":"` + testFilmPath + `",` +
 		`"presentation":{"type":"video","subtitles":` + subtitles + `}}]}`
 	publishPlay(operator, []byte(payload))

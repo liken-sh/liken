@@ -286,8 +286,20 @@ CREATE INDEX files_library_arrived ON files (library, arrived);
 -- media-operator reads it to tell a forced track from a full one. It is
 -- null on every other kind and on a subtitle stream with no such tag, and
 -- the column takes a null because a track with no count is unknown, not
--- empty. The columns after present came later, and Corrosion adds a column
--- to a table that exists at its end, so a new column always goes last here.
+-- empty.
+--
+-- The three image columns are the probe's measurement of an image subtitle
+-- stream, PGS or VobSub, in rows of the stream's own canvas:
+-- image_canvas_height is the height of the canvas, image_line_height is
+-- the height of one line of its text, and image_ink_bottom is the row just
+-- below the last row of text of a usual bottom cue. media-operator's
+-- display reads them to draw the track on the row and at the size of every
+-- other subtitle. All three are null on every other kind, on a text
+-- subtitle stream, and on an image stream that the probe has not measured
+-- or that gave too few cues to measure.
+--
+-- The columns after present came later, and Corrosion adds a column to a
+-- table that exists at its end, so a new column always goes last here.
 --
 -- Every read of a file's streams leads with the library and the path, which
 -- the primary key covers, so the table carries no index of its own.
@@ -316,6 +328,9 @@ CREATE TABLE streams (
     forced INTEGER NOT NULL DEFAULT 0,
     present INTEGER NOT NULL DEFAULT 1,
     events INTEGER,
+    image_canvas_height INTEGER,
+    image_line_height INTEGER,
+    image_ink_bottom INTEGER,
     PRIMARY KEY (library, path, ordinal)
 );
 

@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 
 use crate::film::Film;
 use crate::marks::Marks;
+use crate::subtitles::measurement::{self, Measured};
 
 /// The kind of item that the block's `type` declares. The scrubber, the
 /// strip, and the header change their layout by it.
@@ -22,14 +23,16 @@ pub enum Kind {
 }
 
 /// The block for the current item. `receive` parses the kind, the line
-/// under a series title, and the marks once, because the display reads
-/// them on every redraw and they change only when a new block arrives.
+/// under a series title, the marks, and the measured subtitle tracks
+/// once, because the display reads them on every redraw and they change
+/// only when a new block arrives.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Presentation {
     block: Map<String, Value>,
     kind: Kind,
     second: Option<String>,
     marks: Marks,
+    measured: Vec<Measured>,
 }
 
 impl Presentation {
@@ -50,6 +53,12 @@ impl Presentation {
         };
         self.second = crate::header::second_line(self);
         self.marks = Marks::parse(self.field("marks"));
+        self.measured = measurement::parse(self.field("subtitles"));
+    }
+
+    /// The entries of `subtitles` that have an `image` block.
+    pub fn measured(&self) -> &[Measured] {
+        &self.measured
     }
 
     /// The spans of the intro, the recap, the credits, and the preview.
@@ -343,5 +352,16 @@ mod tests {
         );
         presentation.receive(r#"{"title":"Another"}"#);
         assert_eq!(presentation.marks(), &Marks::default());
+    }
+
+    #[test]
+    fn the_measured_subtitle_tracks_come_from_the_block_and_a_new_item_replaces_them() {
+        let mut presentation = block(
+            r#"{"subtitles":[{"stream":3,"events":1382,
+                "image":{"canvasHeight":1080,"lineHeight":61,"inkBottom":918}}]}"#,
+        );
+        assert_eq!(presentation.measured().len(), 1);
+        presentation.receive(r#"{"subtitles":[{"stream":3,"events":1382}]}"#);
+        assert_eq!(presentation.measured(), []);
     }
 }

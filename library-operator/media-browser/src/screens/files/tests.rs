@@ -50,6 +50,7 @@ fn beside(name: &str, events: Option<i64>) -> Subtitle {
     Subtitle {
         track: Entry::File(name.into()),
         events,
+        image: None,
     }
 }
 

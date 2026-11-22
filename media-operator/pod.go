@@ -129,9 +129,10 @@ func buildPod(
 		container.Env = append(container.Env,
 			EnvVar{Name: playStartVariable, Value: play.Spec.Start})
 	}
-	// With no preference and no passthrough codec, mpv keeps its
-	// defaults and decodes every track. A track in a passthrough codec
-	// goes to the receiver still encoded (passthrough.go).
+	// With no passthrough codec, mpv decodes every track. A track in a
+	// passthrough codec goes to the receiver still encoded
+	// (passthrough.go). The options always include the house subtitle
+	// style.
 	//
 	// No volume option is set, so mpv plays at its default of 100%. The
 	// receiver or the sinks set the room's level (volumeengine.go).
@@ -195,10 +196,31 @@ func buildPod(
 	}
 }
 
+// houseSubtitleStyle is the style of every subtitle that mpv draws from
+// text, in every Play. Each value except the font is mpv's own default,
+// and the font is the one that `sans-serif` gives in the player image.
+// The options state them so that a new mpv default or a new font in the
+// image does not change the style. The margin of 34 puts the last line
+// of a cue 34 scaled pixels above the bottom of the screen, which is the
+// row that the display moves the other kinds of track to
+// (media-operator plan 46).
+var houseSubtitleStyle = []string{
+	"--sub-font=Source Sans 3",
+	"--sub-font-size=38",
+	"--sub-color=#FFFFFFFF",
+	"--sub-outline-color=#FF000000",
+	"--sub-outline-size=1.65",
+	"--sub-shadow-offset=0",
+	"--sub-margin-y=34",
+	"--sub-margin-x=19",
+}
+
 // mpvPreferenceOptions returns the mpv flags for the resolved
-// preferences. It sets a flag only for a preference that has a value,
-// and it adds --subs-match-os-language=no only when it sets another
-// flag.
+// preferences, followed by the house subtitle style. It sets a
+// preference's flag only when the preference has a value, and it adds
+// --subs-match-os-language=no only when it sets another preference
+// flag. The house style is in every Play, whatever the subtitle mode,
+// because a person can turn subtitles on from the display.
 //
 // In the on and auto modes, the command sidecar picks the subtitle track
 // after mpv loads each file (subtitlechoice.go). The flags decide the
@@ -234,10 +256,10 @@ func mpvPreferenceOptions(prefs resolvedPreferences) []string {
 	if subtitlePreferencesValue(prefs) != "" {
 		options = append(options, "--reset-on-next-file=sid")
 	}
-	if len(options) == 0 {
-		return nil
+	if len(options) > 0 {
+		options = append(options, "--subs-match-os-language=no")
 	}
-	return append(options, "--subs-match-os-language=no")
+	return append(options, houseSubtitleStyle...)
 }
 
 // commandSidecar returns the native sidecar that runs the sidecar image

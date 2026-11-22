@@ -85,10 +85,10 @@ func TestPassthroughOptionReachesThePlayer(t *testing.T) {
 		codecs []string
 		want   string
 	}{
-		{name: "alone", codecs: []string{"ac3", "eac3"}, want: "--audio-spdif=ac3,eac3"},
+		{name: "alone", codecs: []string{"ac3", "eac3"}, want: houseStyleLines + "\n--audio-spdif=ac3,eac3"},
 		{name: "after the preferences", prefs: resolvedPreferences{AudioLanguages: []string{"en"}}, codecs: []string{"truehd"},
-			want: "--alang=en\n--subs-match-os-language=no\n--audio-spdif=truehd"},
-		{name: "no codecs and no preferences", want: ""},
+			want: "--alang=en\n--subs-match-os-language=no\n" + houseStyleLines + "\n--audio-spdif=truehd"},
+		{name: "no codecs and no preferences", want: houseStyleLines},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -110,11 +110,11 @@ func TestPlayStartLogsPassthroughDecision(t *testing.T) {
 	}{
 		{name: "passes through", change: func(*fakeCluster) {}, want: []string{
 			"play house/movie: mpv passes ac3,eac3,dts,dts-hd,truehd through to sink front, because Player theater sets spec.passthrough to On",
-		}, option: "--audio-spdif=ac3,eac3,dts,dts-hd,truehd"},
+		}, option: houseStyleLines + "\n--audio-spdif=ac3,eac3,dts,dts-hd,truehd"},
 		{name: "decodes", change: func(c *fakeCluster) { c.sinks["front"].Status.Passthrough = nil }, want: []string{
 			"play house/movie: mpv decodes every track, although Player theater sets spec.passthrough to On, because Sink front lists no encoded format in status.passthrough",
-		}},
-		{name: "passthrough unset", change: func(c *fakeCluster) { c.players["theater"].Spec.Passthrough = "" }},
+		}, option: houseStyleLines},
+		{name: "passthrough unset", change: func(c *fakeCluster) { c.players["theater"].Spec.Passthrough = "" }, option: houseStyleLines},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {

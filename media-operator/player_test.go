@@ -128,6 +128,25 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 	}
 }
 
+// An option with spaces in its value, such as the subtitle font, is one
+// argument of mpv's command line, because the operator separates options
+// with newlines and not with spaces.
+func TestPlayerArgvKeepsAnOptionWithSpacesAsOneArgument(t *testing.T) {
+	mpv := useMPV(t)
+	useSocket(t, "/tmp/test-mpv.sock")
+	t.Setenv(playStartVariable, "")
+	t.Setenv(playerVerboseVariable, "")
+	t.Setenv(playerOptionsVariable, "--alang=en\n--sub-font=Source Sans 3\n--sub-font-size=38")
+
+	argv, err := playerArgv([]string{"/media/0/film.mkv"}, nil)
+	mustSucceed(t, err)
+
+	mustMatchAll(t, argv[len(argv)-5:], []string{
+		"--alang=en", "--sub-font=Source Sans 3", "--sub-font-size=38", "--", "/media/0/film.mkv",
+	})
+	mustMatch(t, argv[0], mpv)
+}
+
 func TestPlayerArgvFailsWhenTheImageHasNoMPV(t *testing.T) {
 	was := mpvBinary
 	t.Cleanup(func() { mpvBinary = was })

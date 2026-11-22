@@ -1,13 +1,14 @@
 // The subtitle tracks of one video: its embedded subtitle streams from the
 // `streams` table, and the text subtitle files beside it from the `files`
-// table, each with the event count the probe read. The display matches an
+// table, each with the event count the probe read. A stream the probe
+// measured as an image track also has the measurement. The display matches an
 // entry to a track of mpv's `track-list` by the stream's `ff-index` or by the
 // external file's name, so only a file that mpv loads gets an entry.
 
 use rusqlite::Connection;
 
 use super::collect;
-use crate::catalog::{Subtitle, Track};
+use crate::catalog::{Subtitle, SubtitleImage, Track};
 
 // The subtitle formats whose cues the probe counts, as the library operator's
 // `textSubtitleExtensions` names them. A picture format carries no cue the
@@ -25,18 +26,34 @@ pub fn subtitles(
 ) -> rusqlite::Result<Vec<Subtitle>> {
     let mut tracks = collect(
         connection,
-        "SELECT ordinal, events FROM streams \
+        "SELECT ordinal, events, image_canvas_height, image_line_height, image_ink_bottom \
+         FROM streams \
          WHERE library = ? AND path = ? AND kind = 'subtitle' ORDER BY ordinal",
         &[&library, &path],
         |row| {
             Ok(Subtitle {
                 track: Track::Stream(row.get(0)?),
                 events: row.get(1)?,
+                image: measurement(row.get(2)?, row.get(3)?, row.get(4)?),
             })
         },
     )?;
     tracks.extend(beside(connection, library, path)?);
     Ok(tracks)
+}
+
+// The probe writes the three numbers together, so a stream has a measurement
+// only when all three are present.
+fn measurement(
+    canvas_height: Option<i64>,
+    line_height: Option<i64>,
+    ink_bottom: Option<i64>,
+) -> Option<SubtitleImage> {
+    Some(SubtitleImage {
+        canvas_height: canvas_height?,
+        line_height: line_height?,
+        ink_bottom: ink_bottom?,
+    })
 }
 
 // The text subtitle files in the video's folder that mpv loads for it. The
@@ -73,6 +90,7 @@ pub(super) fn beside(
             (!name.contains('/') && text(name) && loads(video, name)).then(|| Subtitle {
                 track: Track::File(name.into()),
                 events,
+                image: None,
             })
         })
         .collect())

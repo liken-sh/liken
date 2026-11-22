@@ -62,11 +62,13 @@ func (l *probeLedgers) of(dir string) (folderProbes, error) {
 // length is zero until the probe measures the new file, which holds the
 // phases that need the length until then.
 //
-// A record that holds a subtitle track and predates the event counts fills
-// every column and stream row as a current record does, because what it holds
-// is still true of the file. Its probed column is zero, which opens the probe
-// gap, and settleFacts drops its found attempt, so the next probe run reads
-// the file's headers again and records the counts.
+// A record that lacks a fact the probe now writes fills every column and
+// stream row as a current record does, because what it holds is still true
+// of the file. Such a record holds a subtitle track and predates the event
+// counts, or holds an image subtitle stream and predates the measurement. Its
+// probed column is zero, which opens the probe gap, and settleFacts drops its
+// found attempt, so the next probe run reads the file again and records the
+// missing fact.
 func (p folderProbes) fill(row *fileRow, entry, absolute string, identities fileIdentities) []streamRow {
 	record, held := p[entry]
 	if !held {
@@ -86,7 +88,7 @@ func (p folderProbes) fill(row *fileRow, entry, absolute string, identities file
 	if record.Modified != row.Modified {
 		return nil
 	}
-	if identity.uncounted {
+	if identity.incomplete {
 		row.Probed = 0
 	}
 	row.Bitrate = record.Bitrate
@@ -121,7 +123,7 @@ func (p probedFile) first(kind string) probedStream {
 
 // One stream as the catalog holds it, at its own position in the container.
 func (s probedStream) row(library, path string, ordinal int) streamRow {
-	return streamRow{
+	row := streamRow{
 		Library:        library,
 		Path:           path,
 		Ordinal:        ordinal,
@@ -147,6 +149,12 @@ func (s probedStream) row(library, path string, ordinal int) streamRow {
 		Present:        true,
 		Events:         s.Events,
 	}
+	if s.Image != nil {
+		row.ImageCanvasHeight = &s.Image.CanvasHeight
+		row.ImageLineHeight = &s.Image.LineHeight
+		row.ImageInkBottom = &s.Image.InkBottom
+	}
+	return row
 }
 
 // A duration ffprobe gives in seconds, in the milliseconds the catalog holds.

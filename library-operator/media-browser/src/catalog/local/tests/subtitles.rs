@@ -3,7 +3,7 @@
 // beside it that mpv loads, both with the event count the probe read.
 
 use super::*;
-use crate::catalog::{Subtitle, Track};
+use crate::catalog::{Subtitle, SubtitleImage, Track};
 
 const FILM: &str = "The Lantern/The Lantern.mkv";
 
@@ -49,6 +49,7 @@ fn stream(index: i64, events: Option<i64>) -> Subtitle {
     Subtitle {
         track: Track::Stream(index),
         events,
+        image: None,
     }
 }
 
@@ -56,6 +57,7 @@ fn file(name: &str, events: Option<i64>) -> Subtitle {
     Subtitle {
         track: Track::File(name.into()),
         events,
+        image: None,
     }
 }
 
@@ -78,6 +80,52 @@ fn a_movie_carries_each_subtitle_stream_by_its_index_in_the_container() {
             .presentation
             .subtitles,
         vec![stream(2, Some(22)), stream(3, Some(0)), stream(4, None)]
+    );
+}
+
+// The probe writes the three image columns together, so a stream has a
+// measurement when all three have a value. A stream with any of them null
+// has none, which is how a text stream, an unmeasured image stream, and a
+// stream that gave too few cues look in the table.
+#[test]
+fn an_image_stream_carries_its_measurement_only_when_all_three_columns_have_values() {
+    let dir = TempDir::new().unwrap();
+    let path = lantern(&dir);
+    insert_stream(&path, 2, "subtitle", Some(1_382));
+    insert_stream(&path, 3, "subtitle", Some(900));
+    insert_stream(&path, 4, "subtitle", Some(800));
+    let connection = Connection::open(&path).unwrap();
+    for (ordinal, canvas, line, bottom) in [
+        (2, Some(1_080), Some(61), Some(918)),
+        (3, Some(1_080), Some(61), None),
+        (4, None, None, None),
+    ] {
+        connection
+            .execute(
+                "UPDATE streams SET image_canvas_height = ?, image_line_height = ?, \
+                 image_ink_bottom = ? WHERE ordinal = ?",
+                (canvas, line, bottom, ordinal),
+            )
+            .unwrap();
+    }
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    assert_eq!(
+        source.play("default/films", &movie_chosen())[0]
+            .presentation
+            .subtitles,
+        vec![
+            Subtitle {
+                image: Some(SubtitleImage {
+                    canvas_height: 1_080,
+                    line_height: 61,
+                    ink_bottom: 918,
+                }),
+                ..stream(2, Some(1_382))
+            },
+            stream(3, Some(900)),
+            stream(4, Some(800)),
+        ]
     );
 }
 

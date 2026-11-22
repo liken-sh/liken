@@ -4,6 +4,8 @@
 
 use serde_json::Value;
 
+use crate::subtitles::script::Script;
+
 /// One entry of mpv's `chapter-list`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Chapter {
@@ -13,6 +15,11 @@ pub struct Chapter {
 
 /// One entry of mpv's `track-list`. `kind` is the entry's `type` field:
 /// `video`, `audio`, or `sub`.
+///
+/// `ff_index` is the stream's index in its container, the index that
+/// ffprobe reports and that `presentation.subtitles` calls `stream`. An
+/// external file is its own container, so its index is 0 and only
+/// `external_filename` identifies it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Track {
     pub id: i64,
@@ -20,6 +27,22 @@ pub struct Track {
     pub title: Option<String>,
     pub lang: Option<String>,
     pub selected: bool,
+    pub codec: Option<String>,
+    pub ff_index: Option<i64>,
+    pub external: bool,
+    pub external_filename: Option<String>,
+}
+
+/// mpv's `osd-dimensions`: the size of the window that mpv draws into, in
+/// pixels, and the black bars around the picture.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Screen {
+    pub width: i64,
+    pub height: i64,
+    pub top: i64,
+    pub bottom: i64,
+    pub left: i64,
+    pub right: i64,
 }
 
 impl Track {
@@ -63,6 +86,12 @@ pub struct Film {
     pub paused: bool,
     pub audio_delay: f64,
     pub sub_delay: f64,
+    /// `None` until mpv has configured its video output, because mpv
+    /// reports a size of 0 by 0 before that.
+    pub screen: Option<Screen>,
+    /// The header of the selected ASS track. `None` until mpv sends it,
+    /// and again after `forget_script`.
+    pub script: Option<Script>,
 }
 
 impl Film {
@@ -85,8 +114,26 @@ impl Film {
             "pause" => self.paused = value.as_bool().unwrap_or(false),
             "audio-delay" => self.audio_delay = value.as_f64().unwrap_or(0.0),
             "sub-delay" => self.sub_delay = value.as_f64().unwrap_or(0.0),
+            "osd-dimensions" => self.screen = screen(value),
+            // mpv reads the header from the track's decoder, and an ASS
+            // track always has one. So a value of null means that mpv read
+            // the property before it opened the track, and the display keeps
+            // waiting for the header.
+            "sub-ass-extradata" => self.script = value.as_str().map(Script::parse),
             _ => {}
         }
+    }
+
+    /// The subtitle track that mpv draws, if any.
+    pub fn selected_subtitle(&self) -> Option<&Track> {
+        self.tracks_of("sub").find(|track| track.selected)
+    }
+
+    /// Marks the header as unknown. The display calls it when it observes
+    /// `sub-ass-extradata` again, so a header of the previous track is not
+    /// used for the next one.
+    pub fn forget_script(&mut self) {
+        self.script = None;
     }
 
     /// The tracks whose `kind` is `kind`, in `track-list` order.
@@ -155,10 +202,30 @@ fn tracks(value: &Value) -> Vec<Track> {
                         .get("selected")
                         .and_then(Value::as_bool)
                         .unwrap_or(false),
+                    codec: entry.get("codec").and_then(text),
+                    ff_index: entry.get("ff-index").and_then(Value::as_i64),
+                    external: entry
+                        .get("external")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    external_filename: entry.get("external-filename").and_then(text),
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn screen(value: &Value) -> Option<Screen> {
+    let field = |name: &str| value.get(name).and_then(Value::as_i64).unwrap_or(0);
+    let screen = Screen {
+        width: field("w"),
+        height: field("h"),
+        top: field("mt"),
+        bottom: field("mb"),
+        left: field("ml"),
+        right: field("mr"),
+    };
+    (screen.width > 0 && screen.height > 0).then_some(screen)
 }
 
 fn pairs(value: &Value) -> Vec<(String, String)> {
@@ -240,7 +307,7 @@ mod tests {
                 kind: "audio".to_string(),
                 title: title.map(str::to_string),
                 lang: lang.map(str::to_string),
-                selected: false,
+                ..Track::default()
             }
             .label()
         };
@@ -277,6 +344,81 @@ mod tests {
         assert_eq!(film.tag("album"), None);
         assert_eq!(film.tag("date"), Some("1979-10-05"));
         assert_eq!(film.tag("composer"), None);
+    }
+
+    /// The entries are in the shape that mpv 0.41.0 sends: an external
+    /// file has an `ff-index` of 0 and its path.
+    #[test]
+    fn the_selected_subtitle_track_keeps_what_identifies_its_stream() {
+        let mut film = Film::default();
+        film.apply(
+            "track-list",
+            &json!([
+                { "id": 1, "type": "video", "selected": true },
+                { "id": 1, "type": "sub", "codec": "subrip", "ff-index": 4 },
+                { "id": 2, "type": "sub", "codec": "hdmv_pgs_subtitle", "ff-index": 0,
+                  "external": true, "external-filename": "/media/a-film.sup", "selected": true },
+            ]),
+        );
+        assert_eq!(
+            film.selected_subtitle(),
+            Some(&Track {
+                id: 2,
+                kind: "sub".to_string(),
+                selected: true,
+                codec: Some("hdmv_pgs_subtitle".to_string()),
+                ff_index: Some(0),
+                external: true,
+                external_filename: Some("/media/a-film.sup".to_string()),
+                ..Track::default()
+            })
+        );
+
+        film.apply("track-list", &json!([{ "id": 1, "type": "sub" }]));
+        assert_eq!(film.selected_subtitle(), None);
+    }
+
+    /// mpv reports a size of 0 by 0 until its video output is configured,
+    /// and that is no screen to place a subtitle on.
+    #[test]
+    fn the_screen_is_known_once_mpv_reports_a_size() {
+        let mut film = Film::default();
+        film.apply(
+            "osd-dimensions",
+            &json!({ "w": 0, "h": 0, "par": 0.0, "aspect": 0.0, "mt": 0, "mb": 0, "ml": 0, "mr": 0 }),
+        );
+        assert_eq!(film.screen, None);
+        film.apply(
+            "osd-dimensions",
+            &json!({ "w": 1920, "h": 1080, "par": 1.0, "aspect": 1.7778, "mt": 138, "mb": 138, "ml": 0, "mr": 0 }),
+        );
+        assert_eq!(
+            film.screen,
+            Some(Screen {
+                width: 1920,
+                height: 1080,
+                top: 138,
+                bottom: 138,
+                left: 0,
+                right: 0
+            })
+        );
+    }
+
+    /// A null header means that mpv had not opened the track, so the film
+    /// still has no header.
+    #[test]
+    fn the_script_is_read_from_the_header_and_forgotten_on_request() {
+        let mut film = Film::default();
+        film.apply("sub-ass-extradata", &Value::Null);
+        assert_eq!(film.script, None);
+        film.apply(
+            "sub-ass-extradata",
+            &json!("[Script Info]\nPlayResY: 804\n"),
+        );
+        assert_eq!(film.script.map(|script| script.play_res_y), Some(804));
+        film.forget_script();
+        assert_eq!(film.script, None);
     }
 
     #[test]

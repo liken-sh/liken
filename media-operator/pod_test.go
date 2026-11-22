@@ -136,7 +136,10 @@ func TestBuildPodRunsThePlayerOnTheResolvedList(t *testing.T) {
 	}
 	// The shim reads the blocks to expand a music album, so every run
 	// has them.
-	env := []EnvVar{{Name: presentationsVariable, Value: "[{}]"}}
+	env := []EnvVar{
+		{Name: presentationsVariable, Value: "[{}]"},
+		{Name: playerOptionsVariable, Value: houseStyleLines},
+	}
 	if !reflect.DeepEqual(container.Env, env) {
 		t.Errorf("env = %+v, want %+v", container.Env, env)
 	}
@@ -154,6 +157,7 @@ func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
 	want := []EnvVar{
 		{Name: presentationsVariable, Value: "[{}]"},
 		{Name: playStartVariable, Value: "0:10:00"},
+		{Name: playerOptionsVariable, Value: houseStyleLines},
 	}
 	if !reflect.DeepEqual(env, want) {
 		t.Errorf("env = %+v, want %+v", env, want)
@@ -339,6 +343,27 @@ func TestBuildPodBakesThePresentationBlocks(t *testing.T) {
 	}
 }
 
+// The image measurement of a subtitle track reaches the display with the
+// track, and a track with no measurement carries no image object. The
+// operator copies the field and does not read it.
+func TestBuildPodBakesTheImageMeasurementOfASubtitleTrack(t *testing.T) {
+	stream, other, events := 3, 4, int64(1382)
+	play := testPlay()
+	play.Spec.Items = []PlayItem{{
+		URI: "nfs://nas.example/export/films/film.mkv",
+		Presentation: &Presentation{Subtitles: []PlaySubtitle{
+			{Stream: &stream, Events: &events, Image: &PlaySubtitleImage{CanvasHeight: 1080, LineHeight: 61, InkBottom: 918}},
+			{Stream: &other, Events: &events},
+		}},
+	}}
+	claim := buildClaim(play, testPlayer())
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, nil, "")
+
+	got := envValue(initContainer(t, pod, commandContainer), presentationsVariable)
+	want := `[{"subtitles":[{"stream":3,"events":1382,"image":{"canvasHeight":1080,"lineHeight":61,"inkBottom":918}},{"stream":4,"events":1382}]}]`
+	mustMatch(t, got, want)
+}
+
 // The marks reach the display as the library wrote them: every
 // candidate in order, a missing start or end still missing, and an
 // unknown kind still present. The display interprets the marks, and the
@@ -396,19 +421,33 @@ func TestMpvPreferenceOptions(t *testing.T) {
 		want  []string
 	}{
 		{
-			name:  "no preference passes nothing",
+			name:  "no preference passes only the house style",
 			prefs: resolvedPreferences{},
-			want:  nil,
+			want: []string{
+				"--sub-font=Source Sans 3", "--sub-font-size=38", "--sub-color=#FFFFFFFF",
+				"--sub-outline-color=#FF000000", "--sub-outline-size=1.65", "--sub-shadow-offset=0",
+				"--sub-margin-y=34", "--sub-margin-x=19",
+			},
 		},
 		{
 			name:  "audio languages become --alang",
 			prefs: resolvedPreferences{AudioLanguages: []string{"en", "ja"}},
-			want:  []string{"--alang=en,ja", "--subs-match-os-language=no"},
+			want: []string{
+				"--alang=en,ja", "--subs-match-os-language=no",
+				"--sub-font=Source Sans 3", "--sub-font-size=38", "--sub-color=#FFFFFFFF",
+				"--sub-outline-color=#FF000000", "--sub-outline-size=1.65", "--sub-shadow-offset=0",
+				"--sub-margin-y=34", "--sub-margin-x=19",
+			},
 		},
 		{
 			name:  "subtitle languages become --slang",
 			prefs: resolvedPreferences{SubtitleLanguages: []string{"en"}},
-			want:  []string{"--slang=en", "--subs-match-os-language=no"},
+			want: []string{
+				"--slang=en", "--subs-match-os-language=no",
+				"--sub-font=Source Sans 3", "--sub-font-size=38", "--sub-color=#FFFFFFFF",
+				"--sub-outline-color=#FF000000", "--sub-outline-size=1.65", "--sub-shadow-offset=0",
+				"--sub-margin-y=34", "--sub-margin-x=19",
+			},
 		},
 		{
 			name:  "subtitles on shows them over matching audio and takes no forced track first",
@@ -416,17 +455,30 @@ func TestMpvPreferenceOptions(t *testing.T) {
 			want: []string{
 				"--sub-visibility=yes", "--subs-with-matching-audio=yes", "--subs-fallback-forced=no",
 				"--reset-on-next-file=sid", "--subs-match-os-language=no",
+				"--sub-font=Source Sans 3", "--sub-font-size=38", "--sub-color=#FFFFFFFF",
+				"--sub-outline-color=#FF000000", "--sub-outline-size=1.65", "--sub-shadow-offset=0",
+				"--sub-margin-y=34", "--sub-margin-x=19",
 			},
 		},
 		{
 			name:  "subtitles off loads no subtitle track",
 			prefs: resolvedPreferences{Subtitles: subtitlesOff},
-			want:  []string{"--sid=no", "--subs-match-os-language=no"},
+			want: []string{
+				"--sid=no", "--subs-match-os-language=no",
+				"--sub-font=Source Sans 3", "--sub-font-size=38", "--sub-color=#FFFFFFFF",
+				"--sub-outline-color=#FF000000", "--sub-outline-size=1.65", "--sub-shadow-offset=0",
+				"--sub-margin-y=34", "--sub-margin-x=19",
+			},
 		},
 		{
 			name:  "subtitles auto shows only a forced track over audio in a subtitle language",
 			prefs: resolvedPreferences{Subtitles: subtitlesAuto},
-			want:  []string{"--subs-with-matching-audio=forced", "--reset-on-next-file=sid", "--subs-match-os-language=no"},
+			want: []string{
+				"--subs-with-matching-audio=forced", "--reset-on-next-file=sid", "--subs-match-os-language=no",
+				"--sub-font=Source Sans 3", "--sub-font-size=38", "--sub-color=#FFFFFFFF",
+				"--sub-outline-color=#FF000000", "--sub-outline-size=1.65", "--sub-shadow-offset=0",
+				"--sub-margin-y=34", "--sub-margin-x=19",
+			},
 		},
 		{
 			name: "every field together maps to every flag",
@@ -439,12 +491,19 @@ func TestMpvPreferenceOptions(t *testing.T) {
 				"--alang=ja", "--slang=en",
 				"--sub-visibility=yes", "--subs-with-matching-audio=yes", "--subs-fallback-forced=no",
 				"--reset-on-next-file=sid", "--subs-match-os-language=no",
+				"--sub-font=Source Sans 3", "--sub-font-size=38", "--sub-color=#FFFFFFFF",
+				"--sub-outline-color=#FF000000", "--sub-outline-size=1.65", "--sub-shadow-offset=0",
+				"--sub-margin-y=34", "--sub-margin-x=19",
 			},
 		},
 		{
 			name:  "a stated empty list passes no flag for that field",
 			prefs: resolvedPreferences{AudioLanguages: []string{}},
-			want:  nil,
+			want: []string{
+				"--sub-font=Source Sans 3", "--sub-font-size=38", "--sub-color=#FFFFFFFF",
+				"--sub-outline-color=#FF000000", "--sub-outline-size=1.65", "--sub-shadow-offset=0",
+				"--sub-margin-y=34", "--sub-margin-x=19",
+			},
 		},
 	}
 
@@ -467,18 +526,23 @@ func TestBuildPodCarriesTheResolvedOptions(t *testing.T) {
 	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, prefs, nil, "")
 
 	got := envValue(pod.Spec.Containers[0], playerOptionsVariable)
-	want := "--alang=en,ja\n--subs-with-matching-audio=forced\n--reset-on-next-file=sid\n--subs-match-os-language=no"
+	want := "--alang=en,ja\n--subs-with-matching-audio=forced\n--reset-on-next-file=sid\n--subs-match-os-language=no\n" + houseStyleLines
 	if got != want {
 		t.Errorf("%s = %q, want %q", playerOptionsVariable, got, want)
 	}
 }
 
-// A run with no preferences has no options variable.
-func TestBuildPodWithNoPreferencesCarriesNoOptions(t *testing.T) {
+// houseStyleLines is the house subtitle style as the options variable
+// carries it, one option on each line.
+const houseStyleLines = "--sub-font=Source Sans 3\n--sub-font-size=38\n--sub-color=#FFFFFFFF\n" +
+	"--sub-outline-color=#FF000000\n--sub-outline-size=1.65\n--sub-shadow-offset=0\n" +
+	"--sub-margin-y=34\n--sub-margin-x=19"
+
+// A run with no preferences still carries the house subtitle style,
+// because a person can turn subtitles on from the display.
+func TestBuildPodWithNoPreferencesCarriesTheHouseStyle(t *testing.T) {
 	pod := testPod(t)
-	if got := envValue(pod.Spec.Containers[0], playerOptionsVariable); got != "" {
-		t.Errorf("%s = %q, want none", playerOptionsVariable, got)
-	}
+	mustMatch(t, envValue(pod.Spec.Containers[0], playerOptionsVariable), houseStyleLines)
 }
 
 // The command sidecar gets the subtitle preferences only in the two
@@ -527,7 +591,7 @@ func TestTheCommandSidecarCarriesTheSubtitlePreferences(t *testing.T) {
 // its command line, because the receiver or the sinks set the level of
 // the room.
 func TestBuildPodCarriesNoVolumeOption(t *testing.T) {
-	mustMatch(t, envValue(testPod(t).Spec.Containers[0], playerOptionsVariable), "")
+	mustMatch(t, envValue(testPod(t).Spec.Containers[0], playerOptionsVariable), houseStyleLines)
 }
 
 // The command sidecar gets the volume topic only when the Player lists

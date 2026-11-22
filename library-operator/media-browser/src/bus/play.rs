@@ -140,7 +140,8 @@ fn presentation(presentation: &Presentation) -> Value {
 }
 
 // One subtitle track, in media-operator's own field names: `stream` or
-// `file`, and `events` only where the probe read a count.
+// `file`, `events` only where the probe read a count, and `image` only for
+// an image track the probe measured.
 fn subtitle(subtitle: &Subtitle) -> Value {
     let mut object = Map::new();
     match &subtitle.track {
@@ -149,6 +150,16 @@ fn subtitle(subtitle: &Subtitle) -> Value {
     };
     if let Some(events) = subtitle.events {
         object.insert("events".into(), Value::from(events));
+    }
+    if let Some(image) = &subtitle.image {
+        object.insert(
+            "image".into(),
+            serde_json::json!({
+                "canvasHeight": image.canvas_height,
+                "lineHeight": image.line_height,
+                "inkBottom": image.ink_bottom,
+            }),
+        );
     }
     Value::Object(object)
 }
@@ -173,6 +184,7 @@ fn mark(mark: &Mark) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::SubtitleImage;
 
     fn movie() -> PlayItem {
         PlayItem {
@@ -342,7 +354,9 @@ mod tests {
     }
 
     /// Each subtitle track travels by its stream index or its file name,
-    /// with a count of zero sent as zero and no count left out.
+    /// with a count of zero sent as zero and no count left out. An image
+    /// track carries its measurement in `image`, and a track with none
+    /// carries no `image`.
     #[test]
     fn a_request_carries_every_subtitle_track_of_the_file() {
         let mut item = movie();
@@ -350,18 +364,31 @@ mod tests {
             Subtitle {
                 track: Track::Stream(3),
                 events: Some(22),
+                image: None,
             },
             Subtitle {
                 track: Track::Stream(4),
                 events: Some(0),
+                image: None,
             },
             Subtitle {
                 track: Track::File("Some Film (1999).en.hi.srt".into()),
                 events: Some(1054),
+                image: None,
             },
             Subtitle {
                 track: Track::Stream(5),
                 events: None,
+                image: None,
+            },
+            Subtitle {
+                track: Track::Stream(6),
+                events: Some(1382),
+                image: Some(SubtitleImage {
+                    canvas_height: 1080,
+                    line_height: 61,
+                    ink_bottom: 918,
+                }),
             },
         ];
 
@@ -372,6 +399,8 @@ mod tests {
                 {"stream": 4, "events": 0},
                 {"file": "Some Film (1999).en.hi.srt", "events": 1054},
                 {"stream": 5},
+                {"stream": 6, "events": 1382,
+                 "image": {"canvasHeight": 1080, "lineHeight": 61, "inkBottom": 918}},
             ])
         );
     }

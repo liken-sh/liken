@@ -93,7 +93,7 @@ func (r *walkResult) settleFacts() {
 			}
 			continue
 		}
-		if attempt.Result == attemptFound && (!outputs.hold(attempt) || uncountedProbe(attempt, identities) ||
+		if attempt.Result == attemptFound && (!outputs.hold(attempt) || incompleteProbe(attempt, identities) ||
 			(attempt.Fact == factAppearances && unread[attempt.Item])) {
 			r.reopened.missing++
 			continue
@@ -112,13 +112,13 @@ func (r *walkResult) settleFacts() {
 	}
 }
 
-// Whether a found attempt is the probe's, at a record that predates the
-// subtitle event counts. The record is the probe's output, and it lacks a
-// fact the probe now writes, so the attempt reads as one whose output is
-// missing. An error stands for its own window, so a file that will not open
-// is not read on every run.
-func uncountedProbe(attempt attemptRow, identities fileIdentities) bool {
-	return attempt.Fact == factProbe && identities[attempt.Item].uncounted
+// Whether a found attempt is the probe's, at a record that lacks a fact the
+// probe now writes: the subtitle event counts, or the measurement of an image
+// subtitle stream. The record is the probe's output, so the attempt reads as
+// one whose output is missing. An error stands for its own window, so a file
+// that will not open is not read on every run.
+func incompleteProbe(attempt attemptRow, identities fileIdentities) bool {
+	return attempt.Fact == factProbe && identities[attempt.Item].incomplete
 }
 
 func sortedPaths(identities fileIdentities) []string {

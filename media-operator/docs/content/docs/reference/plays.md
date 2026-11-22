@@ -115,7 +115,7 @@ What the display shows about the item. A library that supplies the item sets the
 | <span id="specitemspresentation--appearances"></span>`appearances` | string | no | The URI of the file that lists when each credited person is on screen, as `claim://`, `nfs://`, or `https://`, resolved like `uri`. library-operator writes it as `X.spans.json` in `.liken/appearances/` beside the video. When the film pauses, the display shows the people on screen at that moment. |
 | <span id="specitemspresentation--contributors"></span>`contributors` | string | no | The URI of the library's `.contributors` directory, as `claim://`, `nfs://`, or `https://`, resolved like `uri`. The `appearances` file names each person's portrait by its path under this directory. |
 | <span id="specitemspresentation--marks"></span>`marks` | [\[\]object](#specitemspresentationmarks) | no | Where the intro, the recap, the credits, a scene after the credits, and a preview are in the file. The list can hold several spans of one kind, and the display merges spans that overlap into one, from their median start and median end. While the playhead is in an intro or a recap, the display shows a skip control, and with the OSD hidden, select skips. Credits count only when they start in the second half of the item. A scene after the credits is a `post-credits` span or the gap between two `credits` spans, and during the credits before it the display offers to skip to the scene. Select takes that offer only while the OSD is visible. The marks also set when the up-next card appears, as the `next` field describes. |
-| <span id="specitemspresentation--subtitles"></span>`subtitles` | [\[\]object](#specitemspresentationsubtitles) | no | The number of subtitle events in each subtitle track of the item, which library-operator writes from its probe because mpv does not report it. The command sidecar uses the counts to choose a subtitle track when the file's flags are wrong. It never chooses a track with no events. It treats a track with fewer than a fifth as many events as the largest track in its language as forced, even when no flag or title says so. A track with no entry here is judged by its flags, title, and file name alone. |
+| <span id="specitemspresentation--subtitles"></span>`subtitles` | [\[\]object](#specitemspresentationsubtitles) | no | The number of subtitle events in each subtitle track of the item, which library-operator writes from its probe because mpv does not report it. The command sidecar uses the counts to choose a subtitle track when the file's flags are wrong. It never chooses a track with no events. It treats a track with fewer than a fifth as many events as the largest track in its language as forced, even when no flag or title says so. A track with no entry here is judged by its flags, title, and file name alone. An entry for an image track can also carry `image`, the measurement that the display uses to place the track. |
 
 #### spec.items[].presentation.marks[]
 
@@ -130,13 +130,24 @@ Where the intro, the recap, the credits, a scene after the credits, and a previe
 
 #### spec.items[].presentation.subtitles[]
 
-The event count of one track. Set exactly one of `stream` and `file` to identify the track.
+What the library measured of one track. Set exactly one of `stream` and `file` to identify the track.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specitemspresentationsubtitles--stream"></span>`stream` | integer | no | The index of an embedded track in its container: the stream index from ffprobe, which is mpv's `ff-index`. |
 | <span id="specitemspresentationsubtitles--file"></span>`file` | string | no | The base name of an external subtitle file beside the media, such as `Movie.en.hi.srt`, matched against the track's file name as written. |
 | <span id="specitemspresentationsubtitles--events"></span>`events` | integer | no | The number of subtitle events in the track. Omit it when the count is unknown, which is not the same as 0. |
+| <span id="specitemspresentationsubtitles--image"></span>`image` | [object](#specitemspresentationsubtitlesimage) | no | Where an image track draws its text and how tall the text is, which library-operator measures from a sample of the track's cues. The display uses it to move the track's last line to the same row as a text track's and to shrink the line to the same height. Set it only for an image track, such as a PGS track of a Blu-ray or a VobSub track of a DVD. Omit it for a track that is not measured, and the display draws the track where the disc placed it. Every number is in rows of the track's own canvas. |
+
+#### spec.items[].presentation.subtitles[].image
+
+Where an image track draws its text and how tall the text is, which library-operator measures from a sample of the track's cues. The display uses it to move the track's last line to the same row as a text track's and to shrink the line to the same height. Set it only for an image track, such as a PGS track of a Blu-ray or a VobSub track of a DVD. Omit it for a track that is not measured, and the display draws the track where the disc placed it. Every number is in rows of the track's own canvas.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specitemspresentationsubtitlesimage--canvasheight"></span>`canvasHeight` | integer | yes | The height of the track's canvas, such as `1080` for a Blu-ray. |
+| <span id="specitemspresentationsubtitlesimage--lineheight"></span>`lineHeight` | integer | yes | The height of one line of the track's text, from the top of its tallest letter to the bottom of its lowest. |
+| <span id="specitemspresentationsubtitlesimage--inkbottom"></span>`inkBottom` | integer | yes | The row just below the last line of a usual cue at the bottom of the canvas. |
 
 ### spec.next
 
@@ -240,6 +251,64 @@ pattern plays at `1920x1080` and `mpv` scales it. The operator picks
 the frame size when it creates the playback pod, so a later mode change
 on the `Display` does not affect a run that is already playing.
 
+## How subtitles look
+
+Every subtitle track ends its last line on the same screen row, at the
+same text size, so subtitles do not change place or size from one title
+to the next. On a film with black bars, that row is in the lower bar.
+On a title that fills the screen, it is over the picture, 34 pixels
+above the bottom of a screen that is 720 pixels tall, scaled to the
+real height.
+
+The style is the same in every `Play`, whatever the subtitle mode,
+because a person can turn subtitles on from the on-screen display. It
+is Source Sans 3 at `mpv`'s size 38, in white with a black outline of
+1.65 and no shadow. No field of a `Play`, a `Player`, or a
+`MediaPreferences` changes it.
+
+How a track takes the style depends on its kind:
+
+- **Plain text**, such as SubRip, takes the whole style from `mpv`.
+- **ASS** tracks have their own fonts, sizes, and colors. The display
+  makes `mpv` draw the dialogue in the house style, and it moves the
+  dialogue to the house row from the script's own bottom margin. Each
+  line keeps its side of the screen and its italics, and a sign that
+  the script places at a fixed point stays on the thing it labels.
+- **Image** tracks, the PGS tracks of a Blu-ray and the VobSub tracks
+  of a DVD, are pictures of text, so they keep the disc's font. The
+  display moves each cue to the house row and shrinks it so that a
+  line is as tall as a line of house text.
+
+An image track needs a measurement to be placed. `library-operator`'s
+probe measures each image track once from a sample of its cues. The
+media browser sends the result in the track's `image` field in
+`items[].presentation.subtitles[]`. A track with no `image` field is
+drawn where the disc placed it, at the disc's size, so its last line
+ends on a different row from the other tracks. A track has no `image`
+field when the probe has not measured the file yet, or when the track
+had too few cues to measure. The display moves and shrinks an image
+track only on a screen whose shape is 16:9, within 1%. On another
+screen it draws the track as the disc placed it.
+
+The display logs one line each time the place of the selected track
+changes. The line names the track, its codec, and the four `mpv`
+properties that the display set, and for an image track that it did
+not move, the reason.
+
+These cases still differ from the house row:
+
+- A cue of two or more lines of an image track ends higher than the
+  house row, because `mpv` shrinks each picture around its own centre.
+- On a film with bars, a cue of two lines covers the foot of the
+  picture, because two lines of house text are taller than the lower
+  bar.
+- A cue at the top of the frame has no common row. Each kind of track
+  puts it somewhere else.
+- A script that places an ASS cue on the left or the right keeps its
+  side margin.
+- Bars that are part of the encoded picture look like picture to
+  `mpv`, so no track moves a cue into them.
+
 ## Events
 
 The operator posts a Kubernetes `Event` on the `Play` each time its
@@ -321,13 +390,11 @@ accent color, and a dot marks the track that plays now. The on-screen
 display stays visible while a chooser or an adjuster is open.
 
 While the on-screen display is showing, it moves the subtitles up so
-that the lowest line stays just above whatever the display draws at the
-bottom of the frame. It does this with `mpv`'s `sub-pos`, which moves
-text tracks, ASS tracks, and image tracks such as PGS. An ASS sign that
-the track places at a fixed point does not move, and neither does an
-image cue in the upper half of the picture. On a letterboxed film, an
-image cue moves a shorter distance than a text cue, because `mpv` moves
-it by a share of the picture's height and not of the frame's.
+that the last line of a cue stays just above whatever the display draws
+at the bottom of the frame. When the display hides, the subtitles
+return to the house row that [How subtitles look](#how-subtitles-look)
+describes. The move does not apply to an ASS sign that the track places
+at a fixed point, or to an image cue in the upper half of the picture.
 
 `back` does the first of these that applies:
 

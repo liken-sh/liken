@@ -16,6 +16,10 @@ section describes. The operator also writes the resolved values to the
 `status.subtitles`, and `status.sdh`, so `kubectl get play <name> -o
 yaml` shows what the three tiers produced.
 
+No field here changes how subtitles look. Every `Play` draws them in
+one style on one row, as [How subtitles look](/docs/reference/plays/#how-subtitles-look)
+describes.
+
 When you edit the `MediaPreferences`, the operator writes the new
 resolved values to the status of each running `Play`. The running pod
 keeps the arguments it started with, so until the next `Play` starts,

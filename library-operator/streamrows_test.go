@@ -11,6 +11,7 @@ import (
 
 // One stream row with every column filled.
 func fullStream(library, path string, ordinal int) streamRow {
+	canvas, line, bottom := 1080, 61, 918
 	return streamRow{
 		Library: library, Path: path, Ordinal: ordinal,
 		Kind: "video", Codec: "hevc", Profile: "Main 10",
@@ -19,6 +20,7 @@ func fullStream(library, path string, ordinal int) streamRow {
 		DolbyVision: true, Channels: 8, Layout: "7.1", SampleRate: 48000,
 		Bitrate: 64000000, Language: "eng", Title: "Main",
 		Default: true, Forced: true, Present: true,
+		ImageCanvasHeight: &canvas, ImageLineHeight: &line, ImageInkBottom: &bottom,
 	}
 }
 
@@ -39,11 +41,12 @@ func streamColumns(t *testing.T, agent *sqliteAgent, library, path string, ordin
 	row := agent.db.QueryRow(
 		`SELECT kind, codec, profile, width, height, depth, frame_rate, `+
 			`color_primaries, color_transfer, color_space, dolby_vision, channels, `+
-			`layout, sample_rate, bitrate, language, title, is_default, forced, present `+
+			`layout, sample_rate, bitrate, language, title, is_default, forced, present, `+
+			`image_canvas_height, image_line_height, image_ink_bottom `+
 			`FROM streams WHERE library = ? AND path = ? AND ordinal = ?`,
 		library, path, ordinal)
-	cells := make([]any, 20)
-	pointers := make([]any, 20)
+	cells := make([]any, 23)
+	pointers := make([]any, 23)
 	for i := range cells {
 		pointers[i] = &cells[i]
 	}
@@ -65,7 +68,7 @@ func TestUpsertStreamsWritesEveryColumn(t *testing.T) {
 
 	want := []any{"video", "hevc", "Main 10", int64(3840), int64(2160), int64(10), "24000/1001",
 		"bt2020", "smpte2084", "bt2020nc", int64(1), int64(8), "7.1", int64(48000),
-		int64(64000000), "eng", "Main", int64(1), int64(1), int64(1)}
+		int64(64000000), "eng", "Main", int64(1), int64(1), int64(1), int64(1080), int64(61), int64(918)}
 	got := streamColumns(t, agent, "house/movies", "One/one.mkv", 0)
 	for i := range want {
 		if got[i] != want[i] {

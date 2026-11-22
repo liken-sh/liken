@@ -29,7 +29,11 @@ pub const SOCKET_VARIABLE: &str = "MEDIA_MPV_SOCKET";
 /// on every change, so the display reads none of them on a timer. The
 /// display keeps the latest value of each, so drawing a frame sends no
 /// request to mpv.
-pub const OBSERVED: [&str; 14] = [
+///
+/// mpv sends `osd-dimensions` again when its window changes size and
+/// when a new video starts, so the display knows the screen's shape and
+/// the bars around the picture that place a subtitle track.
+pub const OBSERVED: [&str; 15] = [
     "duration",
     "time-pos",
     "chapter",
@@ -44,7 +48,33 @@ pub const OBSERVED: [&str; 14] = [
     "pause",
     "audio-delay",
     "sub-delay",
+    "osd-dimensions",
 ];
+
+/// The header of the selected ASS track. It is not in `OBSERVED`, because
+/// mpv sends it when a client observes it and when mpv goes idle, and not
+/// when the selected track changes. So the display observes it again for
+/// each ASS track that is selected.
+pub const SCRIPT: &str = "sub-ass-extradata";
+
+/// The id of the observation of `SCRIPT`, after the ids of `OBSERVED`.
+const SCRIPT_OBSERVATION: u64 = OBSERVED.len() as u64 + 1;
+
+/// The lines that end the observation of `SCRIPT` and start it again, so
+/// mpv sends the value for the track that is selected now.
+pub fn observe_script() -> [String; 2] {
+    [
+        line(&vec![
+            json!("unobserve_property"),
+            json!(SCRIPT_OBSERVATION),
+        ]),
+        line(&vec![
+            json!("observe_property"),
+            json!(SCRIPT_OBSERVATION),
+            json!(SCRIPT),
+        ]),
+    ]
+}
 
 /// The message that shows the display and arms the idle hide timer. It
 /// does not move focus.
@@ -392,6 +422,19 @@ mod tests {
         assert_eq!(
             get_property(1, "duration"),
             "{\"command\":[\"get_property\",\"duration\"],\"request_id\":1}\n"
+        );
+    }
+
+    /// The observation has an id of its own, so ending it ends no
+    /// observation of `OBSERVED`.
+    #[test]
+    fn the_script_is_observed_again_under_its_own_id() {
+        assert_eq!(
+            observe_script(),
+            [
+                "{\"command\":[\"unobserve_property\",16],\"request_id\":0}\n",
+                "{\"command\":[\"observe_property\",16,\"sub-ass-extradata\"],\"request_id\":0}\n",
+            ]
         );
     }
 

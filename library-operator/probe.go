@@ -77,11 +77,27 @@ func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) 
 // and then writes the .nfo file from it. An audio file gets a record and no
 // .nfo file, because no player reads an .nfo file beside a music file.
 // A video whose role is not the feature also gets a record and no .nfo file.
+//
+// A file with an image subtitle stream gets a second read, which measures
+// the stream. When that read fails, the probe still records what the header
+// read found, because it is true of the file, and the error makes the
+// attempt an error. The record is then unmeasured, so the probe reads the
+// file again after the error's window.
 func (e *enricher) recordProbe(ctx context.Context, probe mediaProbe, absolute string) error {
 	record, err := readProbeRecord(ctx, probe, absolute)
 	if err != nil {
 		return err
 	}
+	measured := measureImageSubtitles(ctx, readSubtitleWindow, absolute, &record)
+	if err := e.writeProbe(absolute, record); err != nil {
+		return err
+	}
+	return measured
+}
+
+// writeProbe writes the record into the ledger, and the stream details into
+// the .nfo file of a feature video.
+func (e *enricher) writeProbe(absolute string, record probedFile) error {
 	size, modified, err := statFile(absolute)
 	if err != nil {
 		return err
