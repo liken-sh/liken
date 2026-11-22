@@ -2,6 +2,28 @@
 
 Proposed and built on 2026-11-21. The operator's tests pass.
 
+A drill ran on 2026-11-22 on the testbed's `lab-portable` `Player`,
+with `media-operator` 2026.11.21-001-dev-002 and a 1920x1080 display.
+Each row below is from a capture of the display, and counts the white
+of the text and not its outline. On a 1920x804 film, the text of a
+SubRip track ended at row 1027, or at row 1018 for a line with no
+descender. An ASS track ended at row 908 on release 2026.11.19-002 and
+at rows 1017 to 1026 on the development build, where the display
+logged `sub-ass-override force` and `sub-pos 97.358`. A PGS track on
+another 1920x804 film ended at rows 817 to 825 on the release. On the
+development build a measured PGS track on a 1920x804 film ended a
+one-line cue at rows 1016 to 1017, with `sub-scale 0.7541` and
+`sub-pos 110.231`, and the last line of a two-line cue at row 1008 or
+1016. With the film paused on a cue, the display logged `subtitles
+move above row 846 of the display, to sub-pos 91.1`, the cue stood
+above the scrubber, and on resume the display set `sub-pos 110.231`
+again. The same build then played a household's SubRip track on a
+home cluster. No drill has played a VobSub track, a 4:3 title, or an
+image track on a screen that is not 16:9. `library-operator` plan 97
+records that the first measurement read two lines that touch as one
+line on about 3% of tracks, which this display then drew at half
+size, and how the second measurement corrects it.
+
 [Root plan 95](../../../plans/completed/95-subtitles-on-one-row-in-one-style.md)
 states the rule that this plan builds in the player: the last line of
 every subtitle ends on one screen row at one text size, in one house

@@ -84,7 +84,7 @@ func measureImageSubtitles(ctx context.Context, read subtitleWindowRead, absolut
 	for index, stream := range streams {
 		record.Streams[index].Image = stream.cues.measurement()
 	}
-	record.Measured = true
+	record.Measured, record.Measurement = true, imageMeasurement
 	return nil
 }
 

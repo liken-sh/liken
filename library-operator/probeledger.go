@@ -52,6 +52,13 @@ type probedFile struct {
 	// subtitle stream. An image stream with no measurement in a measured
 	// record gave too few cues, and the probe does not read it again.
 	Measured bool `yaml:"measured,omitempty"`
+	// The version of the measurement that wrote the record's image blocks,
+	// imageMeasurement in imagemeasure.go. A measured record with no version
+	// was written by the first one, and the walk opens the probe gap again
+	// for such a record that holds an image block, because that block can
+	// be wrong. The probe writes measured: true beside the version, so a
+	// build that reads only measured still reads the record as measured.
+	Measurement int `yaml:"measurement,omitempty"`
 	// The change time of the file when a probe found it at a size the record
 	// before it did not hold, which is when a new file took this path. An
 	// attempt of a file fact made before it, and a thumbnail or a tile

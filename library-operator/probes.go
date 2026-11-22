@@ -65,10 +65,13 @@ func (l *probeLedgers) of(dir string) (folderProbes, error) {
 // A record that lacks a fact the probe now writes fills every column and
 // stream row as a current record does, because what it holds is still true
 // of the file. Such a record holds a subtitle track and predates the event
-// counts, or holds an image subtitle stream and predates the measurement. Its
-// probed column is zero, which opens the probe gap, and settleFacts drops its
-// found attempt, so the next probe run reads the file again and records the
-// missing fact.
+// counts, or holds an image subtitle stream and predates the current
+// measurement. Its probed column is zero, which opens the probe gap, and
+// settleFacts drops its found attempt, so the next probe run reads the file
+// again and records the missing fact. The image blocks that an earlier
+// measurement wrote are the exception: they can be wrong, so the stream rows
+// leave them out, and the player draws each such track where the disc
+// placed it until the probe measures it again.
 func (p folderProbes) fill(row *fileRow, entry, absolute string, identities fileIdentities) []streamRow {
 	record, held := p[entry]
 	if !held {
@@ -103,8 +106,12 @@ func (p folderProbes) fill(row *fileRow, entry, absolute string, identities file
 		row.Dialogue = record.Dialogue.column()
 	}
 	row.Events = record.Events
+	earlierImages := record.earlierImages()
 	rows := make([]streamRow, len(record.Streams))
 	for ordinal, stream := range record.Streams {
+		if earlierImages {
+			stream.Image = nil
+		}
 		rows[ordinal] = stream.row(row.Library, row.Path, ordinal)
 	}
 	return rows

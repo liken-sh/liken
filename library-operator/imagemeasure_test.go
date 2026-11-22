@@ -6,6 +6,7 @@ package main
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -78,13 +79,33 @@ func TestTheMeasurementFollowsThePlansDefinitions(t *testing.T) {
 			want:    &probedImage{CanvasHeight: 1080, LineHeight: 60, InkBottom: 959},
 		},
 		{
-			// Each line is 30 rows and the line height is 60, so no last line is
-			// full, and every lower cue counts.
+			// Each last line is 30 rows and the line height is 40, so no last
+			// line is full, and every lower cue counts.
 			name: "every lower cue counts when no last line is full",
 			bitmaps: [][]imageBitmap{
-				repeated(2, cueAt(100, 60)), repeated(4, cueAt(900, 30)), repeated(7, cueAt(920, 30)),
+				repeated(4, cueAt(100, 40)), repeated(4, cueAt(900, 30)), repeated(7, cueAt(920, 30)),
 			},
-			want: &probedImage{CanvasHeight: 1080, LineHeight: 60, InkBottom: 950},
+			want: &probedImage{CanvasHeight: 1080, LineHeight: 40, InkBottom: 950},
+		},
+		{
+			// Two lines of 60 rows that touch read as one run of 125 rows, which
+			// is more than 1.7 times the median line of 60. The run is in no
+			// number: the line height is the 60 of the one-line cues, and the
+			// cues that end at 970 with a run do not count in the ink bottom.
+			name: "two lines that touch are not one line",
+			bitmaps: [][]imageBitmap{
+				repeated(14, cueAt(900, 60)), repeated(6, cueAt(845, 125)),
+			},
+			want: &probedImage{CanvasHeight: 1080, LineHeight: 60, InkBottom: 960},
+		},
+		{
+			// A line of 100 rows is less than 1.7 times the median of 60, as a
+			// line of Thai with its marks above and below is, so it is one line.
+			name: "a tall line under 1.7 times the median is one line",
+			bitmaps: [][]imageBitmap{
+				repeated(12, cueAt(900, 60)), repeated(8, cueAt(880, 100)),
+			},
+			want: &probedImage{CanvasHeight: 1080, LineHeight: 100, InkBottom: 980},
 		},
 		{
 			// The upper cues add their lines to the line height and nothing to
@@ -127,11 +148,34 @@ func TestTheInkBottomOfAnEvenCountIsTheUpperMiddleValue(t *testing.T) {
 	}
 }
 
-// A bitmap is a row of alpha values per row. Rows of alpha 128 or more are
-// ink, a run of them is a line, and a VobSub bitmap starts at its first row
-// with any alpha, the way FFmpeg crops it.
+// textRows gives one row for each alpha, as a row of letters gives it: a
+// row of ink has clear pixels between its first and last ink pixel.
+func textRows(alphas ...uint8) []bitmapRow {
+	rows := make([]bitmapRow, len(alphas))
+	for i, alpha := range alphas {
+		rows[i] = bitmapRow{alpha: alpha}
+		if alpha >= inkAlpha {
+			rows[i].ink, rows[i].first, rows[i].last = 6, 100, 140
+		}
+	}
+	return rows
+}
+
+// boxRows gives n rows of ink with no clear pixel from the first ink pixel
+// to the last, as a box behind the text or a picture gives them.
+func boxRows(n int) []bitmapRow {
+	return slices.Repeat([]bitmapRow{{alpha: 255, ink: 41, first: 100, last: 140}}, n)
+}
+
+func textLine(n int) []bitmapRow {
+	return textRows(slices.Repeat([]uint8{255}, n)...)
+}
+
+// A bitmap is one row of alpha values and ink per row. Rows of alpha 128
+// or more are ink, a run of them is a line, and a VobSub bitmap starts at
+// its first row with any alpha, the way FFmpeg crops it.
 func TestABitmapsLinesAreItsRunsOfInkRows(t *testing.T) {
-	rows := []uint8{0, 0, 40, 200, 255, 128, 0, 127, 0, 255, 255, 0, 0}
+	rows := textRows(0, 0, 40, 200, 255, 128, 0, 127, 0, 255, 255, 0, 0)
 	cases := []struct {
 		name    string
 		cropped bool
@@ -160,9 +204,45 @@ func TestABitmapsLinesAreItsRunsOfInkRows(t *testing.T) {
 }
 
 func TestALineThatReachesTheLastRowEndsBelowIt(t *testing.T) {
-	got := bitmapOf(480, 400, []uint8{0, 255, 255}, false)
+	got := bitmapOf(480, 400, textRows(0, 255, 255), false)
 
 	if want := []inkLine{{start: 401, end: 403}}; !reflect.DeepEqual(got.lines, want) {
 		t.Errorf("lines = %+v, want %+v", got.lines, want)
+	}
+}
+
+// A run of ink rows that is a box behind the text or a picture is not a
+// line of text, so it is in no number. A run is a box or a picture when at
+// least three of each four of its rows have no clear pixel between their
+// first and last ink pixel, or when it is taller than a quarter of the
+// canvas.
+func TestABoxOrAPictureIsNotALine(t *testing.T) {
+	cases := []struct {
+		name string
+		rows []bitmapRow
+		want []inkLine
+	}{
+		{name: "a box", rows: boxRows(60)},
+		{name: "three gapless rows of four", rows: slices.Concat(boxRows(3), textLine(1))},
+		{
+			name: "two gapless rows of four are text",
+			rows: slices.Concat(boxRows(2), textLine(2)),
+			want: []inkLine{{start: 300, end: 304}},
+		},
+		{
+			name: "a box beside a line of text",
+			rows: slices.Concat(boxRows(20), textRows(0), textLine(20)),
+			want: []inkLine{{start: 321, end: 341}},
+		},
+		{name: "a run taller than a quarter of the canvas", rows: textLine(121)},
+		{name: "a run of a quarter of the canvas", rows: textLine(120), want: []inkLine{{start: 300, end: 420}}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			got := bitmapOf(480, 300, test.rows, false)
+			if !reflect.DeepEqual(got.lines, test.want) {
+				t.Errorf("lines = %+v, want %+v", got.lines, test.want)
+			}
+		})
 	}
 }

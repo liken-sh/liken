@@ -16,6 +16,7 @@ package main
 
 import (
 	"encoding/binary"
+	"slices"
 )
 
 // FFmpeg joins a unit that is split over packets in a buffer of 64 KiB, and
@@ -71,7 +72,7 @@ func (d *vobsubDecoder) subPicture(unit []byte) (imageBitmap, bool) {
 	if len(unit) < 10 || binary.BigEndian.Uint16(unit) == 0 {
 		return imageBitmap{}, false
 	}
-	var rows []uint8
+	var rows []bitmapRow
 	var top int
 	at := int(binary.BigEndian.Uint16(unit[2:4]))
 	for at > 0 && at < len(unit)-4 {
@@ -82,7 +83,7 @@ func (d *vobsubDecoder) subPicture(unit []byte) (imageBitmap, bool) {
 		}
 		width, height := area.x2-area.x1+1, area.y2-area.y1+1
 		if area.top >= 0 && area.bottom >= 0 && width > 0 && height > 1 {
-			rows = make([]uint8, height)
+			rows = make([]bitmapRow, height)
 			if !d.field(unit, area.top, width, rows, 0) || !d.field(unit, area.bottom, width, rows, 1) {
 				return imageBitmap{}, false
 			}
@@ -93,18 +94,10 @@ func (d *vobsubDecoder) subPicture(unit []byte) (imageBitmap, bool) {
 		}
 		at = next
 	}
-	if rows == nil || maxRowAlpha(rows) == 0 {
+	if !slices.ContainsFunc(rows, func(row bitmapRow) bool { return row.alpha > 0 }) {
 		return imageBitmap{}, false
 	}
 	return bitmapOf(d.canvasHeight, top, rows, true), true
-}
-
-func maxRowAlpha(rows []uint8) uint8 {
-	var most uint8
-	for _, alpha := range rows {
-		most = max(most, alpha)
-	}
-	return most
 }
 
 // controlSequence reads the commands of one sequence, from at to the end
@@ -152,13 +145,13 @@ func (d *vobsubDecoder) controlSequence(unit []byte, at int) (spuArea, bool) {
 	return area, true
 }
 
-// field decodes one field of the picture into the largest alpha of each of
-// its rows: the even rows for field 0 and the odd rows for field 1. Each
+// field decodes one field of the picture into its rows: the even rows for
+// field 0 and the odd rows for field 1. Each
 // row starts on a byte. A run is one to four nibbles: the length shifted
 // left by two, and the pixel code in the low two bits. A run of length zero
 // fills the rest of the row. A run past the end of the row, or code that
 // ends before the field does, is a damaged unit.
-func (d *vobsubDecoder) field(unit []byte, start, width int, rows []uint8, first int) bool {
+func (d *vobsubDecoder) field(unit []byte, start, width int, rows []bitmapRow, first int) bool {
 	reader := nibbleReader{data: unit, at: start * 2}
 	for y := first; y < len(rows); y += 2 {
 		for x := 0; x < width; {
@@ -176,7 +169,7 @@ func (d *vobsubDecoder) field(unit []byte, start, width int, rows []uint8, first
 			case run > width-x:
 				return false
 			}
-			rows[y] = max(rows[y], d.alpha[code]*17)
+			rows[y].paint(x, run, d.alpha[code]*17)
 			x += run
 		}
 		reader.align()

@@ -266,14 +266,13 @@ func (d *pgsDecoder) release() []imageBitmap {
 	return bitmaps
 }
 
-// rows decodes the object's code into the largest alpha of each of its
-// rows. A byte that is not zero is one pixel of that entry. A zero byte is
-// followed by a flag byte: zero ends the line, bit 0x40 makes the run's
-// length 14 bits long, and bit 0x80 names an entry, where entry 0 is
-// otherwise meant. A pixel past the width or a line past the height is
-// dropped.
-func (o *pgsObject) rows(alpha *[256]uint8) []uint8 {
-	rows := make([]uint8, o.height)
+// rows decodes the object's code into its rows. A byte that is not zero is
+// one pixel of that entry. A zero byte is followed by a flag byte: zero ends
+// the line, bit 0x40 makes the run's length 14 bits long, and bit 0x80 names
+// an entry, where entry 0 is otherwise meant. A pixel past the width or a
+// line past the height is dropped.
+func (o *pgsObject) rows(alpha *[256]uint8) []bitmapRow {
+	rows := make([]bitmapRow, o.height)
 	x, y := 0, 0
 	code := o.rle
 	for len(code) > 0 && y < o.height {
@@ -299,8 +298,8 @@ func (o *pgsObject) rows(alpha *[256]uint8) []uint8 {
 				code = code[1:]
 			}
 		}
-		if run > 0 && x < o.width {
-			rows[y] = max(rows[y], alpha[entry])
+		if x < o.width {
+			rows[y].paint(x, min(run, o.width-x), alpha[entry])
 		}
 		x += run
 	}

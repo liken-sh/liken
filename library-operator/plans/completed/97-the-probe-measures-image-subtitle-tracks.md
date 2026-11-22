@@ -2,6 +2,34 @@
 
 Proposed and built on 2026-11-21. The operator's tests pass.
 
+Changed on 2026-11-22, after a drill on a home cluster with a
+development build. The probe measured 9,825 image streams in 2,121
+files. The streams with a `lineHeight` of 100 thousandths of the canvas
+or more were two lines that touch, boxes behind the text, and pictures,
+which the first definitions read as one line of text. "The second
+measurement" below has the evidence, the changed definitions, and what
+happens to the records that the first build wrote. The same drill found
+that a probe stopped by a restart recorded an error attempt for the
+file it was reading, which kept the file out of the probe's work for a
+day. The probe now records no attempt for a read that its own shutdown
+ended. A drill of the second measurement on a home cluster has not run.
+
+The drill of the first build ran on 2026-11-22 with `library-operator`
+2026.11.21-001-dev-002 on a home cluster whose nodes read the NAS at
+about 100 MB/s. The walks of two libraries started together, and the
+probe read 2,086 files in about 80 minutes, with both probes on the NAS
+for most of that time. For the 1,561 episode files the time from one
+file's record to the next had a median of 1 second, a mean of 3.0
+seconds, and a 90th percentile of 5 seconds. For the 525 film files it
+had a median of 3 seconds, a mean of 7.7 seconds, and a 90th percentile
+of 14.5 seconds. In each library 8 files took longer than 60 seconds.
+The probe container used 30 MiB of its 256 MiB limit and did not
+restart. 9,303 of 9,685 PGS streams and 522 of 578 VobSub streams got
+numbers, and 36 files have no measured stream. On a testbed whose node
+reads the same NAS at 10 MB/s, a film took about 20 seconds. The
+records are beside the media, so the catalog of the first cluster took
+the 38 files that the testbed had measured without a read.
+
 [Root plan 95](../../../plans/completed/95-subtitles-on-one-row-in-one-style.md)
 states the rule that this plan serves: the last line of every subtitle
 ends on one screen row at one text size.
@@ -192,3 +220,146 @@ replace `ffprobe` with an answer of their own, as the tests of the
 header read do. A drill on a home cluster with a development build
 then measures the image tracks of real libraries. The drill's times
 and counts go in this header.
+
+## The second measurement
+
+### What the drill found
+
+On 2026-11-22 the probe of a home cluster had measured 9,825 image
+streams. The table gives `lineHeight` in thousandths of `canvasHeight`.
+
+| Thousandths | Streams | Files |
+|---|---|---|
+| 30 to 39 | 78 | 38 |
+| 40 to 49 | 353 | 123 |
+| 50 to 59 | 8,108 | 1,653 |
+| 60 to 69 | 797 | 403 |
+| 70 to 79 | 175 | 152 |
+| 80 to 99 | 29 | 24 |
+| 100 to 149 | 269 | 176 |
+| 150 and over | 16 | 16 |
+
+A `Job` read the packets of 12 of the streams outside the usual range,
+in the probe's first window, and the Go decoders turned them into
+bitmaps on a laptop.
+
+| Range | Streams read | What the bitmaps are |
+|---|---|---|
+| 100 to 149, PGS | 3 English, 1 Japanese | Two lines that touch. Each line has a thick outline, and the outline of a descender in the first line meets the outline of an ascender or a capital in the second, so no row between the lines is clear. A cue of two such lines is one run of ink rows 1.84 to 2.01 times as tall as one line with a descender. |
+| 100 to 149 and 150 and over, VobSub | 2 English | An opaque box behind each line, with the letters cut out of it. The boxes of the lines of one cue touch, so a cue of two lines is one run of 125 to 136 rows and a cue of three lines one run of 199 to 211 rows. |
+| 150 and over, PGS | 2 English | Pictures: a track of photographs that goes with a commentary, and a track of trivia drawn on graphics. Each picture is 394 to 697 rows tall. |
+| 80 to 99, PGS | 1 English, 1 Thai | One line in each case. The English track is a forced track in a large decorative font, 97 to 104 rows a line. A line of Thai has vowel and tone marks above and below its letters, and is 92 to 98 rows. The numbers are correct. |
+| 30 to 39, PGS | 2 English | Small fonts, in an SDH track and a commentary track, 38 to 40 rows a line with descenders. The numbers are correct. |
+
+The 24 tracks that set the first definitions had no box, no picture,
+and no two lines that touch, so the first definitions did not provide
+for them.
+
+### The changed definitions
+
+The canvas, the ink rows, the cues, and the lower cues are as above.
+These definitions replace the definitions of a line, `lineHeight`, and
+`inkBottom`.
+
+- A row is **gapless** when every pixel from its first ink pixel to its
+  last is ink. A row of letters has clear pixels between its letters
+  and its words. A row of a box or a picture usually has none.
+- A **line** is a run of consecutive ink rows in which fewer than three
+  of each four rows are gapless, and which is at most a quarter of the
+  canvas tall. Any other run of ink rows is a box or a picture. It is
+  in no number, and a bitmap with no line is not a cue.
+- A line at least 1.7 times the median height of every line is **two
+  or more lines that touch**.
+- `lineHeight` is the 90th percentile, by nearest rank, of the heights
+  of the lines that are not two or more lines that touch.
+- `inkBottom` is the median, over the lower cues whose last line is not
+  two or more lines that touch and is at least `lineHeight − 1` rows
+  tall, of the row just below that last line. When no lower cue has
+  such a line, every lower cue counts.
+
+The decoders reduce each row of a bitmap to its largest alpha, its
+count of ink pixels, and the columns of its first and last ink pixel,
+so the probe still keeps no picture.
+
+The limits come from the streams above. Of the lines of text, the most
+gapless one had 54% of its rows gapless, a short line in a thick
+outline. On the 24 tracks the most was 39%. Every run of the two box
+tracks had 100%. Nine of the 11 pictures had 100%. One graphic with
+clear areas around it had 64%, and one photograph with many clear areas
+had 10%. They are 635 and 421 rows tall, more than a quarter of the
+canvas, and the limit of a quarter is what keeps them out. The tallest run
+of text on the streams above was 200 rows, three lines that touch on a
+960-row canvas, whose quarter is 240 rows. Some runs of the Thai track are a mark
+alone, and they are gapless. They are not lines, and the Thai track's
+numbers are the same with them and without them.
+
+Two lines touch only where a descender meets an ascender or a capital,
+so a run of two lines is at least the height of one full line and one
+line with no descender: 1.84 times one full line on the tracks above.
+The median line of a track is a full line or a line without a
+descender, so the run is at least 1.84 times the median. The tallest
+line of the Thai track was 1.53 times its track's median, and the
+tallest line of the decorative font 1.07 times. A limit of 1.7 is
+between them.
+
+The median is a line only while fewer than half of the runs of a track
+are two lines that touch. On the four tracks of two lines that touch,
+such runs were 14% to 33% of the runs. A track with more than half
+would still give the height of two lines.
+
+### The records of the first measurement
+
+A record that the probe writes has `measurement: 2` beside
+`measured: true`. The first build wrote `measured: true` alone, and a
+build that reads only `measured` still reads a new record as measured.
+
+| Record | The walk | The probe |
+|---|---|---|
+| No `measured`, with an image stream | Opens the probe gap, as before. | Reads the file once. |
+| `measured: true` with no `measurement`, with an `image` block on any stream | Leaves every `image` block of the record out of the stream rows, so the three columns are null, and opens the probe gap. | Reads the file once and writes `measurement: 2`. |
+| `measured: true` with no `measurement`, with no `image` block | No change. | Does not read the file. |
+| `measurement: 2` | No change. | Does not read the file. |
+| No image stream | No change. | Does not read the file. |
+
+A stream with no block had too few cues for the first definitions, and
+the second definitions count the same cues or fewer, so it has too few
+again. A stream with a block can change. The three numbers do not show
+whether a track was a box, a picture, or a track with some lines that
+touch, so the probe measures each of them again. Until it does, the
+player draws the track where the disc placed it.
+
+On 2026-11-22 the catalog of the home cluster had 2,121 files with an
+image stream, and 2,085 of them had a block on at least one stream. The
+probe reads those 2,085 files again, and the other 36 files not. A
+stream of boxes or pictures has no lower cue, so the probe reads both
+of its windows to their ends.
+
+### How the second measurement is proved
+
+The changed decoders and measurement ran over the packets of the 24
+sampled tracks, outside the repository. Each of the three numbers was
+the same as with the first definitions, over each track's 600-second
+sample and with the stop at 20 lower cues.
+
+Over the probe's first window of each of the 12 streams above, the
+first definitions and the second gave these numbers. The catalog
+column is the probe's own result, which can include a second window.
+
+| Stream | Kind | Catalog `inkBottom`, `lineHeight` | First definitions | Second definitions |
+|---|---|---|---|---|
+| tall-1 | Two lines that touch, 1080 rows | 1061, 150 | 1061, 150 | 1059, 75 |
+| tall-2 | Two lines that touch, 960 rows | 942, 134 | 942, 134 | 941, 68 |
+| tall-3 | Two lines that touch, 800 rows | 780, 112 | 783, 112 | 783, 56 |
+| tall-4 | Two lines that touch, Japanese | 929, 136 | 929, 136 | 929, 69 |
+| box-1 | VobSub boxes | 977, 199 | 977, 137 | none |
+| box-2 | VobSub boxes | 988, 135 | 988, 135 | none |
+| picture-1 | Photographs | 1023, 597 | none | none |
+| picture-2 | Trivia graphics | 1007, 467 | none | none |
+| large-1 | Decorative forced font | 907, 104 | 904, 101 | 904, 101 |
+| thai-1 | Thai | 913, 92 | 913, 92 | 913, 92 |
+| small-1 | SDH | 971, 40 | 971, 40 | 971, 40 |
+| small-2 | Commentary | 964, 38 | 964, 38 | 964, 38 |
+
+The picture streams had too few cues in the first window for any
+numbers, and the probe's numbers came from both windows. With the
+second definitions they have no cue at all.

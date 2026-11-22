@@ -12,15 +12,20 @@ import (
 )
 
 // A band of rows of one palette entry in a test's picture, from its first
-// row to the row just below its last.
+// row to the row just below its last. A band is text unless it is a box.
 type band struct {
 	start int
 	end   int
 	entry uint8
+	// The band fills its rows with no gap, as a box behind the text or a
+	// picture does.
+	box bool
 }
 
 // picture draws a picture of entries 0 with each band across its middle
-// half. Each row of the picture is one row of palette entries.
+// half. Each row of the picture is one row of palette entries. A band of
+// text is strokes 4 pixels wide with gaps of 4 pixels between them, so each
+// of its rows has clear pixels between its ink, as a row of letters has.
 func picture(width, height int, bands ...band) [][]uint8 {
 	rows := make([][]uint8, height)
 	for y := range rows {
@@ -28,7 +33,9 @@ func picture(width, height int, bands ...band) [][]uint8 {
 		for _, b := range bands {
 			if y >= b.start && y < b.end {
 				for x := width / 4; x < width*3/4; x++ {
-					rows[y][x] = b.entry
+					if b.box || (x-width/4)%8 < 4 {
+						rows[y][x] = b.entry
+					}
 				}
 			}
 		}

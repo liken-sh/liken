@@ -117,6 +117,36 @@ func TestTheProbeMeasuresEachImageStreamInAWindowAtAQuarterOfTheDuration(t *test
 	if !record.Measured || !reflect.DeepEqual(windows.starts, []float64{1000}) {
 		t.Errorf("measured %v from windows %v, want measured from the window at 1000", record.Measured, windows.starts)
 	}
+	if record.Measurement != imageMeasurement {
+		t.Errorf("measurement = %d, want %d", record.Measurement, imageMeasurement)
+	}
+}
+
+// n VobSub cues that are each a box of 30 rows at canvas row y, one second
+// apart, as a DVD that draws an opaque box behind each line gives them.
+func vobsubBoxes(stream, n, y int, at float64) []subtitlePacket {
+	cue := spuTest{x: 200, y: y, alpha: usualSPUAlpha, picture: picture(300, 30, band{start: 0, end: 30, entry: 3, box: true})}
+	var packets []subtitlePacket
+	for i := range n {
+		packets = append(packets, packetAt(stream, at+float64(i), cue.packet()))
+	}
+	return packets
+}
+
+// A track of boxes has no line of text to measure, so it has no numbers in
+// a measured record, and the player draws it where the disc placed it.
+func TestATrackOfBoxesHasNoNumbers(t *testing.T) {
+	windows := &fakeWindows{windows: map[float64][]subtitlePacket{
+		1000: inOrder(pgsCues(1, 20, 900, 1000), vobsubBoxes(3, 30, 400, 1000)),
+		2000: vobsubBoxes(3, 30, 400, 2000),
+	}}
+
+	record := measureWith(t, windows, filmWithImageSubtitles())
+
+	if record.Streams[1].Image == nil || record.Streams[3].Image != nil || !record.Measured {
+		t.Errorf("images = %+v, measured %v, want numbers for the PGS stream only and a measured record",
+			imagesOf(record), record.Measured)
+	}
 }
 
 // The probe stops ffprobe at the packet that gives the last image stream its

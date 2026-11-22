@@ -6,6 +6,7 @@ package main
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -150,19 +151,30 @@ func TestAFadeIsOneCueAtItsMostOpaquePalette(t *testing.T) {
 
 // Every form of a run that the code has, at the width and the length where
 // each form starts: a single pixel, a short and a long run of entry 0, and a
-// short and a long run of another entry.
+// short and a long run of another entry. A faint pixel adds to the row's
+// alpha and is not ink.
 func TestEveryRunOfThePGSCodeReadsBack(t *testing.T) {
 	cases := []struct {
-		name  string
-		row   []uint8
-		alpha uint8
+		name string
+		row  []uint8
+		want bitmapRow
 	}{
-		{name: "one pixel after 63 transparent pixels", row: append(make([]uint8, 63), 1), alpha: 255},
-		{name: "one pixel after 64 transparent pixels", row: append(make([]uint8, 64), 1), alpha: 255},
-		{name: "a run of 63 opaque pixels", row: pixelRun(1, 63), alpha: 255},
-		{name: "a run of 64 opaque pixels", row: pixelRun(1, 64), alpha: 255},
-		{name: "a run of 2000 faint pixels", row: pixelRun(2, 2000), alpha: 100},
-		{name: "a row of transparent pixels", row: make([]uint8, 500), alpha: 0},
+		{
+			name: "one pixel after 63 transparent pixels", row: append(make([]uint8, 63), 1),
+			want: bitmapRow{alpha: 255, ink: 1, first: 63, last: 63},
+		},
+		{
+			name: "one pixel after 64 transparent pixels", row: append(make([]uint8, 64), 1),
+			want: bitmapRow{alpha: 255, ink: 1, first: 64, last: 64},
+		},
+		{name: "a run of 63 opaque pixels", row: pixelRun(1, 63), want: bitmapRow{alpha: 255, ink: 63, first: 0, last: 62}},
+		{name: "a run of 64 opaque pixels", row: pixelRun(1, 64), want: bitmapRow{alpha: 255, ink: 64, first: 0, last: 63}},
+		{name: "a run of 2000 faint pixels", row: pixelRun(2, 2000), want: bitmapRow{alpha: 100}},
+		{name: "a row of transparent pixels", row: make([]uint8, 500), want: bitmapRow{}},
+		{
+			name: "two runs with a gap between them", row: slices.Concat(pixelRun(1, 3), make([]uint8, 2), pixelRun(1, 4)),
+			want: bitmapRow{alpha: 255, ink: 7, first: 0, last: 8},
+		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -170,10 +182,44 @@ func TestEveryRunOfThePGSCodeReadsBack(t *testing.T) {
 
 			got := object.rows(&[256]uint8{1: 255, 2: 100})
 
-			if !reflect.DeepEqual(got, []uint8{test.alpha}) {
-				t.Errorf("rows = %v, want [%d]", got, test.alpha)
+			if !reflect.DeepEqual(got, []bitmapRow{test.want}) {
+				t.Errorf("rows = %+v, want [%+v]", got, test.want)
 			}
 		})
+	}
+}
+
+// A run past the object's width ends at its edge, so its pixels past the
+// edge are not ink.
+func TestAPGSRunPastTheWidthEndsAtTheEdge(t *testing.T) {
+	object := pgsObject{width: 4, height: 1, rle: []byte{0, 0x80 | 6, 1}}
+
+	got := object.rows(&[256]uint8{1: 255})
+
+	if want := []bitmapRow{{alpha: 255, ink: 4, first: 0, last: 3}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("rows = %+v, want %+v", got, want)
+	}
+}
+
+// A run whose length is zero names an entry and paints no pixel, so it adds
+// nothing to the row, not even its alpha.
+func TestAPGSRunOfNoPixelsAddsNothing(t *testing.T) {
+	object := pgsObject{width: 4, height: 1, rle: []byte{0, 0x80, 1}}
+
+	if got := object.rows(&[256]uint8{1: 255}); !reflect.DeepEqual(got, []bitmapRow{{}}) {
+		t.Errorf("rows = %+v, want one empty row", got)
+	}
+}
+
+// A cue that is a box, an opaque rectangle with the text cut out of it or
+// drawn on it, has no line of text, so the measurement does not count it.
+func TestAPGSBoxHasNoLineOfText(t *testing.T) {
+	box := picture(400, 100, band{start: 20, end: 80, entry: 1, box: true})
+
+	got := pgsBitmaps(pgsTestSet{objects: []pgsTestObject{{x: 760, y: 900, picture: box}}}.packet(), pgsClear())
+
+	if want := []imageBitmap{shownAt(1080, 900)}; !reflect.DeepEqual(got, want) {
+		t.Errorf("bitmaps = %+v, want %+v", got, want)
 	}
 }
 
@@ -189,8 +235,9 @@ func pixelRun(entry uint8, length int) []uint8 {
 func TestPGSCodeThatEndsInARunGivesThePixelsBeforeIt(t *testing.T) {
 	object := pgsObject{width: 4, height: 2, rle: []byte{1, 0}}
 
-	if got := object.rows(&[256]uint8{1: 255}); !reflect.DeepEqual(got, []uint8{255, 0}) {
-		t.Errorf("rows = %v, want [255 0]", got)
+	want := []bitmapRow{{alpha: 255, ink: 1, first: 0, last: 0}, {}}
+	if got := object.rows(&[256]uint8{1: 255}); !reflect.DeepEqual(got, want) {
+		t.Errorf("rows = %+v, want %+v", got, want)
 	}
 }
 

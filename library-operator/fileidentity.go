@@ -38,8 +38,8 @@ type fileIdentity struct {
 	probeEarlier int64
 	// The record lacks a fact that the probe now writes: it holds a subtitle
 	// track and predates the event counts, or it holds an image subtitle
-	// stream and predates the measurement. So the probe's found attempt at
-	// it no longer closes the probe gap.
+	// stream and predates the current measurement. So the probe's found
+	// attempt at it no longer closes the probe gap.
 	incomplete bool
 }
 
@@ -146,11 +146,26 @@ func (p probedFile) uncounted() bool {
 	return slices.ContainsFunc(p.Streams, func(s probedStream) bool { return s.Kind == fileTypeSubtitle })
 }
 
-// Whether a record holds an image subtitle stream and was written before the
-// probe measured image streams. A text subtitle file and a video with no
-// image stream have nothing for the measurement to add.
+// Whether a record holds an image subtitle stream and lacks the current
+// measurement of it: it was written before the probe measured image
+// streams, or an earlier version of the measurement wrote its image blocks.
+// A text subtitle file and a video with no image stream have nothing for the
+// measurement to add.
 func (p probedFile) unmeasured() bool {
-	return !p.Measured && slices.ContainsFunc(p.Streams, probedStream.isImageSubtitle)
+	if !slices.ContainsFunc(p.Streams, probedStream.isImageSubtitle) {
+		return false
+	}
+	return !p.Measured || p.earlierImages()
+}
+
+// Whether an earlier version of the measurement wrote an image block of the
+// record. A reader does not trust such a block, and the probe measures the
+// stream again. A record of an earlier version with no image block has
+// nothing to correct, because each stream in it had too few cues, and the
+// current version counts the same cues or fewer.
+func (p probedFile) earlierImages() bool {
+	return p.Measurement < imageMeasurement &&
+		slices.ContainsFunc(p.Streams, func(s probedStream) bool { return s.Image != nil })
 }
 
 // The probe record one path holds, or false where the ledger holds none.

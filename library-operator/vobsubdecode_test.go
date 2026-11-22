@@ -6,6 +6,7 @@ package main
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -117,25 +118,52 @@ func TestEveryRunOfTheVobSubCodeReadsBack(t *testing.T) {
 	cases := []struct {
 		name string
 		row  []uint8
+		want bitmapRow
 	}{
-		{name: "a run of 3", row: append(pixelRun(1, 3), make([]uint8, 5)...)},
-		{name: "a run of 15", row: append(pixelRun(1, 15), make([]uint8, 5)...)},
-		{name: "a run of 63", row: append(pixelRun(1, 63), make([]uint8, 5)...)},
-		{name: "a run of 255", row: append(pixelRun(1, 255), make([]uint8, 5)...)},
-		{name: "a run to the end of the line", row: append(make([]uint8, 5), pixelRun(1, 400)...)},
+		{name: "a run of 3", row: append(pixelRun(1, 3), make([]uint8, 5)...), want: bitmapRow{ink: 3, first: 0, last: 2}},
+		{name: "a run of 15", row: append(pixelRun(1, 15), make([]uint8, 5)...), want: bitmapRow{ink: 15, first: 0, last: 14}},
+		{name: "a run of 63", row: append(pixelRun(1, 63), make([]uint8, 5)...), want: bitmapRow{ink: 63, first: 0, last: 62}},
+		{
+			name: "a run of 255", row: append(pixelRun(1, 255), make([]uint8, 5)...),
+			want: bitmapRow{ink: 255, first: 0, last: 254},
+		},
+		{
+			name: "a run to the end of the line", row: append(make([]uint8, 5), pixelRun(1, 400)...),
+			want: bitmapRow{ink: 400, first: 5, last: 404},
+		},
+		{
+			name: "two runs with a gap between them", row: slices.Concat(pixelRun(1, 3), make([]uint8, 2), pixelRun(1, 4)),
+			want: bitmapRow{ink: 7, first: 0, last: 8},
+		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			area := [][]uint8{test.row, make([]uint8, len(test.row))}
 			unit := spuTest{x: 0, y: 300, alpha: usualSPUAlpha, picture: area}.packet()
+			decoder := vobsubDecoder{canvasHeight: 480}
+			rows := make([]bitmapRow, 2)
 
-			got := vobsubBitmaps(unit)
+			decoder.alpha = usualSPUAlpha
+			decoder.field(unit, 4, len(test.row), rows, 0)
 
-			want := []imageBitmap{shownAt(480, 300, inkLine{300, 301})}
-			if !reflect.DeepEqual(got, want) {
-				t.Errorf("bitmaps = %+v, want %+v", got, want)
+			test.want.alpha = 255
+			if !reflect.DeepEqual(rows[0], test.want) {
+				t.Errorf("row = %+v, want %+v", rows[0], test.want)
 			}
 		})
+	}
+}
+
+// A cue that is a box, an opaque rectangle with the text cut out of it or
+// drawn on it, has no line of text, so the measurement does not count it.
+// Some DVDs draw every line of every cue this way.
+func TestAVobSubBoxHasNoLineOfText(t *testing.T) {
+	box := picture(300, 40, band{start: 0, end: 30, entry: 3, box: true})
+
+	got := vobsubBitmaps(spuTest{x: 200, y: 400, alpha: usualSPUAlpha, picture: box}.packet())
+
+	if want := []imageBitmap{shownAt(480, 400)}; !reflect.DeepEqual(got, want) {
+		t.Errorf("bitmaps = %+v, want %+v", got, want)
 	}
 }
 

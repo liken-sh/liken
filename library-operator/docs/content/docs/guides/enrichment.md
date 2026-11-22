@@ -1337,6 +1337,15 @@ The numbers are in rows of the track's own canvas:
   usual bottom cue: the median over the cues in the lower half of the
   canvas whose last line is a full line.
 
+A line is a run of rows of ink. Two kinds of run are not counted as a
+line. A run in which three of each four rows have no clear pixel
+between their first and last ink pixel, or a run taller than a quarter
+of the canvas, is a box behind the text or a picture. A track of boxes
+or pictures has no cue to measure, so it gets no numbers and plays
+where the disc placed it. A run at least 1.7 times as tall as the
+median line of the track is two or more lines whose ascenders and
+descenders touch, and it counts in neither number.
+
 After the header read, a video with an image subtitle stream gets a
 second `ffprobe` read of the packets of every subtitle stream in a window
 of 300 seconds that starts at a quarter of the video's duration, after
@@ -1357,7 +1366,8 @@ because one read returns every stream. Plan 97 in
 cluster.
 
 Each image stream's entry in `probe.yaml` gets an `image` block, and the
-file's record gets `measured: true`:
+file's record gets `measured: true` and the version of the measurement,
+`measurement: 2`:
 
 ```yaml
 streams:
@@ -1370,6 +1380,7 @@ streams:
       inkBottom: 918
 counted: true
 measured: true
+measurement: 2
 ```
 
 The numbers are in the `image_canvas_height`, `image_line_height`, and
@@ -1383,7 +1394,15 @@ A record in `probe.yaml` that the probe wrote before it measured image
 streams has no `measured: true`. When such a record holds an image
 subtitle stream, the walk opens the probe gap for its file, and the next
 probe run reads the file again, once. A file with no image subtitle
-stream is not read again. When the window read fails, the probe records
+stream is not read again.
+
+A record with `measured: true` and no `measurement` comes from the first
+version of the measurement, which counted boxes, pictures, and lines
+that touch as lines of text. When such a record has an `image` block,
+the walk leaves the record's numbers out of the catalog, so each of its
+tracks plays where the disc placed it, and the next probe run reads the
+file again, once. Such a record with no `image` block is not read again,
+because its streams had too few cues and still have too few. When the window read fails, the probe records
 what the header read found and an error, which lasts its day as any other
 error does, so you do not need to set `spec.refresh` for the
 measurements.

@@ -1,6 +1,9 @@
 # 95, Subtitles on one row in one style
 
 Proposed and built on 2026-11-21. The tests of both operators pass.
+A drill ran on 2026-11-22 on a testbed and then on a home cluster,
+with a development build of both operators, and each component's plan
+records what it measured.
 
 ## The problem
 

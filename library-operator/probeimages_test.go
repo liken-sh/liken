@@ -20,16 +20,15 @@ import (
 var filmImage = &probedImage{CanvasHeight: 1080, LineHeight: 61, InkBottom: 918}
 
 func TestTheLedgerNamesTheMeasurementAsThePlanDoes(t *testing.T) {
-	record := probedFile{Path: "a.mkv", Counted: true, Measured: true, Streams: []probedStream{
-		{Kind: fileTypeSubtitle, Codec: codecPGS, Image: filmImage},
-	}}
+	record := probedFile{Path: "a.mkv", Counted: true, Measured: true, Measurement: imageMeasurement,
+		Streams: []probedStream{{Kind: fileTypeSubtitle, Codec: codecPGS, Image: filmImage}}}
 
 	data, err := yaml.Marshal(record)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	for _, want := range []string{"measured: true", "image:\n", "canvasHeight: 1080", "lineHeight: 61", "inkBottom: 918"} {
+	for _, want := range []string{"measured: true", "measurement: 2", "image:\n", "canvasHeight: 1080", "lineHeight: 61", "inkBottom: 918"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("the record has no %q:\n%s", want, data)
 		}
@@ -38,7 +37,7 @@ func TestTheLedgerNamesTheMeasurementAsThePlanDoes(t *testing.T) {
 	if err := yaml.Unmarshal(data, &read); err != nil {
 		t.Fatal(err)
 	}
-	if got := read.Streams[0].Image; got == nil || *got != *filmImage || !read.Measured {
+	if got := read.Streams[0].Image; got == nil || *got != *filmImage || !read.Measured || read.Measurement != 2 {
 		t.Errorf("read back %+v from\n%s", read, data)
 	}
 }
@@ -55,7 +54,23 @@ func TestARecordWithAnImageStreamAndNoMeasurementIsUnmeasured(t *testing.T) {
 		{name: "a PGS stream", record: probedFile{Streams: []probedStream{{Kind: fileTypeSubtitle, Codec: codecPGS}}}, want: true},
 		{name: "a VobSub stream", record: probedFile{Streams: []probedStream{{Kind: fileTypeSubtitle, Codec: codecVobSub}}}, want: true},
 		{
-			name:   "a measured PGS stream",
+			name: "a measured PGS stream",
+			record: probedFile{Measured: true, Measurement: imageMeasurement,
+				Streams: []probedStream{{Kind: fileTypeSubtitle, Codec: codecPGS, Image: filmImage}}},
+			want: false,
+		},
+		{
+			// The first measurement counted a box, a picture, and two lines
+			// that touch as lines of text, so its numbers are measured again.
+			name: "a PGS stream with numbers of the first measurement",
+			record: probedFile{Measured: true,
+				Streams: []probedStream{{Kind: fileTypeSubtitle, Codec: codecPGS, Image: filmImage}}},
+			want: true,
+		},
+		{
+			// A stream with too few cues for the first measurement has too few
+			// for this one, which counts fewer cues and never more.
+			name:   "a PGS stream with too few cues for the first measurement",
 			record: probedFile{Measured: true, Streams: []probedStream{{Kind: fileTypeSubtitle, Codec: codecPGS}}},
 			want:   false,
 		},
@@ -71,16 +86,33 @@ func TestARecordWithAnImageStreamAndNoMeasurementIsUnmeasured(t *testing.T) {
 	}
 }
 
+// How a probe measured the episode's PGS stream: not at all, with the first
+// measurement, or with this one.
+type episodeMeasurement int
+
+const (
+	notMeasured episodeMeasurement = iota
+	firstMeasurement
+	currentMeasurement
+)
+
 // The episode's probe record, with event counts and a PGS stream, and the
-// result of the probe's last attempt.
-func (e enrichedEpisode) probedWithAnImageStream(t *testing.T, measured bool, result string) {
+// result of the probe's last attempt. A measured stream has numbers.
+func (e enrichedEpisode) probedWithAnImageStream(t *testing.T, measured episodeMeasurement, result string) {
 	t.Helper()
+	record := probedFile{
+		Path: replacedEntry, At: e.made, Modified: e.written.Unix(), Size: int64(len("the first encode")),
+		Duration: 1500, Counted: true,
+		Streams: []probedStream{{Kind: fileTypeVideo, Codec: "h264"}, {Kind: fileTypeSubtitle, Codec: codecPGS}},
+	}
+	if measured != notMeasured {
+		record.Measured, record.Streams[1].Image = true, filmImage
+	}
+	if measured == currentMeasurement {
+		record.Measurement = imageMeasurement
+	}
 	writeFactLedger(t, e.season, factProbe, likenLedger{
-		Probes: []probedFile{{
-			Path: replacedEntry, At: e.made, Modified: e.written.Unix(), Size: int64(len("the first encode")),
-			Duration: 1500, Counted: true, Measured: measured,
-			Streams: []probedStream{{Kind: fileTypeVideo, Codec: "h264"}, {Kind: fileTypeSubtitle, Codec: codecPGS}},
-		}},
+		Probes:   []probedFile{record},
 		Attempts: []likenAttempt{{Path: replacedEntry, At: e.made, Result: result}},
 	})
 }
@@ -92,13 +124,14 @@ func (e enrichedEpisode) probedWithAnImageStream(t *testing.T, measured bool, re
 func TestAnUnmeasuredRecordReopensTheProbeGap(t *testing.T) {
 	cases := []struct {
 		name     string
-		measured bool
+		measured episodeMeasurement
 		result   string
 		want     int
 	}{
-		{name: "a record from before the measurement", measured: false, result: attemptFound, want: 1},
-		{name: "a measured record", measured: true, result: attemptFound, want: 0},
-		{name: "a record whose window read failed", measured: false, result: attemptError, want: 0},
+		{name: "a record from before the measurement", measured: notMeasured, result: attemptFound, want: 1},
+		{name: "a record of the first measurement", measured: firstMeasurement, result: attemptFound, want: 1},
+		{name: "a measured record", measured: currentMeasurement, result: attemptFound, want: 0},
+		{name: "a record whose window read failed", measured: notMeasured, result: attemptError, want: 0},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -119,7 +152,7 @@ func TestAnUnmeasuredRecordReopensTheProbeGap(t *testing.T) {
 // keep the codecs and the tracks while the probe reads the file again.
 func TestAnUnmeasuredRecordStillFillsTheRow(t *testing.T) {
 	episode := seedEnrichedEpisode(t)
-	episode.probedWithAnImageStream(t, false, attemptFound)
+	episode.probedWithAnImageStream(t, notMeasured, attemptFound)
 
 	result := readFolder(episode.scan(), episode.series)
 
@@ -129,29 +162,72 @@ func TestAnUnmeasuredRecordStillFillsTheRow(t *testing.T) {
 	}
 }
 
+// The walk carries the numbers of the current measurement into the stream
+// rows. The numbers of the first measurement can be wrong, so the walk
+// leaves them out, and the stream is drawn where the disc placed it until
+// the probe measures it again.
 func TestTheWalkCarriesEachImageStreamsMeasurement(t *testing.T) {
-	root := t.TempDir()
-	folder := filepath.Join(root, "The Long Survey (1982)")
-	video := filepath.Join(folder, "The Long Survey (1982).mkv")
-	writeFile(t, video, "video")
-	writeProbeLedger(t, folder, probedFile{
-		Path: "The Long Survey (1982).mkv", Modified: modifiedOf(t, video), Counted: true, Measured: true,
-		Streams: []probedStream{
-			{Kind: fileTypeVideo, Codec: "h264"},
-			{Kind: fileTypeSubtitle, Codec: codecPGS, Image: filmImage},
-			{Kind: fileTypeSubtitle, Codec: codecPGS},
-		},
-	})
-
-	result := &walkResult{}
-	scanMovieFolder(movieScan(root), folder, result)
-
-	var got []string
-	for _, row := range streamRowsAt(result, "The Long Survey (1982)/The Long Survey (1982).mkv") {
-		got = append(got, imageColumnsText(row.ImageCanvasHeight, row.ImageLineHeight, row.ImageInkBottom))
+	cases := []struct {
+		name        string
+		measurement int
+		want        []string
+	}{
+		{name: "the current measurement", measurement: imageMeasurement,
+			want: []string{"none none none", "1080 61 918", "none none none"}},
+		{name: "the first measurement", measurement: 0,
+			want: []string{"none none none", "none none none", "none none none"}},
 	}
-	if want := []string{"none none none", "1080 61 918", "none none none"}; !slices.Equal(got, want) {
-		t.Errorf("image columns = %q, want %q", got, want)
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			folder := filepath.Join(root, "The Long Survey (1982)")
+			video := filepath.Join(folder, "The Long Survey (1982).mkv")
+			writeFile(t, video, "video")
+			writeProbeLedger(t, folder, probedFile{
+				Path: "The Long Survey (1982).mkv", Modified: modifiedOf(t, video), Counted: true, Measured: true,
+				Measurement: test.measurement,
+				Streams: []probedStream{
+					{Kind: fileTypeVideo, Codec: "h264"},
+					{Kind: fileTypeSubtitle, Codec: codecPGS, Image: filmImage},
+					{Kind: fileTypeSubtitle, Codec: codecPGS},
+				},
+			})
+
+			result := &walkResult{}
+			scanMovieFolder(movieScan(root), folder, result)
+
+			var got []string
+			for _, row := range streamRowsAt(result, "The Long Survey (1982)/The Long Survey (1982).mkv") {
+				got = append(got, imageColumnsText(row.ImageCanvasHeight, row.ImageLineHeight, row.ImageInkBottom))
+			}
+			if !slices.Equal(got, test.want) {
+				t.Errorf("image columns = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+// The first build of the measurement wrote measured: true and no version.
+// This build reads that record, and the record's numbers are measured again.
+func TestARecordOfTheFirstMeasurementReads(t *testing.T) {
+	written := `path: a.mkv
+streams:
+  - kind: subtitle
+    codec: hdmv_pgs_subtitle
+    image:
+      canvasHeight: 1080
+      lineHeight: 150
+      inkBottom: 1061
+counted: true
+measured: true
+`
+	var record probedFile
+	if err := yaml.Unmarshal([]byte(written), &record); err != nil {
+		t.Fatal(err)
+	}
+
+	if !record.Measured || record.Measurement != 0 || record.Streams[0].Image == nil || !record.unmeasured() {
+		t.Errorf("record = %+v, want measured, of no version, with numbers, and unmeasured", record)
 	}
 }
 
