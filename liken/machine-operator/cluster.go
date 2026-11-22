@@ -34,6 +34,7 @@ package main
 // acts on it.
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 
@@ -76,7 +77,8 @@ func renderCluster(name string, spec cluster.ClusterSpec) ([]byte, string, error
 //
 //   - With no facts, the condition is Unknown.
 //   - When this boot ran the document, the condition is True. The result
-//     also withdraws any staged copy and clears any rejection.
+//     also withdraws a staged copy that withdrawableStaged allows, and
+//     clears any rejection.
 //   - When init rejected this document at the last boot, it is not
 //     staged again.
 //   - When machineState is in memory, nothing can be staged.
@@ -93,7 +95,7 @@ func renderCluster(name string, spec cluster.ClusterSpec) ([]byte, string, error
 // change.
 //
 // bootDoc and bootHash are the document this boot ran and its canonical
-// hash, from bootClusterDocument. facts.Boot.ClusterManifestHash hashes
+// hash, from readRunningCluster. facts.Boot.ClusterManifestHash hashes
 // the raw bytes instead, and a hand-written seed and the operator's
 // rendering of the same spec have different bytes. A formatting
 // difference must not reboot the fleet.
@@ -104,7 +106,11 @@ func renderCluster(name string, spec cluster.ClusterSpec) ([]byte, string, error
 // held lists those features. The decision runs on reduced, so each of
 // those features keeps running through any disruption this pass
 // requests.
-func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootDoc *cluster.Cluster, bootHash, stagedHash string, t turn) convergence {
+//
+// stagedHash and attemptedHash are the hash of staged.yaml and the hash
+// that the attempted marker records. withdrawableStaged decides from
+// them whether a staged copy may be withdrawn.
+func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootDoc *cluster.Cluster, bootHash, stagedHash, attemptedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
 		return factsIncomplete("ClusterConverged")
 	}
@@ -119,18 +125,19 @@ func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *m
 	}
 
 	if hash == bootHash {
+		withdraw := withdrawableStaged(stagedHash, attemptedHash, bootHash)
 		// While held lists a feature, no disruption can make progress
 		// until the objects that block its removal are gone. A staged
 		// copy is still withdrawn, so the next boot does not run it.
 		if len(held) > 0 {
 			return convergence{
 				condition: notConverged("ClusterConverged", "RetractionBlocked", holdMessage(held)),
-				withdraw:  stagedHash != "",
+				withdraw:  withdraw != "",
 			}
 		}
 		return convergedWithCleanup(
 			converged("ClusterConverged", "Converged", "This boot ran the current cluster document"),
-			stagedHash, rejection)
+			withdraw, rejection)
 	}
 
 	// rejection is read from machineState and not from facts, which do
@@ -188,6 +195,36 @@ func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *m
 	return c
 }
 
+// withdrawableStaged returns stagedHash when the pass may withdraw that
+// staged copy, and "" when it must keep it. The pass withdraws a staged
+// copy when the Cluster has returned to the document that this machine
+// runs, because the next boot would otherwise apply an edit that the
+// Cluster no longer declares. It keeps two staged copies:
+//
+//   - One that is the running document, as bootHash records it. Init
+//     applied it with a restart, and the promotion in
+//     settleClusterLifecycle did not complete. Withdrawing it would
+//     leave proven.yaml on the older document.
+//   - One whose hash is in the attempted marker. Init writes the marker
+//     before it applies a staged document, so this copy runs or is
+//     about to run, and the running document that the pass read is
+//     older than it.
+//
+// Both checks use what the pass read and not when it read it, so a
+// pass that races a restart keeps the staged copy. When init applies a
+// copy after the pass read the marker and before the withdraw,
+// settleClusterLifecycle writes the running document as proven on the
+// next pass. Init's boot record wakes that pass.
+//
+// The operator renders every staged copy, so stagedHash is a canonical
+// hash and compares with bootHash directly.
+func withdrawableStaged(stagedHash, attemptedHash, bootHash string) string {
+	if stagedHash == bootHash || stagedHash == attemptedHash {
+		return ""
+	}
+	return stagedHash
+}
+
 // convergeClusterDocument runs the cluster document's part of a
 // reconcile pass. It also returns the Cluster, because version
 // convergence (release.go) reads spec.version and spec.releases from
@@ -198,90 +235,142 @@ func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *m
 // feature, to check whether objects such as HelmCharts still exist.
 // waits.go watches the HelmCharts and the LoadBalancer Services only
 // while a removal waits on them.
-func convergeClusterDocument(r *reader, store machine.ManifestStore, clusterName string, m *machine.Machine, facts *machine.MachineStatus, t turn) (convergence, *cluster.Cluster) {
+//
+// running is the pass's one read of the running document. The pass
+// read it before settleClusterLifecycle, so the promotion and this
+// decision agree on what the machine runs.
+func convergeClusterDocument(r *reader, store machine.ManifestStore, clusterName string, m *machine.Machine, facts *machine.MachineStatus, running runningCluster, t turn) (convergence, *cluster.Cluster) {
 	liveCluster, err := r.cluster(clusterName)
 	if err != nil {
 		return convergence{condition: convergenceUnknown("ClusterConverged", "ClusterUnavailable",
 			fmt.Sprintf("The Cluster %s cannot be read: %v", clusterName, err))}, nil
 	}
 	rejection, _ := store.LoadRejection()
-	bootDoc, bootHash := bootClusterDocument(cluster.BootClusterManifestPath)
-	reduced, held := reduceRetraction(bootDoc, liveCluster, func(p cluster.Precondition) (bool, string, error) {
+	attempted, _ := store.LoadAttempted()
+	reduced, held := reduceRetraction(running.doc, liveCluster, func(p cluster.Precondition) (bool, string, error) {
 		return evaluatePrecondition(r, p)
 	})
 	return decideClusterConvergence(reduced, held, m, facts, rejection,
-		bootDoc, bootHash, readStagedHash(store), t), liveCluster
+		running.doc, running.hash, readStagedHash(store), attempted, t), liveCluster
 }
 
-// bootClusterDocument reads the cluster document that init published
-// for this boot, and returns it parsed, with its canonical hash. It
-// renders the document the same way as the Cluster resource, so the
-// drift check compares content and not formatting. It returns nil and
-// "" when the file is missing or cannot be parsed.
-func bootClusterDocument(path string) (*cluster.Cluster, string) {
+// runningCluster is the cluster document that k3s runs now, as init
+// published it to cluster.BootClusterManifestPath. Init writes that
+// file at boot, and again after each restart has applied a staged
+// document, so the file changes during a boot.
+//
+// raw is the exact bytes, which the promotion compares with the bytes
+// of the store. doc and hash are the parsed document and its canonical
+// hash, which the drift check compares with the Cluster resource, so a
+// difference in formatting alone is not drift.
+type runningCluster struct {
+	raw  []byte
+	doc  *cluster.Cluster
+	hash string
+}
+
+// readRunningCluster reads the running document. raw is nil when the
+// file is missing, and doc is nil and hash is "" when it does not
+// parse.
+func readRunningCluster(path string) runningCluster {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, ""
+		return runningCluster{}
 	}
+	running := runningCluster{raw: raw}
 	c, err := cluster.ParseCluster(raw)
 	if err != nil {
-		return nil, ""
+		return running
 	}
 	_, hash, err := renderCluster(c.Metadata.Name, c.Spec)
 	if err != nil {
-		return nil, ""
+		return running
 	}
-	return c, hash
+	running.doc, running.hash = c, hash
+	return running
 }
 
-// settleClusterLifecycle records the cluster document that this boot
-// ran as proven. It runs on every pass and does nothing once the
-// document is proven. It promotes only bytes whose hash matches the one
-// in facts.
-func settleClusterLifecycle(root, seedPath string, facts *machine.MachineStatus, out *passOutcome) {
-	if facts == nil || facts.Storage.MachineState.Backing != machine.BackingPartition {
-		return // nothing durable to settle
+// settleClusterLifecycle makes proven.yaml the cluster document that
+// this machine runs, so the next boot never runs an older document than
+// this one. It runs first in every pass and writes nothing once the
+// proven copy is the running document.
+//
+// It compares the store with running, the pass's one read of the
+// running document, and not with the boot record in facts. The pass
+// reads the facts once, at its start, and init writes the boot record
+// of a restart while the pass runs. So a pass can read a boot record
+// that is older than the running document. Each case below holds for
+// whichever of init's writes the pass's reads came after:
+//
+//   - When the staged copy is the running document, init applied it at
+//     this boot or with a restart, and the pass promotes it.
+//   - When this boot ran the image's seed and no proven copy exists,
+//     the pass records the seed. A seed boot with a proven copy keeps
+//     that copy, because init boots the seed then only when the proven
+//     copy does not parse, as after a rollback to a release that does
+//     not know a field in it. That copy is still the newest document
+//     that a boot proved, and a roll forward reads it again.
+//   - Otherwise, when the proven copy is not the running document, the
+//     pass writes the running document as proven. That repairs a store
+//     whose staged copy was withdrawn while the machine ran it
+//     (withdrawableStaged).
+//
+// The running document is proven as soon as init publishes it, which
+// for a restart is before k3s starts again under it. So a restart's
+// document gets no trial of its own (milestone 103).
+func settleClusterLifecycle(root string, facts *machine.MachineStatus, running runningCluster, notes machineEvents, out *passOutcome) {
+	if facts == nil || facts.Storage.MachineState.Backing != machine.BackingPartition || running.raw == nil {
+		return // nothing durable to settle, or no document to settle to
 	}
 	store := machine.ClusterManifests(root)
+	hash := machine.ManifestHash(running.raw)
 
-	switch facts.Boot.ClusterManifestSource {
-	case machine.ManifestSourceStaged:
-		raw, err := store.LoadStaged()
-		if err != nil || raw == nil {
-			return // already promoted, or nothing staged
-		}
-		if machine.ManifestHash(raw) != facts.Boot.ClusterManifestHash {
-			// A document staged after this boot started must prove
-			// itself at its own boot.
-			return
-		}
+	staged, err := store.LoadStaged()
+	if err != nil {
+		return
+	}
+	if staged != nil && bytes.Equal(staged, running.raw) {
 		if err := store.Promote(); err != nil {
 			fmt.Fprintf(os.Stderr, "promoting the cluster document: %v\n", err)
 			out.fail("promoting the cluster document", err)
 			return
 		}
 		out.wrote("promoting the cluster document")
-		fmt.Printf("the staged cluster document is now proven (%.12s)\n", facts.Boot.ClusterManifestHash)
+		fmt.Printf("the staged cluster document is now proven (%.12s)\n", hash)
+		return
+	}
 
+	proven, err := store.LoadProven()
+	if err != nil || bytes.Equal(proven, running.raw) {
+		return
+	}
+	switch facts.Boot.ClusterManifestSource {
 	case machine.ManifestSourceSeed:
-		if proven, err := store.LoadProven(); proven != nil || err != nil {
+		if proven != nil {
 			return
 		}
-		raw, err := os.ReadFile(seedPath)
-		if err != nil {
-			return
-		}
-		if machine.ManifestHash(raw) != facts.Boot.ClusterManifestHash {
-			// The seed differs from the bytes this boot ran, and only
-			// bytes that a boot ran are recorded as proven.
-			return
-		}
-		if err := store.WriteProven(raw); err != nil {
+		if err := store.WriteProven(running.raw); err != nil {
 			fmt.Fprintf(os.Stderr, "recording the seed cluster document as proven: %v\n", err)
 			out.fail("recording the seed cluster document as proven", err)
 			return
 		}
 		out.wrote("recording the seed cluster document as proven")
-		fmt.Printf("the seed cluster document is now proven (%.12s)\n", facts.Boot.ClusterManifestHash)
+		fmt.Printf("the seed cluster document is now proven (%.12s)\n", hash)
+
+	case machine.ManifestSourceStaged, machine.ManifestSourceProven:
+		if err := store.WriteProven(running.raw); err != nil {
+			fmt.Fprintf(os.Stderr, "recording the running cluster document as proven: %v\n", err)
+			out.fail("recording the running cluster document as proven", err)
+			return
+		}
+		out.wrote("recording the running cluster document as proven")
+		had := "no proven cluster document"
+		if proven != nil {
+			had = fmt.Sprintf("the proven cluster document %.12s", machine.ManifestHash(proven))
+		}
+		message := fmt.Sprintf("This machine runs the cluster document %.12s and its store had %s, so the operator recorded the running document as proven, and the next boot runs it",
+			hash, had)
+		fmt.Println(message)
+		notes.normal(reasonClusterProvenRepaired, message)
 	}
 }

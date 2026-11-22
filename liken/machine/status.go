@@ -121,6 +121,12 @@ type MachineStatus struct {
 	// derived again on each boot.
 	Boot BootStatus `json:"boot,omitzero"`
 
+	// NextBoot records the copy of each document that the next boot
+	// would choose. machine-operator reads the machine's store and
+	// writes it on every pass, because the operator stages and promotes
+	// documents in the store after init wrote Boot.
+	NextBoot NextBootStatus `json:"nextBoot,omitzero"`
+
 	// LastCrash is the newest kernel panic or oops that this machine
 	// has records of, from the pstore records that init copied to
 	// machineState. It can be much older than the previous boot. Read
@@ -766,6 +772,19 @@ type BootStatus struct {
 	ClusterRejection     *Rejection `json:"clusterRejection,omitempty"`
 	SystemRejection      *Rejection `json:"systemRejection,omitempty"`
 	CredentialsRejection *Rejection `json:"credentialsRejection,omitempty"`
+}
+
+// NextBootStatus records the copy of the Cluster document that the
+// next boot would choose, by the rule that init applies at boot
+// (chooseCluster in init/cluster.go): a staged copy that parses and has
+// not had its trial, then a proven copy that parses, then the image's
+// seed. The source and the hash have the same values as
+// Boot.ClusterManifestSource and Boot.ClusterManifestHash, so a person
+// can compare what this machine runs with what its next boot runs. The
+// ClusterProven condition reports the comparison.
+type NextBootStatus struct {
+	ClusterManifestSource ManifestSource `json:"clusterManifestSource,omitempty"`
+	ClusterManifestHash   string         `json:"clusterManifestHash,omitempty"`
 }
 
 // CrashReason is the kmsg-dump reason on the first line of a pstore

@@ -171,9 +171,10 @@ func (s ManifestStore) WriteStaged(raw []byte) error {
 }
 
 // WriteProven writes proven.yaml without a staged file to promote.
-// init calls it for the seed Machine manifest, and the operator calls
-// it for the seed Cluster manifest and for the system release that
-// the machine runs.
+// init calls it for the seed Machine manifest. The operator calls it
+// for the system release that the machine runs, and for the Cluster
+// document that the machine runs when proven.yaml has none or has
+// another document.
 func (s ManifestStore) WriteProven(raw []byte) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
@@ -254,7 +255,10 @@ func (s ManifestStore) LoadAttempted() (string, error) {
 // WithdrawStaged removes the staged document. The operator calls it
 // when the cluster's copy has been edited back to what the machine
 // already runs, so the next boot does not apply an edit that the
-// cluster no longer declares. It also removes the attempted marker.
+// cluster no longer declares. The operator does not call it for a
+// staged document that the machine runs or that the attempted marker
+// names, because that document would then be in no file that a boot
+// reads. It also removes the attempted marker.
 // The marker belongs to the withdrawn document, and if it stayed, the
 // next staging of an identical document would look like a failed
 // proving boot and be rejected. It is not an error when nothing is staged.

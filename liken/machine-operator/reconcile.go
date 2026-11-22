@@ -70,10 +70,18 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	status.Conditions = api.SetCondition(ownedConditions(m.Status.Conditions), factsCondition(err), now)
 
 	// A running operator proves that the machine joined its cluster
-	// with the cluster document this boot used, so the pass promotes
-	// that document to proven (cluster.go). It also promotes the system
+	// with the cluster document that it runs, so the pass makes that
+	// document the proven one (cluster.go). It also promotes the system
 	// release that the facts say this boot ran (release.go).
-	settleClusterLifecycle(machine.MachineStateDir, cluster.ClusterManifestPath, facts, out)
+	//
+	// The pass reads the running cluster document once, here, and the
+	// promotion and the cluster document's convergence below both use
+	// this read. Init publishes a new running document during a k3s
+	// restart, and a pass that read it twice could promote nothing
+	// under the first read and withdraw the staged copy under the
+	// second.
+	running := readRunningCluster(cluster.BootClusterManifestPath)
+	settleClusterLifecycle(machine.MachineStateDir, facts, running, notes, out)
 	settleSystemReleaseLifecycle(machine.MachineStateDir, facts, out)
 
 	// The pass promotes the record of the image tarballs that this boot
@@ -287,13 +295,18 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	if clusterName != "" {
 		clusterStore := machine.ClusterManifests(machine.MachineStateDir)
 		var cconv convergence
-		cconv, liveCluster = convergeClusterDocument(r, clusterStore, clusterName, decided, facts, t)
+		cconv, liveCluster = convergeClusterDocument(r, clusterStore, clusterName, decided, facts, running, t)
 		cconv = disr.gate(r, node, nodeErr, t, now, cconv)
 		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutConvergence(cconv, clusterStore, machine.OperatorRunDir, "cluster document", now, out), now)
 		if cconv.pending != nil {
 			status.Pending = append(status.Pending, *cconv.pending)
 		}
+		// status.nextBoot and ClusterProven describe the store after
+		// this pass's promotion, staging, and withdraw (nextboot.go).
+		var proven api.Condition
+		status.NextBoot, proven = nextBootOfCluster(clusterStore, cluster.ClusterManifestPath, facts, running)
+		status.Conditions = api.SetCondition(status.Conditions, proven, now)
 
 		// The target system release comes from the Cluster's release
 		// feed, so it converges only in a pass that read the Cluster.

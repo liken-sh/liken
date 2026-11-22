@@ -76,14 +76,16 @@ func conditionPhase(c api.Condition) api.Phase {
 		// Ready. LoadRequested applies the spec without a reboot.
 		return api.PhaseUpdating
 	case "RebootPending", "RestartPending", "DemotionPending", "AwaitingTurn",
-		"StagedForNextBoot", "AwaitingPodRefresh":
+		"StagedForNextBoot", "AwaitingPodRefresh", "ChangeStaged":
 		// A change is staged and waits for a Manual reboot or for the
 		// cluster operator to grant this machine its turn.
 		// StagedForNextBoot needs no reboot of its own, because any
 		// later boot applies it, but the machine does not run the new
 		// document yet. AwaitingPodRefresh means the machine runs the
 		// new release and this operator's pod still has the old
-		// template, until a leader boots the release.
+		// template, until a leader boots the release. ChangeStaged is
+		// ClusterProven's report of a staged cluster document, which
+		// ClusterConverged reports with one of the reasons above.
 		return api.PhaseUpdatePending
 	}
 	// An unlisted reason is Degraded, so a new reason that someone

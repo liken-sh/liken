@@ -20,13 +20,16 @@ package main
 // staged for the boot path, and the restart path applies none of it.
 //
 // A restart does not promote the cluster document. The operator
-// promotes it after the machine serves correctly under it. Until then
-// the restart path leaves what a trial boot leaves: the attempted
-// marker, and facts that name the staged document. If k3s does not
-// come back and the machine reboots, the next boot finds the attempted
-// marker and rejects the document, so a document gets one attempt
-// either way. Credentials are promoted when they are applied, as at
-// boot (registries.go).
+// promotes it when it reads the document that the restart published.
+// Until then the restart path leaves what a trial boot leaves: the
+// attempted marker, and facts that name the staged document. If the
+// machine reboots before the operator promotes it, the next boot finds
+// the attempted marker and rejects the document. The operator reads the
+// published document as soon as init writes it, which is before k3s
+// starts again under it, so in practice the promotion comes first and a
+// k3s that does not start again under the document is not caught by
+// the marker (milestone 103). Credentials are promoted when they are
+// applied, as at boot (registries.go).
 
 import (
 	"fmt"
@@ -129,11 +132,13 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 	}
 	registries := s.renderRegistries(clusterDoc, creds, machine.RegistryCredentialsStore(s.root), credsSource)
 
-	// boot/clusterManifest is written last, because the operator
-	// promotes the cluster document when it reads that record
-	// (machine-operator/cluster.go). The other facts must already
-	// describe the document by then. publishBootClusterManifest writes
-	// the exact bytes that the operator compares against.
+	// The operator promotes the staged cluster document when the
+	// document that publishBootClusterManifest writes has its bytes
+	// (machine-operator/cluster.go). The operator watches the facts
+	// tree and not that file, so boot/clusterManifest is written after
+	// it, as the last write. The wake that the record sends then starts
+	// a pass that reads the published document, and the other facts
+	// already describe the document.
 	s.restarts++
 	s.tree.WriteFeatures(featureStatuses)
 	s.tree.WriteRegistries(registries)
@@ -143,8 +148,8 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 	}
 	s.tree.WriteBootRestarts(s.restarts)
 	if applyingCluster {
-		s.tree.WriteBootClusterManifest(machine.ManifestSourceStaged, clusterHash)
 		publishBootClusterManifest(clusterRaw)
+		s.tree.WriteBootClusterManifest(machine.ManifestSourceStaged, clusterHash)
 	}
 
 	// After this, a duplicate intent applies nothing: the applied

@@ -37,6 +37,7 @@ var ownedConditionTypes = map[string]bool{
 	"NodeCurrent":                true,
 	"SpecConverged":              true,
 	"ClusterConverged":           true,
+	clusterProvenCondition:       true,
 	"VersionConverged":           true,
 	"CredentialsConverged":       true,
 	"ImportsConverged":           true,

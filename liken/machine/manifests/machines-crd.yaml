@@ -27,7 +27,7 @@ metadata:
     # (init/schemarevision.go). Raise the revision in
     # the same change that changes the schema. A test checks that the
     # two change together.
-    liken.sh/schema-revision: "15"
+    liken.sh/schema-revision: "16"
 spec:
   group: liken.sh
   names:
@@ -3164,6 +3164,36 @@ spec:
                           description: >-
                             The time when the machine refused the
                             document.
+                nextBoot:
+                  type: object
+                  description: >-
+                    The copy of the Cluster document that the next boot
+                    would run. `machine-operator` reads the machine's
+                    store and writes this field on every pass, because
+                    the operator stages and promotes documents after the
+                    boot. Compare it with `boot.clusterManifestHash`,
+                    which is the document that the machine runs now. The
+                    two hashes are equal when the next boot runs the
+                    same document, and the `ClusterProven` condition
+                    reports the comparison. The field is absent on a
+                    machine that is not in a cluster.
+                  properties:
+                    clusterManifestSource:
+                      type: string
+                      enum: [Staged, Proven, Seed]
+                      description: >-
+                        The copy that the next boot would choose, with
+                        the same rule that the boot applies: a staged
+                        copy that has not had its trial boot or restart,
+                        then the proven copy, then the copy in the image
+                        (the seed). A staged copy that this machine
+                        already tried and did not prove is skipped,
+                        because the next boot rejects it.
+                    clusterManifestHash:
+                      type: string
+                      description: >-
+                        The sha256 hash of the exact bytes of that copy,
+                        in the same form as `boot.clusterManifestHash`.
                 sysctls:
                   type: object
                   description: >-
@@ -3719,7 +3749,18 @@ spec:
                     `ClusterConverged`, `VersionConverged`,
                     `CredentialsConverged`, and `ImportsConverged`
                     report the documents and the release that this boot
-                    ran under. `SerioAttached` reports the serial-line
+                    ran under. `ClusterProven` is `True` when the next
+                    boot would run the Cluster document that the machine
+                    runs now, as `nextBoot` records it. It is `False`
+                    with the reason `ChangeStaged` while a staged
+                    document waits for the restart or the reboot that
+                    applies it, and with `NextBootDiffers` when the next
+                    boot would run a proven copy that is not the running
+                    document. The operator replaces that copy with the
+                    running document in the pass that finds it, and
+                    posts a `ClusterProvenRepaired` `Event`, so
+                    `NextBootDiffers` lasts only while the operator
+                    cannot write the store. `SerioAttached` reports the serial-line
                     adapters that `spec.serio` declares. An adapter that
                     is unplugged or refused leaves the rest of the
                     machine working, so `Ready` does not count it.

@@ -150,7 +150,7 @@ func blockedRetraction(t *testing.T) convergence {
 	reduced, held := reduceRetraction(boot, clusterWithFeatures(), (&stubEvaluator{}).evaluate)
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-raw-hash")
 	return decideClusterConvergence(reduced, held, machineWithPolicy(machine.RebootAuto), facts, nil,
-		boot, bootHash, "", turnGranted)
+		boot, bootHash, "", "", turnGranted)
 }
 
 func TestABlockedRetractionNamesTheBlockingObjects(t *testing.T) {
@@ -195,7 +195,7 @@ func TestTheReducedDocumentIsWhatGetsStaged(t *testing.T) {
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-raw-hash")
 
 	conv := decideClusterConvergence(reduced, held, machineWithPolicy(machine.RebootAuto), facts, nil,
-		boot, bootHash, "", turnGranted)
+		boot, bootHash, "", "", turnGranted)
 
 	if !conv.stage {
 		t.Fatalf("stopping traefik alone changes the document, so it stages: %+v", conv)

@@ -1,7 +1,7 @@
 ---
 title: Troubleshoot
 weight: 80
-description: "Diagnose a liken machine from its Machine resource: the phase, the condition that is False, and the status field it names, for each failure from the stick menu to a Pending device claim. Use when a machine is Lost, Blocked, crashed, on the old version, waits for a reboot turn, stays drained without a reboot, or refuses a disk."
+description: "Diagnose a liken machine from its Machine resource: the phase, the condition that is False, and the status field it names, for each failure from the stick menu to a Pending device claim. Use when a machine is Lost, Blocked, crashed, on the old version, waits for a reboot turn, stays drained without a reboot, refuses a disk, or would run another Cluster document at its next boot."
 ---
 
 # Troubleshoot
@@ -348,6 +348,34 @@ The `RebootRequestHonored` condition reports the progress of the
 request, and the request reads `Complete` when the machine has booted
 again.
 
+## The next boot would run another Cluster document
+
+Each machine keeps copies of the `Cluster` document on its
+`machineState` disk: a staged copy that waits for the restart or the
+reboot that applies it, and a proven copy that the next boot runs when
+nothing is staged. `status.boot.clusterManifestHash` is the document
+that the machine runs now, and `status.nextBoot.clusterManifestHash`
+is the one that its next boot would run:
+
+    kubectl get machine <name> -o jsonpath='{.status.boot.clusterManifestHash}{"\n"}{.status.nextBoot}{"\n"}'
+
+The `ClusterProven` condition compares the two. It is `True` with the
+reason `Current` when they are the same document. While a `Cluster`
+edit waits to apply, it is `False` with `ChangeStaged`, and
+`ClusterConverged` reports how the edit is applied.
+
+`NextBootDiffers` means that the proven copy is not the document that
+the machine runs, so the next boot would run an older document, and
+k3s would remove the features that the older document turns off until
+the machine applies the current one again. The machine operator
+replaces the proven copy with the running document in the pass that
+finds the difference, and posts a `ClusterProvenRepaired` `Event`, so
+`NextBootDiffers` stays only while the operator cannot write the
+`machineState` disk. The log of the `liken-machine-operator` pod on
+that machine has the error of each write that failed, as
+[Reading logs](#reading-logs) shows. Do not reboot the machine while
+`ClusterProven` is `NextBootDiffers`.
+
 ## A pod with a device claim stays Pending
 
 [Give a workload a device](/docs/guides/devices/#when-a-claim-does-not-schedule)
@@ -412,6 +440,7 @@ the condition's name. The other events are these:
 | `Associated` | `Machine` | `Normal` | A radio associated with an access point, at boot or after it lost its previous one. The message gives the access point and the reason for the loss. |
 | `DeviceUnplugged` | `Machine` | `Warning` | A device that a prepared claim held was unplugged, or appeared again at its address. The machine taints the device `liken.sh/unplugged`, and Kubernetes evicts the claim's pods. The message gives the device and the claim. The [device reference](/docs/reference/devices/#an-unplugged-device-evicts-its-pods) says what follows. |
 | `BackstopRepaired` | `Machine` | `Warning` | The operator's periodic backstop pass found and corrected a change that no event had started a pass for. The machine is correct again. A missed event is a bug in `liken`, so report it with the message, which names each step that wrote. |
+| `ClusterProvenRepaired` | `Machine` | `Normal` | The machine's proven copy of the `Cluster` document was not the document that the machine runs, so its next boot would have run another document. The operator wrote the running document as the proven copy. The message gives the hash of both documents. [The next boot would run another Cluster document](#the-next-boot-would-run-another-cluster-document) explains the copies. |
 | `RebootTurnGranted` | `Machine` | `Normal` | The cluster granted the machine a reboot turn. |
 | `RebootTurnReclaimed` | `Machine` | `Normal` | The machine no longer needs its reboot turn, so the turn no longer counts against the budgets. |
 | `DisruptionDeleted` | `Disruption` | `Normal` | `cluster-operator` deleted a request that completed more than a day ago. |

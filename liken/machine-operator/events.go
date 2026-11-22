@@ -22,6 +22,7 @@ package main
 //   - A radio's new association with an access point.
 //   - A prepared claim's device that was unplugged.
 //   - A write by a backstop pass.
+//   - A proven cluster document replaced with the running one.
 //
 // An action that repeats on each pass posts nothing: a refused
 // eviction, a sysctl written again, or a heartbeat renewal.
@@ -49,6 +50,10 @@ const (
 	// reasonDeviceUnplugged is for a device that was unplugged while
 	// a prepared claim used it (unplugged.go).
 	reasonDeviceUnplugged = "DeviceUnplugged"
+
+	// reasonClusterProvenRepaired is for a proven.yaml that the pass
+	// replaced with the running cluster document (cluster.go).
+	reasonClusterProvenRepaired = "ClusterProvenRepaired"
 
 	// reasonBackstopRepaired is for a write by a backstop pass, which
 	// means that a code path in this operator changed state without
