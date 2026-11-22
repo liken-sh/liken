@@ -12,7 +12,21 @@ happens to the records that the first build wrote. The same drill found
 that a probe stopped by a restart recorded an error attempt for the
 file it was reading, which kept the file out of the probe's work for a
 day. The probe now records no attempt for a read that its own shutdown
-ended. A drill of the second measurement on a home cluster has not run.
+ended.
+
+A drill of the second measurement ran on 2026-11-22 on the same home
+cluster, with `library-operator` 2026.11.21-002-dev-002. The walks
+took each first-build record's numbers out of the catalog, and the
+probe read 2,077 files again in about 75 minutes: a median of 1 second
+and a mean of 2.5 seconds for an episode file, and a median of 3
+seconds and a mean of 8.5 seconds for a film file. 9,722 streams have
+numbers, where the first measurement gave 9,825. 7 streams measure a
+`lineHeight` of a tenth of the canvas or more, where 285 did, and 33
+measure 8% or more, where 314 did. Nobody has looked at those 7. A
+testbed that shares the volume restarted twice during the two drills
+while it ran the first build, and each time its probe recorded an
+error attempt for the file it was reading. Those two files wait out
+the error's period on both clusters.
 
 The drill of the first build ran on 2026-11-22 with `library-operator`
 2026.11.21-001-dev-002 on a home cluster whose nodes read the NAS at
