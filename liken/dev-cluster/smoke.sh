@@ -419,8 +419,8 @@ if [[ -n "$REPORT_STICK" ]]; then
         </dev/null >"$REPORT_QEMU_LOG" 2>&1 &
     guest=$!
     watch_hold "$REPORT_LOG" \
-        "this report was written to the stick" \
-        "to the stick FAILED" \
+        "liken: wrote this report to the stick" \
+        "to the stick failed" \
         "the report boot"
 
     # The proposal's proof, read straight from the stick image. The
@@ -441,7 +441,7 @@ if [[ -n "$REPORT_STICK" ]]; then
     proposal_carries "): e1000"      # the NIC evidence names the driver
     proposal_carries "MAC 52:54:00:" # the interface evidence carries real MACs
     proposal_carries "#   /dev/sda"  # the disk evidence lists the AHCI disks
-    proposal_carries "(/dev/sdd is the installation stick" # named in evidence, not proposed
+    proposal_carries "(/dev/sdd is the install stick" # named in evidence, not proposed
     for stickism in "): usb-storage" "- usb-storage" "): uas" "- uas" "device: /dev/sdd"; do
         if grep -a -q -- "$stickism" guests/node-1/stick.img; then
             echo "$drill: the proposal put the installation stick in the manifest (\"$stickism\")" >&2
