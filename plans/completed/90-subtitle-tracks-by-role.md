@@ -10,6 +10,10 @@ from the counts on the item. On the second item, through mpv's
 Pluribus S01E02 over its forced default track. No drill has run of
 `subtitles: auto`.
 
+On 2026-11-21 the order gained one step. Among tracks of the same
+role, a text track goes before an image track, and the role still
+ranks above the kind. `media-operator` plan 46 has the reason.
+
 ## The problem
 
 A household that sets `subtitles: on` with English audio and English

@@ -46,7 +46,7 @@ The operator uses a language or subtitle field here only when neither the Play n
 | --- | --- | --- | --- |
 | <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | Audio languages in order of preference, as IETF language tags such as `en` or `pt-BR`. mpv plays the first audio track that matches, and treats `en` and `eng` as the same language. |
 | <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | Subtitle languages in order of preference, so a viewer can hear the original audio with subtitles in their own language. When it is empty, `audioLanguages` is used. |
-| <span id="spec--subtitles"></span>`subtitles` | string | no | When subtitles show. With `on`, the playback pod shows the first full or SDH track in the order of `subtitleLanguages`. When there is none, it shows the forced track of the audio's language, if that language is in `audioLanguages`. With `auto`, audio in the first language of `audioLanguages` shows only its forced track, or nothing, and other audio chooses as `on` does. With `off`, no subtitles show. One of: `on`, `off`, `auto`. |
+| <span id="spec--subtitles"></span>`subtitles` | string | no | When subtitles show. With `on`, the playback pod shows the first full or SDH track in the order of `subtitleLanguages`, and a text track goes before an image track. When there is none, it shows the forced track of the audio's language, if that language is in `audioLanguages`. With `auto`, audio in the first language of `audioLanguages` shows only its forced track, or nothing, and other audio chooses as `on` does. With `off`, no subtitles show. One of: `on`, `off`, `auto`. |
 | <span id="spec--sdh"></span>`sdh` | string | no | Whether an SDH track ranks ahead of a full track in the same language (`prefer`) or behind it (`avoid`). An SDH track also describes sounds, for a viewer who is deaf or hard of hearing. When omitted, the two rank the same, and the playback pod takes the track with the default flag, or else the first in the file. One of: `prefer`, `avoid`. |
 | <span id="spec--timezone"></span>`timeZone` | string | no | The time zone, as an IANA name such as `America/New_York`. The playback pod gets it as `TZ`, so the display clock shows local time and not UTC. |
 | <span id="spec--idle"></span>`idle` | [object](#specidle) | no | What a screen does while nothing plays. Each field applies to a Player whose own `idle` block leaves it unset. |
@@ -131,8 +131,16 @@ With `subtitles: on`, the sidecar chooses in this order:
 1. The first `full` or `sdh` track, going through the languages in order.
    Within one language, `sdh: prefer` ranks `sdh` tracks first and
    `sdh: avoid` ranks them last. With no `sdh` setting, the two roles
-   rank the same. After that, a track with the default flag ranks first,
-   then the track that comes first in the file.
+   rank the same. Among tracks of the same role, a text track ranks
+   before an image track, because the display draws every text track in
+   one house font and size, and it draws an image track as the disc
+   made it. An image track is the PGS track of a Blu-ray
+   (`hdmv_pgs_subtitle`) or the VobSub track of a DVD (`dvd_subtitle`).
+   A track with no codec and an external subtitle file count as text.
+   The role ranks above the kind, so with `sdh: prefer` an `sdh` image
+   track ranks before a `full` text track. After that, a track with the
+   default flag ranks first among tracks of the same kind, then the
+   track that comes first in the file.
 2. A `forced` track in the language of the audio that plays, if that
    language is in `audioLanguages`.
 3. A `forced` track in one of these languages, when

@@ -66,8 +66,16 @@ With `subtitles: on`, the sidecar chooses in this order:
 1. The first `full` or `sdh` track, going through the languages in order.
    Within one language, `sdh: prefer` ranks `sdh` tracks first and
    `sdh: avoid` ranks them last. With no `sdh` setting, the two roles
-   rank the same. After that, a track with the default flag ranks first,
-   then the track that comes first in the file.
+   rank the same. Among tracks of the same role, a text track ranks
+   before an image track, because the display draws every text track in
+   one house font and size, and it draws an image track as the disc
+   made it. An image track is the PGS track of a Blu-ray
+   (`hdmv_pgs_subtitle`) or the VobSub track of a DVD (`dvd_subtitle`).
+   A track with no codec and an external subtitle file count as text.
+   The role ranks above the kind, so with `sdh: prefer` an `sdh` image
+   track ranks before a `full` text track. After that, a track with the
+   default flag ranks first among tracks of the same kind, then the
+   track that comes first in the file.
 2. A `forced` track in the language of the audio that plays, if that
    language is in `audioLanguages`.
 3. A `forced` track in one of these languages, when

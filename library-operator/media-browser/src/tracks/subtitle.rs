@@ -9,7 +9,8 @@
 // track belongs to the reader. The rule takes a full or SDH track in the
 // order of the subtitle languages first. When no such track exists, it
 // takes the forced track of the audio that plays, if a person in the
-// household hears that language. A commentary track is the last choice,
+// household hears that language. Among tracks of the same role, a text
+// track goes before an image track. A commentary track is the last choice,
 // because its text follows the commentary audio and not the film. An empty
 // track is never a choice.
 
@@ -29,6 +30,9 @@ pub struct Track {
     /// gives it.
     pub lang: String,
     pub title: String,
+    /// ffprobe's codec name, which is also the name mpv reports. An
+    /// external file has none, and a track with none counts as text.
+    pub codec: String,
     pub default: bool,
     pub forced: bool,
     pub hearing_impaired: bool,
@@ -37,6 +41,18 @@ pub struct Track {
     pub file: Option<String>,
     /// How many events the track holds. No count is not a count of zero.
     pub events: Option<i64>,
+}
+
+/// The codecs of the subtitle tracks that are pictures: the PGS track of a
+/// Blu-ray and the VobSub track of a DVD. mpv draws such a track as it is on
+/// the disc, so the display's house style does not change its font. Every
+/// other codec is text.
+const IMAGE_CODECS: [&str; 2] = ["hdmv_pgs_subtitle", "dvd_subtitle"];
+
+impl Track {
+    fn is_image(&self) -> bool {
+        IMAGE_CODECS.contains(&self.codec.as_str())
+    }
 }
 
 /// The one role a track takes.
@@ -295,7 +311,12 @@ fn rank(sdh: &str, role: Role) -> u8 {
 }
 
 // The first track whose language matches and whose role is one of the
-// roles: by the rank of its role, then the default flag, then track order.
+// roles: by the rank of its role, then a text track before an image track,
+// then the default flag, then track order. The display draws a text track
+// in the house style and an image track as the disc made it, so a text
+// track is the better pick when the role is the same. The role still
+// outranks the kind, so with `sdh: prefer` an SDH image track goes before
+// a full text track.
 fn best(
     tracks: &[Classified],
     matches: impl Fn(&str) -> bool,
@@ -306,6 +327,12 @@ fn best(
         .iter()
         .enumerate()
         .filter(|(_, one)| roles.contains(&one.role) && matches(&one.language))
-        .min_by_key(|(_, one)| (rank(sdh, one.role), !one.track.default))
+        .min_by_key(|(_, one)| {
+            (
+                rank(sdh, one.role),
+                one.track.is_image(),
+                !one.track.default,
+            )
+        })
         .map(|(index, _)| index)
 }

@@ -96,7 +96,7 @@ func TestAFileOpenWhenTheSidecarConnectsGetsItsSubtitleTrack(t *testing.T) {
 		mustMatchAll(t, log.lines(), []string{
 			"command: connected to mpv's socket",
 			`command: the sidecar connected to mpv's socket, so the sidecar chose subtitle track 2 (eng, full, 569 events) for item 1, ` +
-				`because it is the first full or SDH track in en, sent ["set_property","sid",2] to mpv, mpv answered success`,
+				`because it ranks first of the full and SDH tracks in en, sent ["set_property","sid",2] to mpv, mpv answered success`,
 		})
 	})
 }

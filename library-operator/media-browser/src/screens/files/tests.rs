@@ -1,5 +1,5 @@
 use super::*;
-use crate::tracks::preferences::{AUTO, ON, PREFER};
+use crate::tracks::preferences::{AUTO, AVOID, ON, PREFER};
 
 const REMUX: &str = "Film (2024)/Film (2024) [Remux-2160p].mkv";
 const ENCODE: &str = "Film (2024)/Film (2024) [Bluray-1080p].mkv";
@@ -237,8 +237,13 @@ fn a_subtitle_row_names_its_format_its_lines_and_its_role_and_an_empty_track_tak
 fn the_dot_marks_the_subtitle_track_the_rule_chooses() {
     let subtitles =
         |preferences: &Preferences| playing(group(&section(preferences).blocks[0], "Subtitles"));
-    assert_eq!(subtitles(&english(ON, "")), [0]);
-    assert_eq!(subtitles(&english(ON, PREFER)), [1]);
+    // The SRT file is a text track, so it goes before the PGS tracks of
+    // the same role.
+    assert_eq!(subtitles(&english(ON, "")), [4]);
+    assert_eq!(subtitles(&english(ON, PREFER)), [4]);
+    // The role outranks the kind, so a full PGS track goes before an SDH
+    // text file when the household avoids SDH.
+    assert_eq!(subtitles(&english(ON, AVOID)), [0]);
     assert_eq!(subtitles(&english(AUTO, "")), [2]);
 }
 

@@ -50,6 +50,7 @@ fn track(value: &Value) -> Track {
         hearing_impaired: flags.iter().any(|flag| flag == "hi"),
         file,
         events: value["events"].as_i64(),
+        codec: text(value, "codec"),
     }
 }
 

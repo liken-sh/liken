@@ -44,6 +44,15 @@ const (
 // in its language counts as forced, even when no flag or title says so.
 const forcedShare = 5
 
+// The codecs of the subtitle tracks that are pictures: the PGS track of a
+// Blu-ray and the VobSub track of a DVD. mpv draws such a track as it is
+// on the disc, so the house style of the display's subtitles cannot change
+// its font. Every other codec, such as subrip and ass, is text.
+const (
+	codecPGS    = "hdmv_pgs_subtitle"
+	codecVobSub = "dvd_subtitle"
+)
+
 // mpvTrack is one entry of mpv's track-list property. FFIndex is the
 // stream's index in its container, the same index that ffprobe reports.
 // An external file is its own container, so its FFIndex is 0 and only its
@@ -53,6 +62,7 @@ type mpvTrack struct {
 	Type             string `json:"type"`
 	Lang             string `json:"lang"`
 	Title            string `json:"title"`
+	Codec            string `json:"codec"`
 	Default          bool   `json:"default"`
 	Forced           bool   `json:"forced"`
 	HearingImpaired  bool   `json:"hearing-impaired"`
@@ -60,6 +70,12 @@ type mpvTrack struct {
 	ExternalFilename string `json:"external-filename"`
 	FFIndex          *int   `json:"ff-index"`
 	Selected         bool   `json:"selected"`
+}
+
+// isImage reports whether the track is a set of pictures. A track with no
+// codec counts as text, and so does an external file.
+func (track mpvTrack) isImage() bool {
+	return track.Codec == codecPGS || track.Codec == codecVobSub
 }
 
 // subtitleTrack is one subtitle track with its role. language is the base
@@ -295,7 +311,8 @@ type subtitleChoice struct {
 //
 // In auto mode, audio in the first of audioLanguages gets only its forced
 // track, or no subtitles. Otherwise it chooses, in order, a full or SDH
-// track in a language to read, the forced track of the audio when
+// track in a language to read (a text track before an image track, when
+// the role ranks the same), the forced track of the audio when
 // audioLanguages has the audio's language, a forced track in a language
 // to read, a full or SDH track with no language, and a commentary track in
 // a language to read. It never chooses an empty track.
@@ -317,7 +334,7 @@ func chooseSubtitle(tracks []subtitleTrack, audioLanguage string, prefs subtitle
 	}
 	for _, wanted := range reading {
 		if pick := bestTrack(tracks, wanted, readerRank(prefs.SDH), roleFull, roleSDH); pick != nil {
-			return subtitleChoice{track: pick, reason: "it is the first full or SDH track in " + wanted}
+			return subtitleChoice{track: pick, reason: "it ranks first of the full and SDH tracks in " + wanted}
 		}
 	}
 	if forced != nil && slices.ContainsFunc(prefs.AudioLanguages, func(wanted string) bool {
@@ -375,8 +392,12 @@ func untaggedTrack(tracks []subtitleTrack, rank func(string) int) *mpvTrack {
 }
 
 // bestOf returns the track whose language matches and whose role is one
-// of roles, or nil. It orders by the rank of the role, then the default
-// flag, then track order.
+// of roles, or nil. It orders by the rank of the role, then a text track
+// before an image track, then the default flag, then track order. The
+// display draws a text track in the house style and an image track as the
+// disc made it, so a text track is the better pick when the role is the
+// same. The role still outranks the kind, so with sdh prefer an SDH image
+// track goes before a full text track.
 func bestOf(tracks []subtitleTrack, matches func(string) bool, rank func(string) int, roles []string) *mpvTrack {
 	var candidates []subtitleTrack
 	for _, one := range tracks {
@@ -391,9 +412,19 @@ func bestOf(tracks []subtitleTrack, matches func(string) bool, rank func(string)
 		if order := cmp.Compare(rank(a.role), rank(b.role)); order != 0 {
 			return order
 		}
+		if order := cmp.Compare(imageOrder(a.track), imageOrder(b.track)); order != 0 {
+			return order
+		}
 		return cmp.Compare(defaultOrder(a.track), defaultOrder(b.track))
 	})
 	return &candidates[0].track
+}
+
+func imageOrder(track mpvTrack) int {
+	if track.isImage() {
+		return 1
+	}
+	return 0
 }
 
 func defaultOrder(track mpvTrack) int {

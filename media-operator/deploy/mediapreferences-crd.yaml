@@ -78,7 +78,8 @@ spec:
                   description: >-
                     When subtitles show. With `on`, the playback pod shows the
                     first full or SDH track in the order of
-                    `subtitleLanguages`. When there is none, it shows the
+                    `subtitleLanguages`, and a text track goes before an
+                    image track. When there is none, it shows the
                     forced track of the audio's language, if that language is
                     in `audioLanguages`. With `auto`, audio in the first
                     language of `audioLanguages` shows only its forced track,

@@ -228,6 +228,7 @@ fn subtitle_rows(
         .map(|stream| subtitle::Track {
             lang: stream.language.clone(),
             title: stream.title.clone(),
+            codec: stream.codec.clone(),
             default: stream.default,
             forced: stream.forced,
             events: stream.events,

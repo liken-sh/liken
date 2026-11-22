@@ -15,11 +15,12 @@ import (
 
 // ruleTrack is one track of the shared cases. An external track has a
 // file, and an embedded track has none. The flag values are default,
-// forced, and hi.
+// forced, and hi. A track with no codec is a text track.
 type ruleTrack struct {
 	File   string   `json:"file"`
 	Lang   string   `json:"lang"`
 	Title  string   `json:"title"`
+	Codec  string   `json:"codec"`
 	Flags  []string `json:"flags"`
 	Events *int64   `json:"events"`
 }
@@ -86,7 +87,7 @@ func mpvTracks(tracks []ruleTrack) ([]mpvTrack, []PlaySubtitle) {
 		id := index + 1
 		ffIndex := id + 1
 		track := mpvTrack{
-			ID: id, Type: trackTypeSub, Lang: one.Lang, Title: one.Title, FFIndex: &ffIndex,
+			ID: id, Type: trackTypeSub, Lang: one.Lang, Title: one.Title, Codec: one.Codec, FFIndex: &ffIndex,
 			Default:         slices.Contains(one.Flags, "default"),
 			Forced:          slices.Contains(one.Flags, "forced"),
 			HearingImpaired: slices.Contains(one.Flags, "hi"),

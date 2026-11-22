@@ -355,6 +355,9 @@ one `media-operator` chooses by role, under `subtitles: on` or `auto`,
 as
 [How the subtitle track is chosen](https://liken.sh/media/docs/reference/mediapreferences/#how-the-subtitle-track-is-chosen)
 describes.
+Among tracks of the same role, the rule takes a text track before an
+image track, such as the PGS track of a Blu-ray, so a film with both
+marks the text track.
 With `subtitles: off`, or with no mode stated, no subtitle row has a dot.
 A `Play` that states its own preferences can take other tracks than the
 page marks, because the page reads the `Player`'s preferences before any
