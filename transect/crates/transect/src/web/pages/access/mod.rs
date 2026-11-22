@@ -24,7 +24,7 @@ pub use account::{service_account_page, subject_page};
 pub use namespace::namespace_access_page;
 use transect_access::access::ways::{Isolation, Sources, Ways};
 use transect_access::access::{AccountsPage, Look, WaysPage};
-use transect_graph::edges::{Endpoint, Kind, Object, Shown};
+use transect_graph::edges::{Endpoint, Kind, Object};
 use transect_network::policy::{NamespaceReach, Reach};
 pub use workload::access_page;
 
@@ -58,7 +58,7 @@ pub fn accounts_page(model: &Model) -> AccountsPage {
 /// policies and sign-ins that each one passes through.
 pub fn ways_page(model: &Model) -> WaysPage {
     let snapshot = &model.snapshot;
-    let allowed = model.allowed(&Shown::default());
+    let allowed = model.allowed();
     let open = snapshot.namespaces.iter().filter_map(|namespace| {
         let name = namespace.metadata.name.clone()?;
         matches!(allowed.of_namespace(&name), Some(NamespaceReach::Open)).then_some(name)
@@ -78,8 +78,8 @@ pub fn ways_page(model: &Model) -> WaysPage {
 /// snapshot.
 pub fn read_ways(model: &Model) -> Ways {
     let snapshot = &model.snapshot;
-    let graph = model.graph(&Shown::default());
-    let allowed = model.allowed(&Shown::default());
+    let graph = model.graph();
+    let allowed = model.allowed();
     let objects = |endpoints: Vec<&Endpoint>| {
         let found = endpoints.into_iter().filter_map(|end| match end {
             Endpoint::Object(object) => Some(object.clone()),

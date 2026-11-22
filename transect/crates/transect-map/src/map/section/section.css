@@ -133,20 +133,6 @@
   color: var(--ink-muted);
 }
 
-.section-key {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 24px;
-  margin-bottom: 12px;
-}
-
-.section-key > .section-legend { margin: 0; }
-
-.section-key > .edge-menu {
-  margin: 0 0 0 auto;
-}
-
 .section-box {
   position: absolute;
   box-sizing: border-box;

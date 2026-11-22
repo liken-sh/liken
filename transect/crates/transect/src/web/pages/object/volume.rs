@@ -15,7 +15,7 @@ use super::super::super::model::Model;
 use super::super::super::snapshot::Snapshot;
 use super::{card, refer_object};
 use transect_graph::edges::Claim;
-use transect_graph::edges::{Object, Shown};
+use transect_graph::edges::Object;
 use transect_graph::links::Reference;
 use transect_ground::storage::Backend;
 use transect_ground::volumes::{cron_jobs, fullness, mounters};
@@ -106,7 +106,7 @@ pub fn volume_page(
     if let Some(volume) = volume {
         sections.push(where_stored(snapshot, volume));
     }
-    let graph = model.graph(&Shown::default());
+    let graph = model.graph();
     // The card describes the claim, like the title, when there is one.
     let (titled, created) = match (&claim_key, claim) {
         (Some(key), Some(claim)) => (
@@ -115,7 +115,7 @@ pub fn volume_page(
         ),
         _ => (object.clone(), volume.map(|volume| &volume.metadata)),
     };
-    let card = card::card(snapshot, &titled, created, &graph, level, false, now);
+    let card = card::card(snapshot, &titled, created, graph, level, false, now);
     Some(ObjectPage {
         kind: kind.into(),
         name,

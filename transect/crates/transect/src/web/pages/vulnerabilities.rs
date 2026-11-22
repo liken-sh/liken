@@ -4,7 +4,6 @@ use k8s_openapi::jiff::Timestamp;
 
 use super::super::model::Model;
 use super::{WorkloadAt, read_workloads, workload_card};
-use transect_graph::edges::Shown;
 use transect_map::map::vulnerabilities::WorkloadVulnerabilitiesPage;
 use transect_observe::usage;
 use transect_resources::layers::Layers;
@@ -25,7 +24,6 @@ pub fn vulnerabilities_page(
         resource,
         name,
     } = at;
-    let shown = Shown::default();
     let build = |map: &transect_map::map::ClusterMap,
                  contents: transect_map::map::WorkloadContents| {
         let layer = map.layer_of(namespace)?.to_owned();
@@ -52,5 +50,5 @@ pub fn vulnerabilities_page(
             workload_path,
         })
     };
-    read_workloads(model, layers, usage, namespace, &shown, build, now)
+    read_workloads(model, layers, usage, namespace, build, now)
 }

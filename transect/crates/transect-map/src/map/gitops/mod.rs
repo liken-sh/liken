@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 
 use askama::Template;
 
-use super::EdgeRow;
 use transect_frame::frame::crumbs::Crumb;
 use transect_graph::edges::Object;
 use transect_supply::gitops::Detail;
@@ -18,7 +17,6 @@ use transect_supply::gitops::Detail;
 #[derive(Template)]
 #[template(path = "map/gitops/gitops.html", blocks = ["main"])]
 pub struct GitOpsPage {
-    pub edge_row: EdgeRow,
     pub detail: Detail,
     /// The layer of its namespace, for the crumb, when the map draws
     /// that namespace.
@@ -75,7 +73,6 @@ impl GitOpsPage {
             href: href(source),
         });
         Self {
-            edge_row: EdgeRow::default(),
             reconciling: groups(reconciling, &href),
             source,
             detail,
@@ -108,10 +105,6 @@ impl GitOpsPage {
         siblings.sort_by(|a, b| a.name.cmp(&b.name));
         siblings.dedup();
         Self { siblings, ..self }
-    }
-
-    pub fn with_edge_row(self, edge_row: EdgeRow) -> Self {
-        Self { edge_row, ..self }
     }
 
     pub fn name(&self) -> &str {

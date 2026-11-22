@@ -11,7 +11,7 @@ use transect_access::access::namespace::{NamespaceAccessPage, Served, Way, pod_s
 use transect_access::access::ways::page::Dot;
 use transect_access::access::ways::{self, Gate, State, Through};
 use transect_access::access::{ALL, Look as RowLook};
-use transect_graph::edges::{Object, Shown};
+use transect_graph::edges::Object;
 use transect_network::policy::Reach;
 use transect_resources::layers::Layers;
 
@@ -53,18 +53,16 @@ pub fn namespace_access_page(
         .map(String::as_str);
     let minute = model.minute(now);
     let mut health = minute.health.clone();
-    let shown = Shown::default();
-    let graph = model.graph(&shown);
-    let edge_set = model.edge_set(&shown);
-    let kept = (&edge_set.forges, &minute.logged[..]);
+    let graph = model.graph();
+    let kept = (&model.forges, &minute.logged[..]);
     let card = snapshot.card(
         namespace,
         health.remove(namespace).unwrap_or_default(),
-        &graph,
+        graph,
         kept,
-        model.allowed(&shown),
+        model.allowed(),
     );
-    let card = card.with_loops(&edge_set.loops);
+    let card = card.with_loops(&model.loops);
     let page = NamespaceAccessPage {
         namespace: namespace.into(),
         layer,
@@ -83,7 +81,7 @@ pub fn namespace_access_page(
 fn served(model: &Model, namespace: &str, look: &Look) -> Vec<Served> {
     let snapshot = &model.snapshot;
     let ways = model.ways();
-    let allowed = model.allowed(&Shown::default());
+    let allowed = model.allowed();
     let workloads = snapshot.workloads();
     let mut owners: Vec<&Object> = snapshot
         .ownership

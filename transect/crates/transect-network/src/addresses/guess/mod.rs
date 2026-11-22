@@ -18,9 +18,23 @@ use serde_json::Value;
 
 use super::StatedReading;
 use transect_graph::edges::{
-    ClusterScoped, Edge, Endpoint, Graph, Kind, Object, Plurals, Provenance, TOGGLED,
+    ClusterScoped, Edge, Endpoint, Graph, Kind, Object, Plurals, Provenance,
 };
 use transect_resources::knowledge::{Clue, Hint, Kinds, clues};
+
+/// The kinds of an edge from an object that already show its relation
+/// to an end, so a clue to that end draws no guessed edge.
+const RELATED_BY: [Kind; 9] = [
+    Kind::RunsOn,
+    Kind::DependsOn,
+    Kind::AuthenticatesThrough,
+    Kind::StoresOn,
+    Kind::Holds,
+    Kind::ReconcilesFrom,
+    Kind::ControlledBy,
+    Kind::AllowedToCall,
+    Kind::ManagedBy,
+];
 
 /// The cluster state that clues resolve against.
 pub struct Lookup<'a> {
@@ -52,9 +66,9 @@ pub fn guesses(
 
 /// The guessed depends-on edges that the `clues` of `from` draw. A clue
 /// draws no edge when `graph` already joins `from` to its end by a kind
-/// in `TOGGLED` or by `ManagedBy`, because the edge already shows that
-/// relation. It also draws none when an earlier clue drew an edge to the
-/// same end, or when the end is an object that `from` owns.
+/// in `RELATED_BY`, because the edge already shows that relation. It
+/// also draws none when an earlier clue drew an edge to the same end,
+/// or when the end is an object that `from` owns.
 pub fn guessed(from: &Object, clues: &[Clue], lookup: &Lookup, graph: &Graph) -> Vec<Edge> {
     let start = Endpoint::Object(from.clone());
     let watched_kinds: HashSet<(&str, &str)> = lookup
@@ -72,9 +86,8 @@ pub fn guessed(from: &Object, clues: &[Clue], lookup: &Lookup, graph: &Graph) ->
             },
         };
         for to in ends {
-            let joined = TOGGLED
+            let joined = RELATED_BY
                 .into_iter()
-                .chain([Kind::ManagedBy])
                 .any(|kind| graph.leaving(kind, &start).contains(&&to));
             let seen = drawn.iter().any(|edge| edge.to == to);
             if joined || seen || lookup.reading.owns(from, &to) {

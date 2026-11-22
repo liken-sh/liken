@@ -7,8 +7,8 @@ use std::hash::Hash;
 use std::sync::{Arc, Mutex};
 
 /// A cache of the values for up to `cap` keys. A new key at the cap
-/// clears the cache, so a viewer who tries many sets of edge kinds does
-/// not grow it without limit.
+/// clears the cache, so a cache keyed by the minute does not grow as
+/// the minutes pass.
 pub struct Memo<K, V> {
     cap: usize,
     kept: Mutex<HashMap<K, Arc<V>>>,

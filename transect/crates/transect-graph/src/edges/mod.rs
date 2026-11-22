@@ -15,7 +15,6 @@ pub mod fixtures;
 mod index;
 mod loops;
 pub mod provenance;
-mod shown;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -28,7 +27,6 @@ pub use loops::Loop;
 #[cfg(any(test, feature = "fixtures"))]
 pub use loops::fixtures as loop_fixtures;
 pub use provenance::{Provenance, Stated, Way};
-pub use shown::{Shown, TOGGLED};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Kind {
@@ -82,25 +80,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// One line on what an edge of this kind means, for the edge row.
-    pub fn meaning(self) -> &'static str {
-        match self {
-            Self::RunsOn => "A pod runs on a machine.",
-            Self::DependsOn => "A workload calls what an address it is configured with reaches.",
-            Self::AuthenticatesThrough => "An application signs its users in through a provider.",
-            Self::StoresOn => "A workload keeps its data where its volumes are.",
-            Self::Holds => "A workload's pods hold a device that a ResourceClaim gave them.",
-            Self::ReconcilesFrom => "A GitOps tool applies an object from a source.",
-            Self::ControlledBy => "An operator's controller reconciles a custom resource.",
-            Self::ManagedBy => "An object belongs to the workload that owns it.",
-            Self::AllowedToCall => "NetworkPolicies let one workload call another.",
-            Self::Selects => "A Service sends its traffic to a workload's pods.",
-            Self::RoutesTo => "An Ingress sends requests to a Service.",
-            Self::PartOf => "An object is part of a larger one, as its kind knowledge declares.",
-        }
-    }
-
-    /// The kind as a phrase, for tags, card lines, and the edge row.
+    /// The kind as a phrase, for tags and card lines.
     pub fn words(self) -> &'static str {
         match self {
             Self::RunsOn => "runs on",
@@ -217,12 +197,11 @@ pub struct Edge {
     pub provenance: Provenance,
 }
 
-/// The edges of one build of the graph, and the kinds that one view
-/// shows.  `only` makes a view's copy without copying the edges.
+/// The edges of one build of the graph.  A clone shares the edges
+/// without copying them.
 #[derive(Clone, Debug, Default)]
 pub struct Graph {
     edges: Arc<Edges>,
-    shown: Shown,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -258,11 +237,9 @@ impl Graph {
         }
     }
 
-    /// The edges of the kinds this view shows, in the order the sources
-    /// returned them.
+    /// Every edge, in the order the sources returned them.
     fn iter(&self) -> impl Iterator<Item = &Edge> {
-        let shown = &self.shown;
-        self.edges.list.iter().filter(|edge| shown.is_on(edge.kind))
+        self.edges.list.iter()
     }
 
     /// The edges with an object in `namespace` at either end.
@@ -270,14 +247,6 @@ impl Graph {
         self.iter().filter(move |edge| {
             edge.from.in_namespace(namespace) || edge.to.in_namespace(namespace)
         })
-    }
-
-    /// The same edges, with only the kinds that `shown` turns on.
-    pub fn only(&self, shown: &Shown) -> Self {
-        Self {
-            edges: self.edges.clone(),
-            shown: shown.clone(),
-        }
     }
 
     /// Every `kind` edge, in the order the sources returned them.
@@ -321,26 +290,21 @@ impl Graph {
         edges.filter(move |edge| &edge.to == to)
     }
 
-    /// The edges of every kind this view shows that arrive at `to`, in
-    /// the order the sources returned them.
+    /// The edges of every kind that arrive at `to`, in the order the sources returned them.
     pub fn every_edge_reaching<'a>(&'a self, to: &'a Endpoint) -> impl Iterator<Item = &'a Edge> {
         self.iter().filter(move |edge| &edge.to == to)
     }
 
-    /// The edges of `kind` that `index` lists for `end`, or none when
-    /// this view does not show `kind`.  The index is keyed by a hash of
-    /// the end, so the caller must still check each edge's end.
+    /// The edges of `kind` that `index` lists for `end`.  The index is
+    /// keyed by a hash of the end, so the caller must still check each
+    /// edge's end.
     fn at<'a>(
         &'a self,
         index: &'a Index,
         kind: Kind,
         end: &Endpoint,
     ) -> impl Iterator<Item = &'a Edge> {
-        let found = if self.shown.is_on(kind) {
-            index.candidates(kind, end)
-        } else {
-            &[]
-        };
+        let found = index.candidates(kind, end);
         found.iter().map(|&at| &self.edges.list[at])
     }
 }
@@ -450,30 +414,5 @@ mod tests {
         let graph = Graph::new([edges]);
         let found = graph.leaving(Kind::Selects, &object("Service", "web"));
         assert_eq!(found, expected.iter().collect::<Vec<_>>());
-    }
-
-    #[rstest]
-    #[case::on(None, 1)]
-    #[case::off(Some(""), 0)]
-    fn a_kind_turned_off_returns_no_edges(#[case] edges: Option<&str>, #[case] count: usize) {
-        let all = Graph::new([vec![edge(
-            Kind::DependsOn,
-            object("Deployment", "web"),
-            object("Deployment", "db"),
-        )]]);
-        let graph = all.only(&Shown::parse(edges));
-        assert_eq!(
-            graph
-                .leaving(Kind::DependsOn, &object("Deployment", "web"))
-                .len(),
-            count
-        );
-        assert_eq!(
-            graph
-                .reaching(Kind::DependsOn, &object("Deployment", "db"))
-                .len(),
-            count
-        );
-        assert_eq!(graph.of_kind(Kind::DependsOn).count(), count);
     }
 }

@@ -5,7 +5,7 @@
 
 use super::super::model::Model;
 use k8s_openapi::jiff::Timestamp;
-use transect_graph::edges::{Device, Endpoint, Kind, Object, Provenance, Shown};
+use transect_graph::edges::{Device, Endpoint, Kind, Object, Provenance};
 use transect_graph::links::Reference;
 use transect_ground::machines::Facts;
 use transect_map::map::{
@@ -84,7 +84,6 @@ pub fn machine_page(
         underneath_none: underneath_none(snapshot, name),
         path,
     };
-    // The page shows no graph edges, so it has no edge kinds to toggle.
     Some(page)
 }
 
@@ -106,7 +105,7 @@ fn devices(model: &Model, name: &str, href: &dyn Fn(&Object) -> Option<String>) 
     let snapshot = &model.snapshot;
     let knowledge = &snapshot.resources.devices;
     let attributes = |device: &Device| snapshot.devices.attributes(device);
-    let graph = model.graph(&Shown::default());
+    let graph = model.graph();
     let names = |device: &Device| -> Vec<(String, Reference)> {
         let from = Endpoint::Device(device.clone());
         let edges = DEVICE_EDGE_KINDS
@@ -173,7 +172,7 @@ fn underneath(model: &Model, name: &str) -> Option<Underneath> {
     let snapshot = &model.snapshot;
     let (object, found) = snapshot.underneath(name)?;
     let knowledge = snapshot.kinds.of_object(&object)?;
-    let graph = model.graph(&Shown::default());
+    let graph = model.graph();
     let relations = snapshot.relations.get(&object).into_iter().flatten();
     let related = relations.map(|relation| {
         Related::of(relation, None, &snapshot.plurals, |other| {
@@ -181,7 +180,7 @@ fn underneath(model: &Model, name: &str) -> Option<Underneath> {
             snapshot.ownership.workloads(namespace).any(|w| w == other)
         })
     });
-    let controller = controller(&graph, &object).map(|controller| Reference {
+    let controller = controller(graph, &object).map(|controller| Reference {
         href: snapshot.pages().href(&controller),
         text: controller.name,
     });

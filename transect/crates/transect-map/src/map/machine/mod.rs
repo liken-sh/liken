@@ -50,7 +50,8 @@ pub struct MachinePage {
     /// Why the bars show no usage, when they show none.
     pub usage_note: Option<transect_resources::resources::OffLine>,
     pub drivers: Vec<Driver>,
-    /// Why no device is listed, when the `holds` edge kind is off.
+    /// Why no device is listed, when `transect` cannot read the
+    /// cluster's devices.
     pub devices_note: Option<&'static str>,
     pub volumes: Vec<VolumeLine>,
     pub logs: OwnLogs,

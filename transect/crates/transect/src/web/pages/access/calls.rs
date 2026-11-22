@@ -10,7 +10,7 @@ use crate::web::model::Model;
 use transect_access::access::drawing::Gate;
 use transect_access::access::drawing::reach::{Group, Inside, Out};
 use transect_access::access::ways::Isolation;
-use transect_graph::edges::{Endpoint, Kind, Object, Shown};
+use transect_graph::edges::{Endpoint, Kind, Object};
 use transect_graph::links::Part;
 use transect_map::map::section_drawing::SectionBox;
 use transect_network::policy::{Admission, Caller, Ports, Reach as Called};
@@ -46,7 +46,7 @@ fn nearness(admissions: &[Admission], me: &Caller, namespace: &str) -> u8 {
 
 /// The `NetworkPolicy` gate on a line from a `Service` into `object`.
 pub fn isolation(model: &Model, object: &Object) -> Gate {
-    let allowed = model.allowed(&Shown::default());
+    let allowed = model.allowed();
     let isolation = match allowed.reach(object) {
         Some(Called::Isolated(_)) => Some(Isolation::Isolated),
         Some(Called::MachineNetwork) => Some(Isolation::MachineNetwork),
@@ -59,7 +59,7 @@ pub fn isolation(model: &Model, object: &Object) -> Gate {
 
 /// The callers that may reach `object` from inside the cluster.
 pub fn inside(model: &Model, object: &Object, ports: &mut Served, look: &Look) -> Inside {
-    let allowed = model.allowed(&Shown::default());
+    let allowed = model.allowed();
     let any = |line: &str, label: &str, title: &str| Inside::Any {
         boxed: Box::new(plain("any pod".into(), vec![line.into()], None)),
         label: label.into(),
@@ -120,7 +120,7 @@ fn group(
     ports: &mut Served,
     look: &Look,
 ) -> Option<Group> {
-    let allowed = model.allowed(&Shown::default());
+    let allowed = model.allowed();
     let namespace = object.namespace.as_deref();
     let mut boxes: Vec<SectionBox> = Vec::new();
     if admission.everywhere {
@@ -247,8 +247,8 @@ fn group(
 /// it may call it on.  Workloads whose rules name `object` or its
 /// namespace come first.  `fold` limits how many are drawn one by one.
 pub fn calls(model: &Model, object: &Object, look: &Look) -> Vec<SectionBox> {
-    let allowed = model.allowed(&Shown::default());
-    let graph = model.graph(&Shown::default());
+    let allowed = model.allowed();
+    let graph = model.graph();
     let from = Endpoint::Object(object.clone());
     let me = Caller::Workload {
         namespace: object.namespace.clone().unwrap_or_default(),
@@ -308,7 +308,7 @@ fn fold(mut boxes: Vec<SectionBox>) -> Vec<SectionBox> {
 /// What limits the outgoing calls of `object`: the `NetworkPolicy`
 /// objects that restrict its egress, or no limit.
 pub fn out(model: &Model, object: &Object) -> Out {
-    let allowed = model.allowed(&Shown::default());
+    let allowed = model.allowed();
     let on_machine = allowed.reach(object) == Some(&Called::MachineNetwork);
     match allowed.limits_out(object) {
         Some(names) if !on_machine => {

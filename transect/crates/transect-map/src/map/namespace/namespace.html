@@ -22,7 +22,6 @@
 <a class="switch switch-current" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}" aria-current="page">{{ namespace }}</a>
 {% call frame::tabs(tabs()) %}{% endcall %}
 </nav>
-{% include "map/edge_row.html" %}
 <div class="bands">
 {%- for band in bands %}
 <section class="band{% if band.open %} band-open{% else %} band-folded{% endif %}" id="{{ band.name }}" aria-label="{{ band.name }}{% if band.open %}, with {{ namespace }} open{% endif %}">

@@ -6,8 +6,8 @@ use k8s_openapi::jiff::Timestamp;
 
 use super::{WorkloadAt, has_page, read_workloads, workload_card};
 use crate::web::model::Model;
-use transect_graph::edges::{Object, Shown};
-use transect_map::map::{EdgeRow, SectionContents, SectionPage};
+use transect_graph::edges::Object;
+use transect_map::map::{SectionContents, SectionPage};
 use transect_observe::usage;
 use transect_resources::layers::Layers;
 
@@ -19,7 +19,6 @@ pub fn section_page(
     layers: &Layers,
     usage: &usage::Reading,
     at: WorkloadAt,
-    shown: &Shown,
     now: Timestamp,
 ) -> Option<SectionPage> {
     let WorkloadAt {
@@ -34,7 +33,6 @@ pub fn section_page(
         layers,
         usage,
         namespace,
-        shown,
         |map, contents| {
             let pages = |object: &Object| has_page(object, &contents);
             let drawn = SectionContents {
@@ -48,7 +46,6 @@ pub fn section_page(
                 issuers: contents.issuers,
                 storage: contents.storage,
                 machines: &machines,
-                shown,
                 intents: contents.intents,
                 has_page: &pages,
                 traffic: snapshot.traffic(),
@@ -64,7 +61,6 @@ pub fn section_page(
         let title = outsides.box_of(name).to_string();
         (title, outsides.page_of(name), outsides.link_of(name))
     });
-    let row = EdgeRow::build(&snapshot.offered(), shown, &page.path);
     let access = super::has_access(model, namespace, resource, name);
-    Some(page.with_edge_row(row).with_access(access))
+    Some(page.with_access(access))
 }

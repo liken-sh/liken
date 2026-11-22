@@ -4,16 +4,6 @@ cluster / if node-alpha were lost
 access vulnerabilities kinds
 Search /
 esc
-Edges
-The map draws no lines. A selected namespace's relations, the loop marks, and a loss's cascade follow the edges of the kinds that are on. Edges
-runs on A pod runs on a machine.
-depends on A workload calls what an address it is configured with reaches.
-authenticates through An application signs its users in through a provider.
-stores on A workload keeps its data where its volumes are.
-holds A workload's pods hold a device that a ResourceClaim gave them.
-reconciles from A GitOps tool applies an object from a source.
-controlled by An operator's controller reconciles a custom resource.
-allowed to call NetworkPolicies let one workload call another.
 apps
 1 namespace
 acme-shop

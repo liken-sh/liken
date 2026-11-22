@@ -17,7 +17,7 @@ use transect_access::access::drawing::page::AccessPage;
 use transect_access::access::drawing::reach::{self, Path, Reach, Right, ServiceBox, WayBox};
 use transect_access::access::drawing::{self as drawn, Gate};
 use transect_access::access::ways::{self, Backend, Through};
-use transect_graph::edges::{Endpoint, Kind, Object, Shown};
+use transect_graph::edges::{Endpoint, Kind, Object};
 use transect_map::map::WorkloadContents;
 use transect_map::map::section_drawing::{Look as BoxLook, SectionBox};
 use transect_observe::usage;
@@ -30,7 +30,6 @@ pub fn access_page(
     layers: &Layers,
     usage: &usage::Reading,
     at: WorkloadAt,
-    shown: &Shown,
     now: Timestamp,
 ) -> Option<AccessPage> {
     let WorkloadAt {
@@ -43,7 +42,6 @@ pub fn access_page(
         layers,
         usage,
         namespace,
-        shown,
         |map, contents| {
             let layer = map.layer_of(namespace)?.to_owned();
             let object =

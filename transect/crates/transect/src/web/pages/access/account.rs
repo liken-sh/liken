@@ -14,7 +14,7 @@ use transect_access::access::drawing::account::{self as drawn, Grant, Placing, S
 use transect_access::access::drawing::account_page::{AccountPage, Place};
 use transect_access::access::rules;
 use transect_access::access::{Account, Capability, Held, Scope, Via, Where};
-use transect_graph::edges::{Object, Shown};
+use transect_graph::edges::Object;
 use transect_graph::links::Part;
 use transect_map::map::section_drawing::{Look as BoxLook, SectionBox};
 use transect_resources::layers::Layers;
@@ -43,12 +43,12 @@ pub fn service_account_page(
     let object = Object::new("", "ServiceAccount", Some(namespace), name);
     let account = Account::service_account(namespace, name);
     let look = Look::new(model);
-    let graph = model.graph(&Shown::default());
+    let graph = model.graph();
     let card = super::super::object::card::card(
         snapshot,
         &object,
         Some(&meta.metadata),
-        &graph,
+        graph,
         None,
         false,
         now,

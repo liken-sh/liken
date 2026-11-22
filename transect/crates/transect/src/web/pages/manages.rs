@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use super::super::model::Model;
 use super::super::snapshot::Snapshot;
 use super::kinds::table;
-use transect_graph::edges::{Endpoint, Kind, Object, Provenance, Shown};
+use transect_graph::edges::{Endpoint, Kind, Object, Provenance};
 use transect_map::objects::{self, Manages};
 
 /// The workload `name` in `namespace` whose resource plural is
@@ -34,9 +34,8 @@ pub fn workload_at(
 fn controlled(
     model: &Model,
     workload: &Object,
-    shown: &Shown,
 ) -> BTreeMap<(String, String), (Vec<Object>, Provenance)> {
-    let graph = model.graph(shown);
+    let graph = model.graph();
     let end = Endpoint::Object(workload.clone());
     let mut by_kind: BTreeMap<(String, String), (Vec<Object>, Provenance)> = BTreeMap::new();
     for edge in graph.edges_reaching(Kind::ControlledBy, &end) {
@@ -70,10 +69,10 @@ pub fn rule(provenance: &Provenance) -> String {
 
 /// One table for each custom kind that `workload` controls. A kind that
 /// the snapshot has no store for is left out.
-pub fn manages(model: &Model, workload: &Object, shown: &Shown, now: Timestamp) -> Vec<Manages> {
+pub fn manages(model: &Model, workload: &Object, now: Timestamp) -> Vec<Manages> {
     let snapshot = &model.snapshot;
     let labels = objects::labels(snapshot.custom.iter().map(|(api, _)| api));
-    let by_kind = controlled(model, workload, shown);
+    let by_kind = controlled(model, workload);
     by_kind
         .into_iter()
         .filter_map(|(kind, (controlled, provenance))| {

@@ -5,16 +5,6 @@ access vulnerabilities kinds
 Search /
 esc
 acme-ops device-hub edge-proxy log-shipper metrics-relay sql-listener overview section logs access
-Edges
-Edges
-runs on A pod runs on a machine.
-depends on A workload calls what an address it is configured with reaches.
-authenticates through An application signs its users in through a provider.
-stores on A workload keeps its data where its volumes are.
-holds A workload's pods hold a device that a ResourceClaim gave them.
-reconciles from A GitOps tool applies an object from a source.
-controlled by An operator's controller reconciles a custom resource.
-allowed to call NetworkPolicies let one workload call another.
 Pods
 device-hub-rs-one node-alpha · 0 restarts
 mem no reading · no request · no limit

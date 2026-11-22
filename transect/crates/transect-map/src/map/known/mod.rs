@@ -19,7 +19,6 @@ mod sketch;
 
 use askama::Template;
 
-use super::EdgeRow;
 use crate::cards::WorkloadCard;
 use crate::objects::{Center, ObjectBoard, ObjectCard, Section};
 pub use crate::shapes::text::{End, Reading, Why};
@@ -40,7 +39,6 @@ use transect_resources::knowledge::{Count, KnownThrough};
 #[derive(Template)]
 #[template(path = "map/known/known.html", blocks = ["main"])]
 pub struct KnownPage {
-    pub edge_row: EdgeRow,
     pub namespace: String,
     pub layer: String,
     pub kind: String,
@@ -163,7 +161,6 @@ impl KnownPage {
             }),
         };
         Self {
-            edge_row: EdgeRow::default(),
             namespace,
             layer: board.layer,
             kind: object.kind.clone(),
@@ -233,11 +230,6 @@ impl KnownPage {
     /// Whether the page draws a diagram: the ring of boxes or a sketch.
     pub fn diagram(&self) -> bool {
         !self.boxes.is_empty() || self.sketch.is_some()
-    }
-
-    /// Adds the row of edge kinds above the main column.
-    pub fn with_edge_row(self, edge_row: EdgeRow) -> Self {
-        Self { edge_row, ..self }
     }
 
     /// The breadcrumbs. The layer's breadcrumb links to the cluster map

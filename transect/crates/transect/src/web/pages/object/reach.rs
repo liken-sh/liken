@@ -78,8 +78,8 @@ mod tests {
     /// listed under it.
     fn facts(object: &Object, title: &str) -> Vec<(String, Vec<String>)> {
         let model = fixture::model();
-        let graph = model.graph(&Default::default());
-        let sections = edges(&model.snapshot, object, &graph);
+        let graph = model.graph();
+        let sections = edges(&model.snapshot, object, graph);
         let section = sections.into_iter().find(|s| s.title == title).unwrap();
         let facts = section.facts.into_iter();
         facts

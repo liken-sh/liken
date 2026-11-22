@@ -11,7 +11,6 @@ use super::{Focus, cluster_page};
 use crate::web::model::Model;
 use crate::web::snapshot::Snapshot;
 use transect_cluster::ownership::{Entry, Ownership};
-use transect_graph::edges::Shown;
 use transect_map::map::relation::Relation;
 use transect_observe::usage;
 use transect_resources::layers::Layers;
@@ -60,7 +59,6 @@ spec: {{podSelector: {{}}, policyTypes: [Ingress], ingress: [{ingress}]}}"
         &Layers::default(),
         &usage::Reading::Off,
         Focus::Select(Some("shop")),
-        &Shown::default(),
         k8s_openapi::jiff::Timestamp::now(),
     );
     let tiles = page.map.bands.iter().flat_map(|band| &band.tiles);

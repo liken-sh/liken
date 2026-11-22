@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 
 use super::super::model::Model;
 use transect_graph::edges::Claim;
-use transect_graph::edges::{Endpoint, Kind, Object, Shown};
+use transect_graph::edges::{Endpoint, Kind, Object};
 use transect_ground::outside::Outside;
 use transect_ground::storage::{self, Type};
 use transect_map::map::ground::{Ground, GroundPage};
@@ -44,7 +44,7 @@ fn gathered<'a>(model: &'a Model, name: &'a str) -> Option<Gathered<'a>> {
     let claims = snapshot.storage.claims_on(title);
     // The page lists edges of every kind, whatever kinds the URL turns
     // off.
-    let graph = model.graph(&Shown::parse(None));
+    let graph = model.graph();
     let end = Endpoint::Outside(title.to_string());
     let reaching = |stores: bool| -> BTreeSet<Object> {
         let edges = graph.every_edge_reaching(&end);

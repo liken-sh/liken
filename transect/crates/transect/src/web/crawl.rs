@@ -11,7 +11,7 @@ use axum::http::Uri;
 use super::fixture;
 use super::model::Model;
 use super::render::{Part, Rendered, draw};
-use super::view::{self, View};
+use super::view::{self, Page};
 use transect_graph::edges::Object;
 use transect_observe::usage;
 
@@ -26,11 +26,11 @@ fn render(model: &Model, url: &str) -> Option<Rendered> {
     let Query(query) = Query::<view::Query>::try_from_uri(&uri).ok()?;
     // The router percent-decodes the path before it matches a view.
     let path = transect_graph::links::percent_decoded(uri.path().trim_start_matches('/'));
-    let view = View::at(&path, query)?;
+    let page = Page::at(&path, &query)?;
     let reads = transect_map::objects::reads::Reads::default();
     draw(
         model,
-        &view,
+        &page,
         Part::Whole,
         &usage::Reading::Off,
         &reads,
@@ -322,43 +322,6 @@ fn every_object_has_a_page(#[case] url: &str, #[case] shows: &[&str]) {
     let html = html.unwrap_or_else(|| panic!("the crawl did not reach {url}"));
     let missing: Vec<&&str> = shows.iter().filter(|text| !html.contains(**text)).collect();
     assert!(missing.is_empty(), "{url} lacks the text {missing:?}");
-}
-
-/// The edge-kind menu appears only on pages where the edge kinds change
-/// the drawing, and never in the masthead.
-#[rstest::rstest]
-#[case::the_map("/", true)]
-#[case::a_workload("/namespaces/acme-shop/deployments/storefront", true)]
-#[case::its_section("/namespaces/acme-shop/deployments/storefront/section", true)]
-#[case::its_access("/namespaces/acme-shop/deployments/storefront/access", false)]
-#[case::the_ways_in("/access", false)]
-#[case::the_kinds("/kinds", false)]
-#[case::one_kind("/kinds/gizmos.gizmos.example.test", false)]
-#[case::a_namespaces_list_of_a_kind("/namespaces/acme-shop/gizmos.gizmos.example.test", false)]
-#[case::a_generic_page("/namespaces/acme-shop/services/storefront-svc", false)]
-#[case::the_logs_lens("/namespaces/acme-shop/deployments/storefront/logs", false)]
-#[case::an_outside_system("/ground/archive-nas", false)]
-#[case::a_machine("/machines/node-alpha", false)]
-#[case::a_volume(
-    "/namespaces/acme-ledger/persistentvolumeclaims/data-ledger-db-0",
-    false
-)]
-fn shows_the_edge_menu_only_where_edge_kinds_change_the_drawing(
-    #[case] url: &str,
-    #[case] shown: bool,
-) {
-    let (pages, _) = crawl(&fixture::model());
-    let html = pages
-        .iter()
-        .find(|(found, _)| found == url)
-        .map(|(_, html)| html);
-    let html = html.unwrap_or_else(|| panic!("the crawl did not reach {url}"));
-    assert_eq!(html.contains("edge-menu"), shown, "edge menu on {url}");
-    let masthead = html.split("</header>").next().unwrap_or_default();
-    assert!(
-        !masthead.contains("edge-menu"),
-        "the masthead of {url} has the edge menu"
-    );
 }
 
 /// The namespace card beside the map lists the namespace's workloads as

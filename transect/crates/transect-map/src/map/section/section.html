@@ -25,12 +25,7 @@
 {% call frame::tabs(tabs()) %}{% endcall %}
 </nav>
 <p class="section-subtitle">{{ subtitle() }}</p>
-{#- The legend explains what the lines mean, and the edge kinds beside
-    it select which lines are drawn. -#}
-<div class="section-key">
 <p class="section-legend">{{ legend() }}</p>
-{% include "map/edge_row.html" %}
-</div>
 <div class="section-scroll">
 <section class="section-drawing" style="width: {{ width }}px; height: {{ height }}px; --section-width: {{ width }}px" aria-label="The section through {{ name }}">
 {%- for row in rows %}

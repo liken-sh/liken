@@ -8,6 +8,7 @@
 
 mod needs;
 pub(super) mod sentence;
+mod switches;
 mod tile_text;
 pub(super) mod tiles;
 
@@ -22,6 +23,8 @@ use k8s_openapi::jiff::Timestamp;
 use kube::core::ApiResource;
 
 use needs::{Need, needs, secrets};
+pub use switches::Switch;
+use switches::switches;
 use tile_text::claim_pages;
 use tiles::{PodTile, State, tiles};
 
@@ -44,7 +47,7 @@ use transect_network::addresses::{Depends, Unread};
 use transect_network::entry::{Endpoints, Entry, Issuers, Serving, TrafficResults};
 use transect_network::policy::Allowed;
 use transect_network::policy::Calls;
-use transect_observe::health::{Deciding, Health, Level};
+use transect_observe::health::{Deciding, Health};
 use transect_observe::usage::Usage;
 use transect_resources::intent::Intents;
 use transect_resources::knowledge::{Definitions, Kinds, KnownThrough, Related, Relation};
@@ -58,8 +61,6 @@ use transect_supply::images::{Known, Origins};
 #[derive(Template)]
 #[template(path = "map/workload/workload.html", blocks = ["main"])]
 pub struct WorkloadPage {
-    /// The row of edge kinds in the main column.
-    pub edge_row: super::EdgeRow,
     pub namespace: String,
     /// The layer of the cluster map that contains the namespace, which
     /// the breadcrumb shows.
@@ -94,35 +95,6 @@ pub struct WorkloadPage {
     pub manages: Vec<crate::objects::Manages>,
     /// Whether the workload serves a port, and so has an access tab.
     pub access: bool,
-}
-
-/// A link to one of the namespace's workloads, in the row above the
-/// page's main row.
-#[derive(Debug, PartialEq)]
-pub struct Switch {
-    /// The workload's name, followed by its replica count, as in
-    /// "web ×3", when the count is not one.
-    pub label: String,
-    pub href: String,
-    /// Whether this is the workload that the page shows.
-    pub current: bool,
-    pub level: Level,
-}
-
-impl Switch {
-    /// The CSS classes of the switch.  The current workload is outlined
-    /// in the selection color of the cluster map, and a workload at level
-    /// `Warning` or worse has a border in the warning color.
-    pub fn class(&self) -> String {
-        let mut class = String::from("switch");
-        if self.current {
-            class.push_str(" switch-current");
-        }
-        if self.level >= Level::Warning {
-            class.push_str(" switch-warning");
-        }
-        class
-    }
 }
 
 /// One guard as the page draws it.
@@ -216,10 +188,6 @@ impl WorkloadPage {
         Self { access, ..self }
     }
 
-    pub fn with_edge_row(self, edge_row: super::EdgeRow) -> Self {
-        Self { edge_row, ..self }
-    }
-
     /// The page of the workload `name` among the top owners of
     /// `namespace`, where `resource` is the URL name of its kind.  Returns
     /// `None` when there is no such workload or the map has no such
@@ -271,7 +239,6 @@ impl WorkloadPage {
         let reading = tiles.iter().any(|tile| tile.state != State::Finished);
         Some(Self {
             access: false,
-            edge_row: super::EdgeRow::default(),
             namespace: namespace.into(),
             layer,
             name: name.into(),
@@ -475,35 +442,6 @@ pub fn find<'a>(
         owner.name == name && kinds::workload(owner, plurals).as_deref() == Some(resource)
     });
     found.copied()
-}
-
-/// A switch for each workload that has a page.  The built-in kinds come
-/// first and then the custom kinds, each sorted by name, so a workload
-/// keeps its place in the row as the reader moves between pages.
-fn switches(current: &Object, contents: &Contents) -> Vec<Switch> {
-    let mut switches: Vec<(bool, &str, Switch)> = contents
-        .owners
-        .iter()
-        .filter_map(|&owner| {
-            let href = transect_graph::links::page(owner, contents.plurals)?;
-            let replicas = contents.workloads.get(owner).replicas();
-            let label = match replicas {
-                Some(replicas) if replicas != 1 => format!("{} ×{replicas}", owner.name),
-                _ => owner.name.clone(),
-            };
-            let custom = ownership::custom(owner);
-            let level = contents.by_workload.get(owner).map(|h| h.level);
-            let switch = Switch {
-                label,
-                href,
-                current: owner == current,
-                level: level.unwrap_or_default(),
-            };
-            Some((custom, owner.name.as_str(), switch))
-        })
-        .collect();
-    switches.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
-    switches.into_iter().map(|(_, _, switch)| switch).collect()
 }
 
 fn guard_chips(guards: &Guards) -> Vec<GuardChip> {

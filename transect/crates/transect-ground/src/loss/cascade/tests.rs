@@ -140,18 +140,6 @@ fn finds_the_dependents_of_a_down_workload(
     assert_eq!(shop.of(name), dependents);
 }
 
-#[rstest]
-fn an_edge_kind_turned_off_finds_no_dependents(shop: Shop) {
-    let shown = transect_graph::edges::Shown::parse(Some(""));
-    let graph = shop.graph.only(&shown);
-    let edges = Edges {
-        graph: &graph,
-        ingresses: &shop.ingresses,
-        intents: &Intents::default(),
-    };
-    assert_eq!(edges.of(&deployment("shop", "db")), vec![]);
-}
-
 fn loss(dependent: Dependent, lost: &str) -> Loss {
     Loss {
         dependent,

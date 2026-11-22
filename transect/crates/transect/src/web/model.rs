@@ -1,12 +1,10 @@
 //! What every view reads from one state of the cluster: the snapshot,
-//! the `NetworkPolicy` evaluation, the edge graph with every kind on,
-//! and the findings about each workload and image. These are costly and
-//! do not depend on the view, so `latest` builds them once per change,
-//! and each view turns edge kinds off in its own copy of the graph.
-//! Values that depend on the shown edge kinds or on the minute are
-//! computed on first request and cached.
+//! the `NetworkPolicy` evaluation, the edge graph, the loops and forges
+//! found in it, and the findings about each workload and image. These
+//! are costly and do not depend on the view, so `latest` builds them
+//! once per change. Values that depend on the minute are computed on
+//! first request and cached.
 
-mod edge_set;
 mod index;
 mod memo;
 mod minute;
@@ -19,23 +17,21 @@ use k8s_openapi::jiff::Timestamp;
 
 use super::snapshot::{Signals, Snapshot, fingerprint};
 use crate::web::loaded::Loaded;
-pub use edge_set::EdgeSet;
 use memo::Memo;
 pub use minute::Minute;
 use transect_access::access::Access;
 use transect_access::access::ways::Ways;
 use transect_cluster::cluster::Cluster;
 use transect_cluster::ownership::{Before, Departed};
-use transect_graph::edges::{Graph, Kind, Object, Shown};
+use transect_graph::edges::{Graph, Loop, Object};
 use transect_map::search::Index;
 use transect_network::addresses::Unread;
 use transect_network::policy::Allowed;
+use transect_supply::changed::Recorded;
 use transect_supply::findings::{Linked, WorkloadFinding};
+use transect_supply::forge::Forges;
 use transect_supply::images::{self, Census, Known};
 use transect_supply::vulnerabilities::{Stores, Vulnerabilities};
-
-/// How many sets of shown edge kinds a model caches derived values for.
-const EDGE_SETS: usize = 8;
 
 /// How many minutes a model caches values for: the current minute and
 /// the one before it, because a render that began just before the
@@ -52,13 +48,18 @@ pub struct Model {
     /// The intent entries that refer to something `transect` cannot
     /// read, by the workload whose card shows them.
     pub unread: HashMap<Object, Vec<Unread>>,
-    /// The empty `Allowed` that views read when allowed-to-call is off.
-    no_calls: Allowed,
     pub workload_findings: Vec<(WorkloadFinding, Linked)>,
     /// The images that the running pods use, and which of them lack
     /// labels.
     pub census: Census,
-    edge_sets: Memo<Shown, EdgeSet>,
+    /// The loops in the graph.
+    pub loops: Vec<Loop>,
+    /// The forges that the resources declare, and the forges that run in
+    /// the cluster behind an `Ingress` host.
+    pub forges: Forges,
+    /// Every change that the cluster's objects still record, before a
+    /// page limits them to its window.
+    pub recorded: Recorded,
     minutes: Memo<i64, Minute>,
     /// Every way in, computed when the model is built.
     ways: Memo<(), Ways>,
@@ -136,6 +137,7 @@ impl Model {
         let allowed = snapshot.allowed(&workloads);
         let (graph, unread) = snapshot.graph(&workloads, &allowed);
         let workload_findings = snapshot.workload_findings(&workloads);
+        let forges = snapshot.forges(&graph, &workloads);
         let serving = workloads
             .owners()
             .filter(|owner| {
@@ -174,15 +176,16 @@ impl Model {
                 }))
                 .collect();
         let model = Self {
+            loops: graph.loops(),
+            recorded: snapshot.recorded(&forges),
+            forges,
             snapshot,
             departed: Departed::default(),
             allowed,
             graph,
             unread,
-            no_calls: Allowed::default(),
             workload_findings,
             census,
-            edge_sets: Memo::new(EDGE_SETS),
             minutes: Memo::new(MINUTES),
             ways: Memo::new(1),
             serving,
@@ -193,9 +196,7 @@ impl Model {
             vulnerabilities,
         };
         // Compute the values that most first renders after a change
-        // read: the edge set with every kind shown, the current minute,
-        // and the ways in.
-        model.edge_set(&Shown::default());
+        // read: the current minute and the ways in.
         model.minute(Timestamp::now());
         let started = Instant::now();
         model.ways();
@@ -203,16 +204,10 @@ impl Model {
         model
     }
 
-    /// The graph with only the edge kinds that `shown` turns on.
-    pub fn graph(&self, shown: &Shown) -> Graph {
-        self.graph.only(shown)
-    }
-
-    /// The `EdgeSet` of the graph with only the kinds that `shown` turns
-    /// on, cached for each `Shown`.
-    pub fn edge_set(&self, shown: &Shown) -> Arc<EdgeSet> {
-        let make = || EdgeSet::read(&self.snapshot, &self.graph(shown));
-        self.edge_sets.get(shown.clone(), make)
+    /// The edges between the cluster's objects, machines, devices, and
+    /// the systems outside it.
+    pub fn graph(&self) -> &Graph {
+        &self.graph
     }
 
     /// Whether `workload` serves a port, and so has an access tab.
@@ -254,14 +249,8 @@ impl Model {
         self.minutes.get(Minute::of(now), make)
     }
 
-    /// Which workloads the `NetworkPolicy` objects allow to call which,
-    /// or an empty `Allowed` when `shown` turns allowed-to-call off, so
-    /// that no tag or card line shows a policy.
-    pub fn allowed(&self, shown: &Shown) -> &Allowed {
-        if shown.is_on(Kind::AllowedToCall) {
-            &self.allowed
-        } else {
-            &self.no_calls
-        }
+    /// Which workloads the `NetworkPolicy` objects allow to call which.
+    pub fn allowed(&self) -> &Allowed {
+        &self.allowed
     }
 }

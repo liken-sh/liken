@@ -3,7 +3,6 @@
 
 mod bar;
 mod cluster;
-mod edge_row;
 mod gitops;
 mod gone;
 pub mod ground;
@@ -21,7 +20,6 @@ mod workload;
 use askama::Template;
 
 pub use cluster::{ClusterMap, Selected, UNSORTED};
-pub use edge_row::{EdgeRow, ON_THE_MAP};
 pub use gitops::GitOpsPage;
 pub use gone::{Above, GonePage, Named as Gone};
 pub use known::{
@@ -57,8 +55,8 @@ pub struct ClusterPage {
     pub machines: Vec<Machine>,
     /// Why the machines band shows no usage bars, when it shows none.
     pub usage_note: Option<transect_resources::resources::OffLine>,
-    /// Why no machine strip lists a device, when the `holds` edge kind is
-    /// off.
+    /// Why no machine strip lists a device, when `transect` cannot read
+    /// the cluster's devices.
     pub devices_note: Option<&'static str>,
     pub ground: Ground,
     pub sidebar: Sidebar,
@@ -68,7 +66,6 @@ pub struct ClusterPage {
     /// What losing a set of machines takes down. The page shows it in
     /// place of the sidebar.
     pub loss: Option<loss::Sidebar>,
-    pub edge_row: EdgeRow,
 }
 
 impl ClusterPage {

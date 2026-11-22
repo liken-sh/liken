@@ -27,7 +27,7 @@ use rstest::rstest;
 
 use super::fixture;
 use super::render::{Part, Rendered, draw};
-use super::view::{self, View};
+use super::view::{self, Page};
 
 /// `url` drawn whole from the fixture cluster, with its usage.
 fn render(url: &str) -> String {
@@ -45,12 +45,12 @@ fn render_from(
     // The server's router decodes percent-escapes in the path before it
     // matches it.
     let path = transect_graph::links::percent_decoded(uri.path().trim_start_matches('/'));
-    let view = View::at(&path, query).unwrap();
+    let page = Page::at(&path, &query).unwrap();
     let reads = transect_map::objects::reads::Reads::default();
     let now = fixture::NOW.parse().unwrap();
     match draw(
         model,
-        &view,
+        &page,
         Part::Whole,
         usage,
         &reads,

@@ -61,10 +61,9 @@ and the product design that new work follows is in
   as `transect` draws it for every kind that fills it: the `Service`s
   for writes and reads, the primary, the replicas stacked, and whether
   the store is as the pattern expects.
-- **Edges**, which you turn on and off from a row above each picture:
-  runs on, depends on, authenticates through, stores on, holds,
-  reconciles from, controlled by, and allowed to call (from
-  `NetworkPolicy` rules).  The map also lists loops, where objects in
+- **Edges** of each kind: runs on, depends on, authenticates through,
+  stores on, holds, reconciles from, controlled by, and allowed to call
+  (from `NetworkPolicy` rules).  The map also lists loops, where objects in
   different namespaces each need another to start.  After a full
   shutdown, such as a power cut, no start order brings a loop up.
 - **Health** from readiness, restarts, error lines in pod logs, a custom

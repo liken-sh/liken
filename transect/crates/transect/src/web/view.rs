@@ -1,17 +1,9 @@
-//! The view that a URL requests. The event stream renders once per
-//! view, so two URLs that request the same view share one rendering.
+//! The page that a URL requests. The event stream renders once per
+//! page, so two URLs that request the same page share one rendering.
 
 use serde::Deserialize;
 
-use transect_graph::edges::Shown;
 use transect_supply::vulnerabilities::Shown as Severities;
-
-/// A page and the edge kinds it shows.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct View {
-    pub page: Page,
-    pub shown: Shown,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Page {
@@ -119,7 +111,6 @@ pub enum Page {
 pub struct Query {
     select: Option<String>,
     lose: Option<String>,
-    edges: Option<String>,
     pod: Option<String>,
     container: Option<String>,
     severity: Option<String>,
@@ -165,23 +156,6 @@ impl Query {
     pub fn severities(&self) -> Severities {
         Severities::parse(self.severity.as_deref())
     }
-
-    /// The edge kinds to show, all of them when the query names none.
-    pub fn shown(&self) -> Shown {
-        Shown::parse(self.edges.as_deref())
-    }
-}
-
-impl View {
-    /// The view at `path`, the URL path without its leading slash, or
-    /// `None` when no view serves the path.
-    pub fn at(path: &str, query: Query) -> Option<Self> {
-        let page = Page::at(path, &query)?;
-        Some(Self {
-            page,
-            shown: query.shown(),
-        })
-    }
 }
 
 impl Page {
@@ -214,7 +188,9 @@ impl Page {
         }
     }
 
-    fn at(path: &str, query: &Query) -> Option<Self> {
+    /// The page at `path`, the URL path without its leading slash, or
+    /// `None` when no page serves the path.
+    pub fn at(path: &str, query: &Query) -> Option<Self> {
         match path.split('/').collect::<Vec<_>>()[..] {
             [""] => Some(Self::cluster(query)),
             ["resources"] => Some(Self::Resources),
@@ -418,8 +394,7 @@ mod tests {
         #[case] select: Option<&str>,
         #[case] page: Option<Page>,
     ) {
-        let view = View::at(path, query(select));
-        assert_eq!(view.map(|view| view.page), page);
+        assert_eq!(Page::at(path, &query(select)), page);
     }
 
     #[rstest]
@@ -436,7 +411,7 @@ mod tests {
             lose: lose.map(Into::into),
             ..query(select)
         };
-        assert_eq!(View::at("", query).map(|view| view.page), Some(page));
+        assert_eq!(Page::at("", &query), Some(page));
     }
 
     #[rstest]
@@ -452,22 +427,11 @@ mod tests {
             container: container.map(Into::into),
             ..Query::default()
         };
-        let page = View::at("namespaces/shop/deployments/web/logs", query).map(|view| view.page);
+        let page = Page::at("namespaces/shop/deployments/web/logs", &query);
         let found = match page {
             Some(Page::Logs { pod, container, .. }) => (pod, container),
             other => panic!("the page is {other:?}, want Page::Logs"),
         };
         assert_eq!(found, expected);
-    }
-
-    #[rstest]
-    #[case::every_kind(None, Shown::default())]
-    #[case::some_kinds(Some("holds,runs-on"), Shown::parse(Some("runs-on,holds")))]
-    fn reads_the_edge_kinds_from_the_url(#[case] edges: Option<&str>, #[case] shown: Shown) {
-        let query = Query {
-            edges: edges.map(Into::into),
-            ..Query::default()
-        };
-        assert_eq!(View::at("", query).map(|view| view.shown), Some(shown));
     }
 }

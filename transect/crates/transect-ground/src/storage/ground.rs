@@ -79,18 +79,10 @@ impl Ground {
     /// outside it that `graph`'s depends-on edges reach, with the most
     /// volumes first, then the most dependents, then by name.  A
     /// selected namespace adds its own counts to each box but does not
-    /// change the order.  `stores_on` is whether the page shows
-    /// stores-on edges.  When it is false, the selected namespace's
-    /// volume counts are zero, because those edges draw its volumes.
-    pub fn build(
-        storage: &Storage,
-        graph: &Graph,
-        selected: Option<&str>,
-        stores_on: bool,
-    ) -> Self {
+    /// change the order.
+    pub fn build(storage: &Storage, graph: &Graph, selected: Option<&str>) -> Self {
         let tally = storage.tally(None);
         let here_tally = selected
-            .filter(|_| stores_on)
             .map(|namespace| storage.tally(Some(namespace)))
             .unwrap_or_default();
         let dependents = dependents(graph);
@@ -269,32 +261,26 @@ mod tests {
     }
 
     #[rstest]
-    #[case::nothing_selected(None, true, vec![
+    #[case::nothing_selected(None, vec![
         ground_box("nas.example.com", totals(nfs(3), 1), None),
         ground_box("csi.example.com", totals(fast(2), 0), None),
         ground_box("api.example.com", totals(Counts::default(), 3), None),
     ])]
-    #[case::shop_has_counts_on_every_box(Some("shop"), true, vec![
+    #[case::shop_has_counts_on_every_box(Some("shop"), vec![
         ground_box("nas.example.com", totals(nfs(3), 1), Some(totals(nfs(2), 1))),
         ground_box("csi.example.com", totals(fast(2), 0), Some(totals(fast(1), 0))),
         ground_box("api.example.com", totals(Counts::default(), 3), Some(totals(Counts::default(), 2))),
     ])]
-    #[case::blog_has_counts_on_two_boxes(Some("blog"), true, vec![
+    #[case::blog_has_counts_on_two_boxes(Some("blog"), vec![
         ground_box("nas.example.com", totals(nfs(3), 1), Some(totals(Counts::default(), 0))),
         ground_box("csi.example.com", totals(fast(2), 0), Some(totals(fast(1), 0))),
         ground_box("api.example.com", totals(Counts::default(), 3), Some(totals(Counts::default(), 1))),
     ])]
-    #[case::stores_on_hidden(Some("blog"), false, vec![
-        ground_box("nas.example.com", totals(nfs(3), 1), Some(totals(Counts::default(), 0))),
-        ground_box("csi.example.com", totals(fast(2), 0), Some(totals(Counts::default(), 0))),
-        ground_box("api.example.com", totals(Counts::default(), 3), Some(totals(Counts::default(), 1))),
-    ])]
     fn draws_a_box_per_backend_and_dependency_with_the_selected_namespaces_counts(
         #[case] selected: Option<&str>,
-        #[case] stores_on: bool,
         #[case] boxes: Vec<GroundBox>,
     ) {
-        let ground = Ground::build(&storage(), &graph(), selected, stores_on);
+        let ground = Ground::build(&storage(), &graph(), selected);
         assert_eq!(ground.boxes, boxes);
         assert_eq!((ground.total(), ground.depended_on()), (5, 2));
     }

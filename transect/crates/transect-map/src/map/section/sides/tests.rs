@@ -1,7 +1,7 @@
 use rstest::rstest;
 
 use super::*;
-use transect_graph::edges::{Device, Provenance, Shown};
+use transect_graph::edges::{Device, Provenance};
 
 fn object(kind: &str, namespace: &str, name: &str) -> Object {
     Object::new("", kind, Some(namespace), name)
@@ -166,17 +166,6 @@ fn joins_each_side_box_by_its_edge() {
             ("holds", Style::Solid, false, Some("alpha")),
         ]
     );
-}
-
-#[rstest]
-#[case::depends_on_off("runs-on,stores-on,holds,reconciles-from,controlled-by", vec!["deploy/shop", "operators/shop-operator", "card-0"])]
-#[case::holds_off("depends-on,reconciles-from,controlled-by", vec!["jobs/worker", "database", "beta", "deploy/shop", "operators/shop-operator"])]
-#[case::every_side_kind_off("runs-on,stores-on", vec![])]
-fn a_kind_turned_off_drops_its_side_boxes(#[case] edges: &str, #[case] expected: Vec<&str>) {
-    let graph = graph().only(&Shown::parse(Some(edges)));
-    let found = sides(&graph, &web(), &objects(&|_| true), "apps", layer_of);
-    let titles: Vec<&str> = found.iter().map(|s| s.boxed.title.as_str()).collect();
-    assert_eq!(titles, expected);
 }
 
 #[rstest]

@@ -25,8 +25,8 @@ use askama::Template;
 use k8s_openapi::api::core::v1::Service;
 use k8s_openapi::api::networking::v1::Ingress;
 
+use super::ClusterMap;
 use super::workload::find;
-use super::{ClusterMap, EdgeRow};
 use crate::cards::WorkloadCard;
 use layout::{Layout, Rect, SPINE, SPINE_BAND, layout};
 use lines::{Drawn, Label, Line, draw};
@@ -34,7 +34,7 @@ use spine::{Band, Look, Parts, SectionBox};
 use transect_cluster::workloads::Workloads;
 use transect_frame::frame::crumbs::Crumb;
 use transect_frame::frame::tabs::{Lens, Tabs};
-use transect_graph::edges::{Endpoint, Graph, Kind, Object, Plurals, Shown};
+use transect_graph::edges::{Endpoint, Graph, Kind, Object, Plurals};
 use transect_ground::machines::Machine;
 use transect_ground::storage::Storage;
 use transect_network::entry::{Endpoints, Entry, Issuers, TrafficResults};
@@ -45,7 +45,6 @@ use transect_resources::intent::Intents;
 #[derive(Template)]
 #[template(path = "map/section/section.html", blocks = ["main"])]
 pub struct SectionPage {
-    pub edge_row: EdgeRow,
     pub namespace: String,
     pub layer: String,
     pub name: String,
@@ -91,7 +90,6 @@ pub struct Contents<'a> {
     pub issuers: &'a Issuers,
     pub storage: &'a Storage,
     pub machines: &'a [Machine],
-    pub shown: &'a Shown,
     /// The recorded intent of the objects in the side columns.
     pub intents: &'a Intents,
     /// Whether an object in the side columns has a page to link to.
@@ -125,10 +123,6 @@ impl SectionPage {
 
     pub fn with_access(self, access: bool) -> Self {
         Self { access, ..self }
-    }
-
-    pub fn with_edge_row(self, edge_row: EdgeRow) -> Self {
-        Self { edge_row, ..self }
     }
 
     /// Builds the section view of the workload `name`, whose kind has
@@ -175,7 +169,6 @@ impl SectionPage {
         let width = placed.width + if tied { lines::OUTER } else { 0 };
         Some(Self {
             access: false,
-            edge_row: EdgeRow::default(),
             namespace: namespace.into(),
             layer,
             name: name.into(),
@@ -299,19 +292,13 @@ fn parts(object: &Object, layer: &str, href: &str, contents: &Contents) -> Parts
     let line = sentence::workload_line(workload.replicas(), workload.ready(), running.len());
     let title = transect_graph::edges::kind_and_name(&object.kind, &object.name);
     let workload_box = SectionBox::new(title, vec![line], Look::Workload);
-    let backings = match contents.shown.is_on(Kind::StoresOn) {
-        true => gather::backings(
-            contents.storage,
-            object.namespace.as_deref().unwrap_or_default(),
-            &running,
-            &workload.templates(),
-        ),
-        false => Vec::new(),
-    };
-    let hosts = match contents.shown.is_on(Kind::RunsOn) {
-        true => gather::hosts(&running, contents.machines),
-        false => Vec::new(),
-    };
+    let backings = gather::backings(
+        contents.storage,
+        object.namespace.as_deref().unwrap_or_default(),
+        &running,
+        &workload.templates(),
+    );
+    let hosts = gather::hosts(&running, contents.machines);
     Parts {
         layer: layer.into(),
         routes: routes(contents.graph, object, &entry),

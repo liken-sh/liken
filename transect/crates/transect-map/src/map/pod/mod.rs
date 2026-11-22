@@ -50,7 +50,6 @@ const PREVIEW: usize = 5;
 #[derive(Template)]
 #[template(path = "map/pod/pod.html", blocks = ["main"])]
 pub struct PodPage {
-    pub edge_row: super::EdgeRow,
     pub namespace: String,
     /// The map band that contains the namespace.
     pub layer: String,
@@ -124,10 +123,6 @@ pub struct Contents<'a> {
 }
 
 impl PodPage {
-    pub fn with_edge_row(self, edge_row: super::EdgeRow) -> Self {
-        Self { edge_row, ..self }
-    }
-
     pub fn with_logs(self, logs: Option<Arc<Tails>>) -> Self {
         Self { logs, ..self }
     }
@@ -175,7 +170,6 @@ impl PodPage {
             })
             .collect();
         Some(Self {
-            edge_row: super::EdgeRow::default(),
             namespace: namespace.into(),
             layer,
             name: name.into(),

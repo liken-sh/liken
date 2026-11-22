@@ -42,9 +42,6 @@ use transect_observe::health::Health;
 #[derive(Template)]
 #[template(path = "map/namespace/namespace.html", blocks = ["main"])]
 pub struct NamespacePage {
-    /// The main column's row of edge kinds, set by
-    /// `with_edge_row`.
-    pub edge_row: super::EdgeRow,
     pub namespace: String,
     /// The band that contains the namespace, shown in the crumb.
     pub layer: String,
@@ -96,10 +93,6 @@ pub struct Contents<'a> {
 }
 
 impl NamespacePage {
-    pub fn with_edge_row(self, edge_row: super::EdgeRow) -> Self {
-        Self { edge_row, ..self }
-    }
-
     /// The page for `namespace`, or `None` when no band of `map`
     /// contains it. `machines` supplies the machine chips, each with
     /// its count of the namespace's pods.
@@ -136,7 +129,6 @@ impl NamespacePage {
             contents.workloads.clone()
         };
         Some(Self {
-            edge_row: super::EdgeRow::default(),
             namespace: namespace.into(),
             layer,
             bands: fold(map, namespace, &looped_with(contents.loops, namespace)),

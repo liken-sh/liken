@@ -36,7 +36,6 @@
 {% call frame::tabs(tabs) %}{% endcall %}
 {%- endif %}
 </nav>
-{% include "map/edge_row.html" %}
 {%- if let Some(sketch) = sketch %}
 {% include "map/known/sketch.html" %}
 {%- else if diagram() %}

@@ -1,6 +1,4 @@
-//! Renders one view: draws the view's page from the latest model on a
-//! blocking thread, then writes the view's edge kinds onto the links in
-//! the page.
+//! Renders one page from the latest model, on a blocking thread.
 
 use k8s_openapi::jiff::Timestamp;
 use std::sync::Arc;
@@ -20,14 +18,14 @@ use super::pages::{
     subject_page, volume_page, vulnerabilities_page, ways_page, workload_at, workload_page,
 };
 use super::template::{Drawing, template};
-use super::view::{Page, View};
+use super::view::Page;
 use transect_map::map::Gone;
 use transect_map::objects::reads::Reads;
 use transect_observe::logs::{LogTails, Tails};
 use transect_observe::usage;
 use transect_supply::vulnerabilities::{IdPage, ListPage};
 
-/// What one render reads besides the view.
+/// What one render reads besides the page.
 #[derive(Clone)]
 pub struct Sources {
     pub models: Latest<Model>,
@@ -48,7 +46,7 @@ pub enum Part {
     Main,
 }
 
-/// A view's HTML, and whether the object it names is in the cluster.
+/// A page's HTML, and whether the object it names is in the cluster.
 pub struct Rendered {
     pub html: String,
     /// False when the render drew the page that says the object is
@@ -86,15 +84,15 @@ impl Sources {
         }
     }
 
-    /// The view rendered from the latest model, the page that says the
+    /// The page rendered from the latest model, the page that says the
     /// object is gone when the cluster has no such object, or
     /// `Err(INTERNAL_SERVER_ERROR)` when rendering fails.
-    pub async fn render(&self, view: View, part: Part) -> Result<Rendered, StatusCode> {
+    pub async fn render(&self, page: Page, part: Part) -> Result<Rendered, StatusCode> {
         let model = self.models.get().await;
-        self.render_on(model, view, part).await
+        self.render_on(model, page, part).await
     }
 
-    /// Renders the view from `model`, which the caller got from
+    /// Renders the page from `model`, which the caller got from
     /// `models`, or returns `Err(INTERNAL_SERVER_ERROR)` when `model` is
     /// `None`.  Drawing a page is CPU work that grows with the cluster,
     /// so it runs on a blocking thread and leaves the async workers free
@@ -102,21 +100,21 @@ impl Sources {
     pub async fn render_on(
         &self,
         model: Option<Arc<Model>>,
-        view: View,
+        page: Page,
         part: Part,
     ) -> Result<Rendered, StatusCode> {
         let model = model.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
         let sources = self.clone();
         let drawn = tokio::task::spawn_blocking(move || {
             let started = Instant::now();
-            let drawn = sources.draw(&model, &view, part);
-            tracing::debug!(page = ?view.page, elapsed = ?started.elapsed(), "rendered a view");
+            let drawn = sources.draw(&model, &page, part);
+            tracing::debug!(?page, elapsed = ?started.elapsed(), "rendered a page");
             drawn
         });
         drawn.await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     }
 
-    fn draw(&self, model: &Model, view: &View, part: Part) -> Result<Rendered, StatusCode> {
+    fn draw(&self, model: &Model, page: &Page, part: Part) -> Result<Rendered, StatusCode> {
         // Clone the reading so that the watch channel's read lock is
         // released before the render starts.  A held lock would block the
         // sender's next update until the render finished.
@@ -124,7 +122,7 @@ impl Sources {
         let logs = |namespace: &str, name: &str| self.logs.cached(namespace, name);
         draw(
             model,
-            view,
+            page,
             part,
             &usage,
             &self.reads,
@@ -134,11 +132,11 @@ impl Sources {
     }
 }
 
-/// Draws `view` from `model`.  `usage` fills the usage bars, and `logs`
+/// Draws `page` from `model`.  `usage` fills the usage bars, and `logs`
 /// returns the log tails that a pod page shows.
 pub fn draw(
     model: &Model,
-    view: &View,
+    page: &Page,
     part: Part,
     usage: &usage::Reading,
     reads: &Reads,
@@ -146,22 +144,21 @@ pub fn draw(
     now: Timestamp,
 ) -> Result<Rendered, StatusCode> {
     let layers = &model.snapshot.resources.layers;
-    let shown = &view.shown;
     let part = Drawing {
         part,
         vulnerabilities: model.vulnerabilities.described,
     };
-    let found = match &view.page {
+    let found = match page {
         Page::Cluster { select } => {
             let focus = Focus::Select(select.as_deref());
             Some(template(
-                cluster_page(model, layers, usage, focus, shown, now),
+                cluster_page(model, layers, usage, focus, now),
                 part,
             ))
         }
         Page::Loss { lose, select } => {
             let focus = Focus::Lose(lose, select.as_deref());
-            let html = template(cluster_page(model, layers, usage, focus, shown, now), part);
+            let html = template(cluster_page(model, layers, usage, focus, now), part);
             Some(html.map(|html| carry::carry_loss(&html, lose)))
         }
         Page::Resources => Some(template(resources_page(model, usage), part)),
@@ -185,7 +182,7 @@ pub fn draw(
             let page = kind_page(model, resource, now);
             page.map(|page| template(page, part))
         }
-        Page::Changed => Some(template(changed_page(model, shown, now), part)),
+        Page::Changed => Some(template(changed_page(model, now), part)),
         Page::Machine { name } => {
             let page = machine_page(model, usage, name, now);
             page.map(|page| template(page, part))
@@ -199,7 +196,7 @@ pub fn draw(
             page.map(|page| template(page, part))
         }
         Page::Namespace { name } => {
-            let page = namespace_page(model, layers, usage, name, shown, now);
+            let page = namespace_page(model, layers, usage, name, now);
             page.map(|page| template(page, part))
         }
         Page::NamespaceAccess { name } => {
@@ -228,7 +225,7 @@ pub fn draw(
             // `KindKnowledge`, then a `ServiceAccount`'s access drawing,
             // then a custom resource whose kind has knowledge, then a
             // workload, and last the plain object page.
-            let page = gitops_page(model, layers, namespace, resource, name, shown);
+            let page = gitops_page(model, layers, namespace, resource, name);
             let page = page.map(|page| template(page, part));
             let page = page.or_else(|| {
                 let page = (resource == "serviceaccounts")
@@ -236,15 +233,15 @@ pub fn draw(
                 page.flatten().map(|page| template(page, part))
             });
             page.or_else(|| {
-                let known = known_page(model, layers, usage, at, None, shown, now);
+                let known = known_page(model, layers, usage, at, None, now);
                 if let Some(known) = known {
                     return Some(template(known, part));
                 }
-                let page = workload_page(model, layers, usage, at, shown, now);
+                let page = workload_page(model, layers, usage, at, now);
                 let page = page.map(|page| {
                     let workload = workload_at(&model.snapshot, namespace, resource, name);
                     let manages = workload
-                        .map(|workload| manages(model, &workload, shown, now))
+                        .map(|workload| manages(model, &workload, now))
                         .unwrap_or_default();
                     template(transect_map::map::WorkloadPage { manages, ..page }, part)
                 });
@@ -270,7 +267,7 @@ pub fn draw(
                 resource,
                 name,
             };
-            let page = known_page(model, layers, usage, at, Some(slug), shown, now);
+            let page = known_page(model, layers, usage, at, Some(slug), now);
             page.map(|page| template(page, part))
         }
         Page::ClusterObject { resource, name } => {
@@ -292,7 +289,7 @@ pub fn draw(
                 resource,
                 name,
             };
-            let page = section_page(model, layers, usage, at, shown, now);
+            let page = section_page(model, layers, usage, at, now);
             page.map(|page| template(page, part))
         }
         Page::Access {
@@ -305,7 +302,7 @@ pub fn draw(
                 resource,
                 name,
             };
-            let page = access_page(model, layers, usage, at, shown, now);
+            let page = access_page(model, layers, usage, at, now);
             page.map(|page| template(page, part))
         }
         Page::WorkloadVulnerabilities {
@@ -339,23 +336,19 @@ pub fn draw(
             logs_page(model, layers, &lens, &logs, now).map(|page| template(page, part))
         }
         Page::Pod { namespace, name } => {
-            let page = pod_page(model, layers, usage, namespace, name, shown, now);
+            let page = pod_page(model, layers, usage, namespace, name, now);
             page.map(|page| template(page.with_logs(logs(namespace, name)), part))
         }
     };
-    let (html, found) = match (found, gone(&view.page)) {
+    let (html, found) = match (found, gone(page)) {
         (Some(html), _) => (html, true),
         (None, Some(gone)) => (template(gone_page(model, &gone), part), false),
         (None, None) => (None, false),
     };
     let html = html.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
-    let html = match view.page.in_access() {
+    let html = match page.in_access() {
         true => carry::carry_access(&html, model.access_paths()),
         false => html,
-    };
-    let html = match shown.param() {
-        Some(edges) => carry::carry(&html, &edges),
-        None => html,
     };
     Ok(Rendered { html, found })
 }

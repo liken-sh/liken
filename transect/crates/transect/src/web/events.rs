@@ -13,7 +13,7 @@ use futures::{Stream, StreamExt};
 use tokio::sync::watch;
 
 use super::AppState;
-use super::view::{self, View};
+use super::view::{self, Page};
 
 /// The SSE event name that each page's `sse-swap` attribute listens for.
 pub const VIEW: &str = "view";
@@ -62,14 +62,14 @@ pub async fn page(
     Path(path): Path<String>,
     Query(query): Query<view::Query>,
 ) -> Response {
-    let Some(view) = View::at(&path, query) else {
+    let Some(page) = Page::at(&path, &query) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     // An event stream can connect with no page load before it, or after
     // `Reads` dropped its copy of the page's object, so read the object
     // here as a page load would.
-    state.sources.prepare(&view.page).await;
-    stream(state.views.subscribe(view).await).into_response()
+    state.sources.prepare(&page).await;
+    stream(state.views.subscribe(page).await).into_response()
 }
 
 #[cfg(test)]

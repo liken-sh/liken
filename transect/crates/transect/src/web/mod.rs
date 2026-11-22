@@ -52,15 +52,15 @@ use transect_observe::alerts;
 use transect_observe::logs::{Counted, LogTails, Searched};
 use transect_observe::usage;
 use transect_supply::images::Known;
-use view::{Page, View};
+use view::Page;
 use views::Views;
 
 #[derive(Clone)]
 struct AppState {
     sources: Sources,
-    /// Re-renders the `main` block of each view that a browser has
+    /// Re-renders the `main` block of each page that a browser has
     /// open.
-    views: Views<View>,
+    views: Views<Page>,
 }
 
 /// The sources the pages read in addition to the cluster's stores.
@@ -168,9 +168,9 @@ async fn serve_sources(
 fn router(changes: &watch::Sender<()>, sources: Sources) -> Router {
     let views = Views::new(changes.clone(), debounce::QUIET, debounce::CAP, {
         let sources = sources.clone();
-        move |view: View| {
+        move |page: Page| {
             let sources = sources.clone();
-            async move { sources.render(view, Part::Main).await.ok().map(|r| r.html) }
+            async move { sources.render(page, Part::Main).await.ok().map(|r| r.html) }
         }
     });
     let state = AppState { sources, views };
@@ -253,33 +253,24 @@ impl AppState {
     /// anything newer. When the object is missing from the last model
     /// and a newer model is due, as for a link to an object created a
     /// second ago, it waits for that model before it responds 404.
-    async fn whole(&self, page: Page, query: &view::Query) -> Response {
+    async fn whole(&self, page: Page) -> Response {
         self.sources.prepare(&page).await;
         let model = self.sources.models.last().await;
-        self.whole_on(model, page, query).await
+        self.whole_on(model, page).await
     }
 
     /// Renders `page` whole from `model`, or from a newer model as
     /// `whole` describes.
-    async fn whole_on(
-        &self,
-        model: Option<Arc<Model>>,
-        page: Page,
-        query: &view::Query,
-    ) -> Response {
-        let view = View {
-            page,
-            shown: query.shown(),
-        };
+    async fn whole_on(&self, model: Option<Arc<Model>>, page: Page) -> Response {
         let models = &self.sources.models;
         let mut rendered = self
             .sources
-            .render_on(model, view.clone(), Part::Whole)
+            .render_on(model, page.clone(), Part::Whole)
             .await;
         if matches!(rendered, Ok(Rendered { found: false, .. })) && models.behind() {
             rendered = self
                 .sources
-                .render_on(models.get().await, view, Part::Whole)
+                .render_on(models.get().await, page, Part::Whole)
                 .await;
         }
         match rendered {
@@ -296,89 +287,62 @@ async fn cluster_elevation(
     State(state): State<AppState>,
     Query(query): Query<view::Query>,
 ) -> Response {
-    state.whole(Page::cluster(&query), &query).await
+    state.whole(Page::cluster(&query)).await
 }
 
-async fn resources_page(
-    State(state): State<AppState>,
-    Query(query): Query<view::Query>,
-) -> Response {
-    state.whole(Page::Resources, &query).await
+async fn resources_page(State(state): State<AppState>) -> Response {
+    state.whole(Page::Resources).await
 }
 
-async fn changed_page(State(state): State<AppState>, Query(query): Query<view::Query>) -> Response {
-    state.whole(Page::Changed, &query).await
+async fn changed_page(State(state): State<AppState>) -> Response {
+    state.whole(Page::Changed).await
 }
 
-async fn kinds_list(State(state): State<AppState>, Query(query): Query<view::Query>) -> Response {
-    state.whole(Page::Kinds, &query).await
+async fn kinds_list(State(state): State<AppState>) -> Response {
+    state.whole(Page::Kinds).await
 }
 
-async fn shapes_list(State(state): State<AppState>, Query(query): Query<view::Query>) -> Response {
-    state.whole(Page::Shapes, &query).await
+async fn shapes_list(State(state): State<AppState>) -> Response {
+    state.whole(Page::Shapes).await
 }
 
-async fn ways_page(State(state): State<AppState>, Query(query): Query<view::Query>) -> Response {
-    state.whole(Page::WaysIn, &query).await
+async fn ways_page(State(state): State<AppState>) -> Response {
+    state.whole(Page::WaysIn).await
 }
 
-async fn accounts_page(
-    State(state): State<AppState>,
-    Query(query): Query<view::Query>,
-) -> Response {
-    state.whole(Page::Accounts, &query).await
+async fn accounts_page(State(state): State<AppState>) -> Response {
+    state.whole(Page::Accounts).await
 }
 
-async fn kind_list(
-    State(state): State<AppState>,
-    Path(resource): Path<String>,
-    Query(query): Query<view::Query>,
-) -> Response {
-    state.whole(Page::Kind { resource }, &query).await
+async fn kind_list(State(state): State<AppState>, Path(resource): Path<String>) -> Response {
+    state.whole(Page::Kind { resource }).await
 }
 
-async fn machine_elevation(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-    Query(query): Query<view::Query>,
-) -> Response {
-    state.whole(Page::Machine { name }, &query).await
+async fn machine_elevation(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    state.whole(Page::Machine { name }).await
 }
 
-async fn ground_elevation(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-    Query(query): Query<view::Query>,
-) -> Response {
-    state.whole(Page::Ground { name }, &query).await
+async fn ground_elevation(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    state.whole(Page::Ground { name }).await
 }
 
-async fn volume_elevation(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-    Query(query): Query<view::Query>,
-) -> Response {
-    state.whole(Page::Volume { name }, &query).await
+async fn volume_elevation(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    state.whole(Page::Volume { name }).await
 }
 
-async fn namespace_elevation(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-    Query(query): Query<view::Query>,
-) -> Response {
-    state.whole(Page::Namespace { name }, &query).await
+async fn namespace_elevation(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    state.whole(Page::Namespace { name }).await
 }
 
 async fn objects_list(
     State(state): State<AppState>,
     Path((namespace, resource)): Path<(String, String)>,
-    Query(query): Query<view::Query>,
 ) -> Response {
     let page = Page::Objects {
         namespace,
         resource,
     };
-    state.whole(page, &query).await
+    state.whole(page).await
 }
 
 /// A page for a cluster-scoped object. A `Node`, a `PersistentVolume`,
@@ -387,7 +351,6 @@ async fn objects_list(
 async fn cluster_object(
     State(state): State<AppState>,
     Path((resource, name)): Path<(String, String)>,
-    Query(query): Query<view::Query>,
 ) -> Response {
     match resource.as_str() {
         "nodes" => {
@@ -401,7 +364,5 @@ async fn cluster_object(
         }
         _ => {}
     }
-    state
-        .whole(Page::ClusterObject { resource, name }, &query)
-        .await
+    state.whole(Page::ClusterObject { resource, name }).await
 }

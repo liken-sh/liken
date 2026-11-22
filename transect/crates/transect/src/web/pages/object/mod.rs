@@ -27,7 +27,7 @@ use serde_json::Value;
 use super::super::model::Model;
 use super::super::snapshot::Snapshot;
 pub use find::{stored, typed};
-use transect_graph::edges::{Endpoint, Object, Shown};
+use transect_graph::edges::{Endpoint, Object};
 use transect_graph::links::Reference;
 use transect_map::objects::kinds::{Catalog, ReadFrom, Served};
 use transect_map::objects::reads::{Key, Read, Reads};
@@ -193,7 +193,7 @@ pub fn object_page(
     let level = transect_observe::health::reported(&snapshot.kinds, snapshot, &object, &dynamic);
     let resting = transect_observe::health::resting(&snapshot.kinds, snapshot, &object, &dynamic);
     let path = transect_graph::links::page(&object, &snapshot.plurals)?;
-    let graph = model.graph(&Shown::default());
+    let graph = model.graph();
     let deciding = transect_observe::health::Deciding::of(&snapshot.kinds, &object);
     let center = objects::Center {
         kind: object.kind.clone(),
@@ -204,7 +204,7 @@ pub fn object_page(
         chips: transect_map::map::every_chip(&found.data, &deciding),
         messages: messages(&objects::conditions(&found.data, &deciding)),
     };
-    let sections = sections(model, &object, &found, &graph, now);
+    let sections = sections(model, &object, &found, graph, now);
     let page = ObjectPage {
         kind: object.kind.clone(),
         name: object.name.clone(),
@@ -213,12 +213,12 @@ pub fn object_page(
         kind_href,
         path,
         board: ObjectBoard::build(Some(center), sections)
-            .with_nesting(part_of::nesting(snapshot, &graph, &object)),
+            .with_nesting(part_of::nesting(snapshot, graph, &object)),
         card: card::card(
             snapshot,
             &object,
             Some(&found.meta),
-            &graph,
+            graph,
             level,
             resting.is_some(),
             now,

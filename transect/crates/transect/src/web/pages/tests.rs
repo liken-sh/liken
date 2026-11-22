@@ -12,7 +12,6 @@ use rstest::rstest;
 use super::{Focus, cluster_page};
 use crate::web::model::Model;
 use crate::web::snapshot::Snapshot;
-use transect_graph::edges::Shown;
 use transect_observe::usage;
 use transect_resources::layers::Layers;
 
@@ -54,7 +53,6 @@ fn page(
         &Layers::default(),
         &usage::Reading::Off,
         focus,
-        &Shown::default(),
         k8s_openapi::jiff::Timestamp::now(),
     );
     let tags = page

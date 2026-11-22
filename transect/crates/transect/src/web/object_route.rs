@@ -12,27 +12,25 @@ use super::{AppState, pages};
 pub(super) async fn workload(
     State(state): State<AppState>,
     Path((namespace, resource, name)): Path<(String, String, String)>,
-    Query(query): Query<view::Query>,
 ) -> Response {
     let page = Page::Workload {
         namespace,
         resource,
         name,
     };
-    state.whole(page, &query).await
+    state.whole(page).await
 }
 
 pub(super) async fn section(
     State(state): State<AppState>,
     Path((namespace, resource, name)): Path<(String, String, String)>,
-    Query(query): Query<view::Query>,
 ) -> Response {
     let page = Page::Section {
         namespace,
         resource,
         name,
     };
-    state.whole(page, &query).await
+    state.whole(page).await
 }
 
 /// One elevation of a custom resource whose kind's knowledge states
@@ -40,7 +38,6 @@ pub(super) async fn section(
 pub(super) async fn elevation(
     State(state): State<AppState>,
     Path((namespace, resource, name, slug)): Path<(String, String, String, String)>,
-    Query(query): Query<view::Query>,
 ) -> Response {
     let page = Page::Elevation {
         namespace,
@@ -48,13 +45,12 @@ pub(super) async fn elevation(
         name,
         slug,
     };
-    state.whole(page, &query).await
+    state.whole(page).await
 }
 
 pub(super) async fn pod(
     State(state): State<AppState>,
     Path((namespace, name)): Path<(String, String)>,
-    Query(query): Query<view::Query>,
 ) -> Response {
     // Log tails are read on a page load, never for a push.
     let last = state.sources.models.last().await;
@@ -72,9 +68,7 @@ pub(super) async fn pod(
     if let Some(pod) = pod {
         state.sources.logs.refresh(pod).await;
     }
-    state
-        .whole_on(last, Page::Pod { namespace, name }, &query)
-        .await
+    state.whole_on(last, Page::Pod { namespace, name }).await
 }
 
 pub(super) async fn logs(
@@ -105,5 +99,5 @@ pub(super) async fn logs(
         pod,
         container,
     };
-    state.whole_on(model, page, &query).await
+    state.whole_on(model, page).await
 }

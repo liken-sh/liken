@@ -24,7 +24,6 @@
 {%- endfor %}
 {% call frame::tabs(tabs()) %}{% endcall %}
 </nav>
-{% include "map/edge_row.html" %}
 {#- The row goes left to right in the order a request travels: the
     Ingresses that route to the Services, the Services that select the
     pods, the pods, and the claims the pods mount above the backend that

@@ -1,6 +1,5 @@
 //! Builds the edge graph of one snapshot from every source of edges,
-//! including the edges that intent declares, and lists the edge kinds
-//! that a reader can turn on and off.
+//! including the edges that intent declares.
 
 use std::collections::{HashMap, HashSet};
 
@@ -9,7 +8,7 @@ use k8s_openapi::api::core::v1::Pod;
 use super::Snapshot;
 use transect_cluster::ownership;
 use transect_cluster::workloads::Workloads;
-use transect_graph::edges::{Graph, Kind, Object, TOGGLED};
+use transect_graph::edges::{Graph, Kind, Object};
 use transect_ground::devices;
 use transect_ground::machines;
 use transect_ground::storage;
@@ -223,20 +222,5 @@ impl Snapshot {
             known,
             readers,
         }
-    }
-
-    /// The edge kinds that a reader can turn on and off for this
-    /// cluster. These are all of `TOGGLED`, except `ReconcilesFrom` when
-    /// there is no GitOps source and `Holds` when there is no device
-    /// source.
-    pub fn offered(&self) -> Vec<Kind> {
-        TOGGLED
-            .into_iter()
-            .filter(|kind| match kind {
-                Kind::ReconcilesFrom => self.gitops.off.is_none(),
-                Kind::Holds => self.devices.off.is_none(),
-                _ => true,
-            })
-            .collect()
     }
 }

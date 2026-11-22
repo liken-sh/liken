@@ -13,10 +13,10 @@ use super::object::card;
 use super::read_workloads;
 use k8s_openapi::jiff::Timestamp;
 use transect_graph::edges::Graph;
-use transect_graph::edges::{Object, Shown};
+use transect_graph::edges::Object;
 use transect_map::map::{
-    Board, EdgeRow, KnownEntry, KnownPage, Standing, Subject, Why, every_chip, has_page,
-    known_chips, known_through, workload_card,
+    Board, KnownEntry, KnownPage, Standing, Subject, Why, every_chip, has_page, known_chips,
+    known_through, workload_card,
 };
 use transect_map::objects::{self, Center, ObjectCard};
 use transect_network::entry::Endpoints;
@@ -36,7 +36,6 @@ pub fn known_page(
     usage: &usage::Reading,
     at: WorkloadAt,
     elevation: Option<&str>,
-    shown: &Shown,
     now: Timestamp,
 ) -> Option<KnownPage> {
     let WorkloadAt {
@@ -67,7 +66,6 @@ pub fn known_page(
         layers,
         usage,
         namespace,
-        shown,
         |map, contents| {
             let layer = map.layer_of(namespace)?.to_owned();
             let path = transect_graph::links::page(&object, plurals)?;
@@ -186,13 +184,7 @@ pub fn known_page(
         let path = transect_graph::links::page(&object, plurals)?;
         page.tabs = page.tabs.map(|tabs| tabs.with_access(&path));
     }
-    // The edge kinds affect only the diagram, so a page without a
-    // diagram has no edge kinds in its masthead.
-    if !page.diagram() {
-        return Some(page);
-    }
-    let row = EdgeRow::build(&snapshot.offered(), shown, &page.path);
-    Some(page.with_edge_row(row))
+    Some(page)
 }
 
 /// What a sketch reads of `object`, for a part that it draws as an

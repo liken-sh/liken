@@ -11,7 +11,7 @@ use kube::core::{ApiResource, DynamicObject};
 
 use super::super::model::Model;
 use super::super::snapshot::Snapshot;
-use transect_graph::edges::{Endpoint, Kind, Object, Shown};
+use transect_graph::edges::{Endpoint, Kind, Object};
 use transect_graph::links::Reference;
 use transect_map::map::KnownEntry;
 use transect_map::objects::{
@@ -24,7 +24,7 @@ use transect_resources::knowledge::{Column, ColumnRead, columns};
 /// kinds with no objects go in `empty`, apart from the others.
 pub fn kinds_page(model: &Model) -> KindsPage {
     let snapshot = &model.snapshot;
-    let graph = model.graph(&Shown::default());
+    let graph = model.graph();
     let labels = objects::labels(snapshot.custom.iter().map(|(api, _)| api));
     let mut groups: BTreeMap<String, Vec<KindRow>> = BTreeMap::new();
     let mut empty: BTreeMap<String, Vec<KindRow>> = BTreeMap::new();
@@ -132,7 +132,7 @@ pub fn kind_card(
     let snapshot = &model.snapshot;
     let labels = objects::labels(snapshot.custom.iter().map(|(api, _)| api));
     let kind = Object::new(&api.group, &api.kind, None, "");
-    let graph = model.graph(&Shown::default());
+    let graph = model.graph();
     let (mut controllers, mut rule) = (Vec::new(), None);
     let (mut count, mut unhealthy, mut worst) = (0, 0, None);
     let kept = found.iter().filter_map(|found| {

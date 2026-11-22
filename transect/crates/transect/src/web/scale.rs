@@ -29,7 +29,6 @@ use super::render::Part;
 use super::snapshot::Snapshot;
 use super::template::template;
 use transect_cluster::ownership::{Entry, Ownership};
-use transect_graph::edges::Shown;
 use transect_network::addresses::Addresses;
 use transect_observe::usage;
 use transect_resources::layers::Layers;
@@ -244,7 +243,7 @@ fn ownership(snapshot: &Snapshot) -> Ownership {
 #[rstest]
 #[ignore = "a timing test; run it in release mode"]
 fn builds_and_renders_a_large_cluster() {
-    let (layers, usage, shown) = (Layers::default(), usage::Reading::Off, Shown::default());
+    let (layers, usage) = (Layers::default(), usage::Reading::Off);
     let snapshot = large_cluster();
     assert_eq!(snapshot.pods.len(), 5000);
     let started = Instant::now();
@@ -264,7 +263,6 @@ fn builds_and_renders_a_large_cluster() {
                 &layers,
                 &usage,
                 Focus::Select(Some("ns-0")),
-                &shown,
                 k8s_openapi::jiff::Timestamp::now(),
             ),
             Part::Whole,
@@ -277,7 +275,6 @@ fn builds_and_renders_a_large_cluster() {
                 &layers,
                 &usage,
                 "ns-0",
-                &shown,
                 k8s_openapi::jiff::Timestamp::now(),
             )?,
             Part::Whole,
@@ -293,7 +290,6 @@ fn builds_and_renders_a_large_cluster() {
                 resource: "deployments",
                 name: "app-0",
             },
-            &shown,
             k8s_openapi::jiff::Timestamp::now(),
         );
         template(page?, Part::Whole)

@@ -58,8 +58,7 @@
     knowledge describes a scanner's reports, and the list of kinds, on
     every page, so a
     reader finds them without knowing a key.  The button shows the key
-    that opens search.  The edge kinds filter a page's picture, so each
-    page that draws edges places them in its own main column. -#}
+    that opens search. -#}
 <div class="masthead-tools">
 <a class="masthead-link{% block masthead_access %}{% endblock %}" href="/access" hx-get="/access" hx-target="body" hx-swap="innerHTML" hx-push-url="true">access</a>
 {%- if let Ok(described) = "vulnerabilities"|value::<bool> %}{% if *described %}

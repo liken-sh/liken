@@ -1,25 +1,19 @@
 //! Builds the data of each page from one `Model` of the cluster.  Every
 //! page reads the same values the same way, so the cluster map and the
 //! namespace page agree on counts and health.
-//!
-//! A view turns some edge kinds on and the rest off.  `model.graph(shown)`
-//! drops the kinds that are off, so the tags, card lines, and loops of
-//! an off kind disappear together.  Data that does not come from the
-//! graph, such as the policy summary and the ground's volume counts, is
-//! filtered by `shown` separately.
 
 use k8s_openapi::jiff::Timestamp;
 
 use super::model::Model;
-use transect_graph::edges::{Endpoint, Kind, Object, Shown};
-use transect_ground::devices::{self, Devices};
+use transect_graph::edges::{Endpoint, Kind, Object};
+use transect_ground::devices;
 use transect_ground::loss::{self, Lost};
 use transect_ground::machines;
 use transect_ground::storage::Ground;
 use transect_map::map::relation::{self, Relation};
 use transect_map::map::{
-    ClusterMap, ClusterPage, Contents, EdgeRow, GitOpsPage, NamespacePage, ON_THE_MAP, PodContents,
-    PodPage, Sidebar, WorkloadContents, WorkloadPage, has_page, workload_card,
+    ClusterMap, ClusterPage, Contents, GitOpsPage, NamespacePage, PodContents, PodPage, Sidebar,
+    WorkloadContents, WorkloadPage, has_page, workload_card,
 };
 use transect_map::shapes::ShapesPage;
 use transect_network::entry::Endpoints;
@@ -51,7 +45,6 @@ pub fn cluster_page(
     layers: &Layers,
     usage: &usage::Reading,
     focus: Focus,
-    shown: &Shown,
     now: Timestamp,
 ) -> ClusterPage {
     let snapshot = &model.snapshot;
@@ -64,9 +57,8 @@ pub fn cluster_page(
         Focus::Select(select) => (select, &[][..]),
         Focus::Lose(lose, select) => (select, lose),
     };
-    let allowed = model.allowed(shown);
-    let graph = model.graph(shown);
-    let edge_set = model.edge_set(shown);
+    let allowed = model.allowed();
+    let graph = model.graph();
     let selected = select.and_then(|namespace| map.select(namespace));
     // Machines that are not ready are drawn as lost, together with the
     // machines named in `lose`.  While a namespace is selected, only the
@@ -95,20 +87,20 @@ pub fn cluster_page(
         let workloads = snapshot.workloads();
         loss_sidebar(
             snapshot,
-            &graph,
+            graph,
             &workloads,
             request,
             &mut map,
             &mut machines,
         )
     });
-    let loops = &edge_set.loops;
+    let loops = &model.loops;
     map.mark_loops(loops);
     let mut card = None;
     if let Some(selected) = &selected {
-        machines::count_here(&mut machines, &graph, &selected.namespace);
-        devices::name_here(&mut machines, &graph, &selected.namespace);
-        for (namespace, relations) in relation::across(&graph, &selected.namespace) {
+        machines::count_here(&mut machines, graph, &selected.namespace);
+        devices::name_here(&mut machines, graph, &selected.namespace);
+        for (namespace, relations) in relation::across(graph, &selected.namespace) {
             for found in relations {
                 map.relate(&namespace, found);
             }
@@ -125,8 +117,8 @@ pub fn cluster_page(
             }
         }
         let health = health_of(&selected.namespace);
-        let card_inputs = (&edge_set.forges, &minute.logged[..]);
-        let found = snapshot.card(&selected.namespace, health, &graph, card_inputs, allowed);
+        let card_inputs = (&model.forges, &minute.logged[..]);
+        let found = snapshot.card(&selected.namespace, health, graph, card_inputs, allowed);
         card = Some(found.with_loops(loops));
     }
     let found = model.workload_findings.iter().cloned();
@@ -142,18 +134,17 @@ pub fn cluster_page(
         snapshot.alerts.off_line(&snapshot.resources.directory),
         (&snapshot.ownership, &snapshot.plurals),
     );
-    let changes = edge_set.recorded.arranged(&minute.firing, now);
+    let changes = model.recorded.arranged(&minute.firing, now);
     sidebar.changed = Listed::sidebar(&changes, now);
     sidebar.unknown = unknown.filter(|_| loss.is_none());
     // The volume counts of the selected namespace on each ground come
     // from the `StoresOn` edges, which the graph builds from the claims.
     let ground = Ground::build(
         &snapshot.storage,
-        &graph,
+        graph,
         selected
             .as_ref()
             .map(|selected| selected.namespace.as_str()),
-        shown.is_on(Kind::StoresOn),
     )
     .with_about(|name| {
         let outside = snapshot.outsides.titled(name);
@@ -163,14 +154,6 @@ pub fn cluster_page(
         let outsides = &snapshot.outsides;
         (outsides.page_of(name), outsides.link_of(name))
     });
-    let here = match (&selected, &loss) {
-        (Some(selected), Some(loss)) if !loss.all_real() => {
-            format!("/?lose={}&select={}", loss.param(), selected.namespace)
-        }
-        (Some(selected), _) => format!("/?select={}", selected.namespace),
-        (None, Some(loss)) if !loss.all_real() => format!("/?lose={}", loss.param()),
-        (None, _) => "/".into(),
-    };
     ClusterPage {
         map,
         selected,
@@ -181,7 +164,6 @@ pub fn cluster_page(
         sidebar,
         card,
         loss,
-        edge_row: EdgeRow::build(&snapshot.offered(), shown, &here).affecting(ON_THE_MAP),
     }
 }
 
@@ -192,7 +174,6 @@ pub fn namespace_page(
     layers: &Layers,
     usage: &usage::Reading,
     namespace: &str,
-    shown: &Shown,
     now: Timestamp,
 ) -> Option<NamespacePage> {
     let snapshot = &model.snapshot;
@@ -201,17 +182,16 @@ pub fn namespace_page(
     let mut health = minute.health.clone();
     let namespace_health = health.remove(namespace).unwrap_or_default();
     let map = snapshot.map(layers, health);
-    let allowed = model.allowed(shown);
-    let graph = model.graph(shown);
-    let edge_set = model.edge_set(shown);
+    let allowed = model.allowed();
+    let graph = model.graph();
     let mut machines = snapshot.machines(usage);
-    machines::count_here(&mut machines, &graph, namespace);
+    machines::count_here(&mut machines, graph, namespace);
     let by_workload = health::by_workload(&namespace_health, namespace, &snapshot.ownership);
-    let loops = &edge_set.loops;
+    let loops = &model.loops;
     let contents = Contents {
         workloads: snapshot.ownership.workloads(namespace).collect(),
         pods: &snapshot.pods,
-        graph: &graph,
+        graph,
         ownership: &snapshot.ownership,
         objects: &objects,
         services: &snapshot.services,
@@ -223,12 +203,10 @@ pub fn namespace_page(
         resources: snapshot.resources_in(namespace),
         now,
     };
-    let card_inputs = (&edge_set.forges, &minute.logged[..]);
-    let card = snapshot.card(namespace, namespace_health, &graph, card_inputs, allowed);
+    let card_inputs = (&model.forges, &minute.logged[..]);
+    let card = snapshot.card(namespace, namespace_health, graph, card_inputs, allowed);
     let card = card.with_loops(loops);
-    let page = NamespacePage::build(&map, namespace, contents, &machines, card)?;
-    let here = format!("/namespaces/{namespace}");
-    Some(page.with_edge_row(EdgeRow::build(&snapshot.offered(), shown, &here)))
+    NamespacePage::build(&map, namespace, contents, &machines, card)
 }
 
 /// Identifies the workload to draw: its namespace, the resource name
@@ -247,7 +225,6 @@ pub fn workload_page(
     layers: &Layers,
     usage: &usage::Reading,
     at: WorkloadAt,
-    shown: &Shown,
     now: Timestamp,
 ) -> Option<WorkloadPage> {
     let WorkloadAt {
@@ -260,13 +237,10 @@ pub fn workload_page(
         layers,
         usage,
         namespace,
-        shown,
         |map, contents| WorkloadPage::build(map, namespace, resource, name, contents),
         now,
     )?;
-    let page = page.with_access(has_access(model, namespace, resource, name));
-    let row = EdgeRow::build(&model.snapshot.offered(), shown, &page.path);
-    Some(page.with_edge_row(row))
+    Some(page.with_access(has_access(model, namespace, resource, name)))
 }
 
 /// The page of the GitOps object `name` in `namespace`, where `resource`
@@ -279,7 +253,6 @@ pub fn gitops_page(
     namespace: &str,
     resource: &str,
     name: &str,
-    shown: &Shown,
 ) -> Option<GitOpsPage> {
     let snapshot = &model.snapshot;
     let (gitops, plurals) = (&snapshot.gitops, &snapshot.plurals);
@@ -291,7 +264,7 @@ pub fn gitops_page(
     let detail = gitops.detail(object)?;
     let path = transect_graph::links::page(object, plurals)?;
     let layer = snapshot.layer_of(namespace, layers);
-    let graph = model.graph(shown);
+    let graph = model.graph();
     let end = Endpoint::Object(object.clone());
     let reconciling = graph.reaching(Kind::ReconcilesFrom, &end);
     let reconciling = reconciling.into_iter().filter_map(|end| match end {
@@ -304,8 +277,7 @@ pub fn gitops_page(
         .with_siblings(gitops.objects(), |object| {
             transect_graph::links::page(object, plurals)
         });
-    let row = EdgeRow::build(&snapshot.offered(), shown, &page.path);
-    Some(page.with_edge_row(row))
+    Some(page)
 }
 
 /// Collects the data that every page of one workload in `namespace`
@@ -315,7 +287,6 @@ fn read_workloads<T>(
     layers: &Layers,
     usage: &usage::Reading,
     namespace: &str,
-    shown: &Shown,
     build: impl FnOnce(&ClusterMap, WorkloadContents) -> Option<T>,
     now: Timestamp,
 ) -> Option<T> {
@@ -325,11 +296,10 @@ fn read_workloads<T>(
     let map = snapshot.map(layers, health);
     let by_workload = health::by_workload(&namespace_health, namespace, &snapshot.ownership);
     let workloads = snapshot.workloads();
-    let allowed = model.allowed(shown);
-    let graph = model.graph(shown);
+    let allowed = model.allowed();
+    let graph = model.graph();
     let endpoints = Endpoints::build(&snapshot.endpoint_slices);
-    let edge_set = model.edge_set(shown);
-    let forges = &edge_set.forges;
+    let forges = &model.forges;
     let serving = snapshot.serving();
     let ways_in = model.ways_in();
     let contents = WorkloadContents {
@@ -339,7 +309,7 @@ fn read_workloads<T>(
         ownership: &snapshot.ownership,
         plurals: &snapshot.plurals,
         budgets: &snapshot.budgets,
-        graph: &graph,
+        graph,
         gitops: &snapshot.gitops,
         forges,
         images: &snapshot.images,
@@ -377,15 +347,12 @@ pub fn pod_page(
     usage: &usage::Reading,
     namespace: &str,
     name: &str,
-    shown: &Shown,
     now: Timestamp,
 ) -> Option<PodPage> {
     let snapshot = &model.snapshot;
     let map = snapshot.map(layers, model.minute(now).health.clone());
     let workloads = snapshot.workloads();
     let machines = snapshot.machines(usage);
-    let none_held = Devices::default();
-    let edge_set = model.edge_set(shown);
     let secrets = snapshot.secret_intent();
     let contents = PodContents {
         pods: &snapshot.pods,
@@ -394,23 +361,17 @@ pub fn pod_page(
         plurals: &snapshot.plurals,
         machines: &machines,
         storage: &snapshot.storage,
-        devices: if shown.is_on(Kind::Holds) {
-            &snapshot.devices
-        } else {
-            &none_held
-        },
+        devices: &snapshot.devices,
         usage: usage.usage(),
         usage_note: usage.off_line(&snapshot.resources.directory),
         origins: Origins {
             known: &snapshot.images,
-            forges: &edge_set.forges,
+            forges: &model.forges,
         },
         secrets: &secrets,
         now,
     };
-    let page = PodPage::build(&map, namespace, name, contents)?;
-    let row = EdgeRow::build(&snapshot.offered(), shown, &page.path);
-    Some(page.with_edge_row(row))
+    PodPage::build(&map, namespace, name, contents)
 }
 
 /// The page of every shape that `transect` has loaded, with the kinds
@@ -428,8 +389,7 @@ pub fn shapes_page(model: &Model) -> ShapesPage {
 pub fn resources_page(model: &Model, usage: &usage::Reading) -> ResourcesPage {
     let snapshot = &model.snapshot;
     let mut conditions = snapshot.conditions();
-    let forges = &model.edge_set(&Shown::default()).forges;
-    conditions.extend(snapshot.unmatched(usage, forges));
+    conditions.extend(snapshot.unmatched(usage, &model.forges));
     ResourcesPage::build(&snapshot.resources.directory, conditions)
 }
 

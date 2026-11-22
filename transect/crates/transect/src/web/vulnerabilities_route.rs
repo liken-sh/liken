@@ -13,9 +13,7 @@ pub(super) async fn list(
     Query(query): Query<view::Query>,
 ) -> Response {
     let severities = query.severities();
-    state
-        .whole(Page::Vulnerabilities { severities }, &query)
-        .await
+    state.whole(Page::Vulnerabilities { severities }).await
 }
 
 pub(super) async fn workload(
@@ -30,13 +28,9 @@ pub(super) async fn workload(
         name,
         severities,
     };
-    state.whole(page, &query).await
+    state.whole(page).await
 }
 
-pub(super) async fn finding(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Query(query): Query<view::Query>,
-) -> Response {
-    state.whole(Page::Vulnerability { id }, &query).await
+pub(super) async fn finding(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    state.whole(Page::Vulnerability { id }).await
 }

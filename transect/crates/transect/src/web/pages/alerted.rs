@@ -11,7 +11,6 @@ use rstest::rstest;
 use super::{Focus, cluster_page};
 use crate::web::model::Model;
 use crate::web::snapshot::Snapshot;
-use transect_graph::edges::Shown;
 use transect_observe::alerts::fixtures::alert;
 use transect_observe::alerts::{self, Alert};
 use transect_observe::usage;
@@ -45,7 +44,6 @@ status: {conditions: [{type: Ready, status: 'True'}]}",
         &Layers::default(),
         &usage::Reading::Off,
         Focus::Select(None),
-        &Shown::default(),
         k8s_openapi::jiff::Timestamp::now(),
     );
     page.render().unwrap()

@@ -1,68 +1,12 @@
 //! Rewrites the links of a rendered page so the next page keeps the
-//! reader's view. `carry` adds the `edges` query parameter, the edge
-//! kinds that the reader turned on, to each link, so a click, a new
-//! tab, and the page's event stream show the same kinds. `carry_loss`
-//! keeps the loss view, and `carry_access` keeps the access lens.
+//! reader's view. `carry_loss` keeps the loss view, and `carry_access`
+//! keeps the access lens.
 //!
 //! The rewrite runs on the rendered HTML so that the templates write
 //! plain paths and need no view state passed down to them, and a link
 //! added to a template later is rewritten with no change.
 
 use std::collections::HashSet;
-
-/// The attributes that hold a link to another view.
-const ATTRIBUTES: [&str; 3] = [" href=\"", " hx-get=\"", " sse-connect=\""];
-
-/// `html` with `edges=<edges>` added to each in-page link: every
-/// `href`, `hx-get`, and `sse-connect` whose value starts with `/`.
-/// Links to `/static/` and links that already have `edges=` are left
-/// alone. The parameter goes before a `#fragment`, so the link still
-/// opens at the same place on the page.
-pub fn carry(html: &str, edges: &str) -> String {
-    let mut out = String::with_capacity(html.len() + html.len() / 16);
-    // The position of each attribute's next occurrence. Each is searched
-    // for again only after the copy passes it, so the page is scanned
-    // once per attribute, however many links it has.
-    let mut next = ATTRIBUTES.map(|attribute| html.find(attribute));
-    let mut done = 0;
-    while let Some((which, at)) = first(&next) {
-        let start = at + ATTRIBUTES[which].len();
-        out.push_str(&html[done..start]);
-        let end = html[start..]
-            .find('"')
-            .map_or(html.len(), |end| start + end);
-        out.push_str(&carried(&html[start..end], edges));
-        done = end;
-        for (attribute, found) in ATTRIBUTES.iter().zip(&mut next) {
-            if found.is_some_and(|found| found < done) {
-                *found = html[done..].find(attribute).map(|found| done + found);
-            }
-        }
-    }
-    out.push_str(&html[done..]);
-    out
-}
-
-/// The index in `ATTRIBUTES` and the position of the attribute that
-/// occurs first.
-fn first(next: &[Option<usize>; 3]) -> Option<(usize, usize)> {
-    let found = next.iter().enumerate();
-    let found = found.filter_map(|(which, at)| Some((which, (*at)?)));
-    found.min_by_key(|(_, at)| *at)
-}
-
-fn carried(link: &str, edges: &str) -> String {
-    let in_page = link.starts_with('/') && !link.starts_with("/static/");
-    if !in_page || link.contains("edges=") {
-        return link.into();
-    }
-    let (path, fragment) = match link.find('#') {
-        Some(at) => link.split_at(at),
-        None => (link, ""),
-    };
-    let joiner = if path.contains('?') { '&' } else { '?' };
-    format!("{path}{joiner}edges={edges}{fragment}")
-}
 
 /// `html` with `lose=<lose>` added to each `href` and `hx-get` that
 /// starts with `/?select=`, so a namespace clicked on the cluster map
@@ -148,46 +92,6 @@ mod tests {
     use super::*;
 
     #[rstest]
-    #[case::a_path(
-        r#"<a href="/namespaces/shop">"#,
-        r#"<a href="/namespaces/shop?edges=holds">"#
-    )]
-    #[case::a_query(
-        r#"<div hx-get="/?select=shop">"#,
-        r#"<div hx-get="/?select=shop&edges=holds">"#
-    )]
-    #[case::a_fragment(
-        r#"<a href="/?select=shop#apps">"#,
-        r#"<a href="/?select=shop&edges=holds#apps">"#
-    )]
-    #[case::the_stream(
-        r#"<div sse-connect="/events/">"#,
-        r#"<div sse-connect="/events/?edges=holds">"#
-    )]
-    #[case::a_static_file(
-        r#"<link href="/static/web/layout.css">"#,
-        r#"<link href="/static/web/layout.css">"#
-    )]
-    #[case::another_site(
-        r#"<a href="https://forge.example.com/x">"#,
-        r#"<a href="https://forge.example.com/x">"#
-    )]
-    #[case::kinds_named_already(r#"<a href="/?edges=runs-on">"#, r#"<a href="/?edges=runs-on">"#)]
-    #[case::the_data_prefix(r#"<input data-hx-get="/">"#, r#"<input data-hx-get="/">"#)]
-    #[case::two_links(
-        r#"<a href="/a" hx-get="/a">x</a>"#,
-        r#"<a href="/a?edges=holds" hx-get="/a?edges=holds">x</a>"#
-    )]
-    #[case::links_of_each_attribute_in_turn(
-        r#"<div sse-connect="/events/"><a href="/a">x</a><b hx-get="/b"></b><a href="/c"></a></div>"#,
-        r#"<div sse-connect="/events/?edges=holds"><a href="/a?edges=holds">x</a><b hx-get="/b?edges=holds"></b><a href="/c?edges=holds"></a></div>"#
-    )]
-    #[case::an_unclosed_value(r#"<a href="/a"#, r#"<a href="/a?edges=holds"#)]
-    fn adds_the_kinds_to_each_link_to_a_view(#[case] html: &str, #[case] expected: &str) {
-        assert_eq!(carry(html, "holds"), expected);
-    }
-
-    #[rstest]
     #[case::a_namespace_on_the_map(
         r#"<a href="/?select=shop" hx-get="/?select=shop">"#,
         r#"<a href="/?lose=alpha,beta&select=shop" hx-get="/?lose=alpha,beta&select=shop">"#
@@ -234,10 +138,6 @@ mod tests {
     #[case::the_lens_tabs(
         r#"<span class="lens-tabs"><a href="/namespaces/shop/deployments/web">overview</a></span>"#,
         r#"<span class="lens-tabs"><a href="/namespaces/shop/deployments/web">overview</a></span>"#
-    )]
-    #[case::the_data_prefix(
-        r#"<input data-hx-get="/namespaces/shop">"#,
-        r#"<input data-hx-get="/namespaces/shop">"#
     )]
     #[case::a_machine_link_beside_a_workload_link(
         r#"<a href="/machines/node-a">node-a</a><a href="/namespaces/shop/deployments/web">'s address</a>"#,

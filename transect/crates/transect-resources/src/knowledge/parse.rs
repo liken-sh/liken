@@ -355,9 +355,8 @@ fn template(name: &str, kind: bool, matched: bool) -> Result<(), String> {
 }
 
 /// The edge `Kind` for the text of a reference's `edge`. The kinds are
-/// a fixed set because loop detection, the loss cascade, and the map's
-/// edge row match on them. A reference that needs another verb writes
-/// it in `label`.
+/// a fixed set because loop detection and the loss cascade match on
+/// them. A reference that needs another verb writes it in `label`.
 pub fn edge_kind(edge: &str) -> Option<Kind> {
     Some(match edge {
         "runs on" => Kind::RunsOn,
