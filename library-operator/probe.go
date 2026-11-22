@@ -39,7 +39,8 @@ func (e *enricher) probeFact(ctx context.Context) error {
 
 // A catalog read that fails ends the container, because the gap list is the
 // work and there is nothing to do without it. A file that will not open
-// records an error attempt, and the run carries on to the next file.
+// records an error attempt, and the run carries on to the next file. A
+// shutdown ends the run with its error, also during the last file.
 func (e *enricher) probeGap(ctx context.Context, probe mediaProbe) error {
 	paths, err := e.gaps(ctx, factProbe, time.Now().UTC())
 	if err != nil {
@@ -53,7 +54,9 @@ func (e *enricher) probeGap(ctx context.Context, probe mediaProbe) error {
 		if !e.inScope(path) {
 			continue
 		}
-		e.probeOne(ctx, probe, path)
+		if err := e.probeOne(ctx, probe, path); err != nil {
+			return err
+		}
 		probed++
 	}
 	e.logf("probed %d of the %d files with no current probe", probed, len(paths))
@@ -61,16 +64,24 @@ func (e *enricher) probeGap(ctx context.Context, probe mediaProbe) error {
 }
 
 // One file: read it, record what it holds, and record the attempt whatever
-// the outcome.
-func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) {
+// the outcome, except when the container's own shutdown ended the read. An
+// error then says nothing about the file, and an error attempt would keep
+// the file out of the probe's work for the error's window, on every cluster
+// that shares the volume. So the probe records no attempt, the file stays
+// in the gap, and probeOne returns the shutdown's error.
+func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) error {
 	absolute := filepath.Join(e.root, path)
 	result := attemptFound
 	if err := e.recordProbe(ctx, probe, absolute); err != nil {
+		if stopped := ctx.Err(); stopped != nil {
+			return stopped
+		}
 		e.logf("could not probe %s: %v", e.named(path), err)
 		result = attemptError
 	}
 	folder, entry := likenFolderFor(e.kind, absolute)
 	e.recordAttempt(folder, factProbe, entry, result, time.Now().UTC())
+	return nil
 }
 
 // The ledger record is the source of truth, so the probe writes it first
@@ -81,8 +92,8 @@ func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) 
 // A file with an image subtitle stream gets a second read, which measures
 // the stream. When that read fails, the probe still records what the header
 // read found, because it is true of the file, and the error makes the
-// attempt an error. The record is then unmeasured, so the probe reads the
-// file again after the error's window.
+// attempt an error, unless a shutdown ended the read. The record is then
+// unmeasured, so the probe reads the file again.
 func (e *enricher) recordProbe(ctx context.Context, probe mediaProbe, absolute string) error {
 	record, err := readProbeRecord(ctx, probe, absolute)
 	if err != nil {

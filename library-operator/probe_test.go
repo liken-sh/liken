@@ -644,3 +644,67 @@ func TestTheProbeWritesNoNFOBesideAVideoThatIsNotTheFeature(t *testing.T) {
 		})
 	}
 }
+
+// A read that the probe's own shutdown ended says nothing about the file.
+// So the probe records no attempt, and the file stays in the gap for the
+// next run on this cluster and on every cluster that shares the volume. A
+// header read that finished before the shutdown still records what it
+// found, unmeasured.
+func TestAReadThatAShutdownEndsRecordsNoAttempt(t *testing.T) {
+	cases := []struct {
+		name     string
+		header   func(cancel context.CancelFunc) mediaProbe
+		window   func(cancel context.CancelFunc) subtitleWindowRead
+		recorded bool
+	}{
+		{
+			name: "the header read",
+			header: func(cancel context.CancelFunc) mediaProbe {
+				return func(context.Context, string) ([]byte, error) {
+					cancel()
+					return nil, errors.New("ffprobe: signal: killed")
+				}
+			},
+		},
+		{
+			name: "the window read",
+			header: func(context.CancelFunc) mediaProbe {
+				return answeringProbe(ffprobeOfAFilmWithAPGSStream)
+			},
+			window: func(cancel context.CancelFunc) subtitleWindowRead {
+				return func(ctx context.Context, _ string, _ float64, _ func(subtitlePacket) bool) error {
+					cancel()
+					return ctx.Err()
+				}
+			},
+			recorded: true,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			root := t.TempDir()
+			seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
+			work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+			ctx, cancel := context.WithCancel(t.Context())
+			if test.window != nil {
+				answeringWindows(t, &fakeWindows{})
+				readSubtitleWindow = test.window(cancel)
+			}
+
+			if err := work.probeGap(ctx, test.header(cancel)); err == nil {
+				t.Error("the probe reported no error, want the shutdown's")
+			}
+
+			ledger, err := readLikenLedger(filepath.Join(root, "The Long Survey (1982)"), factProbe)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, held := ledger.probeAt("The Long Survey (1982).mkv")
+			if len(ledger.Attempts) != 0 || held != test.recorded || record.Measured {
+				t.Errorf("attempts = %+v, record held %v and measured %v, want no attempt, held %v, and unmeasured",
+					ledger.Attempts, held, record.Measured, test.recorded)
+			}
+		})
+	}
+}
