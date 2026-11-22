@@ -27,7 +27,7 @@ metadata:
     # (init/schemarevision.go). Raise the revision in
     # the same change that changes the schema. A test checks that the
     # two change together.
-    liken.sh/schema-revision: "14"
+    liken.sh/schema-revision: "15"
 spec:
   group: liken.sh
   names:
@@ -200,9 +200,10 @@ spec:
               description: >-
                 The declared state of this machine. Init applies the
                 spec at boot. While the machine runs, the `liken`
-                operator applies changes to `sysctls`, `hostEntries`,
-                `nodeLabels`, and `nodeTaints`, to modules that the spec
-                adds, and to `serio` entries that the spec adds. A
+                operator applies changes to `sysctls`, `disks`,
+                `hostEntries`, `nodeLabels`, and `nodeTaints`, to
+                modules that the spec adds, and to `serio` entries that
+                the spec adds. A
                 change to `network`, `storage`, or `rlimits`, a removed
                 module or `serio` entry, a changed module order, and a
                 changed module parameter take effect at the next boot.
@@ -1236,6 +1237,94 @@ spec:
                             not a request. When it is empty, the role
                             takes the rest of its disk, and only one
                             role on a disk can omit it.
+                disks:
+                  type: array
+                  description: >-
+                    Settings of whole disks, one entry for each disk.
+                    `maxRequestSize` is the largest single request that
+                    the kernel sends to the disk, the
+                    `/sys/block/<disk>/queue/max_sectors_kb` attribute.
+                    Every machine sets it to `128Ki` on the disk that
+                    holds `storage.clusterState`, unless an entry here
+                    sets a `maxRequestSize` for that disk, and leaves
+                    every other disk at the kernel's value. A machine whose `clusterState` is in
+                    memory gets no default. The default keeps etcd's
+                    small writes from waiting behind large writes of
+                    pods on a shared disk: the Disk settings page of the
+                    manual has the measurements. Init applies these
+                    settings at boot, before k3s starts, and the
+                    operator applies them again on every pass, so an
+                    edit takes effect without a reboot. An entry that an
+                    edit removes keeps its value until the next boot.
+                    The `DiskSettingsApplied` condition reports each
+                    entry that the machine could not apply, and
+                    `status.hardware.blockDevices` reports the value in
+                    effect on each disk and its hardware limit.
+                  # The list is a map keyed by device, so the API server
+                  # refuses two entries with the same name. Two different
+                  # names of one disk pass admission, and the machine
+                  # uses the first of them and reports the second
+                  # (machine/disksettings.go).
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [device]
+                  maxItems: 32
+                  items:
+                    type: object
+                    required: [device]
+                    properties:
+                      device:
+                        type: string
+                        maxLength: 256
+                        pattern: ^/dev/[a-zA-Z0-9/_.:=+#@-]+$
+                        description: >-
+                          The disk, by the names that
+                          `spec.storage.<role>.device` accepts: a device
+                          path (`/dev/sda`), or a stable name under
+                          `/dev/disk/by-id/` or `/dev/disk/by-path/`.
+                          `status.hardware.blockDevices[].stableNames`
+                          lists the stable names of each disk. The
+                          machine finds the disk by this name on every
+                          boot and every pass, so prefer a by-id name,
+                          which follows the disk to another port. A
+                          device path can name a different disk after
+                          the kernel probes the disks in another order.
+                        # A by-uuid name names a filesystem, not a disk.
+                        x-kubernetes-validations:
+                          - rule: >-
+                              !self.startsWith('/dev/disk/') ||
+                              self.startsWith('/dev/disk/by-id/') ||
+                              self.startsWith('/dev/disk/by-path/')
+                            message: >-
+                              a disk is named by a /dev name or a name
+                              in /dev/disk/by-id or /dev/disk/by-path
+                      maxRequestSize:
+                        type: string
+                        maxLength: 32
+                        pattern: ^([0-9]+(Ki|Mi|Gi|Ti)?|Kernel)$
+                        description: >-
+                          The largest request that the kernel sends to
+                          this disk, as a binary quantity (`128Ki`), or
+                          `Kernel` to keep the kernel's own value, which
+                          turns off the default on the `clusterState`
+                          disk. When it is empty, the default applies.
+                          The kernel sets the value in whole KiB, and
+                          accepts no value below `4Ki` or above the
+                          disk's `maxHardwareRequestSize` in
+                          `status.hardware.blockDevices`. The machine
+                          refuses a value above that limit and keeps
+                          the default on the disk.
+                        # The kernel refuses a value below one
+                        # BLK_MIN_SEGMENT_SIZE and takes KiB, so admission
+                        # refuses those values before a machine does. The
+                        # hardware limit is known only on the machine.
+                        x-kubernetes-validations:
+                          - rule: >-
+                              self == 'Kernel' ||
+                              (quantity(self).compareTo(quantity('4Ki')) >= 0 &&
+                              quantity(self).asInteger() % 1024 == 0)
+                            message: >-
+                              maxRequestSize is Kernel or a whole number
+                              of KiB of at least 4Ki
             status:
               type: object
               description: >-
@@ -1716,7 +1805,9 @@ spec:
                         order, so a name identifies the disk for this
                         boot only. `stableNames` identify the disk
                         across boots. `model` and `serial` come from the
-                        device itself.
+                        device itself. `maxRequestSize` and
+                        `maxHardwareRequestSize` come from the disk's
+                        request queue in sysfs.
                       x-kubernetes-list-type: map
                       x-kubernetes-list-map-keys: [name]
                       items:
@@ -1759,6 +1850,25 @@ spec:
                             x-kubernetes-list-type: atomic
                             items:
                               type: string
+                          maxRequestSize:
+                            type: string
+                            description: >-
+                              The largest request that the kernel sends
+                              to this disk now, read back from
+                              `/sys/block/<name>/queue/max_sectors_kb`,
+                              in the syntax of
+                              `spec.disks[].maxRequestSize`. It shows
+                              the default on the `clusterState` disk,
+                              each value of `spec.disks`, and the
+                              kernel's value on every other disk.
+                          maxHardwareRequestSize:
+                            type: string
+                            description: >-
+                              The largest request that the disk's
+                              driver accepts, read from
+                              `/sys/block/<name>/queue/max_hw_sectors_kb`.
+                              `spec.disks[].maxRequestSize` cannot go
+                              above it.
                     unclaimed:
                       type: array
                       description: >-
@@ -3596,8 +3706,8 @@ spec:
                     `ClockSynchronized`, and `RebootApproved`. The other
                     conditions each report one check. `FactsPublished`
                     reports the facts that init writes.
-                    `SysctlsApplied`, `HostEntriesApplied`,
-                    `StorageReady`, `ModulesLoaded`,
+                    `SysctlsApplied`, `DiskSettingsApplied`,
+                    `HostEntriesApplied`, `StorageReady`, `ModulesLoaded`,
                     `ModuleParametersApplied`, `FeaturesReady`,
                     `WirelessJoined`, `NodeLabelsApplied`, and
                     `NodeTaintsApplied` report the parts of the spec

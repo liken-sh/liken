@@ -409,6 +409,12 @@ func (t FactsTree) readBlockDevices() ([]BlockDevice, error) {
 		if d.StableNames, err = t.readListFact(filepath.Join(base, "stableNames")); err != nil {
 			return nil, err
 		}
+		if d.MaxRequestSize, err = t.readFact(filepath.Join(base, "maxRequestSize")); err != nil {
+			return nil, err
+		}
+		if d.MaxHardwareRequestSize, err = t.readFact(filepath.Join(base, "maxHardwareRequestSize")); err != nil {
+			return nil, err
+		}
 		devices = append(devices, d)
 	}
 	return devices, nil

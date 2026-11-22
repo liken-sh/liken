@@ -41,11 +41,13 @@ const (
 )
 
 // sysctlCheck holds the value that the last pass read back for each
-// parameter it applied, and the parameters it could not apply because
-// their file did not exist.
+// parameter it applied, the parameters it could not apply because
+// their file did not exist, and the request size of each disk that it
+// set (disksettings.go), which also changes with no event.
 type sysctlCheck struct {
-	applied map[string]string
-	missing []string
+	applied      map[string]string
+	missing      []string
+	requestSizes map[string]uint64
 }
 
 // drifted reports whether an applied parameter under dir now reads

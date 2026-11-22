@@ -175,6 +175,10 @@ type reader struct {
 	// kernel parameter, and the value it read back (conditions.go).
 	sysctls *sysctlMemory
 
+	// requestSizes records the disks that the operator returned to the
+	// kernel's request size (disksettings.go).
+	requestSizes *requestSizeMemory
+
 	// waits runs the watches that the waits use (waits.go). A nil value
 	// starts no watch, and those reads go to the API server.
 	waits *waits
@@ -222,7 +226,8 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 	name, clusterName string, wake func(), restarted func(kind string)) *reader {
 	r := &reader{client: client, machineVersions: memo.New(),
 		statusWritten: &kubernetes.OwnWrite{}, slicesWritten: &kubernetes.SliceWriter{}, recovered: &atomic.Bool{},
-		waits: newWaits(ctx, watcher, wake, name), sysctls: newSysctlMemory()}
+		waits: newWaits(ctx, watcher, wake, name), sysctls: newSysctlMemory(),
+		requestSizes: newRequestSizeMemory()}
 	start := func(kind string, source informer.Source, handler cache.ResourceEventHandler) *informer.Collection {
 		options := informer.Options{
 			Handler:  handler,

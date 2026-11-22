@@ -257,19 +257,23 @@ func TestTheLivenessCheckFailsOnlyPastTheLimit(t *testing.T) {
 // reported as a missing wake signal.
 func TestABackstopTimerYieldsToACauseThatIsReady(t *testing.T) {
 	dir := t.TempDir()
-	saved := sysctlRoot
-	t.Cleanup(func() { sysctlRoot = saved })
+	saved, savedSysfs := sysctlRoot, draSysfsRoot
+	t.Cleanup(func() { sysctlRoot, draSysfsRoot = saved, savedSysfs })
 	sysctlRoot = dir
 	writeSysctl(t, filepath.Join(dir, "kernel", "test_value"), "1")
+	sysBlock, _ := diskMachine(t)
+	draSysfsRoot = filepath.Dir(sysBlock)
 	cases := []struct {
-		name    string
-		pending bool
-		applied string
-		want    string
+		name        string
+		pending     bool
+		applied     string
+		requestSize uint64
+		want        string
 	}{
-		{"nothing else ready", false, "1", causeBackstop},
-		{"a watch's wake waiting", true, "1", causeWatch},
-		{"a sysctl that drifted", false, "0", causeSysctls},
+		{"nothing else ready", false, "1", 4096, causeBackstop},
+		{"a watch's wake waiting", true, "1", 4096, causeWatch},
+		{"a sysctl that drifted", false, "0", 4096, causeSysctls},
+		{"a disk's request size that drifted", false, "1", 128, causeDisks},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -279,7 +283,10 @@ func TestABackstopTimerYieldsToACauseThatIsReady(t *testing.T) {
 			}
 			l := &loop{wakes: wakes}
 
-			got := l.backstopCause(waitSources{}, sysctlCheck{applied: map[string]string{"kernel.test_value": c.applied}})
+			got := l.backstopCause(waitSources{}, sysctlCheck{
+				applied:      map[string]string{"kernel.test_value": c.applied},
+				requestSizes: map[string]uint64{"sda": c.requestSize},
+			})
 
 			if got != c.want {
 				t.Errorf("the pass's cause is %q, want %q", got, c.want)

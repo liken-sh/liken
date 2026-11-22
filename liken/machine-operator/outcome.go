@@ -78,6 +78,10 @@ type passOutcome struct {
 	// because their file does not exist. The same check reads it.
 	sysctlsMissing []string
 
+	// requestSizes is the max_sectors_kb that the pass read back from
+	// each disk it set (disksettings.go), which the same check reads.
+	requestSizes map[string]uint64
+
 	// wake is the earliest time that a step asked for another pass, or
 	// zero when no step asked.
 	wake time.Time

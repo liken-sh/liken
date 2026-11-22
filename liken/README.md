@@ -46,7 +46,8 @@ release goes to [releases.liken.sh](https://releases.liken.sh/).
   the release catalog and the target version, the registry settings,
   and features. `flux` syncs the cluster from git from its first boot.
 - **`Machine`** describes one computer: its interfaces, the purpose
-  of each disk, its kernel modules, its sysctls, and its reboot policy.
+  of each disk and its request size, its kernel modules, its sysctls,
+  and its reboot policy.
 - **`Disruption`** asks for a turn to reboot a machine or restart k3s.
 - **`MachineDisruptionBudget`** sets how many of the machines that it
   selects can be out of service at the same time.

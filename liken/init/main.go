@@ -267,6 +267,12 @@ func main() {
 	applySysctls(defaults)
 	applySysctls(m.Spec.Sysctls)
 
+	// The request sizes of the disks apply before k3s starts, so etcd
+	// never writes to a clusterState disk with the kernel's larger
+	// request size (disksettings.go). The operator applies them again
+	// when the cluster is up, so an edit takes effect without a reboot.
+	applyRequestSizes(m.Spec.Disks, storage)
+
 	// Resource limits apply in the same order. A process inherits its
 	// limits when it forks, so init sets them on itself before it starts
 	// k3s, and k3s and every process it starts inherit them. The

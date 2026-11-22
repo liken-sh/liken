@@ -185,6 +185,12 @@ section controls how much of this filesystem the image store may use.
 Set `podStorage` to the size that your workloads' volumes need. If the
 report had to reduce either size, it says so in the file.
 
+The disk that holds `clusterState` gets a smaller largest request
+size than the kernel's, so that etcd's writes do not wait behind
+large writes from pods on the same disk.
+[Disk settings](https://liken.sh/docs/reference/disks/) explains the default and how
+to change it or turn it off with `spec.disks`.
+
 The proposal declares only the network ports that had a cable when the
 report ran. It lists the ports with no cable below them, as comments,
 with their names and MAC addresses. Remove the comment marks from a

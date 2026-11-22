@@ -310,6 +310,22 @@ condition is `False`, the condition's message gives the cause:
   did not load with your parameters. The message names what loaded it
   first.
 
+## A disk setting did not take
+
+Read the request size that each disk has now, and its hardware limit:
+
+    kubectl get machine <name> -o jsonpath='{.status.hardware.blockDevices}' | jq '.[] | {name, maxRequestSize, maxHardwareRequestSize}'
+
+When the `DiskSettingsApplied` condition is `False`, its reason and
+message name each entry of `spec.disks` that the machine skipped:
+`DiskNotFound` for a name that no attached disk has,
+`AboveHardwareLimit` for a value above `maxHardwareRequestSize`,
+`InvalidSetting` for an entry that the machine cannot use, and
+`ApplyFailed` for a write that the kernel refused. The disk of a
+skipped entry keeps the default.
+[Disk settings](/docs/reference/disks/#when-a-value-is-refused) has
+the fix for each reason.
+
 ## A machine needs a reboot and nothing is staged
 
 On its own, a machine reboots only to apply a staged change, so a

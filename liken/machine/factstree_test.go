@@ -176,6 +176,7 @@ func everythingSet() *MachineStatus {
 						"/dev/disk/by-id/scsi-35002538d40a45c88",
 						"/dev/disk/by-path/pci-0000:00:1f.2-ata-3",
 					},
+					MaxRequestSize: "128Ki", MaxHardwareRequestSize: "32767Ki",
 				},
 			},
 			Unclaimed: []UnclaimedDevice{

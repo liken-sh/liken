@@ -214,5 +214,6 @@ func unclaimedEqual(a, b machine.UnclaimedDevice) bool {
 func blockDeviceEqual(a, b machine.BlockDevice) bool {
 	return a.Name == b.Name && a.SizeBytes == b.SizeBytes &&
 		a.Model == b.Model && a.Serial == b.Serial &&
+		a.MaxRequestSize == b.MaxRequestSize && a.MaxHardwareRequestSize == b.MaxHardwareRequestSize &&
 		slices.Equal(a.StableNames, b.StableNames)
 }

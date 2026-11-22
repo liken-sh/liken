@@ -119,7 +119,7 @@ func newMachineMetrics(o *metrics.Operator, f *fetcher) *machineMetrics {
 		}, []string{"step"}),
 		passes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: metrics.Prefix + "machine_passes_total",
-			Help: "Reconcile passes, by what started each one: start, watch, machine event, facts, retry, sysctl drift, or backstop.",
+			Help: "Reconcile passes, by what started each one: start, watch, machine event, facts, retry, sysctl drift, disk drift, or backstop.",
 		}, []string{"cause"}),
 		classes: map[string]bool{},
 	}

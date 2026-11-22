@@ -384,6 +384,15 @@ type BlockDevice struct {
 	// disk when the disk moves to another bay. A disk with no by-id name
 	// has only a by-path name.
 	StableNames []string `json:"stableNames,omitempty"`
+
+	// MaxRequestSize is the largest request that the kernel sends to
+	// this disk now, read back from /sys/block/<name>/queue/max_sectors_kb,
+	// in the syntax of spec.disks[].maxRequestSize.
+	// MaxHardwareRequestSize is the largest that the disk's driver
+	// accepts, max_hw_sectors_kb, and no setting can go above it. Both
+	// are empty when sysfs shows no queue for the disk.
+	MaxRequestSize         string `json:"maxRequestSize,omitempty"`
+	MaxHardwareRequestSize string `json:"maxHardwareRequestSize,omitempty"`
 }
 
 // Backing is where the data of a storage role is: a partition assigned

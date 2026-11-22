@@ -76,6 +76,7 @@ func discoverBlockDevices() []machine.BlockDevice {
 		}
 
 		d.StableNames = stableNames(name)
+		machine.FillRequestLimits(sysBlock, &d)
 
 		disks = append(disks, d)
 	}

@@ -184,6 +184,15 @@ type MachineSpec struct {
 	// stages an edit for the next boot.
 	Storage StorageSpec `json:"storage,omitzero"`
 
+	// Disks sets the request queue of whole disks (disksettings.go),
+	// keyed by the same device names that Storage accepts. Init applies
+	// it at boot, before k3s starts, together with liken's default for
+	// the clusterState disk, and the operator applies it again on every
+	// pass, so an edit takes effect without a reboot. An entry that an
+	// edit removes keeps its value until the next boot, as a removed
+	// sysctl does.
+	Disks []DiskSettings `json:"disks,omitempty"`
+
 	// RebootPolicy decides what the operator does when a spec change
 	// needs a reboot, such as a change to storage or network or a
 	// removed module. With Manual, the default, the operator stages

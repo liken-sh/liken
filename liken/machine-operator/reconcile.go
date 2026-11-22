@@ -99,6 +99,16 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	}
 	status.Conditions = api.SetCondition(status.Conditions, sysctlsCondition(defaultsErr, specErr), now)
 
+	// The disks' request sizes apply in the same way, and
+	// status.hardware.blockDevices reports the values that sysfs reads
+	// back after the writes, not the ones that init published at boot.
+	disks := applyDiskSettings(sysBlockRoot(), m.Spec.Disks, facts, out, r.requestSizes)
+	if out != nil {
+		out.requestSizes = disks.applied
+	}
+	status.Hardware.BlockDevices = requestSizesInEffect(sysBlockRoot(), status.Hardware.BlockDevices)
+	status.Conditions = api.SetCondition(status.Conditions, diskSettingsCondition(disks), now)
+
 	// podStale is true when this pod's template is older than the
 	// release it runs. A follower that reboots into a new release
 	// before a leader does runs the new binary in the old pod spec

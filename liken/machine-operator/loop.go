@@ -188,7 +188,7 @@ func (l *loop) run(ctx context.Context, current *machine.Machine) error {
 		// (waits.go).
 		l.objects.waits.endPass()
 		if out.sysctls != nil {
-			sysctls = sysctlCheck{applied: out.sysctls, missing: out.sysctlsMissing}
+			sysctls = sysctlCheck{applied: out.sysctls, missing: out.sysctlsMissing, requestSizes: out.requestSizes}
 		}
 		if cause == causeBackstop {
 			reportRepairs(out.writes, machineEvents{recorder: l.objects.recorder, machine: machineReference(current)}, l.layer)
@@ -240,6 +240,7 @@ const (
 	causeRetry    = "retry"
 	causeFacts    = "facts"
 	causeSysctls  = "sysctl drift"
+	causeDisks    = "disk drift"
 	causeBackstop = "backstop"
 )
 
@@ -295,6 +296,9 @@ func (l *loop) wait(ctx context.Context, from waitSources, sysctls sysctlCheck) 
 			if sysctls.drifted(sysctlRoot) {
 				return causeSysctls, false, nil
 			}
+			if sysctls.requestSizesDrifted(sysBlockRoot()) {
+				return causeDisks, false, nil
+			}
 		}
 	}
 }
@@ -315,6 +319,9 @@ func (l *loop) backstopCause(from waitSources, sysctls sysctlCheck) string {
 	}
 	if sysctls.drifted(sysctlRoot) {
 		return causeSysctls
+	}
+	if sysctls.requestSizesDrifted(sysBlockRoot()) {
+		return causeDisks
 	}
 	return causeBackstop
 }

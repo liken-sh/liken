@@ -161,6 +161,12 @@ process, such as how many files it can have open. No sysctl changes
 them. `liken` sets its own values, and `spec.rlimits` overrides them.
 [Resource limits](/docs/reference/rlimits/) lists both.
 
+**Disk settings** are attributes of each disk's request queue under
+`/sys/block`, not under `/proc/sys`. `liken` sets the largest request
+size on the disk that holds `clusterState`, and `spec.disks` changes
+it on any disk. [Disk settings](/docs/reference/disks/) has the
+default and the reason for it.
+
 **The kernel command line** has the settings that the kernel reads at
 boot, before any program runs. `liken` writes the command line, and no
 field adds to it.
