@@ -431,12 +431,18 @@ func TestDisabledComponents(t *testing.T) {
 		want    []string
 	}{
 		{"nil cluster disables everything bundled", nil,
-			[]string{"metrics-server", "servicelb", "traefik"}},
+			[]string{"gateway-api-crd", "metrics-server", "servicelb", "traefik"}},
 		{"no features disables everything bundled", &Cluster{},
-			[]string{"metrics-server", "servicelb", "traefik"}},
+			[]string{"gateway-api-crd", "metrics-server", "servicelb", "traefik"}},
 		{"an opt-in leaves the disable list",
 			&Cluster{Spec: ClusterSpec{Features: map[string]*FeatureConfig{"metrics-server": {}}}},
-			[]string{"servicelb", "traefik"}},
+			[]string{"gateway-api-crd", "servicelb", "traefik"}},
+		{"helm leaves its chart off the disable list",
+			&Cluster{Spec: ClusterSpec{Features: map[string]*FeatureConfig{"helm": {}}}},
+			[]string{"metrics-server", "servicelb", "traefik"}},
+		{"traefik turns on helm, which leaves its chart off the disable list",
+			&Cluster{Spec: ClusterSpec{Features: map[string]*FeatureConfig{"traefik": {}}}},
+			[]string{"metrics-server", "servicelb"}},
 		{"all opt-ins empty the list",
 			&Cluster{Spec: ClusterSpec{Features: map[string]*FeatureConfig{
 				"traefik": {}, "servicelb": {}, "metrics-server": {},

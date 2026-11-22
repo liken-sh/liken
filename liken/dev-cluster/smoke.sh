@@ -229,6 +229,50 @@ assert_machine_reports() {
     exit 1
 }
 
+# k3s's deploy controller applies every manifest in its auto-deploy
+# directory again on every pass until one pass has no error. So a
+# manifest that can never apply keeps every leader applying liken's
+# operators and CRDs again for as long as k3s runs. A Ready node does
+# not show this, because each manifest that can apply still applies.
+#
+# This check reads k3s's own record of each manifest. The controller
+# creates an Addon for a file before it applies the file, and it writes
+# the file's checksum into the Addon's spec.checksum only after an
+# apply succeeds. So an Addon with no checksum is a manifest that has
+# never applied. The usual cause is a manifest that a new k3s writes
+# and that needs a controller that liken turns off, such as a
+# HelmChart while the Helm controller is off. Its name then goes on the
+# disable list, in controllerManifests in cluster/features.go.
+#
+# A manifest that applied once and fails after a change keeps its old
+# checksum, so this check does not see it. No manifest changes on the
+# drill's fresh cluster.
+assert_manifests_applied() {
+    local deadline=$(( $(date +%s) + 120 )) addons="" pending=""
+    while (( $(date +%s) < deadline )); do
+        addons="$("$K3S" kubectl --kubeconfig "$KUBECONFIG_FILE" \
+            --request-timeout=5s get addons.k3s.cattle.io -n kube-system \
+            -o jsonpath='{range .items[*]}{.metadata.name}={.spec.checksum}{"\n"}{end}' \
+            2>/dev/null || true)"
+        pending="$(awk -F= '$2 == "" { printf "%s ", $1 }' <<< "$addons")"
+        if [[ -n "$addons" && -z "$pending" ]]; then
+            echo "$drill: k3s applied every manifest in its auto-deploy directory"
+            return 0
+        fi
+        sleep 5
+    done
+    teardown
+    if [[ -z "$addons" ]]; then
+        echo "$drill: the drill could not read k3s's Addons" >&2
+    else
+        echo "$drill: k3s did not apply these manifests: $pending" >&2
+        echo "$drill: k3s's last error from its deploy controller:" >&2
+        grep "Failed to process config" "$CONSOLE_LOG" | tail -n 1 >&2 || true
+    fi
+    evidence
+    exit 1
+}
+
 # The emmc drill claims to prove that the disk walk skips the
 # card's hardware boot areas, and without this function nothing
 # read that back: a walk that stopped skipping still installed,
@@ -492,6 +536,7 @@ while true; do
         elapsed=$(( $(date +%s) - started ))
         echo "$drill: node-1 is Ready after ${elapsed}s, booted from disk under $FIRMWARE"
         assert_machine_reports
+        assert_manifests_applied
         assert_emmc_disks
         exit 0
     fi

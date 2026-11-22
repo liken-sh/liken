@@ -217,9 +217,13 @@ func k3sBootConfig(in k3sBootInputs) string {
 		// so that everything beyond the control plane is a workload
 		// that the cluster declares. DisabledComponents returns every
 		// bundled component that the cluster does not enable, and every
-		// one of them when there is no cluster document. Only leaders
-		// render the key, because an agent refuses it. The static file
-		// sets no disable key, so this list is the whole list.
+		// one of them when there is no cluster document. It also
+		// returns each manifest of k3s that needs a controller that the
+		// keys below turn off, because k3s's deploy controller applies
+		// every manifest again on every pass while one of them fails.
+		// Only leaders render the key, because an agent refuses it. The
+		// static file sets no disable key, so this list is the whole
+		// list.
 		if disabled := clusterDoc.DisabledComponents(); len(disabled) > 0 {
 			b.WriteString("disable:\n")
 			for _, name := range disabled {

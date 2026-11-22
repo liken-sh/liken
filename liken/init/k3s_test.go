@@ -528,15 +528,15 @@ func TestK3sBootConfigWithNoClusterIsNearlyEmpty(t *testing.T) {
 			t.Errorf("the config of a machine with no cluster has %s, want none:\n%s", reject, got)
 		}
 	}
-	if !strings.Contains(got, "disable:\n  - metrics-server\n  - servicelb\n  - traefik\n") {
-		t.Errorf("the config of a machine with no cluster does not disable metrics-server, servicelb, and traefik, want all three disabled:\n%s", got)
+	if !strings.Contains(got, "disable:\n  - gateway-api-crd\n  - metrics-server\n  - servicelb\n  - traefik\n") {
+		t.Errorf("the config of a machine with no cluster does not disable gateway-api-crd, metrics-server, servicelb, and traefik, want all four disabled:\n%s", got)
 	}
 }
 
 func TestK3sBootConfigDisablesEverythingBundledByDefault(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: labCluster(), haveToken: true})
-	if !strings.Contains(got, "disable:\n  - metrics-server\n  - servicelb\n  - traefik\n") {
-		t.Errorf("the config does not disable metrics-server, servicelb, and traefik, want all three disabled with no features:\n%s", got)
+	if !strings.Contains(got, "disable:\n  - gateway-api-crd\n  - metrics-server\n  - servicelb\n  - traefik\n") {
+		t.Errorf("the config does not disable gateway-api-crd, metrics-server, servicelb, and traefik, want all four disabled with no features:\n%s", got)
 	}
 }
 
@@ -544,8 +544,8 @@ func TestK3sBootConfigLeavesOptedInComponentsOffTheDisableList(t *testing.T) {
 	c := labCluster()
 	c.Spec.Features = map[string]*cluster.FeatureConfig{"metrics-server": {}}
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: c, haveToken: true})
-	if !strings.Contains(got, "disable:\n  - servicelb\n  - traefik\n") {
-		t.Errorf("the disable list is not servicelb and traefik, want metrics-server removed from it by its feature:\n%s", got)
+	if !strings.Contains(got, "disable:\n  - gateway-api-crd\n  - servicelb\n  - traefik\n") {
+		t.Errorf("the disable list is not gateway-api-crd, servicelb, and traefik, want metrics-server removed from it by its feature:\n%s", got)
 	}
 	if strings.Contains(got, "metrics-server") {
 		t.Errorf("the config names metrics-server, want it absent when its feature is enabled:\n%s", got)

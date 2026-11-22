@@ -529,11 +529,48 @@ func RetractionLeavesHostState(current, desired *Cluster) bool {
 	return false
 }
 
-// DisabledComponents computes the k3s disable list: every bundled
-// component minus this cluster's opt-ins, sorted. It is always the
-// complete list, never a fragment for k3s to merge with a default
-// defined somewhere else. The rendered value therefore has exactly
-// one author: init, which writes it into the boot drop-in on leaders
+// controllerManifests are the manifests that k3s writes into its
+// auto-deploy directory at each start and that only the controller of
+// an embedded feature can apply. Each name is the file's name without
+// its extension, which is also the name that k3s's disable list
+// accepts for it.
+//
+// A file that cannot apply does more harm than its own failure. k3s's
+// deploy controller (pkg/deploy/controller.go) starts in a forced mode,
+// in which every pass applies every manifest in the directory and skips
+// none for an unchanged checksum. It leaves that mode only after a pass
+// with no error. So one file that can never apply makes every leader
+// apply liken's operators and CRDs again on every pass for as long as
+// k3s runs, and during a rolling upgrade two leaders on different
+// releases write their own copies over each other's.
+//
+// The disable list keeps such a file from ever applying. k3s still
+// writes a disabled file at each start: Stage (pkg/deploy/stage.go)
+// compares names such as "/gateway-api-crd" with the disable list, and
+// no name on the list begins with a slash. The deploy controller then
+// deletes the file and its Addon in its first pass, without applying
+// the file. A `.skip` file beside the manifest would stop the apply
+// too, but it would leave the failed Addon of an earlier start in
+// place, and init would write into the part of the directory that k3s
+// owns.
+//
+// gateway-api-crd is a HelmChart that installs the Gateway API CRDs.
+// With the Helm controller off, the API server has no HelmChart kind,
+// and the apply fails with "the server could not find the requested
+// resource".
+var controllerManifests = []struct {
+	name    string
+	feature string
+}{
+	{name: "gateway-api-crd", feature: "helm"},
+}
+
+// DisabledComponents computes the k3s disable list, sorted: every
+// bundled component minus this cluster's opt-ins, and every manifest in
+// controllerManifests whose feature is off. It is always the complete
+// list, never a fragment for k3s to merge with a default defined
+// somewhere else. The rendered value therefore has exactly one author:
+// init, which writes it into the boot drop-in on leaders
 // (init/k3s.go). A nil Cluster disables everything bundled, which
 // keeps the same default for a machine on its own.
 func (c *Cluster) DisabledComponents() []string {
@@ -548,6 +585,11 @@ func (c *Cluster) DisabledComponents() []string {
 			}
 		}
 		disabled = append(disabled, f.Slug)
+	}
+	for _, m := range controllerManifests {
+		if !c.FeatureEnabled(m.feature) {
+			disabled = append(disabled, m.name)
+		}
 	}
 	slices.Sort(disabled)
 	return disabled

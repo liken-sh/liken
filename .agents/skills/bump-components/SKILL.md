@@ -152,6 +152,15 @@ These bumps need more care:
 - **A k3s minor bump** is a Kubernetes minor bump. It can remove an
   API version that a workload still uses, so read the upstream
   release notes before you take one.
+- **A k3s bump can add a packaged manifest.** k3s writes the files of
+  `manifests/` in its repository into the auto-deploy directory at
+  each start. A file that needs a controller that `liken` turns off,
+  such as a `HelmChart` while the Helm controller is off, never
+  applies. Then k3s's deploy controller applies every manifest again
+  on every pass, and the smoke drills fail with
+  `k3s did not apply these manifests`. Compare `manifests/` between
+  the two k3s tags, and add each such file to `controllerManifests` in
+  `liken/cluster/features.go`. `liken` milestone 101 has the detail.
 - **A kernel bump.** Before you take one, search the repository for
   items tied to the current kernel, such as a workaround that should
   be tested again on the next kernel. Search the open problems with
