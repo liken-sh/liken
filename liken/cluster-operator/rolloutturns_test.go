@@ -43,16 +43,27 @@ func turnNames(turns []cluster.RebootTurn) []string {
 	return names
 }
 
+// heard returns a heartbeat record that started reading the Leases one
+// renewal ago and has seen the named machines renew since.
+func heard(names ...string) heartbeatTrust {
+	t := heartbeatTrust{firstRead: passTime.Add(-fresh), heard: map[string]bool{}}
+	for _, name := range names {
+		t.heard[name] = true
+	}
+	return t
+}
+
 func TestDecideRolloutWithRecordedRebootTurns(t *testing.T) {
 	const down = 5 * time.Minute
 	cases := []struct {
-		name            string
-		machines        []rolloutEntry
-		cluster         *cluster.Cluster
-		leasesFirstRead time.Time
-		grant           []string
-		confirm         []string
-		turns           []string
+		name       string
+		machines   []rolloutEntry
+		cluster    *cluster.Cluster
+		heartbeats heartbeatTrust
+		grant      []string
+		confirm    []string
+		revoke     []string
+		turns      []string
 	}{
 		{
 			name: "an entry with no grant counts against the budget, and a leader's entry keeps the other leader from a turn",
@@ -135,29 +146,66 @@ func TestDecideRolloutWithRecordedRebootTurns(t *testing.T) {
 			turns:   []string{"node-3", "node-4"},
 		},
 		{
-			name: "before the process has read the heartbeats for HeartbeatStaleAfter, there are no grants or confirms, but entries are still added and removed",
+			name: "a young heartbeat record grants and confirms nothing for machines it has not heard renew, but entries are still added and removed",
 			machines: []rolloutEntry{
 				{"node-3", api.PhaseUpdatePending, fresh, true, -1},
 				{"node-4", api.PhaseUpdating, fresh, true, time.Minute},
 				{"node-5", api.PhaseReady, fresh, false, -1},
 				{"node-6", api.PhaseUpdatePending, fresh, true, -1},
 			},
-			cluster:         withTurns(3, turnAt("node-3", "7"), turnAt("node-5", "6")),
-			leasesFirstRead: passTime.Add(-fresh),
-			turns:           []string{"node-3", "node-4"},
+			cluster:    withTurns(3, turnAt("node-3", "7"), turnAt("node-5", "6")),
+			heartbeats: heartbeatTrust{firstRead: passTime.Add(-fresh)},
+			turns:      []string{"node-3", "node-4"},
+		},
+		{
+			name: "a young heartbeat record reclaims, confirms, and grants for machines it has heard renew",
+			machines: []rolloutEntry{
+				{"node-3", api.PhaseReady, fresh, false, time.Minute},
+				{"node-4", api.PhaseUpdatePending, fresh, true, -1},
+				{"node-5", api.PhaseUpdatePending, fresh, true, -1},
+			},
+			cluster:    withTurns(3, turnAt("node-4", "7")),
+			heartbeats: heard("node-3", "node-4", "node-5"),
+			grant:      []string{"node-5"},
+			confirm:    []string{"node-4"},
+			revoke:     []string{"node-3"},
+			turns:      []string{"node-3", "node-4", "node-5"},
+		},
+		{
+			name: "a machine that a young heartbeat record has not heard renew keeps its grant, and another fills the budget",
+			machines: []rolloutEntry{
+				{"node-3", api.PhaseReady, fresh, false, time.Minute},
+				{"node-4", api.PhaseReady, fresh, false, -1},
+				{"node-5", api.PhaseUpdatePending, fresh, true, -1},
+			},
+			cluster:    withTurns(2),
+			heartbeats: heard("node-5"),
+			turns:      []string{"node-3"},
+		},
+		{
+			name: "a leader that a young heartbeat record has not heard renew keeps the other leader from a turn",
+			machines: []rolloutEntry{
+				{"node-1", api.PhaseReady, fresh, false, -1},
+				{"node-2", api.PhaseUpdatePending, fresh, true, -1},
+			},
+			cluster:    withTurns(3),
+			heartbeats: heard("node-2"),
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			machines, renewals := rolloutInputs(c.machines...)
 
-			r := decideFor(atVersion7(machines), renewals, c.leasesFirstRead, c.cluster, "", passTime)
+			r := decideFor(atVersion7(machines), renewals, c.heartbeats, c.cluster, "", passTime)
 
 			if !slices.Equal(r.grant, c.grant) {
 				t.Errorf("grant = %q, want %q", r.grant, c.grant)
 			}
 			if !slices.Equal(r.confirm, c.confirm) {
 				t.Errorf("confirm = %q, want %q", r.confirm, c.confirm)
+			}
+			if !slices.Equal(r.revoke, c.revoke) {
+				t.Errorf("revoke = %q, want %q", r.revoke, c.revoke)
 			}
 			if got := turnNames(r.turns); !slices.Equal(got, c.turns) {
 				t.Errorf("turns = %q, want %q", got, c.turns)
@@ -177,7 +225,7 @@ func TestANewEntryRecordsTheVersionOfTheGrantWrite(t *testing.T) {
 	machines[1].Metadata.ResourceVersion = "184467"
 	kept := turnAt("node-3", "")
 
-	r := decideFor(machines, renewals, time.Time{}, withTurns(2, kept), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, withTurns(2, kept), "", passTime)
 
 	want := []cluster.RebootTurn{kept, {Machine: "node-4", MachineResourceVersion: "184467", Since: passTime}}
 	if !sameTurnsIgnoringDisruptions(r.turns, want) {
@@ -194,7 +242,7 @@ func TestWithoutGrantsKeepsTheConfirms(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
 
-	r := decideFor(atVersion7(machines), renewals, time.Time{}, withTurns(2, turnAt("node-3", "7")), "", passTime).
+	r := decideFor(atVersion7(machines), renewals, heartbeatTrust{}, withTurns(2, turnAt("node-3", "7")), "", passTime).
 		withoutGrants(errTemplateRead)
 
 	if len(r.grant) != 0 || !slices.Equal(r.confirm, []string{"node-3"}) {

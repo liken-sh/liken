@@ -3,7 +3,6 @@ package main
 import (
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/liken-sh/liken/liken/api"
 )
@@ -18,7 +17,7 @@ func TestRolloutDoesNotCountADownloadAgainstTheBudget(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
 
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(0), "", passTime)
 
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("grants are %v, want node-4, because node-3's download does not count against the budget of one", r.grant)

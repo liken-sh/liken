@@ -73,13 +73,52 @@ func TestEveryBudgetThatSelectsAMachineMustHaveRoom(t *testing.T) {
 
 			q := requestsOfAwaitingMachines(machines)
 			q.budgets = c.budgets
-			r := decideRollout(machines, renewals, time.Time{}, labCluster(1), "", q, passTime)
+			r := decideRollout(machines, renewals, heartbeatTrust{}, labCluster(1), "", q, passTime)
 
 			if !slices.Equal(r.grant, c.grant) {
 				t.Errorf("grants = %v, want %v", r.grant, c.grant)
 			}
 			if r.waits["node-4"] != c.waits {
 				t.Errorf("node-4 waits for %q, want %q", r.waits["node-4"], c.waits)
+			}
+		})
+	}
+}
+
+// A machine that a young heartbeat record has not heard renew fills a
+// budget when the pass decides a grant, and the refusal names it. The
+// budget's status counts only the machines known to be out of service.
+func TestAMachineNotHeardFillsTheBudgetButNotItsStatus(t *testing.T) {
+	cases := []struct {
+		name       string
+		heartbeats heartbeatTrust
+		waits      string
+	}{
+		{"one machine is not heard", heard("node-4", "node-6"),
+			"The default budget allows 2 out of service, and node-3 is out, " +
+				"and node-5 counts as out until cluster-operator sees its heartbeat Lease renewed"},
+		{"two machines are not heard", heard("node-4"),
+			"The default budget allows 2 out of service, and node-3 is out, " +
+				"and node-5, node-6 count as out until cluster-operator sees their heartbeat Leases renewed"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			machines, renewals := rolloutInputs(
+				rolloutEntry{"node-3", api.PhaseLost, -1, false, -1},
+				rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
+				rolloutEntry{"node-5", api.PhaseReady, fresh, false, -1},
+				rolloutEntry{"node-6", api.PhaseReady, fresh, false, -1},
+			)
+			q := requestsOfAwaitingMachines(machines)
+			q.budgets = []disruption.Budget{budget("default", 2, nil)}
+
+			r := decideRollout(machines, renewals, c.heartbeats, labCluster(2), "", q, passTime)
+
+			if len(r.grant) != 0 || r.waits["node-4"] != c.waits {
+				t.Errorf("grants = %v and node-4 waits for %q, want none and %q", r.grant, r.waits["node-4"], c.waits)
+			}
+			if got := r.budgets["default"].Unavailable; got != 1 {
+				t.Errorf("the default budget's status counts %d out of service, want 1", got)
 			}
 		})
 	}
@@ -95,7 +134,7 @@ func TestAMissingDefaultBudgetAllowsOne(t *testing.T) {
 	q := requestsOfAwaitingMachines(machines)
 	q.budgets = []disruption.Budget{budget("gpus", 1, map[string]string{"pool": "gpu"})}
 
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(2), "", q, passTime)
+	r := decideRollout(machines, renewals, heartbeatTrust{}, labCluster(2), "", q, passTime)
 
 	if !slices.Equal(r.grant, []string{"node-3"}) {
 		t.Errorf("grants = %v, want node-3 alone under the unsaved default budget's limit of one", r.grant)
@@ -112,7 +151,7 @@ func TestABudgetCountsThePassesGrants(t *testing.T) {
 	q := requestsOfAwaitingMachines(machines)
 	q.budgets = served
 
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(1), "", q, passTime)
+	r := decideRollout(machines, renewals, heartbeatTrust{}, labCluster(1), "", q, passTime)
 
 	got := r.budgets["default"]
 	if got.Selected != 3 || got.Unavailable != 2 || got.Allowed != 1 {
@@ -149,7 +188,7 @@ func TestATurnWaitsForAReleaseThatIsDownloading(t *testing.T) {
 			machines, renewals := rolloutInputs(rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1})
 			machines = downloadingAs(machines, c.reason, "node-4")
 
-			r := decideFor(machines, renewals, time.Time{}, labCluster(1), "", passTime)
+			r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(1), "", passTime)
 
 			if !slices.Equal(r.grant, c.grant) {
 				t.Errorf("grants = %v, want %v", r.grant, c.grant)
@@ -162,7 +201,7 @@ func TestProgressingNamesAMachineThatWaitsForItsDownload(t *testing.T) {
 	machines, renewals := rolloutInputs(rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1})
 	machines = downloadingAs(machines, "Downloading", "node-4")
 
-	r := decideFor(machines, renewals, time.Time{}, labCluster(1), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(1), "", passTime)
 
 	want := "Reboot turns wait for a release to finish downloading. Downloading: node-4"
 	if r.progressing.Message != want {
@@ -184,7 +223,7 @@ func TestATurnNamesTheRequestsItGrants(t *testing.T) {
 	c := withTurns(2, cluster.RebootTurn{Machine: "node-4", MachineResourceVersion: "7", Since: passTime.Add(-time.Minute),
 		Disruptions: []string{"node-4.machine-operator"}})
 
-	r := decideRollout(machines, renewals, time.Time{}, c, "", q, passTime)
+	r := decideRollout(machines, renewals, heartbeatTrust{}, c, "", q, passTime)
 
 	want := map[string][]string{
 		"node-3": {"node-3.machine-operator"},
@@ -207,7 +246,7 @@ func TestOnlyAnOpenApprovedRequestRequestsATurn(t *testing.T) {
 	spent := request("node-4.reboot-0c1e9a2b77b0", "node-4")
 	spent.Spec.Requester, spent.Spec.ApprovedHash = "kubernetes-admin", spent.Spec.Hash
 
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(1), "",
+	r := decideRollout(machines, renewals, heartbeatTrust{}, labCluster(1), "",
 		fleetRequests{disruptions: []disruption.Disruption{waiting, spent}}, passTime)
 
 	if len(r.grant) != 0 || len(r.turns) != 0 {
@@ -236,7 +275,7 @@ func TestAnEntryStaysWhileItsRequestsAreOpen(t *testing.T) {
 			clusterDoc := withTurns(1, cluster.RebootTurn{Machine: "node-4", MachineResourceVersion: "6",
 				Since: passTime.Add(-time.Minute), Disruptions: []string{"node-4.machine-operator"}})
 
-			r := decideRollout(machines, renewals, time.Time{}, clusterDoc, "", fleetRequests{disruptions: c.requests}, passTime)
+			r := decideRollout(machines, renewals, heartbeatTrust{}, clusterDoc, "", fleetRequests{disruptions: c.requests}, passTime)
 
 			if got := turnNames(r.turns); !slices.Equal(got, c.turns) {
 				t.Errorf("turns = %v, want %v", got, c.turns)
@@ -251,7 +290,7 @@ func TestAnEntryWithNoRequestsLeavesAtAnotherVersion(t *testing.T) {
 	machines, renewals := rolloutInputs(rolloutEntry{"node-4", api.PhaseBooting, fresh, false, -1})
 	machines = atVersion7(machines)
 
-	r := decideFor(machines, renewals, time.Time{}, withTurns(1, turnAt("node-4", "6")), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, withTurns(1, turnAt("node-4", "6")), "", passTime)
 
 	if len(r.turns) != 0 {
 		t.Errorf("turns = %v, want empty", turnNames(r.turns))
@@ -273,7 +312,7 @@ func TestAMachineWhoseEntryOutlivedItsGrantIsGrantedAgain(t *testing.T) {
 	person := request("node-4.reboot-0c1e9a2b77b0", "node-4")
 	person.Spec.Requester = "kubernetes-admin"
 
-	r := decideRollout(machines, renewals, time.Time{}, clusterDoc, "", fleetRequests{disruptions: []disruption.Disruption{person}}, passTime)
+	r := decideRollout(machines, renewals, heartbeatTrust{}, clusterDoc, "", fleetRequests{disruptions: []disruption.Disruption{person}}, passTime)
 
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("grants = %v, want node-4 again and not node-5", r.grant)
@@ -295,7 +334,7 @@ func TestAStalledRolloutGrantsNoEntryAgain(t *testing.T) {
 	clusterDoc := withTurns(2, turnAt("node-3", "7"), cluster.RebootTurn{Machine: "node-4", MachineResourceVersion: "6",
 		Since: passTime.Add(-time.Minute), Disruptions: []string{"node-4.machine-operator"}})
 
-	r := decideRollout(machines, renewals, time.Time{}, clusterDoc, "",
+	r := decideRollout(machines, renewals, heartbeatTrust{}, clusterDoc, "",
 		fleetRequests{disruptions: []disruption.Disruption{request("node-4.machine-operator", "node-4")}}, passTime)
 
 	if len(r.grant) != 0 || !strings.Contains(r.waits["node-4"], "stalled") {

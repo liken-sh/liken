@@ -94,9 +94,9 @@ func approvedRequest(name string) disruption.Disruption {
 // decideFor runs decideRollout with the requests from requestsOfAwaitingMachines and a
 // default budget set to the maxUnavailable limit in the Cluster's
 // spec.disruption.
-func decideFor(machines []machine.Machine, heartbeats map[string]time.Time, leasesFirstRead time.Time,
+func decideFor(machines []machine.Machine, heartbeats map[string]time.Time, trust heartbeatTrust,
 	c *cluster.Cluster, appliedVersion string, now time.Time) rollout {
 	q := requestsOfAwaitingMachines(machines)
 	q.budgets = []disruption.Budget{*disruption.NewDefaultBudget(c.Spec.Disruption.MaxUnavailableOrDefault())}
-	return decideRollout(machines, heartbeats, leasesFirstRead, c, appliedVersion, q, now)
+	return decideRollout(machines, heartbeats, trust, c, appliedVersion, q, now)
 }

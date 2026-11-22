@@ -70,7 +70,7 @@ func TestRolloutGrantsAWaitingMachine(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-3", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-3"}) {
 		t.Errorf("grants are %v, want [node-3]", r.grant)
 	}
@@ -84,7 +84,7 @@ func TestRolloutAtRestIsComplete(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-3", api.PhaseReady, fresh, false, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(0), "", passTime)
 	if len(r.grant) != 0 || len(r.revoke) != 0 {
 		t.Errorf("grants are %v and revokes are %v, want none of either", r.grant, r.revoke)
 	}
@@ -99,7 +99,7 @@ func TestRolloutHonorsTheDefaultBudgetOfOne(t *testing.T) {
 		rolloutEntry{"node-3", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-3"}) {
 		t.Errorf("grants are %v, want [node-3] because the default budget is 1", r.grant)
 	}
@@ -115,7 +115,7 @@ func TestRolloutABiggerBudgetGrantsMoreTurns(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(2), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(2), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-3", "node-4"}) {
 		t.Errorf("grants are %v, want [node-3 node-4]", r.grant)
 	}
@@ -126,7 +126,7 @@ func TestRolloutGrantsWorkersBeforeLeaders(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("grants are %v, want [node-4], the worker", r.grant)
 	}
@@ -137,7 +137,7 @@ func TestRolloutGrantsInNameOrder(t *testing.T) {
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("grants are %v, want [node-4], the lowest name", r.grant)
 	}
@@ -167,7 +167,7 @@ func TestRolloutGrantsTheOldestRequestFirst(t *testing.T) {
 			q.disruptions[1].Metadata.CreationTimestamp = passTime.Add(-c.workerAsked)
 			q.budgets = []disruption.Budget{*disruption.NewDefaultBudget(1)}
 
-			r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", q, passTime)
+			r := decideRollout(machines, renewals, heartbeatTrust{}, labCluster(0), "", q, passTime)
 
 			if !slices.Equal(r.grant, []string{c.want}) {
 				t.Errorf("granted %v, want %s", r.grant, c.want)
@@ -181,7 +181,7 @@ func TestRolloutOneLeaderAtATimeRegardlessOfBudget(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-2", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(3), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(3), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-1"}) {
 		t.Errorf("grants are %v, want only [node-1] because two leaders must not reboot together", r.grant)
 	}
@@ -192,7 +192,7 @@ func TestRolloutNeverGrantsALeaderWhileAnotherLeaderIsDown(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-2", api.PhaseLost, 5 * time.Minute, false, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(3), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(3), "", passTime)
 	if len(r.grant) != 0 {
 		t.Errorf("grants are %v, want none while node-2 is down", r.grant)
 	}
@@ -204,7 +204,7 @@ func TestRolloutUnplannedTroubleConsumesTheBudget(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseLost, 5 * time.Minute, false, -1},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(0), "", passTime)
 	if len(r.grant) != 0 {
 		t.Errorf("grants are %v, want none while node-4 is Lost", r.grant)
 	}
@@ -216,7 +216,7 @@ func TestRolloutCountsAnExistingGrantAgainstTheBudget(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, time.Minute},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(0), "", passTime)
 	if len(r.grant) != 0 {
 		t.Errorf("grants are %v, want none while node-4 holds a turn", r.grant)
 	}
@@ -233,7 +233,7 @@ func TestRolloutKeepsTheGrantWhileTheMachineReboots(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdating, 3 * time.Minute, false, 3 * time.Minute},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(0), "", passTime)
 	if len(r.grant) != 0 || len(r.revoke) != 0 {
 		t.Errorf("grants are %v and revokes are %v, want none while node-4 reboots", r.grant, r.revoke)
 	}
@@ -251,7 +251,7 @@ func TestRolloutRevokesAfterTheMachineConverges(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseReady, fresh, false, 5 * time.Minute},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.revoke, []string{"node-4"}) {
 		t.Errorf("revokes are %v, want [node-4]", r.revoke)
 	}
@@ -266,7 +266,7 @@ func TestRolloutStallsOnAMachineThatNeverReturns(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdating, 12 * time.Minute, false, 12 * time.Minute},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(3), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(3), "", passTime)
 	if len(r.grant) != 0 {
 		t.Errorf("grants are %v, want none for a stalled rollout", r.grant)
 	}
@@ -286,7 +286,7 @@ func TestRolloutAManualMachineBlocksNoOtherMachine(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, false, -1},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-5"}) {
 		t.Errorf("grants are %v, want [node-5]", r.grant)
 	}
@@ -299,7 +299,7 @@ func TestRolloutRevokesAGrantTheMachineNoLongerWants(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-4", api.PhaseReady, fresh, false, time.Minute},
 	)
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.revoke, []string{"node-4"}) {
 		t.Errorf("revokes are %v, want [node-4]", r.revoke)
 	}
@@ -310,7 +310,7 @@ func TestRolloutGrantsAWaitingLeaderFirstWhileTheTemplateLags(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1}, // leader
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1}, // worker
 	)
-	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.01-001", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, targetingCluster(0, "2026.08.12-002"), "2026.08.01-001", passTime)
 	if !slices.Equal(r.grant, []string{"node-1"}) {
 		t.Errorf("grants are %v, want [node-1] while the template lags", r.grant)
 	}
@@ -330,7 +330,7 @@ func TestRolloutGrantsWorkersWhenNoLeaderWaitsAndTheTemplateLags(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.01-001", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, targetingCluster(0, "2026.08.12-002"), "2026.08.01-001", passTime)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("grants are %v, want [node-4]", r.grant)
 	}
@@ -344,7 +344,7 @@ func TestRolloutHoldsWorkersThroughALeaderTurnWhileTheTemplateLags(t *testing.T)
 		rolloutEntry{"node-1", api.PhaseUpdating, 3 * time.Minute, false, 3 * time.Minute},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, targetingCluster(2, "2026.08.12-002"), "2026.08.01-001", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, targetingCluster(2, "2026.08.12-002"), "2026.08.01-001", passTime)
 	if len(r.grant) != 0 {
 		t.Errorf("grants are %v, want none while the leader's turn runs", r.grant)
 	}
@@ -362,7 +362,7 @@ func TestRolloutGrantsWorkersWhenALeaderIsDownAndTheTemplateLags(t *testing.T) {
 		rolloutEntry{"node-2", api.PhaseLost, 5 * time.Minute, false, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideFor(machines, renewals, time.Time{}, targetingCluster(2, "2026.08.12-002"), "2026.08.01-001", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, targetingCluster(2, "2026.08.12-002"), "2026.08.01-001", passTime)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("grants are %v, want [node-4] because no leader turn can advance the template", r.grant)
 	}
@@ -373,7 +373,7 @@ func TestRolloutGrantsWorkersFirstWithNoAppliedVersion(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1}, // leader
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1}, // worker
 	)
-	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, targetingCluster(0, "2026.08.12-002"), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("grants are %v, want [node-4] when no applied version exists", r.grant)
 	}
@@ -384,7 +384,7 @@ func TestRolloutGrantsWorkersFirstWhenTheTemplateMatches(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1}, // leader
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1}, // worker
 	)
-	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.12-002", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, targetingCluster(0, "2026.08.12-002"), "2026.08.12-002", passTime)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("grants are %v, want [node-4] when the template matches the target", r.grant)
 	}
@@ -407,7 +407,7 @@ func TestRolloutGivesARequestedRebootATurnLikeAnyOther(t *testing.T) {
 			Type: "RebootRequestHonored", Status: "False", Reason: "AwaitingTurn",
 		}, passTime)
 	}
-	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", passTime)
+	r := decideFor(machines, renewals, heartbeatTrust{}, labCluster(0), "", passTime)
 	if !slices.Equal(r.grant, []string{"node-3"}) {
 		t.Errorf("grants are %v, want only [node-3]", r.grant)
 	}

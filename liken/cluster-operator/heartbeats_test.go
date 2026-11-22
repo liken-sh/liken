@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -142,6 +143,80 @@ func TestADeletedLeaseIsForgotten(t *testing.T) {
 
 		if got := phaseOfNode1(t, r); got != api.PhaseReady {
 			t.Errorf("node-1 reads %s, want %s", got, api.PhaseReady)
+		}
+	})
+}
+
+// A leaseWrite is one write of a heartbeat Lease, as its machine
+// operator or a person sends it.
+type leaseWrite struct {
+	method string
+	name   string
+}
+
+// sendLeaseWrites sends each write in order, with a new renewTime for
+// each, and waits until the watch has delivered them.
+func sendLeaseWrites(t *testing.T, client *apiclient.Client, writes []leaseWrite) {
+	t.Helper()
+	for i, w := range writes {
+		if w.method == http.MethodDelete {
+			if err := client.RequestJSON(http.MethodDelete, leasesPath+"/"+w.name, nil, nil); err != nil {
+				t.Fatalf("deleting the Lease %s: %v", w.name, err)
+			}
+			continue
+		}
+		writeLease(t, client, w.method, w.name, time.Now().Add(time.Duration(i)*time.Second))
+	}
+	synctest.Wait()
+}
+
+// A process hears a machine only when it sees the Lease's renewTime
+// change from a value it read before, because the first value it reads
+// can be from a machine that is already down.
+func TestAProcessHearsAMachineOnlyWhenItSeesItsLeaseRenewed(t *testing.T) {
+	cases := []struct {
+		name   string
+		writes []leaseWrite
+		heard  bool
+	}{
+		{"a Lease read once is not heard", nil, false},
+		{"a renewal is heard", []leaseWrite{{http.MethodPut, "node-1"}}, true},
+		{"a Lease deleted and created again is not heard until it renews",
+			[]leaseWrite{{http.MethodPut, "node-1"}, {http.MethodDelete, "node-1"}, {http.MethodPost, "node-1"}}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				r, client := startWatching(t, time.Now().Add(-time.Hour))
+
+				sendLeaseWrites(t, client, c.writes)
+
+				if got := r.sightings.trust().heard["node-1"]; got != c.heard {
+					t.Errorf("node-1 heard = %v, want %v", got, c.heard)
+				}
+			})
+		})
+	}
+}
+
+// The first renewal of each Lease starts a pass, because it can let a
+// young heartbeat record grant a turn or end one. Later renewals start
+// none, because the ticker measures a heartbeat's age.
+func TestOnlyTheFirstRenewalOfEachLeaseStartsAPass(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fake := newFleetAPI(time.Now().Add(-time.Hour))
+		client, watcher := fleetClients(t, fake)
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		var wakes atomic.Int32
+		r := watchFleet(ctx, watcher, client, func() { wakes.Add(1) }, func(string) {})
+		awaitFleetCaches(t, r)
+		wakes.Store(0)
+
+		sendLeaseWrites(t, client, []leaseWrite{{http.MethodPut, "node-1"}, {http.MethodPut, "node-1"}, {http.MethodPut, "node-2"}})
+
+		if got := wakes.Load(); got != 2 {
+			t.Errorf("the renewals started %d passes, want 2", got)
 		}
 	})
 }

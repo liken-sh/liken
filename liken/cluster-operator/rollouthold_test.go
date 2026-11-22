@@ -3,7 +3,8 @@ package main
 // A newly started process treats every heartbeat Lease as just renewed,
 // so for its first HeartbeatStaleAfter a machine that is already down
 // still reads as the phase it last wrote. These tests check that the
-// rollout grants no reboot turn until that time has passed.
+// rollout grants no reboot turn in that time unless the process has
+// seen a renewal of every Lease that could fill the budget.
 
 import (
 	"encoding/json"
@@ -84,12 +85,20 @@ func granted(m *machine.Machine) bool {
 
 // The Progressing condition of the Cluster gives the reason for the wait.
 func TestANewProcessGrantsNoTurnUntilItCanTrustTheHeartbeats(t *testing.T) {
-	for _, after := range []time.Duration{0, kubernetes.HeartbeatStaleAfter - time.Second} {
-		t.Run(after.String(), func(t *testing.T) {
+	cases := []struct {
+		name     string
+		after    time.Duration
+		renewing []string
+	}{
+		{"no Lease has been renewed since the process started", 0, []string{"node-1", "node-2"}},
+		{"the leader has not renewed its Lease since the process started", kubernetes.HeartbeatStaleAfter - time.Second, []string{"node-2"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				r, client := startWatching(t, time.Now().Add(-time.Hour))
 				awaitTurn(t, client)
-				renewFor(t, client, after, []string{"node-1", "node-2"})
+				renewFor(t, client, c.after, c.renewing)
 
 				leader, worker, clusterDoc := reconcileAndRead(t, r, client)
 
@@ -97,7 +106,7 @@ func TestANewProcessGrantsNoTurnUntilItCanTrustTheHeartbeats(t *testing.T) {
 					t.Errorf("node-1 phase is %s, want %s", leader.Status.Phase, api.PhaseReady)
 				}
 				if granted(worker) {
-					t.Errorf("node-2 has a reboot turn %s after the process started, want none", after)
+					t.Errorf("node-2 has a reboot turn %s after the process started, want none", c.after)
 				}
 				progressing := api.FindCondition(clusterDoc.Status.Conditions, "Progressing")
 				if progressing == nil || !strings.Contains(progressing.Message, "heartbeat") {
@@ -108,17 +117,21 @@ func TestANewProcessGrantsNoTurnUntilItCanTrustTheHeartbeats(t *testing.T) {
 	}
 }
 
-// After HeartbeatStaleAfter, a machine whose Lease never changed reads
-// Lost and uses up the disruption budget, so node-2 gets no turn.
+// A process that has seen every machine renew its Lease grants a turn
+// at once. After HeartbeatStaleAfter, a machine whose Lease never
+// changed reads Lost and uses up the disruption budget, so node-2 gets
+// no turn.
 func TestANewProcessGrantsTurnsOnceItCanTrustTheHeartbeats(t *testing.T) {
 	cases := []struct {
 		name        string
+		renewFor    time.Duration
 		renewing    []string
 		leaderPhase api.Phase
 		grant       bool
 	}{
-		{"every machine renews", []string{"node-1", "node-2"}, api.PhaseReady, true},
-		{"the leader never renews", []string{"node-2"}, api.PhaseLost, false},
+		{"every machine renews once", kubernetes.HeartbeatRenewAfter, []string{"node-1", "node-2"}, api.PhaseReady, true},
+		{"every machine renews", kubernetes.HeartbeatStaleAfter + time.Second, []string{"node-1", "node-2"}, api.PhaseReady, true},
+		{"the leader never renews", kubernetes.HeartbeatStaleAfter + time.Second, []string{"node-2"}, api.PhaseLost, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -126,7 +139,7 @@ func TestANewProcessGrantsTurnsOnceItCanTrustTheHeartbeats(t *testing.T) {
 				r, client := startWatching(t, time.Now().Add(-time.Hour))
 				awaitTurn(t, client)
 				reconcileAndRead(t, r, client)
-				renewFor(t, client, kubernetes.HeartbeatStaleAfter+time.Second, c.renewing)
+				renewFor(t, client, c.renewFor, c.renewing)
 
 				leader, worker, _ := reconcileAndRead(t, r, client)
 

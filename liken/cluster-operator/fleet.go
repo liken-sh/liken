@@ -161,7 +161,7 @@ func reconcileFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available s
 	// decideRollout reboots a leader first. When the DaemonSet cannot
 	// be read, the pass grants no turns.
 	appliedVersion, err := daemonSetVersion(reads, machineOperatorDaemonSet)
-	r := decideRollout(machines, changedAt, reads.sightings.firstReadTime(), clusterDoc, appliedVersion, requests, now)
+	r := decideRollout(machines, changedAt, reads.sightings.trust(), clusterDoc, appliedVersion, requests, now)
 	if err != nil {
 		fmt.Printf("the pass grants no reboot turns, because it cannot read the DaemonSet %s: %v\n", machineOperatorDaemonSet, err)
 		r = r.withoutGrants(err)

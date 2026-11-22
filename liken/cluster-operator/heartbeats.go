@@ -18,13 +18,23 @@ package main
 //
 // The record is in memory. This program opens its watches only after it
 // wins the election and exits when it loses it, so a new leader starts
-// with an empty record and counts each Lease as changed when it first
-// reads it. A machine that went down before then keeps the phase in its
-// status until HeartbeatStaleAfter has passed. So decideRollout grants
-// no reboot turn until HeartbeatStaleAfter has passed since the first
-// read of the Leases. Without that wait, a new leader could count a
-// machine that lost power a minute earlier as up, and grant a second
-// machine a reboot turn.
+// with an empty record. The first renewTime it reads for a Lease shows
+// only that the machine renewed at some time in the past. A machine
+// that went down a minute earlier still has a Lease and a status that
+// reads Ready.
+//
+// So a machine counts as heard only after this program sees its
+// renewTime change from a value it read before: the machine wrote the
+// Lease after this program started reading. Until HeartbeatStaleAfter
+// has passed since the first read of the Leases, decideRollout counts
+// each machine that it has not heard as out of service, grants it no
+// turn, and neither confirms nor reclaims its turn. After that time, a
+// machine that has not renewed reads Lost, and the record needs no
+// such rule. A live machine renews every few seconds, so a new process
+// hears every live machine long before HeartbeatStaleAfter, and a
+// process that restarts more often than that still finishes turns and
+// grants new ones. A machine that is down is never heard, so it never
+// counts as up, however often this program restarts.
 
 import (
 	"sync"
@@ -53,23 +63,30 @@ type sighting struct {
 	renewed time.Time
 	// at is when this program first saw that renewTime.
 	at time.Time
+	// renewal is true when this program saw renewTime change from an
+	// earlier value that it had read, so the machine wrote the Lease
+	// while this program was reading it.
+	renewal bool
 }
 
 // observe records that the named Lease had renewTime renewed at now,
 // and returns when this program first saw that renewTime. Any renewTime
 // that differs from the recorded one counts as a renewal, including an
-// earlier one, because a machine's clock can step back.
-func (s *heartbeatSightings) observe(name string, renewed, now time.Time) time.Time {
+// earlier one, because a machine's clock can step back. heard is true
+// when this call is the first renewal that this program saw for the
+// Lease.
+func (s *heartbeatSightings) observe(name string, renewed, now time.Time) (at time.Time, heard bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if last, ok := s.seen[name]; ok && last.renewed.Equal(renewed) {
-		return last.at
+	last, ok := s.seen[name]
+	if ok && last.renewed.Equal(renewed) {
+		return last.at, false
 	}
 	if s.seen == nil {
 		s.seen = map[string]sighting{}
 	}
-	s.seen[name] = sighting{renewed: renewed, at: now}
-	return now
+	s.seen[name] = sighting{renewed: renewed, at: now, renewal: ok}
+	return now, ok && !last.renewal
 }
 
 // forget removes a Lease's record, so a Lease created again with the
@@ -93,23 +110,64 @@ func (s *heartbeatSightings) changeTimes(renewals map[string]time.Time, now time
 	s.mu.Unlock()
 	changedAt := make(map[string]time.Time, len(renewals))
 	for name, renewed := range renewals {
-		changedAt[name] = s.observe(name, renewed, now)
+		changedAt[name], _ = s.observe(name, renewed, now)
 	}
 	return changedAt
 }
 
-// firstReadTime returns when the first pass read the Leases, or the zero time
-// before any pass has read them.
-func (s *heartbeatSightings) firstReadTime() time.Time {
+// trust returns what a pass may believe about the heartbeats: when the
+// first pass read the Leases, and which Leases this program has seen
+// renewed.
+func (s *heartbeatSightings) trust() heartbeatTrust {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.firstRead
+	t := heartbeatTrust{firstRead: s.firstRead, heard: map[string]bool{}}
+	for name, seen := range s.seen {
+		if seen.renewal {
+			t.heard[name] = true
+		}
+	}
+	return t
+}
+
+// heartbeatTrust is the part of the heartbeat record that decides which
+// machines' statuses a pass may believe. The zero value believes every
+// machine, as a process that has read the Leases for longer than
+// HeartbeatStaleAfter does.
+type heartbeatTrust struct {
+	// firstRead is when the first pass read the Leases, or the zero
+	// time.
+	firstRead time.Time
+	// heard names each Lease that this program has seen renewed.
+	heard map[string]bool
+}
+
+// trustedAt is when every machine's heartbeat becomes trustworthy: a
+// machine that has not renewed by then reads Lost.
+func (t heartbeatTrust) trustedAt() time.Time {
+	return t.firstRead.Add(kubernetes.HeartbeatStaleAfter)
+}
+
+// young reports whether the record is younger than HeartbeatStaleAfter,
+// so a machine that is down may still read its last status.
+func (t heartbeatTrust) young(now time.Time) bool {
+	return !t.firstRead.IsZero() && !now.After(t.trustedAt())
+}
+
+// unheard reports whether a pass at now must treat the named machine as
+// possibly down whatever its status says: the record is young and this
+// program has not seen the machine renew its Lease.
+func (t heartbeatTrust) unheard(name string, now time.Time) bool {
+	return t.young(now) && !t.heard[name]
 }
 
 // handler returns the watch handler that records each Lease the watch
 // receives. kubernetes.Renewals leaves out a Lease whose renewTime does
-// not parse, so that Lease is not recorded.
-func (s *heartbeatSightings) handler(source informer.Source) cache.ResourceEventHandler {
+// not parse, so that Lease is not recorded. The first renewal of each
+// Lease calls wake, because it can let a young record grant a turn or
+// end one. Later renewals start nothing, because the ticker measures
+// heartbeat ages.
+func (s *heartbeatSightings) handler(source informer.Source, wake func()) cache.ResourceEventHandler {
 	seen := func(object any) {
 		lease, err := informer.Convert[kubernetes.Lease](object)
 		if err != nil {
@@ -118,7 +176,9 @@ func (s *heartbeatSightings) handler(source informer.Source) cache.ResourceEvent
 		}
 		now := time.Now()
 		for name, renewed := range kubernetes.Renewals([]kubernetes.Lease{lease}) {
-			s.observe(name, renewed, now)
+			if _, heard := s.observe(name, renewed, now); heard {
+				wake()
+			}
 		}
 	}
 	return cache.ResourceEventHandlerFuncs{

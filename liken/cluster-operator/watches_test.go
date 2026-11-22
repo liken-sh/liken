@@ -263,8 +263,8 @@ func TestAPassRightAfterItsOwnGrantReadsThatMachineDirectly(t *testing.T) {
 		}, func(string) {})
 		awaitFleetCaches(t, r)
 		cm, _ := fleetMetrics(t)
-		// A new process grants no turn until its first reading of
-		// the heartbeats is HeartbeatStaleAfter old (decideRollout).
+		// A new process grants no turn until it has seen each machine
+		// renew its heartbeat Lease (decideRollout).
 		if err := reconcile(r, "lab", newChannelPoller(), &fluxProbe{}, &overduePodReports{}, cm); err != nil {
 			t.Fatalf("running the first pass: %v", err)
 		}

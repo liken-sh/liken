@@ -180,8 +180,9 @@ request of the machine:
 
   The cause can be a budget that has no room, with the machines that
   fill it, another leader that is out of service, a release that is
-  still downloading, a stalled rollout, or the first 40 seconds after
-  `cluster-operator` starts. When the machine itself is out of
+  still downloading, a stalled rollout, or a machine whose heartbeat
+  lease `cluster-operator` has not seen renewed in the first 40
+  seconds after it starts. When the machine itself is out of
   service, the message gives its phase, such as `Lost` or `Degraded`,
   and the request waits until the machine is back. A message that
   says the request waits for the next `cluster-operator` pass clears

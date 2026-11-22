@@ -67,10 +67,16 @@ package main
 // entry at the Machine's current version. These rules read only API
 // state, so a new leader applies them to the previous leader's entries.
 //
-// The budget counts a machine as down only by its phase, and
-// a new cluster-operator process cannot tell a Lost machine until
-// HeartbeatStaleAfter has passed (heartbeats.go). Until then, no turn
-// is granted and no grant is reclaimed.
+// The budget counts a machine as down by its phase, and a new
+// cluster-operator process cannot tell a Lost machine until
+// HeartbeatStaleAfter has passed (heartbeats.go). Until then, a machine
+// that this process has not seen renew its heartbeat Lease may be down
+// while its status reads Ready. Such a machine counts against the
+// budget and the leader limit, gets no turn, and has its turn neither
+// confirmed nor reclaimed. A machine that this process has heard is
+// judged as it would be after that time, so a process that restarts
+// more often than HeartbeatStaleAfter still ends finished turns and
+// grants new ones.
 
 import (
 	"fmt"
@@ -81,7 +87,6 @@ import (
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/disruption"
-	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
 )
 
@@ -161,16 +166,16 @@ func machineNamed(machines []machine.Machine, name string) *machine.Machine {
 // template (daemonSetVersion, steward.go). It is "" when no DaemonSet
 // has been applied, and then leaders do not go first.
 //
-// leasesFirstRead is when this program first read the heartbeat
-// Leases (heartbeatSightings.firstReadTime). The zero time skips the wait for
-// HeartbeatStaleAfter.
-func decideRollout(machines []machine.Machine, heartbeats map[string]time.Time, leasesFirstRead time.Time,
+// trust says which machines this program has heard renew their
+// heartbeat Leases since it started reading them
+// (heartbeatSightings.trust). Its zero value trusts every machine.
+func decideRollout(machines []machine.Machine, heartbeats map[string]time.Time, trust heartbeatTrust,
 	clusterDoc *cluster.Cluster, appliedVersion string, q fleetRequests, now time.Time) rollout {
 	r := rollout{waits: map[string]string{}}
-	heartbeatsTrustedAt := leasesFirstRead.Add(kubernetes.HeartbeatStaleAfter)
-	heartbeatsTooNew := !leasesFirstRead.IsZero() && !now.After(heartbeatsTrustedAt)
 	var outOfService []string  // unavailable machines and machines with a turn
+	var unheard []string       // machines that may be down whatever their status says
 	leaderBusy := false        // a leader is out of service or has a turn
+	leaderUnheard := false     // a leader may be down whatever its status says
 	leaderTurnRunning := false // a leader has a turn whose boot will update the template
 	var stalled, inProgress, waiting, workers, leaders, awaitingDownload, regranting []string
 	recordedTurns := map[string]cluster.RebootTurn{}
@@ -214,14 +219,20 @@ func decideRollout(machines []machine.Machine, heartbeats map[string]time.Time, 
 		// A pending entry has no grant on the Machine yet. The grant
 		// from the leader that wrote the entry can still arrive.
 		pending := recorded && grant == nil
+		silent := trust.unheard(name, now)
+		if silent {
+			unheard = append(unheard, name)
+			leaderUnheard = leaderUnheard || leader
+		}
 
 		switch {
-		case grant != nil && available(phase) && !wantsTurn(open):
+		case grant != nil && available(phase) && !wantsTurn(open) && !silent:
 			// The machine is up and requests nothing: its turn is done,
 			// or its change was reverted or its policy set to Manual
 			// before it rebooted. The entry still counts against the
 			// budget until a later pass reads the Machine without the
-			// grant.
+			// grant. A machine that this process has not heard may be
+			// down, so it keeps its grant, and a later case counts it.
 			r.revoke = append(r.revoke, name)
 			outOfService = append(outOfService, name)
 			leaderBusy = leaderBusy || leader
@@ -252,7 +263,7 @@ func decideRollout(machines []machine.Machine, heartbeats map[string]time.Time, 
 			// A machine that is down gets no confirm, because the grant
 			// would hide its Lost phase, and the write that sets Lost
 			// changes the version anyway.
-			if pending && available(phase) && !heartbeatsTooNew {
+			if pending && available(phase) && !silent {
 				r.confirm = append(r.confirm, name)
 			}
 			if leader {
@@ -276,7 +287,7 @@ func decideRollout(machines []machine.Machine, heartbeats map[string]time.Time, 
 
 	slices.Sort(workers)
 	slices.Sort(leaders)
-	budgetUse := newBudgetCounts(q.budgetsOf(), machines, outOfService)
+	budgetUse := newBudgetCounts(q.budgetsOf(), machines, outOfService, unheard)
 	wait := func(name, why string) {
 		waiting = append(waiting, name)
 		r.waits[name] = why
@@ -284,20 +295,23 @@ func decideRollout(machines []machine.Machine, heartbeats map[string]time.Time, 
 	// noTurnBecause returns why no machine can get a turn in this pass,
 	// or "".
 	noTurnBecause := func() string {
-		switch {
-		case len(stalled) > 0:
+		if len(stalled) > 0 {
 			return "The rollout is stalled, because " + strings.Join(stalled, ", ") + " took a reboot turn and is not back"
-		case heartbeatsTooNew:
-			return "cluster-operator started reading the heartbeat Leases at " + leasesFirstRead.Format(time.RFC3339) +
-				" and grants no turn until " + heartbeatsTrustedAt.Format(time.RFC3339)
 		}
 		return ""
 	}
+	unheardWait := "cluster-operator started reading the heartbeat Leases at " + trust.firstRead.Format(time.RFC3339) +
+		" and grants this machine no turn until it sees a renewal of the machine's heartbeat Lease"
 
 	// A machine that is granted again already counts against the
-	// budget, so only a stall or a young heartbeat record stops it.
+	// budget, so only a stall, or a heartbeat that this process has not
+	// heard, stops it.
 	for _, name := range regranting {
-		if why := noTurnBecause(); why != "" {
+		why := noTurnBecause()
+		if why == "" && slices.Contains(unheard, name) {
+			why = unheardWait
+		}
+		if why != "" {
 			r.waits[name] = why
 			continue
 		}
@@ -347,8 +361,15 @@ func decideRollout(machines []machine.Machine, heartbeats map[string]time.Time, 
 		case noTurnBecause() != "":
 			wait(name, noTurnBecause())
 			continue
+		case slices.Contains(unheard, name):
+			wait(name, unheardWait)
+			continue
 		case leader && leaderBusy:
 			wait(name, "Another leader is out of service, and only one leader is out of service at a time")
+			continue
+		case leader && leaderUnheard:
+			wait(name, "cluster-operator has not yet seen a renewal of another leader's heartbeat Lease, "+
+				"so that leader may be down, and only one leader is out of service at a time")
 			continue
 		}
 		if why := budgetUse.refusal(name); why != "" {
@@ -360,11 +381,6 @@ func decideRollout(machines []machine.Machine, heartbeats map[string]time.Time, 
 	}
 	slices.SortFunc(r.turns, func(a, b cluster.RebootTurn) int { return strings.Compare(a.Machine, b.Machine) })
 	r.budgets = budgetUse.statuses(q.budgets)
-	if heartbeatsTooNew {
-		// A machine that reads available may be down, so no grant is
-		// reclaimed either.
-		r.revoke = nil
-	}
 
 	switch {
 	case len(stalled) > 0:
@@ -377,7 +393,7 @@ func decideRollout(machines []machine.Machine, heartbeats map[string]time.Time, 
 		message := "Machines with a reboot turn: " + strings.Join(inProgress, ", ")
 		switch {
 		case len(inProgress) > 0:
-		case heartbeatsTooNew:
+		case len(unheard) > 0:
 			message = "Reboot turns wait until the heartbeats show which machines are down"
 		case len(waiting) > 0:
 			message = "Reboot turns wait for room in the disruption budgets"
@@ -394,10 +410,11 @@ func decideRollout(machines []machine.Machine, heartbeats map[string]time.Time, 
 			message += fmt.Sprintf(". The machine-operator DaemonSet template is at %s and the fleet's target is %s, "+
 				"so a leader reboots first to update the template, and workers wait", appliedVersion, clusterDoc.Spec.Version)
 		}
-		if heartbeatsTooNew {
-			message += fmt.Sprintf(". cluster-operator started reading the heartbeat Leases at %s "+
-				"and grants no turn until %s, when a machine that is down shows as Lost",
-				leasesFirstRead.Format(time.RFC3339), heartbeatsTrustedAt.Format(time.RFC3339))
+		if len(unheard) > 0 {
+			message += fmt.Sprintf(". cluster-operator started reading the heartbeat Leases at %s, "+
+				"and counts %s as out of service until it sees a renewal of each one's Lease, "+
+				"or until %s, when a machine that is down shows as Lost",
+				trust.firstRead.Format(time.RFC3339), strings.Join(unheard, ", "), trust.trustedAt().Format(time.RFC3339))
 		}
 		r.progressing = api.Condition{
 			Type: "Progressing", Status: api.ConditionTrue, Reason: "RollingOut", Message: message,

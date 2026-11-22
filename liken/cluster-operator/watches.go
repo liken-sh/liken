@@ -26,11 +26,14 @@ package main
 //     new limit. This program writes the status of both. When
 //     machine-operator marks a request Complete after the reboot, the
 //     Machine's new boot is a Machine change, which starts a pass.
-//   - Heartbeat Leases and pods start nothing. The ticker checks each
-//     heartbeat's age, and refreshOSPods acts on a machine's version,
-//     which arrives as a Machine change. The Lease handler records when
-//     each Lease's renewTime changed, on this program's clock, and the pass
-//     measures a heartbeat's age from that record (heartbeats.go).
+//   - A heartbeat Lease starts one only on the first renewal that this
+//     process sees, because until then the rollout counts the machine
+//     as out of service (heartbeats.go). The ticker checks each
+//     heartbeat's age. The Lease handler records when each Lease's
+//     renewTime changed, on this program's clock, and the pass measures
+//     a heartbeat's age from that record.
+//   - Pods start nothing. refreshOSPods acts on a machine's version,
+//     which arrives as a Machine change.
 //
 // The pass reads a cache only while it has synced and its last watch
 // has not failed, and reads the API server otherwise. That covers the
@@ -191,7 +194,7 @@ func watchFleet(ctx context.Context, watcher dynamic.Interface, client *apiclien
 	r.disruptionCache = start(disruptionKind, disruptions, watch.WakeOnEdit[disruption.Disruption](disruptions, wake), nil)
 	r.budgetCache = start(budgetKind, budgets, watch.WakeOnEdit[disruption.Budget](budgets, wake), nil)
 	r.disruptionVersions, r.budgetVersions = memo.New(), memo.New()
-	r.leaseCache = start(leaseKind, leases, r.sightings.handler(leases), nil)
+	r.leaseCache = start(leaseKind, leases, r.sightings.handler(leases, wake), nil)
 	return r
 }
 

@@ -104,12 +104,18 @@ cannot give the last place in a budget to two different machines. An
 entry leaves the list after the machine's turn ends.
 
 When `cluster-operator` starts, for example after the machine that ran
-it loses power, it grants no turns for 40 seconds. It has not yet
-received a heartbeat from each machine, so a machine that is already
-down still shows its last status. After 40 seconds with no heartbeat,
-that machine's status is `Lost`, and it counts against the budget. The
-message of the Cluster's `Progressing` condition gives the time that
-granting resumes.
+it loses power, a machine that is already down still shows its last
+status. So for its first 40 seconds, `cluster-operator` believes a
+machine's status only after it sees the machine renew its heartbeat
+lease, which a running machine does about every ten seconds. Until
+then, the machine counts against the budget, gets no turn, and keeps
+the turn it has. After 40 seconds with no heartbeat, the machine's
+status is `Lost`, and it still counts against the budget. The message
+of the Cluster's `Progressing` condition names the machines that
+`cluster-operator` has not heard from yet, and the time when the 40
+seconds end. A `cluster-operator` that restarts more often than every
+40 seconds still moves the rollout, as long as each run lasts long
+enough to see every machine renew its lease.
 
 If a machine's
 [`rebootPolicy`](/docs/reference/machine/#spec--rebootpolicy) is

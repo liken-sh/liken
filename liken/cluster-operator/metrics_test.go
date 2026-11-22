@@ -140,7 +140,7 @@ func TestMachinesBehindTargetCountsTheOnesNotOnTheTarget(t *testing.T) {
 
 	layer, scrape := fleetMetrics(t)
 	layer.observePass(fleetDecision{},
-		decideFor(machines, renewals, time.Time{}, targetingCluster(1, "2026.09.10-001"), "", passTime))
+		decideFor(machines, renewals, heartbeatTrust{}, targetingCluster(1, "2026.09.10-001"), "", passTime))
 
 	requireSeries(t, scrape(), "liken_machines_behind_target 1")
 }
@@ -153,7 +153,7 @@ func TestAFleetWithNoTargetHasNobodyBehind(t *testing.T) {
 	machines[0].Status.Version.Liken = "2026.09.10-001"
 
 	layer, scrape := fleetMetrics(t)
-	layer.observePass(fleetDecision{}, decideFor(machines, renewals, time.Time{}, labCluster(1), "", passTime))
+	layer.observePass(fleetDecision{}, decideFor(machines, renewals, heartbeatTrust{}, labCluster(1), "", passTime))
 
 	requireSeries(t, scrape(), "liken_machines_behind_target 0")
 }

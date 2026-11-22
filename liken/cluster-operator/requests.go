@@ -167,22 +167,34 @@ const defaultBudgetLimit = 1
 // budgetCounts counts the machines that each budget has out of service
 // during one pass. It starts with the machines that are already out of
 // service, and add counts each machine that the pass grants a turn.
+//
+// unheard lists, for each budget, the selected machines that are not
+// out of service by their status but that this process has not yet
+// seen renew a heartbeat Lease (heartbeatTrust.unheard). Such a machine
+// may be down, so refusal counts it. The budget's status does not,
+// because the status reports what is known to be out of service, and a
+// new process hears every live machine within seconds.
 type budgetCounts struct {
 	budgets     []disruption.Budget
 	selected    [][]string
 	unavailable [][]string
+	unheard     [][]string
 }
 
-func newBudgetCounts(budgets []disruption.Budget, machines []machine.Machine, outOfService []string) *budgetCounts {
-	counts := &budgetCounts{budgets: budgets, selected: make([][]string, len(budgets)), unavailable: make([][]string, len(budgets))}
+func newBudgetCounts(budgets []disruption.Budget, machines []machine.Machine, outOfService, unheard []string) *budgetCounts {
+	counts := &budgetCounts{budgets: budgets, selected: make([][]string, len(budgets)),
+		unavailable: make([][]string, len(budgets)), unheard: make([][]string, len(budgets))}
 	for i, b := range budgets {
 		for _, m := range machines {
 			if !b.Spec.Selector.Selects(m.Metadata.Labels) {
 				continue
 			}
 			counts.selected[i] = append(counts.selected[i], m.Metadata.Name)
-			if slices.Contains(outOfService, m.Metadata.Name) {
+			switch {
+			case slices.Contains(outOfService, m.Metadata.Name):
 				counts.unavailable[i] = append(counts.unavailable[i], m.Metadata.Name)
+			case slices.Contains(unheard, m.Metadata.Name):
+				counts.unheard[i] = append(counts.unheard[i], m.Metadata.Name)
 			}
 		}
 	}
@@ -194,13 +206,28 @@ func newBudgetCounts(budgets []disruption.Budget, machines []machine.Machine, ou
 // budget that selects the machine has room.
 func (b *budgetCounts) refusal(name string) string {
 	for i, budget := range b.budgets {
-		if !slices.Contains(b.selected[i], name) || len(b.unavailable[i]) < budget.Spec.MaxUnavailable {
+		out, unheard := b.unavailable[i], b.unheard[i]
+		if !slices.Contains(b.selected[i], name) || len(out)+len(unheard) < budget.Spec.MaxUnavailable {
 			continue
 		}
-		return fmt.Sprintf("The %s budget allows %d out of service, and %s %s",
-			budget.Metadata.Name, budget.Spec.MaxUnavailable, strings.Join(b.unavailable[i], ", "), isOrAre(len(b.unavailable[i])))
+		var counted []string
+		if len(out) > 0 {
+			counted = append(counted, strings.Join(out, ", ")+" "+isOrAre(len(out)))
+		}
+		if len(unheard) > 0 {
+			counted = append(counted, strings.Join(unheard, ", ")+" "+countsAsOut(len(unheard)))
+		}
+		return fmt.Sprintf("The %s budget allows %d out of service, and %s",
+			budget.Metadata.Name, budget.Spec.MaxUnavailable, strings.Join(counted, ", and "))
 	}
 	return ""
+}
+
+func countsAsOut(n int) string {
+	if n == 1 {
+		return "counts as out until cluster-operator sees its heartbeat Lease renewed"
+	}
+	return "count as out until cluster-operator sees their heartbeat Leases renewed"
 }
 
 func isOrAre(n int) string {

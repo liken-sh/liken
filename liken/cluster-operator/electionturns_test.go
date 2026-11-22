@@ -112,11 +112,11 @@ func (h *heldGrant) responseCode() int {
 	return h.code
 }
 
-// renewHeartbeats renews each machine's heartbeat Lease every ten
-// seconds, as the machine operators do, until ctx ends.
-func renewHeartbeats(ctx context.Context, client *apiclient.Client) {
+// renewHeartbeats renews the heartbeat Lease of each named machine
+// every ten seconds, as the machine operators do, until ctx ends.
+func renewHeartbeats(ctx context.Context, client *apiclient.Client, names ...string) {
 	for {
-		for _, name := range []string{"node-1", "node-2", "node-3"} {
+		for _, name := range names {
 			path := "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases/" + name
 			lease, err := apiclient.Get[map[string]any](client, path)
 			if err != nil {
@@ -171,7 +171,7 @@ func TestTheRebootTurnsKeepTheBudgetAcrossALeaderChange(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		go renewHeartbeats(ctx, machineOperator)
+		go renewHeartbeats(ctx, machineOperator, "node-1", "node-2", "node-3")
 
 		stopA, endA := context.WithCancel(ctx)
 		stopB, endB := context.WithCancel(ctx)
@@ -180,9 +180,8 @@ func TestTheRebootTurnsKeepTheBudgetAcrossALeaderChange(t *testing.T) {
 		time.Sleep(time.Second)
 		copies.Go(func() { runCopy(t, "liken-cluster-operator-b", lease.Config(t), budget, stopB, endB) })
 
-		// node-2 waits for a turn from the start. A grants it on its first
-		// tick after HeartbeatStaleAfter has passed since it first read
-		// the heartbeats.
+		// node-2 waits for a turn from the start. A grants it once it has
+		// seen every machine renew its heartbeat Lease.
 		time.Sleep(kubernetes.HeartbeatStaleAfter + 15*time.Second)
 		if !held.holding() {
 			t.Fatal("copy A did not send its grant")
@@ -190,9 +189,9 @@ func TestTheRebootTurnsKeepTheBudgetAcrossALeaderChange(t *testing.T) {
 		askForATurn(t, machineOperator, "node-1")
 
 		// B takes the Lease 30 to 41 seconds after A's last renewal
-		// (election.Duration). B confirms A's pending entry only after
-		// HeartbeatStaleAfter has passed since its first read of the
-		// heartbeats. A stays paused until then.
+		// (election.Duration). B confirms A's pending entry only after it
+		// has seen node-2 renew its heartbeat Lease. A stays paused until
+		// then.
 		time.Sleep(2 * time.Minute)
 		close(held.released)
 		paused.resume()
