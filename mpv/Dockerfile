@@ -10,13 +10,10 @@
 # build context named builder.
 #
 # mpv itself builds from the upstream release, because a fix that
-# liken needs is in no package that sid holds. mpv 0.41 did not reset
-# FFmpeg's TrueHD framer on a seek, so a TrueHD track that the player
-# passed through to a receiver went silent after each seek. The fix is
-# in mpv 0.42.0, and 0.42.0 needs libplacebo 7.387.0, which sid does
-# not have yet. So the build takes the 0.41.0 release and applies the
-# one upstream commit of the fix, from patches/. Every library mpv
-# builds against still comes from the snapshot.
+# liken needs is in no package that sid has. Before 0.42.0, mpv did not
+# reset FFmpeg's TrueHD framer on a seek, so a TrueHD track that the
+# player passed through to a receiver went silent after each seek.
+# Every library mpv builds against still comes from the snapshot.
 
 # The release tarball, pinned by its sha256. BuildKit checks the
 # checksum when it fetches the file, so no CA bundle enters the build.
@@ -25,9 +22,9 @@
 # it checks the release manager's signature of each release from
 # 0.42.0 on. The 0.41.0 release carries no signature, so this pin
 # rests on its checksum alone.
-ARG MPV_VERSION=0.41.0
-ARG MPV_URL=https://github.com/mpv-player/mpv/archive/refs/tags/v0.41.0.tar.gz
-ARG MPV_SHA256=ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209
+ARG MPV_VERSION=0.42.0
+ARG MPV_URL=https://github.com/mpv-player/mpv/archive/refs/tags/v0.42.0.tar.gz
+ARG MPV_SHA256=bcfebbfa2b65a6d88dc97ea18117831072373e38b5785a2afb874ed4df5070dd
 
 # mpv, built with meson into /usr, which the closure stage below
 # collects from.
@@ -59,14 +56,17 @@ ARG MPV_SHA256=ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209
 # FFmpeg reads the https:// items, and with --tls-verify=yes it checks
 # each certificate against the bundle that the player image copies
 # from the trust component. 0.42.0's libcurl option would replace
-# FFmpeg as that reader, so the bump turns it off.
+# FFmpeg as that reader, so the build turns it off.
 #
 # --auto-features=disabled turns off each option that the list does
 # not name, such as the macOS, Windows, and Android options, and each
 # option that a later release adds. The list names every option of
 # this release that applies to Linux, so a reader sees each choice.
-# 0.42.0 adds dvda, libcurl, and subrandr, and the bump to it names
-# each one as disabled.
+# The options that 0.42.0 adds are off: DVD-Audio (dvda), AMD's AMF
+# (amf), and subrandr. subrandr is a library of its own that sid does
+# not package, and mpv 0.42.0 gives it only YouTube's SRV3 subtitles
+# (the subrandr/srv3 codec in sub/sd_sbr.c). WebVTT still renders
+# through libass.
 #
 # The build keeps mpv's default GPL-2.0-or-later license. -Dgpl=false
 # would remove only options that are already off, and mpv's Copyright
@@ -95,14 +95,11 @@ ADD --checksum=sha256:${MPV_SHA256} ${MPV_URL} /mpv.tar.gz
 # patches/ holds the upstream commits that the build applies to the
 # release, each one the output of git format-patch for the commit, with
 # its author, date, and id. pin.toml names the same commits as
-# backports, so the image's SBOM states them. The one patch now is
-# mpv commit 1388a453950f, "ad_spdif: recreate spdif muxer on reset".
-# Without it, a TrueHD bitstream that the player passes through goes
-# silent after a seek. v0.42.0 holds the commit, so the directory holds
-# no patch again when the pin reaches 0.42.0. patch stops the build
-# when a patch does not apply exactly. The grep stops it when the tree
-# that the build compiles has no reset of the spdif muxer, from the
-# patch now and from the release from 0.42.0 on.
+# backports, so the image's SBOM states them. The directory can be
+# empty. patch stops the build when a patch does not apply exactly. The
+# grep stops it when the tree that the build compiles has no reset of
+# the spdif muxer, the fix for the silent TrueHD passthrough after a
+# seek.
 COPY patches/ /patches/
 RUN mkdir /src && tar -C /src --strip-components=1 -xzf /mpv.tar.gz \
     && cd /src \
@@ -136,7 +133,8 @@ RUN mkdir /src && tar -C /src --strip-components=1 -xzf /mpv.tar.gz \
         -Drubberband=disabled -Dvapoursynth=disabled \
         -Dlibavdevice=disabled -Dlibarchive=disabled \
         -Dlibbluray=disabled -Dcdda=disabled -Ddvdnav=disabled \
-        -Ddvbin=disabled -Dsdl2-gamepad=disabled \
+        -Ddvbin=disabled -Ddvda=disabled -Dsdl2-gamepad=disabled \
+        -Damf=disabled -Dlibcurl=disabled -Dsubrandr=disabled \
         -Dmanpage-build=disabled -Dhtml-build=disabled -Dpdf-build=disabled \
     && meson compile -C build \
     && meson install -C build --strip \

@@ -16,7 +16,7 @@ license = "MIT"
 # mpv links the snapshot's libplacebo, and latest.sh reads its version
 # here to tell whether the newest mpv release can build.
 [package.upstream]
-mpv = "0.41.0"
+mpv = "0.42.0"
 libplacebo = "7.387.0-2"
 pipewire = "1.6.11-2"
 

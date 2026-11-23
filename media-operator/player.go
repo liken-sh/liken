@@ -112,9 +112,10 @@ func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 		// a root filesystem that may be read-only.
 		"--input-conf=memory://CLOSE_WIN quit " + strconv.Itoa(compositorLostExit),
 		"--wayland-app-id=" + videoAppID,
-		// mpv's --tls-verify defaults to no, which accepts any
-		// certificate for an https:// item. mpv checks the chain against
-		// the CA bundle that the image copies from the trust component.
+		// mpv checks the certificate of each https:// item against the
+		// CA bundle that the image copies from the trust component. The
+		// check is mpv's default, and the flag keeps it on when a
+		// release changes the default.
 		"--tls-verify=yes",
 	}
 	// mpv prints its status line many times a second into the pod log,
