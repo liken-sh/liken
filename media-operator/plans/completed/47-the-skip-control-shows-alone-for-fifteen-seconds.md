@@ -3,6 +3,10 @@
 Proposed and built on 2026-11-22. The display's tests pass. The drill
 on `liken-1` has not run.
 
+The window is 10 seconds, not the 15 that this plan describes. The
+maintainer watched the 15-second control on a television the same day
+and found it a little too long.
+
 ## The problem
 
 While the playhead is inside an intro or a recap, the display shows

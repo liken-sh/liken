@@ -1856,10 +1856,10 @@ mod tests {
         {"kind":"intro","start":1100.0,"end":1250.0},
         {"kind":"credits","start":5400.0,"end":5900.0}]}"#;
 
-    /// With the display down, the skip control shows for the first 15
+    /// With the display down, the skip control shows for the first 10
     /// seconds of the intro. The two candidates merge into a span that
     /// starts at 550 seconds, the median of 0 and 1100, so the control
-    /// shows alone from 550 to 565 seconds, and then only as a stop of
+    /// shows alone from 550 to 560 seconds, and then only as a stop of
     /// the display until the intro ends.
     #[tokio::test]
     async fn the_skip_control_shows_alone_for_the_start_of_the_intro() {
@@ -1871,7 +1871,7 @@ mod tests {
         assert!(display.skip.draws_outside(false));
         assert!(!display.focus.visible());
 
-        let _ = display.update(property("time-pos", json!(565.0)));
+        let _ = display.update(property("time-pos", json!(560.0)));
         settle(&mut display);
         assert!(display.skip.available());
         assert!(!display.skip.draws_outside(false));

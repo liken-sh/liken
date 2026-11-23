@@ -537,7 +537,7 @@ mod tests {
             self.skip.on_position(Some(INTRO.span.start), Some(INTRO));
         }
 
-        /// Puts the playhead 100 seconds into the intro, past the 15 seconds
+        /// Puts the playhead 100 seconds into the intro, past the 10 seconds
         /// that the skip control shows over the bare video.
         fn late_intro(&mut self) {
             self.skip.on_position(Some(1200.0), Some(INTRO));
@@ -1466,11 +1466,11 @@ mod tests {
         }
     }
 
-    /// Past the first 15 seconds of the intro, the skip control shows only
+    /// Past the first 10 seconds of the intro, the skip control shows only
     /// on the OSD. Up or down shows the OSD with the control focused, and
     /// the select after it skips.
     #[test]
-    fn a_direction_after_the_first_fifteen_seconds_focuses_the_skip_control() {
+    fn a_direction_after_the_first_ten_seconds_focuses_the_skip_control() {
         for action in [Action::Up, Action::Down] {
             let mut display = Display::new("{}");
             display.late_intro();
@@ -1488,10 +1488,10 @@ mod tests {
         }
     }
 
-    /// Past the first 15 seconds of the intro, no control shows over the
+    /// Past the first 10 seconds of the intro, no control shows over the
     /// bare video, so a select there pauses.
     #[test]
-    fn a_select_at_the_bare_video_after_the_first_fifteen_seconds_pauses() {
+    fn a_select_at_the_bare_video_after_the_first_ten_seconds_pauses() {
         let mut display = Display::new("{}");
         display.late_intro();
         assert_eq!(display.press(Action::Select), pause_toggle());

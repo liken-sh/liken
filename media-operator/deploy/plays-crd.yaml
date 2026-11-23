@@ -244,7 +244,7 @@ spec:
                               into one, from their median start and median
                               end. While the playhead is in an intro or a
                               recap, the display shows a skip control. It
-                              shows over the bare video for the first 15
+                              shows over the bare video for the first 10
                               seconds of the span, and select there skips.
                               After that it shows only with the OSD, which up
                               or down opens with the control focused. Credits count

@@ -35,7 +35,7 @@ use crate::upnext::{CARD_ALPHA, CHIP_H, CHIP_PAD_X, CHIP_PAD_Y, CHIP_R, CHIP_Y};
 
 /// The seconds from the start of an intro or a recap during which its
 /// button shows over the bare video.
-pub const ALONE: f64 = 15.0;
+pub const ALONE: f64 = 10.0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Skip {
@@ -344,20 +344,20 @@ mod tests {
         assert!(skip.available());
     }
 
-    /// Over the bare video, the intro button shows for the first 15
-    /// seconds of the span, from 7 to 22 seconds. After that it is still
+    /// Over the bare video, the intro button shows for the first 10
+    /// seconds of the span, from 7 to 17 seconds. After that it is still
     /// a stop of the OSD, and a select at the bare video no longer takes
     /// it.
     #[test]
-    fn the_intro_button_shows_alone_for_the_first_fifteen_seconds() {
+    fn the_intro_button_shows_alone_for_the_first_ten_seconds() {
         let mut skip = Skip::default();
         skip.on_position(Some(7.0), Some(intro()));
         settle(&mut skip);
-        assert!(!skip.on_position(Some(21.9), Some(intro())));
+        assert!(!skip.on_position(Some(16.9), Some(intro())));
         assert!(skip.draws_outside(false));
         assert!(skip.takes_select_outside());
 
-        assert!(skip.on_position(Some(22.0), Some(intro())));
+        assert!(skip.on_position(Some(17.0), Some(intro())));
         settle(&mut skip);
         assert!(!skip.draws_outside(false));
         assert!(!skip.takes_select_outside());
@@ -369,7 +369,7 @@ mod tests {
     /// A seek into the middle of an intro offers the button on the OSD
     /// only.
     #[test]
-    fn a_seek_past_the_first_fifteen_seconds_shows_nothing_alone() {
+    fn a_seek_past_the_first_ten_seconds_shows_nothing_alone() {
         let mut skip = Skip::default();
         assert!(skip.on_position(Some(50.0), Some(intro())));
         settle(&mut skip);
