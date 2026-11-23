@@ -3,8 +3,8 @@
 // page with its title and its scroll position, the cluster map's
 // Escape and click go back, the event stream replaces the view and
 // opens however late the SSE extension arrives, quick search shows
-// rows and opens one, an error with an empty body leaves the page
-// alone, and a click with ctrl opens a new tab.  The checks expect the fixture cluster of `--fixture`,
+// rows and opens one, a server error or a proxy's error page leaves
+// the page alone, and a click with ctrl opens a new tab.  The checks expect the fixture cluster of `--fixture`,
 // because they name its namespaces, such as acme-shop.
 //
 // Run it against a server on the fixture cluster:
@@ -215,6 +215,46 @@ check("the search page keeps one masthead", (await page.locator(".masthead").cou
   await settle(tab, 1000);
   const url = new URL(tab.url());
   check("an error with an empty body leaves the page and its URL", url.pathname + url.search === "/" && (await tiles.count()) > 0, `${url.pathname + url.search}, ${await tiles.count()} tiles`);
+  await tab.close();
+}
+
+// An error page from a proxy, such as the 502 of an ingress while the
+// pod restarts, also leaves the page and its URL as they are.
+{
+  const tab = await context.newPage();
+  await tab.goto(base + "/", { waitUntil: "domcontentloaded" });
+  await settle(tab, 1500);
+  const title = await tab.title();
+  const tiles = tab.locator("a.ns-tile");
+  const href = await tiles.first().getAttribute("href");
+  const body = "<html><head><title>502 Bad Gateway</title></head><body><h1>502 Bad Gateway</h1></body></html>";
+  await tab.route(`**${href}`, (route) => route.fulfill({ status: 502, contentType: "text/html", body }));
+  await tiles.first().click();
+  await settle(tab, 1000);
+  const url = new URL(tab.url());
+  check("a proxy's error page leaves the page, its URL, and its title", url.pathname + url.search === "/" && (await tab.title()) === title && (await tab.locator(".masthead").count()) === 1, `${url.pathname + url.search}, title ${await tab.title()}`);
+  await tab.close();
+}
+
+// A link to an object that is gone opens transect's 404 page of it,
+// which has a body.  The link is added to the page, because the
+// fixture's pages link only to objects that exist.
+{
+  const tab = await context.newPage();
+  await tab.goto(base + "/namespaces/acme-shop", { waitUntil: "domcontentloaded" });
+  await settle(tab, 1500);
+  await tab.evaluate(() => {
+    const link = document.createElement("a");
+    link.id = "gone";
+    link.href = "/namespaces/acme-shop/deployments/no-such-deployment";
+    link.setAttribute("hx-get", link.getAttribute("href"));
+    link.textContent = "gone";
+    document.querySelector("main").prepend(link);
+    htmx.process(link);
+  });
+  await tab.locator("#gone").click();
+  await settle(tab, 1000);
+  check("a link to an object that is gone opens its 404 page", new URL(tab.url()).pathname.endsWith("/no-such-deployment") && (await tab.locator("main.gone").count()) === 1, `${new URL(tab.url()).pathname}, title ${await tab.title()}`);
   await tab.close();
 }
 

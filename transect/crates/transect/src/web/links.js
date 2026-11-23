@@ -24,16 +24,18 @@ document.addEventListener("htmx:before:request", (event) => {
   ctx.newPage = next.pathname !== location.pathname;
 });
 
-// An error with an empty body, such as the 500 of a page whose render
-// failed, leaves the page as it is.  htmx 4 swaps every response except
-// a 204 and a 304, so it would swap the empty body in, blank the page,
-// and push the URL of the page that failed.  Cancelling the swap here
-// also stops the push, because htmx pushes the URL after this event.
-// An error with a body, such as the 404 page of an object that is gone,
-// swaps in.
+// A server error leaves the page as it is.  htmx 4 swaps every
+// response except a 204 and a 304, so it would swap in the empty body
+// of a 500 from transect, or the error page of an ingress that answers
+// 502 while the pod restarts, and push the URL of the page that failed.
+// Cancelling the swap here also stops the push, because htmx pushes the
+// URL after this event.  Of the other errors, one with a body swaps in,
+// such as the 404 page of an object that is gone, and one with an empty
+// body leaves the page as it is.
 document.addEventListener("htmx:before:swap", (event) => {
   const { ctx } = event.detail;
-  if (ctx.response?.status >= 400 && !ctx.text?.trim()) event.preventDefault();
+  const status = ctx.response?.status ?? 0;
+  if (status >= 500 || (status >= 400 && !ctx.text?.trim())) event.preventDefault();
 });
 
 // A link to a place on a page, such as a device on its machine's page,

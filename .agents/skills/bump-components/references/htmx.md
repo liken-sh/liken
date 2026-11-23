@@ -68,8 +68,8 @@ tarball, because the guide does not list every change:
   reads `HX-Target`.
 - **What htmx swaps.** Check which response statuses swap, and how
   Back and Forward restore a page. htmx 4 swaps every response except
-  a 204 and a 304, so `links.js` cancels the swap of an error with an
-  empty body.
+  a 204 and a 304, so `links.js` cancels the swap of every 5xx and of
+  any other error with an empty body.
 - **How htmx starts.** `layout.html` loads htmx and `hx-sse.min.js` as
   plain scripts, because htmx 4 processes the page at once when it
   loads after the document is parsed, and an extension that registers
@@ -132,8 +132,9 @@ checks cover these:
    a page opens its stream when the SSE extension's file arrives 300 ms
    late; quick search shows rows, sends `HX-Target`, and opens a row
    with Enter; the search page's field replaces its rows; an error with
-   an empty body leaves the page as it is; and a click with ctrl opens
-   a new tab.
+   an empty body and a proxy's 502 page with a body leave the page, its
+   URL, and its title as they are, and the 404 page of an object that is
+   gone opens; and a click with ctrl opens a new tab.
 
 Then run the same scripts against a build of the old pin, and compare.
 A debug build reads its static files from its own source tree, so the
