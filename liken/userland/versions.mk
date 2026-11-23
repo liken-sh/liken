@@ -26,3 +26,5 @@ override TZDATA_VERSION = 2026f
 override ZIC_VERSION = 2026f
 override UTIL_LINUX_VERSION = 2.42.4
 override UTIL_LINUX_VERSION_MAJOR = 2.42
+override NFS_UTILS_VERSION = 3.2.1
+override DBUS_VERSION = 1.16.4

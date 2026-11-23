@@ -17,7 +17,7 @@
 # needs shared libraries. The plugins that read udev, sixaxis and
 # hid2hci, are for USB pairing of game pads, which this image does not
 # do.
-BLUEZ_STATIC_VERSION = 5.87
+BLUEZ_STATIC_VERSION = 5.88
 BLUEZ_STATIC_SOURCE = bluez-$(BLUEZ_STATIC_VERSION).tar.xz
 BLUEZ_STATIC_SITE = $(BR2_KERNEL_MIRROR)/linux/bluetooth
 BLUEZ_STATIC_LICENSE = GPL-2.0+, LGPL-2.1+
