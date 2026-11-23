@@ -650,8 +650,16 @@ crate:*)
     }
     manifests 'Cargo\.toml' | xargs -r sed -i -E "/^$crate *=/ s/\"=[^\"]+\"/\"=$version\"/"
     # Each lock file records the pinned version too, and cargo moves
-    # it with the one crate and nothing else.
+    # it with the one crate and nothing else. A lock whose workspace
+    # pins no exact version of the crate has it only through another
+    # crate, whose own range decides the version, so the bump leaves
+    # that lock alone. Without that, a new major version that one
+    # workspace takes fails in a workspace whose dependency still
+    # requires the old range.
     manifests 'Cargo\.lock' | while read -r lock; do
+        pinned="$(manifests 'Cargo\.toml' | grep "^$(dirname "$lock")/" |
+            xargs -r grep -l -E "^$crate *=.*\"=" || true)"
+        [[ -n "$pinned" ]] || continue
         for v in $old; do
             grep -A1 "^name = \"$crate\"$" "$lock" | grep -qx "version = \"$v\"" || continue
             (cd "$(dirname "$lock")" && cargo update --quiet -p "$crate@$v" --precise "$version")
