@@ -648,24 +648,30 @@ crate:*)
         echo "latest.sh: crates.io did not answer for $crate" >&2
         exit 1
     }
+    # A lock file moves when a package of its workspace pins the
+    # crate exactly: a member, or a package that a member takes by
+    # path, such as media-screen, which other workspaces build. cargo
+    # names those packages, and they are the ones with no source. A
+    # lock file that has the crate only through another crate's range
+    # stays, because that range decides the version, and a new major
+    # version would fail there. cargo reads each lock file before the
+    # manifests change, while the two still agree.
+    manifests 'Cargo\.lock' | while read -r lock; do
+        pins="$(cd "$(dirname "$lock")" && cargo metadata --locked --format-version 1 |
+            jq --arg c "$crate" '[.packages[] | select(.source == null) | .dependencies[]
+                | select(.name == $c and (.req | startswith("=")))] | length')"
+        if ((pins > 0)); then echo "$lock"; fi
+    done >"$work/locks"
     manifests 'Cargo\.toml' | xargs -r sed -i -E "/^$crate *=/ s/\"=[^\"]+\"/\"=$version\"/"
     # Each lock file records the pinned version too, and cargo moves
-    # it with the one crate and nothing else. A lock whose workspace
-    # pins no exact version of the crate has it only through another
-    # crate, whose own range decides the version, so the bump leaves
-    # that lock alone. Without that, a new major version that one
-    # workspace takes fails in a workspace whose dependency still
-    # requires the old range.
-    manifests 'Cargo\.lock' | while read -r lock; do
-        pinned="$(manifests 'Cargo\.toml' | grep "^$(dirname "$lock")/" |
-            xargs -r grep -l -E "^$crate *=.*\"=" || true)"
-        [[ -n "$pinned" ]] || continue
+    # it with the one crate and nothing else.
+    while read -r lock; do
         for v in $old; do
             grep -A1 "^name = \"$crate\"$" "$lock" | grep -qx "version = \"$v\"" || continue
             (cd "$(dirname "$lock")" && cargo update --quiet -p "$crate@$v" --precise "$version")
             echo "${lock#"$root"/}: $crate $v -> $version"
         done
-    done
+    done <"$work/locks"
     echo "crate $crate: $old -> $version in every Cargo.toml"
     next_step "make test in each component that builds the crate"
     ;;
