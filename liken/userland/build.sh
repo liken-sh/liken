@@ -33,6 +33,12 @@
 #                                 manifest.csv, which names each one
 #   sbom.cdx.json                 the CycloneDX SBOM that buildroot's
 #                                 utils/generate-cyclonedx writes
+#   evidence/                     what releases/sbom reads to learn
+#                                 which packages the files of dist/
+#                                 contain: the record of each shipped
+#                                 file, the link map of each program,
+#                                 and buildroot's lists of the package
+#                                 that installed each file
 #   versions                      one line for each program, its name
 #                                 in the OS's components record and the
 #                                 version that the build used
@@ -99,6 +105,7 @@ echo "building the static programs with buildroot ${commit:0:12}; the log is use
     -v "$here/cache/dl:/dl" \
     -v "$here/cache/ccache:/ccache" \
     "$builder" bash -e >"$work/build.log" 2>&1 <<'BUILD' || {
+mkdir -p /work/output/maps
 bash /external/buildroot.sh /work/buildroot /work/output os.config
 cd /work/buildroot
 make --no-print-directory -s O=/work/output show-info | utils/generate-cyclonedx >/work/output/sbom.cdx.json
@@ -108,8 +115,27 @@ BUILD
 }
 
 output="$work/output"
+programs=(mke2fs mount.nfs iscsid iscsiadm wpa_supplicant)
+
+# evidence.sh writes the link map of each program and buildroot's file
+# lists into the output's evidence/, and stops when a program has no
+# map. It runs in the build container, because buildroot's staging
+# symlink names a path that exists only there.
+"$runtime" run --rm \
+    -u "$(id -u):$(id -g)" \
+    -v "$here:/external:ro" \
+    -v "$work:/work" \
+    "$builder" bash /external/evidence.sh /work/output "${programs[@]}"
+
 rm -rf "$out"
 mkdir -p "$out/sbin"
+cp -a "$output/evidence" "$out/evidence"
+
+# evidence/shipped has a line for each file that dist/ ships: its kind,
+# program or data, its path in dist/, and the path in buildroot's
+# output that this script copies it from, written from the root of the
+# output as evidence.sh writes a path. releases/sbom looks up the
+# package that installed each one, and the link map of each program.
 
 # Each program comes out of buildroot's target tree. A dynamically
 # linked binary would run in the build container and fail on the
@@ -117,7 +143,7 @@ mkdir -p "$out/sbin"
 # passes too: it carries no loader request and no library, and
 # relocates itself at start, and file(1) calls it "static-pie linked".
 # buildroot strips each target binary already.
-for program in mke2fs mount.nfs iscsid iscsiadm wpa_supplicant; do
+for program in "${programs[@]}"; do
     binary=""
     for dir in sbin usr/sbin usr/bin; do
         if [[ -f "$output/target/$dir/$program" && ! -L "$output/target/$dir/$program" ]]; then
@@ -128,6 +154,7 @@ for program in mke2fs mount.nfs iscsid iscsiadm wpa_supplicant; do
     file "$binary" | grep -qE "statically linked|static-pie linked" ||
         fail "$program is not statically linked: $(file -b "$binary")"
     install -m 0755 "$binary" "$out/sbin/$program"
+    echo "program sbin/$program /${binary#"$output/"}" >>"$out/evidence/shipped"
 done
 
 # zic writes two trees of zones: posix/, whose clocks ignore leap
@@ -139,9 +166,21 @@ done
 # transitions out explicitly. A slim file leaves future transitions to
 # a rule string, and a glibc older than 2.34 in a workload that
 # bind-mounts the host's /usr/share/zoneinfo misreads one.
+#
+# The files come from the target tree, where buildroot's tzdata
+# package copies the tree that zic wrote, so buildroot's list of the
+# target tree names tzdata as the package that installed each one.
+zoneinfo="$output/target/usr/share/zoneinfo"
 mkdir -p "$out/zoneinfo"
-cp -a "$output/host/share/zoneinfo/posix/." "$out/zoneinfo/"
-cp -a "$output/host/share/zoneinfo/"*.tab "$out/zoneinfo/"
+cp -a "$zoneinfo/posix/." "$out/zoneinfo/"
+cp -a "$zoneinfo/"*.tab "$out/zoneinfo/"
+(cd "$zoneinfo/posix" && find . \( -type f -o -type l \) -printf '%P\n') | LC_ALL=C sort |
+    while IFS= read -r zone; do
+        echo "data zoneinfo/$zone /target/usr/share/zoneinfo/posix/$zone"
+    done >>"$out/evidence/shipped"
+for tab in "$zoneinfo/"*.tab; do
+    echo "data zoneinfo/${tab##*/} /target/usr/share/zoneinfo/${tab##*/}" >>"$out/evidence/shipped"
+done
 
 # A zone that zic did not write fails quietly: LoadLocation returns
 # "unknown time zone" for that name, and the apiserver rejects the
@@ -191,4 +230,4 @@ mv "$out/versions.partial" "$out/versions"
 
 echo "static programs (buildroot ${commit:0:12}):"
 sed 's/^/  /' "$out/versions"
-(cd "$out/sbin" && sha256sum mke2fs mount.nfs iscsid iscsiadm wpa_supplicant | sed 's/^/  /')
+(cd "$out/sbin" && sha256sum "${programs[@]}" | sed 's/^/  /')

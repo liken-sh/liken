@@ -65,7 +65,8 @@ USERLAND_DIST := userland/dist
 USERLAND_OUTPUTS := $(USERLAND_DIST)/sbin/mke2fs $(USERLAND_DIST)/sbin/mount.nfs \
 	$(USERLAND_DIST)/sbin/iscsid $(USERLAND_DIST)/sbin/iscsiadm \
 	$(USERLAND_DIST)/sbin/wpa_supplicant $(USERLAND_DIST)/zoneinfo/UTC \
-	$(USERLAND_DIST)/versions $(USERLAND_DIST)/sbom.cdx.json
+	$(USERLAND_DIST)/versions $(USERLAND_DIST)/sbom.cdx.json \
+	$(USERLAND_DIST)/evidence/shipped
 
 all: kernel k3s xtables trust userland open-iscsi systemd-boot grub hwdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity image
 
@@ -136,7 +137,7 @@ microcode: $(MICROCODE_DIST)/microcode.cpio
 # container. See userland/build.sh. When the registry holds a build of
 # the same inputs, userland/artifact.sh pulls it in place of a build.
 # The prerequisites match the ones that userland/Makefile declares.
-$(USERLAND_OUTPUTS) &: $(addprefix userland/,VERSION fetch.sh build.sh artifact.sh buildroot.sh \
+$(USERLAND_OUTPUTS) &: $(addprefix userland/,VERSION fetch.sh build.sh evidence.sh artifact.sh buildroot.sh \
 		common.config os.config external.desc Config.in external.mk versions.mk \
 		wpa_supplicant.config) \
 		$(shell find userland/patches userland/iscsi -type f) $(IMAGE_PINS)
@@ -471,7 +472,7 @@ $(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml: $(SYSTEM_IMAGE) $(BOOT_ARCHIVE
 		$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi \
 		$(GRUB_DIST)/grub-boot.img $(GRUB_DIST)/grub-core.img \
 		licensing/dist/LICENSES.md \
-		$(USERLAND_DIST)/sbom.cdx.json $(wildcard */pin.toml) ../trust/pin.toml \
+		$(USERLAND_DIST)/sbom.cdx.json $(USERLAND_DIST)/evidence/shipped $(wildcard */pin.toml) ../trust/pin.toml \
 		releases/sbom/scan.sh $(wildcard releases/sbom/*.go releases/sbom/schema/*.json)
 	rm -rf $(IMAGE_DIR)/channel
 	releases/sbom/scan.sh $(LAB_VERSION) $(IMAGE_DIR)/sbom.cdx.json

@@ -15,7 +15,7 @@
 # when one is there, and builds with buildroot when none is. After a
 # build, artifact.sh records the key of the inputs in dist/key, and in
 # CI on main it pushes dist/ to the registry.
-INPUTS := VERSION fetch.sh build.sh artifact.sh buildroot.sh common.config os.config \
+INPUTS := VERSION fetch.sh build.sh evidence.sh artifact.sh buildroot.sh common.config os.config \
 	external.desc Config.in external.mk versions.mk wpa_supplicant.config \
 	$(shell find patches iscsi -type f) ../../toolchains/images.toml
 
@@ -27,7 +27,7 @@ INPUTS := VERSION fetch.sh build.sh artifact.sh buildroot.sh common.config os.co
 
 OUTPUTS := dist/sbin/mke2fs dist/sbin/mount.nfs dist/sbin/iscsid \
 	dist/sbin/iscsiadm dist/sbin/wpa_supplicant \
-	dist/zoneinfo/UTC dist/versions dist/sbom.cdx.json
+	dist/zoneinfo/UTC dist/versions dist/sbom.cdx.json dist/evidence/shipped
 
 $(OUTPUTS) &: $(INPUTS)
 	./artifact.sh restore $(OUTPUTS) || { ./build.sh && ./artifact.sh save; }

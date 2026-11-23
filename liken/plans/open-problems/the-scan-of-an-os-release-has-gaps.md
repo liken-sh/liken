@@ -33,7 +33,11 @@ item is independent.
 The root open question
 [what a vulnerability finding does to a build](../../../plans/open-problems/what-a-vulnerability-finding-does-to-a-build.md)
 lists these findings, as seen on 2026-11-11: 20 in the programs that
-k3s ships and one in libevent 2.1.13.
+k3s ships. It also listed one in libevent 2.1.13, which was false,
+because no program of a release links libevent.
+[Milestone 104](../completed/104-the-sbom-excludes-each-package-that-no-shipped-file-contains.md) gives
+each buildroot package that no shipped file contains the scope
+`excluded` in the release's SBOM, and the scan leaves it out.
 
 ## What is not proven until a release runs
 

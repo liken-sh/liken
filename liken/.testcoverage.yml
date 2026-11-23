@@ -126,11 +126,12 @@ override:
   # listener.
   - path: ^releases$
     threshold: 84
-  # The SBOM merge of a release: pure functions over fixture SBOMs and
-  # a fixture manifest. What stays untested is main's exit and the
-  # errors of a write that the disk refuses.
+  # The SBOM merge of a release: pure functions over fixture SBOMs, a
+  # fixture manifest, and the fixture evidence of a userland build.
+  # What stays untested is main's exit and the errors of a write that
+  # the disk refuses.
   - path: ^releases/sbom$
-    threshold: 88
+    threshold: 93
   # The CycloneDX schema check that releases/sbom and verify share:
   # the tests cover the refusals and the digests of the pinned files.
   # What stays untested is the panics of a schema directory that the

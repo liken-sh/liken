@@ -1,0 +1,6 @@
+e2fsprogs,./sbin/e2fsck
+e2fsprogs,./sbin/mke2fs
+e2fsprogs,./etc/mke2fs.conf
+musl,./lib/libc.a
+tzdata,./usr/share/zoneinfo/zone1970.tab
+tzdata,./usr/share/zoneinfo/posix/UTC

@@ -134,8 +134,9 @@ their CPEs. `--only-fixed` keeps only the findings that a newer version
 fixes. Without it, the report includes many old kernel records that
 NVD lists with no upper version bound, and each one matches every
 kernel. Grype ignores a component's scope, so it also reports the
-compiler and the host tools of the build. The SBOM gives them the
-scope `excluded` because the release does not ship them. `liken`'s CI
+host tools of the build and the libraries that the build compiles and
+no shipped program links. The SBOM gives them the scope `excluded`
+because the release does not ship them. `liken`'s CI
 runs the same scan on each release without those components, and the
 repository's
 [code scanning alerts](https://github.com/liken-sh/liken/security/code-scanning)

@@ -7,7 +7,12 @@
 //     downloads: the kernel, k3s, the firmware, and the rest, with the
 //     URL, the digest, the purl, and the license of each one;
 //   - buildroot's SBOM names the static programs that liken/userland
-//     builds, and every package that they link;
+//     builds, and every package that the build compiled. The evidence
+//     that liken/userland/build.sh writes beside it, the link map of
+//     each program and buildroot's lists of the package that
+//     installed each file, shows which of those packages a release
+//     contains, and the SBOM gives every other one the scope
+//     excluded;
 //   - syft, run over the release's root filesystem, its image
 //     archives, its toolkit, and the programs that k3s carries inside
 //     its binary, names what neither of the others does: liken's own
@@ -21,6 +26,7 @@
 //
 //	go run ./releases/sbom -version <version> -out <file>
 //	    -buildroot <buildroot.cdx.json>
+//	    -evidence <liken/userland/dist/evidence>
 //	    -syft <parent>=<syft.cdx.json>...
 //	    -claim <path>=<component>...
 //	    <pin.toml>...
@@ -65,6 +71,7 @@ func run(args []string) error {
 	version := fs.String("version", "", "the version of the release")
 	out := fs.String("out", "", "the file to write the SBOM to")
 	buildroot := fs.String("buildroot", "", "the CycloneDX SBOM that buildroot wrote")
+	evidence := fs.String("evidence", "", "the directory of the evidence that liken/userland/build.sh writes: the shipped files, their link maps, and buildroot's file lists")
 	var scans, claims pairs
 	fs.Var(&scans, "syft", "<parent>=<file>: a syft SBOM of the files in the parent component, where liken is the parent for the release itself")
 	fs.Var(&claims, "claim", "<path>=<component>: the component that the file at <path> in a scan belongs to")
@@ -72,12 +79,12 @@ func run(args []string) error {
 		return err
 	}
 	switch {
-	case *version == "" || *out == "" || *buildroot == "":
-		return errors.New("the flags -version, -out, and -buildroot are required")
+	case *version == "" || *out == "" || *buildroot == "" || *evidence == "":
+		return errors.New("the flags -version, -out, -buildroot, and -evidence are required")
 	case fs.NArg() == 0:
 		return errors.New("the command line lists no pin.toml, and needs one for each pin that the release ships")
 	}
-	in := inputs{version: *version, manifests: fs.Args(), buildroot: *buildroot, claims: map[string]string{}}
+	in := inputs{version: *version, manifests: fs.Args(), buildroot: *buildroot, evidence: *evidence, claims: map[string]string{}}
 	for _, s := range scans {
 		in.scans = append(in.scans, scan{parent: s[0], file: s[1]})
 	}

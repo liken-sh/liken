@@ -118,7 +118,11 @@ fleet takes it, as [the verify guide](/docs/guides/verify/) shows. It lists:
   kernel, k3s, and the firmware, with its version, purl, sha256,
   license, and download URL.
 * the static programs that buildroot builds, such as `mke2fs` and
-  `mount.nfs`, and every package that they link.
+  `mount.nfs`, and every package that the build compiled. buildroot
+  also builds some libraries that no shipped program links, such as
+  libevent, because a recipe depends on them. The build records the
+  linker's map of each program, and each package whose code no shipped
+  file contains has the scope `excluded`.
 * the Go programs that syft finds in the system image, in the
   toolkit, and inside k3s, and the modules that each one links.
 

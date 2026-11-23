@@ -24,9 +24,10 @@
 # The scan differs from grype's defaults in three ways:
 #
 #   - It leaves out each component with the scope "excluded". The SBOM
-#     lists the compiler, the host tools, and the mirrored sources of a
-#     build with that scope, because the release ships none of them,
-#     and grype does not read the scope.
+#     lists the host tools, the mirrored sources of a build, and each
+#     buildroot package that no shipped file contains with that scope,
+#     because the release ships none of them, and grype does not read
+#     the scope.
 #   - It keeps only a finding with a fixed version, as the Trivy scan
 #     of each image does. NVD records many old kernel vulnerabilities
 #     with a version range that has no upper limit, and each of those

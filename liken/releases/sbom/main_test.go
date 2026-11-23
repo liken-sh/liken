@@ -16,6 +16,7 @@ func fixtureArgs(out string) []string {
 		"-version", "2026.11.01-901",
 		"-out", out,
 		"-buildroot", "testdata/buildroot.cdx.json",
+		"-evidence", "testdata/evidence",
 		"-syft", "liken=testdata/syft-root.cdx.json",
 		"-syft", "pin:k3s=testdata/syft-k3s.cdx.json",
 		"-claim", "/bin/k3s=pin:k3s",
@@ -43,7 +44,7 @@ func TestRunWritesAValidSBOM(t *testing.T) {
 	if err := json.Unmarshal(data, &written); err != nil {
 		t.Fatal(err)
 	}
-	if written.SpecVersion != "1.7" || len(written.Components) != 13 {
+	if written.SpecVersion != "1.7" || len(written.Components) != 19 {
 		t.Errorf("wrote specVersion %s with %d components", written.SpecVersion, len(written.Components))
 	}
 }
@@ -72,6 +73,7 @@ func TestRunRefuses(t *testing.T) {
 		{"no version", []string{"-out", out, "testdata/pin.toml"}},
 		{"no output", []string{"-version", "2026.11.01-901", "testdata/pin.toml"}},
 		{"no manifest", []string{"-version", "2026.11.01-901", "-out", out}},
+		{"no evidence", []string{"-version", "2026.11.01-901", "-out", out, "-buildroot", "testdata/buildroot.cdx.json", "testdata/pin.toml"}},
 		{"a scan with no parent", append(fixtureArgs(out), "-syft", "testdata/syft-k3s.cdx.json")},
 		{"a claim with no component", append(fixtureArgs(out), "-claim", "/bin/k3s")},
 		{"an unknown flag", append(fixtureArgs(out), "-colour", "blue")},

@@ -7,13 +7,15 @@ import (
 )
 
 // fixtureInputs names the fixtures of testdata/: one manifest, one
-// buildroot SBOM, a syft scan of the root filesystem, and a syft scan
-// of the programs that k3s carries inside its binary.
+// buildroot SBOM with the evidence of which of its packages the
+// release contains, a syft scan of the root filesystem, and a syft
+// scan of the programs that k3s carries inside its binary.
 func fixtureInputs() inputs {
 	return inputs{
 		version:   "2026.11.01-901",
 		manifests: []string{"testdata/pin.toml"},
 		buildroot: "testdata/buildroot.cdx.json",
+		evidence:  "testdata/evidence",
 		scans: []scan{
 			{parent: rootRef, file: "testdata/syft-root.cdx.json"},
 			{parent: "pin:k3s", file: "testdata/syft-k3s.cdx.json"},
@@ -133,13 +135,43 @@ func TestBuildrootComponentsKeepTheirGraph(t *testing.T) {
 	}
 }
 
+// The fixture's evidence ships mke2fs and two zone files. mke2fs's
+// link map, trimmed from a real build, names members of e2fsprogs's own
+// archives, of util-linux's libblkid and libuuid, and of musl's libc. It
+// loads musl's crt1.o, and the crtbeginT.o that host-gcc-initial and
+// then host-gcc-final installed.
+func TestABuildrootPackageThatNoShippedFileContainsHasTheScopeExcluded(t *testing.T) {
+	b := fixtureBOM(t)
+	cases := []struct {
+		name, ref string
+		want      any
+	}{
+		{"the package of a shipped program", "buildroot:e2fsprogs", nil},
+		{"a library that a shipped program links", "buildroot:util-linux", nil},
+		{"the C library", "buildroot:musl", nil},
+		{"the compiler's runtime", "buildroot:host-gcc-final", nil},
+		{"the package of shipped data", "buildroot:tzdata", nil},
+		{"an earlier copy of the compiler's runtime", "buildroot:host-gcc-initial", "excluded"},
+		{"a library that no shipped program links", "buildroot:libevent", "excluded"},
+		{"a package of headers only", "buildroot:linux-headers", "excluded"},
+		{"a host tool", "buildroot:host-autoconf", "excluded"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := component(t, b, c.ref)["scope"]; got != c.want {
+				t.Errorf("%s has the scope %v, want %v", c.ref, got, c.want)
+			}
+		})
+	}
+}
+
 func TestEachComponentNamesItsSource(t *testing.T) {
 	b := fixtureBOM(t)
 	got := map[string]int{}
 	for _, c := range b.Components {
 		got[property(c, sourceProperty)]++
 	}
-	want := map[string]int{"manifest": 3, "buildroot": 4, "syft": 6}
+	want := map[string]int{"manifest": 3, "buildroot": 10, "syft": 6}
 	if !equalJSON(t, got, want) {
 		t.Errorf("components by source: %v, want %v", got, want)
 	}
@@ -215,6 +247,7 @@ func TestMergeRefuses(t *testing.T) {
 		{"two scans of one name", func(in *inputs) { in.scans[1].file = in.scans[0].file }},
 		{"a missing manifest", func(in *inputs) { in.manifests = []string{"testdata/none.toml"} }},
 		{"a missing buildroot SBOM", func(in *inputs) { in.buildroot = "testdata/none.cdx.json" }},
+		{"a missing evidence directory", func(in *inputs) { in.evidence = "testdata/none" }},
 		{"a version outside the grammar", func(in *inputs) { in.version = "2026.11.1" }},
 	}
 	for _, c := range cases {

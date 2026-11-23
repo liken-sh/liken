@@ -1,0 +1,9 @@
+e2fsprogs,./usr/lib/libext2fs.a
+libevent,./usr/lib/libevent.a
+linux-headers,./usr/include/linux/fs.h
+musl,./lib/crt1.o
+musl,./lib/crti.o
+musl,./lib/crtn.o
+musl,./lib/libc.a
+util-linux,./usr/lib/libblkid.a
+util-linux,./usr/lib/libuuid.a

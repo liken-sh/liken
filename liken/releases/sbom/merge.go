@@ -28,14 +28,17 @@ const sourceProperty = "liken:source"
 // carries inside its binary.
 type scan struct{ parent, file string }
 
-// inputs are the sources of the SBOM. claims maps the path of a file
-// in a syft scan to the component that already names the file, such
-// as /bin/k3s to pin:k3s, so the SBOM lists the program once, under
-// the manifest's purl and license.
+// inputs are the sources of the SBOM. evidence is the directory of
+// liken/userland/dist/evidence/, which shows the buildroot packages
+// that a release contains. claims maps the path of a file in a syft
+// scan to the component that already names the file, such as /bin/k3s
+// to pin:k3s, so the SBOM lists the program once, under the manifest's
+// purl and license.
 type inputs struct {
 	version   string
 	manifests []string
 	buildroot string
+	evidence  string
 	scans     []scan
 	claims    map[string]string
 }
@@ -71,7 +74,7 @@ func merge(in inputs) (*bom, error) {
 			m.dependOn(rootRef, c["bom-ref"].(string))
 		}
 	}
-	if err := m.addBuildroot(in.buildroot); err != nil {
+	if err := m.addBuildroot(in.buildroot, in.evidence); err != nil {
 		return nil, err
 	}
 	for path, ref := range in.claims {
@@ -124,15 +127,31 @@ func (m *merger) dependOn(ref string, on ...string) {
 }
 
 // addBuildroot takes buildroot's SBOM whole: the buildroot build as a
-// component that the release depends on, each package with its
-// scope, and buildroot's graph between them. A host package has the
-// scope excluded, because it ran during the build and the release does
-// not carry it. buildroot lists every package that it built, so its
-// graph is complete.
-func (m *merger) addBuildroot(path string) error {
+// component that the release depends on, each package, and buildroot's
+// graph between them. buildroot lists every package that it built, so
+// its graph is complete.
+//
+// The scope of each package comes from the evidence. A package that a
+// file of the release contains has no scope, which CycloneDX reads as
+// required, and every other package has the scope excluded. buildroot
+// gives the scope excluded to each host package, and the evidence
+// changes that for a host package whose code a program links, such as
+// the libgcc of host-gcc-final. containedPackages gives the rule.
+func (m *merger) addBuildroot(path, evidence string) error {
 	in, err := readInput(path)
 	if err != nil {
 		return err
+	}
+	contained, err := containedPackages(evidence, in)
+	if err != nil {
+		return fmt.Errorf("reading the evidence of the buildroot packages that the release contains: %w", err)
+	}
+	for _, c := range in.Components {
+		if contained[c["bom-ref"].(string)] {
+			delete(c, "scope")
+		} else {
+			c["scope"] = "excluded"
+		}
 	}
 	prefix := func(ref string) string { return "buildroot:" + ref }
 	top := maps.Clone(in.Metadata.Component)

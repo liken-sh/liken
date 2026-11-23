@@ -62,7 +62,10 @@ root="${3:-}"
 toolkit="${4:-}"
 liken="$(cd "$here/../.." && pwd)"
 
-args=(-version "$version" -out "$out" -buildroot "$liken/userland/dist/sbom.cdx.json")
+# userland/dist/evidence/ shows which buildroot packages the release
+# contains, and the merge gives every other one the scope excluded.
+args=(-version "$version" -out "$out" -buildroot "$liken/userland/dist/sbom.cdx.json"
+    -evidence "$liken/userland/dist/evidence")
 
 # scan <source> <path> <name>: run syft over a path, mounted read-only,
 # and write <name>.cdx.json. The source is syft's scheme for the path:

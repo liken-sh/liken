@@ -1,0 +1,7 @@
+host-autoconf,./bin/autoconf
+host-gcc-final,./lib/gcc/x86_64-buildroot-linux-musl/15.3.0/libgcc.a
+host-gcc-final,./lib/gcc/x86_64-buildroot-linux-musl/15.3.0/crtbeginT.o
+host-gcc-final,./lib/gcc/x86_64-buildroot-linux-musl/15.3.0/crtend.o
+host-gcc-initial,./lib/gcc/x86_64-buildroot-linux-musl/15.3.0/libgcc.a
+host-gcc-initial,./lib/gcc/x86_64-buildroot-linux-musl/15.3.0/crtbeginT.o
+host-gcc-initial,./lib/gcc/x86_64-buildroot-linux-musl/15.3.0/crtend.o

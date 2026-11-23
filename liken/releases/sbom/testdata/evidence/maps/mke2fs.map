@@ -1,0 +1,40 @@
+Archive member included to satisfy reference by file (symbol)
+
+../lib/libext2fs.a(ext2_err.o)
+                              mke2fs.o (et_ext2_error_table)
+../lib/libext2fs.a(alloc.o)   mk_hugefiles.o (ext2fs_new_inode)
+/staging/usr/lib/libblkid.a(la-cache.o)
+                              ../lib/libsupport.a(plausible.o) (blkid_get_cache)
+/staging/usr/lib/libuuid.a(la-clear.o)
+                              mke2fs.o (uuid_clear)
+../lib/libe2p.a(feature.o)    mke2fs.o (e2p_edit_feature)
+/staging/lib/libc.a(sysconf.o)
+                              mke2fs.o (sysconf)
+/staging/lib/libc.a(__ctype_get_mb_cur_max.o)
+                              /work/output/host/bin/../x86_64-buildroot-linux-musl/sysroot/usr/lib/libblkid.a(libcommon_la-mbsalign.o) (__ctype_get_mb_cur_max)
+LOAD /staging/lib/crt1.o
+LOAD /staging/lib/crti.o
+LOAD /host/lib/gcc/x86_64-buildroot-linux-musl/15.3.0/crtbeginT.o
+LOAD mke2fs.o
+LOAD util.o
+LOAD default_profile.o
+LOAD mk_hugefiles.o
+LOAD create_inode.o
+LOAD create_inode_libarchive.o
+LOAD ../lib/libext2fs.a
+LOAD ../lib/libcom_err.a
+LOAD ../lib/libsupport.a
+LOAD /staging/usr/lib/libblkid.a
+LOAD /staging/usr/lib/libuuid.a
+LOAD /staging/lib/libpthread.a
+LOAD /staging/usr/lib/libuuid.a
+LOAD /staging/lib/libpthread.a
+LOAD ../lib/libext2fs.a
+LOAD ../lib/libe2p.a
+LOAD /staging/lib/libpthread.a
+LOAD /staging/lib/libdl.a
+LOAD /host/lib/gcc/x86_64-buildroot-linux-musl/15.3.0/libgcc.a
+LOAD /staging/lib/libpthread.a
+LOAD /staging/lib/libc.a
+LOAD /host/lib/gcc/x86_64-buildroot-linux-musl/15.3.0/crtend.o
+LOAD /staging/lib/crtn.o

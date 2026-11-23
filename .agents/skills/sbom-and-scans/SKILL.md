@@ -165,8 +165,24 @@ bundle, with `liken/releases/sbom/scan.sh`, from these sources:
   license, and download URL. An entry with `scope = "excluded"`, which
   only the build reads, keeps that scope.
 * buildroot's SBOM, `liken/userland/dist/sbom.cdx.json`, for the
-  static programs and every package they link. Host packages have the
-  scope `excluded`.
+  static programs and every package that the build compiled.
+  buildroot builds each target package that a recipe depends on, even
+  when no program that the release ships links it. The nfs-utils
+  recipe depends on libevent, for example. So the merge takes the
+  scope of each buildroot package from the evidence in
+  `liken/userland/dist/evidence/`, which `liken/userland/build.sh`
+  writes. `shipped` has a line for each file that the release ships,
+  with the path in buildroot's output that the build copied it from.
+  `maps/<program>.map` is the part of each program's link map that
+  names the archive members and the object files that the link took.
+  The `packages-file-list*.txt` files are buildroot's lists of the
+  package that installed each file. A package that a shipped file
+  contains has no scope, a host package such as `host-gcc-final`
+  included, and every other package has the scope `excluded`. The
+  merge stops when a map names a file that no package installed, and
+  when a shipped program has no map.
+  [Milestone 104](../../../liken/plans/completed/104-the-sbom-excludes-each-package-that-no-shipped-file-contains.md)
+  has the rule.
 * syft, pinned in `toolchains/images.toml`. It scans the root
   filesystem that the image build staged, each image archive in it,
   the toolkit, and the programs that k3s extracts from its own binary.
@@ -378,19 +394,29 @@ tells you what clears the alert.
    pin's `pin.toml`. When the CPE names the wrong product or version,
    correct it in the `pin.toml` and in the `set_pin` call of the pin's
    `latest.sh`, because each bump writes the CPE again.
-4. **Is the finding false for every release?** An example is an NVD
+4. **Which shipped program contains the code?** The scan leaves out
+   each buildroot package that no shipped file contains, so an alert
+   on a buildroot package of a release built since milestone 104
+   means that a shipped program links a part of it. The link maps
+   show which program, which archive member, and which symbol made
+   the link take the member. For libtirpc, for example:
+   `grep -A1 'libtirpc.a(' liken/userland/dist/evidence/maps/*.map`.
+   When no member that a map names contains the flawed function, the
+   finding is false for this build. Step 5 says when such a finding
+   goes in `grype.yaml`.
+5. **Is the finding false for every release?** An example is an NVD
    record whose version range has no upper limit, or a flaw on a
    platform that `liken` does not build for. Add an entry to
    `liken/releases/sbom/grype.yaml`, with a comment and a `reason`.
    The comments in that file show the form. Code scanning does not
    show a finding that the file drops, so the reason must be one that
    a reviewer can check.
-5. **Does a newer release of the upstream include the fix?** Run the
+6. **Does a newer release of the upstream include the fix?** Run the
    pin's `latest.sh` with no argument. When the pin is behind, bump it
    with the `bump-components` skill. For a Debian package of a base
    image, the pin is the Debian snapshot, which `vulkan/latest.sh`
    moves for every base.
-6. **Is the pin current, with no fix upstream?** Do nothing. The
+7. **Is the pin current, with no fix upstream?** Do nothing. The
    alert stays open until upstream releases a fix, and no one
    dismisses it. A module that k3s links is an example: `liken`
    ships the k3s release as k3s built it.

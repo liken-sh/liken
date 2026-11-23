@@ -48,6 +48,50 @@
       "properties": [{ "name": "BR_TYPE", "value": "target" }]
     },
     {
+      "bom-ref": "libevent",
+      "type": "library",
+      "name": "libevent",
+      "version": "2.1.13",
+      "properties": [{ "name": "BR_TYPE", "value": "target" }]
+    },
+    {
+      "bom-ref": "musl",
+      "type": "library",
+      "name": "musl",
+      "version": "1.2.6",
+      "properties": [{ "name": "BR_TYPE", "value": "target" }]
+    },
+    {
+      "bom-ref": "tzdata",
+      "type": "library",
+      "name": "tzdata",
+      "version": "2026f",
+      "properties": [{ "name": "BR_TYPE", "value": "target" }]
+    },
+    {
+      "bom-ref": "linux-headers",
+      "type": "library",
+      "name": "linux-headers",
+      "version": "7.3.1",
+      "properties": [{ "name": "BR_TYPE", "value": "target" }]
+    },
+    {
+      "bom-ref": "host-gcc-initial",
+      "type": "library",
+      "scope": "excluded",
+      "name": "gcc-initial",
+      "version": "15.3.0",
+      "properties": [{ "name": "BR_TYPE", "value": "host" }]
+    },
+    {
+      "bom-ref": "host-gcc-final",
+      "type": "library",
+      "scope": "excluded",
+      "name": "gcc-final",
+      "version": "15.3.0",
+      "properties": [{ "name": "BR_TYPE", "value": "host" }]
+    },
+    {
       "bom-ref": "host-autoconf",
       "type": "library",
       "scope": "excluded",
@@ -58,7 +102,9 @@
   ],
   "dependencies": [
     { "ref": "buildroot", "dependsOn": ["e2fsprogs"] },
-    { "ref": "e2fsprogs", "dependsOn": ["host-autoconf", "util-linux"] }
+    { "ref": "e2fsprogs", "dependsOn": ["host-autoconf", "util-linux"] },
+    { "ref": "host-gcc-final", "dependsOn": ["musl"] },
+    { "ref": "musl", "dependsOn": ["host-gcc-initial", "linux-headers"] }
   ],
   "vulnerabilities": [
     {
