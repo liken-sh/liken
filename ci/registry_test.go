@@ -29,9 +29,23 @@ type fakeRegistry struct {
 	// registry serves it, as a registry does before a manifest that was
 	// just pushed is readable.
 	lag int
-	// unavailable is how many reads of a manifest answer 503 Service
-	// Unavailable before the registry answers them.
-	unavailable int
+	// unavailable is how many reads answer 503 Service Unavailable
+	// before the registry answers them. unavailableRead names the read
+	// that fails: "index" for an image's index, "manifest" for the
+	// manifest of one platform, or "config" for a config blob. With no
+	// name, each read of a manifest fails.
+	unavailable     int
+	unavailableRead string
+}
+
+// refuses reports whether the registry answers this read with a 503,
+// and counts the answer.
+func (f *fakeRegistry) refuses(read string) bool {
+	if f.unavailable == 0 || (f.unavailableRead != "" && f.unavailableRead != read) {
+		return false
+	}
+	f.unavailable--
+	return true
 }
 
 // push puts an image into the registry the way buildx pushes one with
@@ -95,13 +109,16 @@ func (f *fakeRegistry) serve(t *testing.T) Registry {
 			}
 			json.NewEncoder(w).Encode(map[string]any{"tags": page})
 		case strings.Contains(r.URL.Path, "/manifests/") && r.Method == http.MethodGet:
-			if f.unavailable > 0 {
-				f.unavailable--
+			pkg, reference, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v2/liken-sh/"), "/manifests/")
+			manifest, ok := f.manifests[pkg+"/"+reference]
+			read := "manifest"
+			if !ok || strings.Contains(manifest, `"manifests"`) {
+				read = "index"
+			}
+			if f.refuses(read) {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
-			pkg, reference, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v2/liken-sh/"), "/manifests/")
-			manifest, ok := f.manifests[pkg+"/"+reference]
 			if ok && f.lag > 0 {
 				f.lag--
 				ok = false
@@ -112,6 +129,10 @@ func (f *fakeRegistry) serve(t *testing.T) Registry {
 			}
 			w.Write([]byte(manifest))
 		case strings.Contains(r.URL.Path, "/blobs/sha256:") && r.Method == http.MethodGet:
+			if f.unavailableRead == "config" && f.refuses("config") {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
 			blob, ok := f.blobs[r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]]
 			if !ok {
 				http.NotFound(w, r)

@@ -260,7 +260,7 @@ func (r Registry) Labels(pkg, tag string) (map[string]string, error) {
 			} `json:"config"`
 		}
 		if found, err := get("manifests/"+digest, manifestTypes, &manifest); err != nil || !found {
-			return nil, fmt.Errorf("reading the manifest %s of %s:%s: %v", digest, pkg, tag, orNotFound(err))
+			return nil, fmt.Errorf("reading the manifest %s of %s:%s: %w", digest, pkg, tag, orNotFound(err))
 		}
 		config = manifest.Config.Digest
 	}
@@ -270,7 +270,7 @@ func (r Registry) Labels(pkg, tag string) (map[string]string, error) {
 		} `json:"config"`
 	}
 	if found, err := get("blobs/"+config, "", &blob); err != nil || !found {
-		return nil, fmt.Errorf("reading the config of %s:%s: %v", pkg, tag, orNotFound(err))
+		return nil, fmt.Errorf("reading the config of %s:%s: %w", pkg, tag, orNotFound(err))
 	}
 	if blob.Config.Labels == nil {
 		return map[string]string{}, nil

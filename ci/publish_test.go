@@ -349,16 +349,25 @@ func TestAPublishWaitsForTheRegistryToServeWhatItPushed(t *testing.T) {
 // A registry can answer 503, or not answer before the client's timeout,
 // while it serves other requests. The publish reads the labels again,
 // so a busy registry does not fail a publish whose image it accepted.
+//
+// The labels of a pushed image take three reads: the index, the
+// manifest of the platform, and the config. The registry can fail any
+// one of them.
 func TestAPublishReadsAgainWhenTheRegistryIsUnavailable(t *testing.T) {
-	p, rec, c := publishFixture(t, nil)
-	rec.registry.unavailable = 2
+	for _, read := range []string{"index", "manifest", "config"} {
+		t.Run("at the read of the "+read, func(t *testing.T) {
+			p, rec, c := publishFixture(t, nil)
+			rec.registry.unavailable = 2
+			rec.registry.unavailableRead = read
 
-	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
-		t.Fatalf("publishing the component: %v", err)
-	}
+			if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
+				t.Fatalf("publishing the component: %v", err)
+			}
 
-	if signs := signCommands(rec.commands); len(signs) == 0 {
-		t.Error("the publish signed nothing")
+			if signs := signCommands(rec.commands); len(signs) == 0 {
+				t.Error("the publish signed nothing")
+			}
+		})
 	}
 }
 
