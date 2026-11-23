@@ -14,11 +14,10 @@
 #
 # mpv publishes no checksum file. From 0.42.0 on, its release manager
 # signs the tag's archive, and the release carries the signature as
-# mpv-<version>.tar.gz.asc. The releases before 0.42.0 carry none, so
-# the pinned 0.41.0 rests on the sha256 alone. The bump fetches the
-# archive and the signature, and checks the signature against
-# signing-keys.asc beside this script, which holds the key of Kacper
-# Michajłow as his GitHub account and keys.openpgp.org publish it. Only
+# mpv-<version>.tar.gz.asc. The bump fetches the archive and the
+# signature, and checks the signature against signing-keys.asc beside
+# this script, which holds the key of Kacper Michajłow as his GitHub
+# account and keys.openpgp.org publish it. Only
 # then does it write the URL and the checksum into the Dockerfile, and
 # the same facts with the purl and the CPE into pin.toml, which the
 # image's SBOM record reads. A release with no signature stops the

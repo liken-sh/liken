@@ -19,9 +19,8 @@
 # checksum when it fetches the file, so no CA bundle enters the build.
 # The tarball is the archive that GitHub serves for the release's tag.
 # latest.sh writes the URL and the checksum here and in pin.toml, and
-# it checks the release manager's signature of each release from
-# 0.42.0 on. The 0.41.0 release carries no signature, so this pin
-# rests on its checksum alone.
+# it checks the release manager's signature of the release before it
+# writes them.
 ARG MPV_VERSION=0.42.0
 ARG MPV_URL=https://github.com/mpv-player/mpv/archive/refs/tags/v0.42.0.tar.gz
 ARG MPV_SHA256=bcfebbfa2b65a6d88dc97ea18117831072373e38b5785a2afb874ed4df5070dd

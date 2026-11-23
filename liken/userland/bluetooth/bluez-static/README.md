@@ -21,7 +21,7 @@ fix, delete the patch file and its section below.
 
 ### The bug
 
-In BlueZ 5.87, bluetoothd can turn off the kernel's automatic
+From BlueZ 5.87 on, bluetoothd can turn off the kernel's automatic
 reconnect of a bonded Bluetooth LE device and never turn it on again.
 It logs nothing about this at the default log level. A remote that
 sleeps between uses then does not reconnect on its own until
@@ -42,7 +42,7 @@ Releases before 5.87 do not have this bug. Until BlueZ commit
 reconnect", 2026-06-08), `device_add_connection()` passed 0 to
 `timeout_remove()`, so it did not remove the timer, and the timer
 fired and turned auto connect on. 5.87 is the first release with that
-commit.
+commit, and `device_add_connection()` of 5.88 is the same.
 
 ### The fix
 

@@ -319,8 +319,8 @@ log line, until the pod restarts. The pod works around each of them.
   the radio to close it. A remote that went quiet can make the radio
   take longer. Then Linux takes the remote off its list of devices to
   reconnect, and `bluetoothd` still reports the remote connected.
-- **BlueZ 5.87 turns off the reconnect after an authentication
-  failure.** When the remote connects again within 4 seconds of a
+- **BlueZ 5.87 and 5.88 turn off the reconnect after an
+  authentication failure.** When the remote connects again within 4 seconds of a
   link that ended with an authentication failure, `bluetoothd` never
   turns the kernel's reconnect of the remote back on. The
   `bluetoothd` image includes a patch for this. The image lists its
