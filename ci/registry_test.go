@@ -29,6 +29,9 @@ type fakeRegistry struct {
 	// registry serves it, as a registry does before a manifest that was
 	// just pushed is readable.
 	lag int
+	// unavailable is how many reads of a manifest answer 503 Service
+	// Unavailable before the registry answers them.
+	unavailable int
 }
 
 // push puts an image into the registry the way buildx pushes one with
@@ -92,6 +95,11 @@ func (f *fakeRegistry) serve(t *testing.T) Registry {
 			}
 			json.NewEncoder(w).Encode(map[string]any{"tags": page})
 		case strings.Contains(r.URL.Path, "/manifests/") && r.Method == http.MethodGet:
+			if f.unavailable > 0 {
+				f.unavailable--
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
 			pkg, reference, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v2/liken-sh/"), "/manifests/")
 			manifest, ok := f.manifests[pkg+"/"+reference]
 			if ok && f.lag > 0 {

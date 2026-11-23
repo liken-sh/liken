@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -295,7 +296,8 @@ func (p Publisher) deployAnnotations(c *Component, version string) ([]string, er
 var errNoImage = errors.New("the registry has no image")
 
 // ghcr.io can return 404 for a digest for a few seconds after it
-// accepts the push. So the publish reads the labels of a digest it
+// accepts the push, and it can answer 503 or send no answer before the
+// client's timeout. So the publish reads the labels of a digest it
 // just pushed up to pushedLabelTries times, and waits 3, 6, 9, and 12
 // seconds between the reads.
 const pushedLabelTries = 5
@@ -303,15 +305,27 @@ const pushedLabelTries = 5
 var pushedLabelPause = 3 * time.Second
 
 // checkPushedLabels runs checkLabels on a digest that this run just
-// pushed, and retries only errNoImage.
+// pushed, and reads again only when readAgain says so.
 func (p Publisher) checkPushedLabels(image Image, digest string, want map[string]string) error {
 	for try := 1; ; try++ {
 		err := p.checkLabels(image, digest, want)
-		if !errors.Is(err, errNoImage) || try == pushedLabelTries {
+		if err == nil || !readAgain(err) || try == pushedLabelTries {
 			return err
 		}
 		time.Sleep(time.Duration(try) * pushedLabelPause)
 	}
+}
+
+// readAgain reports whether a failed read of a pushed digest can
+// succeed later: the registry did not serve the digest yet, answered
+// 5xx, or did not answer before the client's timeout. Labels that
+// differ, or a refused token, are the same on every read.
+func readAgain(err error) bool {
+	if errors.Is(err, errNoImage) || errors.Is(err, errRegistryUnavailable) {
+		return true
+	}
+	var timeout net.Error
+	return errors.As(err, &timeout) && timeout.Timeout()
 }
 
 // checkLabels reads the labels of the image in the registry at the

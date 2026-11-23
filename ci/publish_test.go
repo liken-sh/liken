@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -342,6 +343,53 @@ func TestAPublishWaitsForTheRegistryToServeWhatItPushed(t *testing.T) {
 
 	if signs := signCommands(rec.commands); len(signs) == 0 {
 		t.Error("the publish signed nothing")
+	}
+}
+
+// A registry can answer 503, or not answer before the client's timeout,
+// while it serves other requests. The publish reads the labels again,
+// so a busy registry does not fail a publish whose image it accepted.
+func TestAPublishReadsAgainWhenTheRegistryIsUnavailable(t *testing.T) {
+	p, rec, c := publishFixture(t, nil)
+	rec.registry.unavailable = 2
+
+	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
+		t.Fatalf("publishing the component: %v", err)
+	}
+
+	if signs := signCommands(rec.commands); len(signs) == 0 {
+		t.Error("the publish signed nothing")
+	}
+}
+
+// timeoutError is the error that an http.Client returns when the
+// registry sends no headers before the client's timeout.
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "Client.Timeout exceeded while awaiting headers" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
+
+// The publish reads a pushed digest again when the registry has not
+// served it yet or did not answer. A read that answered with labels
+// that differ is final, because a second read returns the same labels.
+func TestTheReadsOfAPushedDigestThatThePublishRepeats(t *testing.T) {
+	cases := map[string]struct {
+		err  error
+		want bool
+	}{
+		"no image yet":       {fmt.Errorf("%w at ghcr.io/liken-sh/a@sha256:1", errNoImage), true},
+		"a 503":              {fmt.Errorf("reading the labels: %w", errRegistryUnavailable), true},
+		"a client timeout":   {fmt.Errorf("reading the labels: %w", &url.Error{Op: "Get", URL: "https://ghcr.io/v2/", Err: timeoutError{}}), true},
+		"a refused token":    {errors.New("reading the labels: the registry returned 403 Forbidden"), false},
+		"labels that differ": {errors.New(`ghcr.io/liken-sh/a@sha256:1 has maintainer="a person"`), false},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := readAgain(c.err); got != c.want {
+				t.Errorf("readAgain(%v) = %v, want %v", c.err, got, c.want)
+			}
+		})
 	}
 }
 

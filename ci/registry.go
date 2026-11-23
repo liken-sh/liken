@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -178,6 +179,10 @@ func (r Registry) CanPush(pkg string) error {
 const manifestTypes = "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, " +
 	"application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
 
+// errRegistryUnavailable is a 5xx answer from the registry: it did not
+// serve the request, and the same request can succeed later.
+var errRegistryUnavailable = errors.New("the registry is unavailable")
+
 // Labels reads the labels of the image at the tag. When the tag points
 // at an index, the labels come from its linux/amd64 image, or from its
 // first image when it has no linux/amd64 one. buildx writes each
@@ -209,6 +214,9 @@ func (r Registry) Labels(pkg, tag string) (map[string]string, error) {
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusNotFound {
 			return false, nil
+		}
+		if resp.StatusCode >= http.StatusInternalServerError {
+			return false, fmt.Errorf("reading %s of %s: %w: %s", path, pkg, errRegistryUnavailable, resp.Status)
 		}
 		if resp.StatusCode != http.StatusOK {
 			return false, fmt.Errorf("reading %s of %s: the registry returned %s", path, pkg, resp.Status)
