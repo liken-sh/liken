@@ -5,9 +5,9 @@
 # pci.ids at an hwdata tag. The file's own header gives its license:
 # the GPL version 2 or later, or the 3-clause BSD license.
 [hwdata]
-version = "v0.412"
-url = "https://raw.githubusercontent.com/vcrhonek/hwdata/v0.412/pci.ids"
-sha256 = "4f020f031d1f2d011b2a656a191519a056cb9744229551aed2cf7f90dfc2e18a"
-purl = "pkg:github/vcrhonek/hwdata@v0.412"
+version = "v0.413"
+url = "https://raw.githubusercontent.com/vcrhonek/hwdata/v0.413/pci.ids"
+sha256 = "3af2de60a0cb598912d4ede5314fcb36a59593d08fba4f7f26ca4d4e53a7b9ea"
+purl = "pkg:github/vcrhonek/hwdata@v0.413"
 license = "GPL-2.0-or-later OR BSD-3-Clause"
 type = "data"
