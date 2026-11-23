@@ -64,10 +64,10 @@ cp -a "$work/openvino/runtime/3rdparty/tbb/lib/libtbb.so.12.13" \
 # ffmpeg base already.
 for path in \
 	"$lib/intel-opencl/libigdrcl.so" \
-	"$lib/libigdgmm.so.12" "$lib/libigdgmm.so.12.10.0" \
+	"$lib/libigdgmm.so.12" "$lib/libigdgmm.so.12.10.2" \
 	/etc/OpenCL/vendors/intel.icd \
-	/usr/local/lib/libigc.so.2 /usr/local/lib/libigc.so.2.41.5+1788943183 \
-	/usr/local/lib/libigdfcl.so.2 /usr/local/lib/libigdfcl.so.2.41.5+1788943183 \
+	/usr/local/lib/libigc.so.2 /usr/local/lib/libigc.so.2.42.6+1792520529 \
+	/usr/local/lib/libigdfcl.so.2 /usr/local/lib/libigdfcl.so.2.42.6+1792520529 \
 	/usr/local/lib/libopencl-clang2.so.22.1; do
 	mkdir -p "$out$(dirname "$path")"
 	cp -a "$work/intel$path" "$out$path"
