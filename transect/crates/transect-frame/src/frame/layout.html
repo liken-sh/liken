@@ -42,8 +42,17 @@
 <link rel="stylesheet" href="/static/changed/changed.css">
 <link rel="stylesheet" href="/static/access/access.css">
 <link rel="stylesheet" href="/static/vulnerabilities/vulnerabilities.css">
-<script src="/static/htmx.min.js" defer></script>
-<script src="/static/hx-sse.min.js" defer></script>
+{#- htmx and its SSE extension load as plain scripts, in this order, as
+    htmx's own instructions for `hx-sse` show.  htmx processes the page
+    on `DOMContentLoaded` when it loads while the document is still being
+    parsed, and at once when it loads later.  A deferred htmx loads
+    later, so when the extension's file arrived after htmx's, htmx
+    processed the page before the extension registered and never opened
+    the page's event stream.  The deferred scripts below run before
+    `DOMContentLoaded`, so their listeners are in place before htmx
+    processes the page. -#}
+<script src="/static/htmx.min.js"></script>
+<script src="/static/hx-sse.min.js"></script>
 <script src="/static/web/links.js" defer></script>
 <script src="/static/search/search.js" defer></script>
 <script src="/static/map/known/wires.js" defer></script>

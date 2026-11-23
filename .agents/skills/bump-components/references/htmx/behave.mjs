@@ -1,9 +1,10 @@
 // Drives what htmx does on transect's pages, and checks each result:
 // a link swaps the page and pushes its URL, Back and Forward restore a
 // page with its title and its scroll position, the cluster map's
-// Escape and click go back, the event stream replaces the view,
-// quick search shows rows and opens one, an error with an empty body
-// leaves the page alone, and a click with ctrl opens a new tab.  The checks expect the fixture cluster of `--fixture`,
+// Escape and click go back, the event stream replaces the view and
+// opens however late the SSE extension arrives, quick search shows
+// rows and opens one, an error with an empty body leaves the page
+// alone, and a click with ctrl opens a new tab.  The checks expect the fixture cluster of `--fixture`,
 // because they name its namespaces, such as acme-shop.
 //
 // Run it against a server on the fixture cluster:
@@ -214,6 +215,21 @@ check("the search page keeps one masthead", (await page.locator(".masthead").cou
   await settle(tab, 1000);
   const url = new URL(tab.url());
   check("an error with an empty body leaves the page and its URL", url.pathname + url.search === "/" && (await tiles.count()) > 0, `${url.pathname + url.search}, ${await tiles.count()} tiles`);
+  await tab.close();
+}
+
+// The page opens its event stream however late htmx's SSE extension
+// arrives.  The check delays the response of the extension's file, so
+// htmx itself is ready first.
+{
+  const tab = await context.newPage();
+  await tab.route("**/static/*sse*.min.js", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.continue();
+  });
+  const stream = tab.waitForRequest((r) => r.url().includes("/events"), { timeout: 5000 }).catch(() => null);
+  await tab.goto(base + "/", { waitUntil: "domcontentloaded" });
+  check("the page opens its event stream when the SSE extension arrives 300 ms late", (await stream) !== null);
   await tab.close();
 }
 
