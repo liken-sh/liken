@@ -75,6 +75,10 @@ tarball, because the guide does not list every change:
   loads after the document is parsed, and an extension that registers
   later never sees the page. Check how the new version starts and
   where it wants its extensions.
+- **A tab left open across the upgrade.** Each page sends
+  `Transect-Scripts` with every htmx request, and `scripts.rs` answers
+  another version with `HX-Refresh: true`. Check that the new version
+  still sends `hx-headers` with each request and obeys `HX-Refresh`.
 
 ## The proof
 
@@ -134,7 +138,9 @@ checks cover these:
    with Enter; the search page's field replaces its rows; an error with
    an empty body and a proxy's 502 page with a body leave the page, its
    URL, and its title as they are, and the 404 page of an object that is
-   gone opens; and a click with ctrl opens a new tab.
+   gone opens; a page that sends another version of
+   its scripts in `Transect-Scripts` loads itself again; and a click
+   with ctrl opens a new tab.
 
 Then run the same scripts against a build of the old pin, and compare.
 A debug build reads its static files from its own source tree, so the

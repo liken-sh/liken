@@ -49,6 +49,10 @@ files.
   inherits an attribute only when its name ends in `:inherited`, so a
   `main` or an `aside` sets `hx-target:inherited="body"` and its
   `hx-swap` and `hx-push-url` the same way for the links inside it.
+  Each page sends a hash of its scripts in the header
+  `Transect-Scripts`, and `web/scripts.rs` tells a page whose scripts
+  are not the server's to load again, so a tab left open across an
+  upgrade does not run old scripts against new fragments.
 - The pages are dark by default, calm, and gray where things are
   healthy.
 - The runtime makes no language model calls.  Every sentence is a

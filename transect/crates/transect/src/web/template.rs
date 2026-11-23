@@ -78,7 +78,11 @@ pub fn template(page: impl Parts, drawing: impl Into<Drawing>) -> Option<String>
 }
 
 fn render(template: &impl Template, drawing: Drawing) -> Option<String> {
-    let values: [(&str, &dyn std::any::Any); 1] = [("vulnerabilities", &drawing.vulnerabilities)];
+    let scripts = super::scripts::version();
+    let values: [(&str, &dyn std::any::Any); 2] = [
+        ("vulnerabilities", &drawing.vulnerabilities),
+        ("scripts", &scripts),
+    ];
     template
         .render_with_values(&values)
         .inspect_err(|error| tracing::error!(%error, "A page did not render"))

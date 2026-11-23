@@ -25,8 +25,8 @@ struct Asset {
     /// keeps no copy.
     source: &'static str,
     content_type: &'static str,
-    /// What release builds serve. Debug builds read `source` instead.
-    #[cfg_attr(debug_assertions, expect(dead_code))]
+    /// What release builds serve. Debug builds read `source` instead,
+    /// and `scripts` reads this copy in both.
     embedded: &'static [u8],
 }
 
@@ -235,6 +235,15 @@ pub async fn serve(Path(url): Path<String>, headers: HeaderMap) -> Response {
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
+}
+
+/// The bytes of every script that a page loads, which `scripts`
+/// hashes into the version of a page's scripts.
+pub fn scripts() -> impl Iterator<Item = &'static [u8]> {
+    ASSETS
+        .iter()
+        .filter(|asset| asset.content_type == JS)
+        .map(|asset| asset.embedded)
 }
 
 /// A quoted hash of `bytes`, which changes whenever the file does.

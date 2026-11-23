@@ -4,7 +4,8 @@
 // Escape and click go back, the event stream replaces the view and
 // opens however late the SSE extension arrives, quick search shows
 // rows and opens one, a server error or a proxy's error page leaves
-// the page alone, and a click with ctrl opens a new tab.  The checks expect the fixture cluster of `--fixture`,
+// the page alone, a page with older scripts loads itself again, and a
+// click with ctrl opens a new tab.  The checks expect the fixture cluster of `--fixture`,
 // because they name its namespaces, such as acme-shop.
 //
 // Run it against a server on the fixture cluster:
@@ -270,6 +271,28 @@ check("the search page keeps one masthead", (await page.locator(".masthead").cou
   const stream = tab.waitForRequest((r) => r.url().includes("/events"), { timeout: 5000 }).catch(() => null);
   await tab.goto(base + "/", { waitUntil: "domcontentloaded" });
   check("the page opens its event stream when the SSE extension arrives 300 ms late", (await stream) !== null);
+  await tab.close();
+}
+
+// A page that loaded other scripts than the server now serves, such as
+// a tab left open across an upgrade, loads itself again on its next
+// request.  The check changes the scripts' version that the page sends.
+{
+  const tab = await context.newPage();
+  await tab.goto(base + "/", { waitUntil: "domcontentloaded" });
+  await settle(tab, 1500);
+  const attribute = "hx-headers:inherited";
+  const sent = await tab.evaluate((attribute) => {
+    window.noFullLoad = true;
+    const now = document.body.getAttribute(attribute);
+    document.body.setAttribute(attribute, '{"Transect-Scripts": "an-older-version"}');
+    return now;
+  }, attribute);
+  await tab.locator("a.ns-tile").first().click();
+  await settle(tab, 1500);
+  const reloaded = await tab.evaluate(() => window.noFullLoad !== true);
+  const now = await tab.evaluate((attribute) => document.body.getAttribute(attribute), attribute);
+  check("a page with older scripts loads itself again on its next request", sent !== null && reloaded && now === sent, `sent ${sent}, reloaded ${reloaded}, now ${now}`);
   await tab.close();
 }
 

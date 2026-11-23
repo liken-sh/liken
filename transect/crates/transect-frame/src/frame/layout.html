@@ -57,7 +57,11 @@
 <script src="/static/search/search.js" defer></script>
 <script src="/static/map/known/wires.js" defer></script>
 </head>
-<body>
+{#- htmx sends the version of the page's scripts with each request, and
+    the server answers a request with another version by telling the
+    page to load again.  `scripts.rs` in the `transect` crate gives the
+    reason. -#}
+<body{% if let Ok(version) = "scripts"|value::<&str> %} hx-headers:inherited='{"Transect-Scripts": "{{ version }}"}'{% endif %}>
 <header class="masthead">
 <a class="wordmark" href="/"><img class="mark" src="/static/brand/transect.svg" alt="" width="22" height="22">transect</a>
 <nav class="elevation" aria-label="Elevation">{% block elevation %}{% endblock %}</nav>

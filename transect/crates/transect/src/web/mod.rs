@@ -21,6 +21,7 @@ mod probes;
 mod render;
 #[cfg(test)]
 mod scale;
+mod scripts;
 mod search_route;
 #[cfg(test)]
 mod served;
@@ -242,6 +243,7 @@ fn router(changes: &watch::Sender<()>, sources: Sources) -> Router {
         .route("/events/{*path}", get(events::page))
         .route("/static/{*path}", get(assets::serve))
         .merge(probes::routes())
+        .layer(axum::middleware::from_fn(scripts::refresh_stale))
         .with_state(state)
 }
 

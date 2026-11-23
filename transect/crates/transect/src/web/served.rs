@@ -280,3 +280,22 @@ async fn the_event_stream_sends_the_view_in_an_unnamed_event() {
         "the first event of /events/ is {event:?}, want the view in an unnamed event"
     );
 }
+
+/// Each page sends the version of its scripts with every htmx request,
+/// so the server can tell a page that loaded older scripts to load
+/// again.
+#[rstest]
+#[case::a_page("/")]
+#[case::the_search_page("/search?q=store")]
+#[tokio::test]
+async fn a_page_names_the_version_of_its_scripts(#[case] url: &str) {
+    let (_, html) = get(url).await;
+    let body = format!(
+        r#"<body hx-headers:inherited='{{"Transect-Scripts": "{}"}}'>"#,
+        super::scripts::version()
+    );
+    assert!(
+        html.contains(&body),
+        "GET {url} has no {body:?}, so its htmx requests send no version"
+    );
+}

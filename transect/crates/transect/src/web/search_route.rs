@@ -43,7 +43,9 @@ pub(super) async fn search(
         None => {
             let results = pages::search_results(&model, query, search::PAGE_LIST);
             let described: &dyn std::any::Any = &model.vulnerabilities.described;
-            let values: [(&str, &dyn std::any::Any); 1] = [("vulnerabilities", described)];
+            let scripts = super::scripts::version();
+            let values: [(&str, &dyn std::any::Any); 2] =
+                [("vulnerabilities", described), ("scripts", &scripts)];
             transect_map::search::SearchPage { results }.render_with_values(&values)
         }
     };
