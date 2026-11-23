@@ -181,7 +181,7 @@ func TestResolveImagesFailsWithNoOperatorContainer(t *testing.T) {
 	api := &cannedAPI{responses: map[string]any{
 		"GET /api/v1/namespaces/liken-system/pods/media-operator-59f4c8d7b5-2xk9q": Pod{
 			Metadata: ObjectMeta{Name: "media-operator-59f4c8d7b5-2xk9q", Namespace: "liken-system"},
-			Spec:     PodSpec{Containers: []Container{{Name: "bus", Image: "eclipse-mosquitto:2.1.2-alpine"}}},
+			Spec:     PodSpec{Containers: []Container{{Name: "bus", Image: "eclipse-mosquitto:2.1.4-alpine"}}},
 		},
 	}}
 

@@ -91,18 +91,18 @@ variable "PUBLISHED_WESTON" {
 # images bare too, and a bump of images.toml reaches it.
 target "toolchains" {
   contexts = {
-    "buildkit" = "docker-image://moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe"
+    "buildkit" = "docker-image://moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c"
     "buildkit-syft-scanner" = "docker-image://docker/buildkit-syft-scanner:1.12.1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315"
     "buildroot" = "docker-image://registry.gitlab.com/buildroot.org/buildroot/base:20250218.2110@sha256:340aa0de68e8e13e4eca70a00aaf94ec68d3a3891c28f3e7495d844829a8c958"
     "corrosion" = "docker-image://ghcr.io/liken-sh/corrosion:2026.11.11-001@sha256:409898c8d0d3d2851d228015064350bd61c51dce9ea34304ec5abafc4b69e0fb"
     "cosign" = "docker-image://ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c273506d52ca43edaa1d9e53e6510fa78a48f69c2d"
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
-    "grype" = "docker-image://anchore/grype:v0.121.3@sha256:13113eeceab017260370cf540e1d25442c59665fd07d1b09b66d63bb0c282887"
-    "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb"
-    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
-    "syft" = "docker-image://anchore/syft:v1.55.0@sha256:4cc92b64ca74ffca4c94d4c8fcc01f217731375300be14d0b6eeb2e82eaa110a"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
+    "grype" = "docker-image://anchore/grype:v0.122.1@sha256:661583704a253c0448ed63998b5ea2cd9d5a76ee71eedc4aed439b8ce3e93a1c"
+    "oras" = "docker-image://ghcr.io/oras-project/oras:v1.4.0@sha256:5fabb4e523de1781443c227fca62782a51aeacd044413c07f54dc64935d7f013"
+    "rust" = "docker-image://rust:1.100.0-trixie@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8"
+    "syft" = "docker-image://anchore/syft:v1.57.2@sha256:e97e20b6e6d1699c60296b66ab337941724f9bd06ac279d893eda89601fc4b2a"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
 }
@@ -216,7 +216,7 @@ target "trust" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "manifest" = "toolchains/manifest"
   }
   args = {
@@ -237,7 +237,7 @@ target "indi" {
   target     = "indi"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -259,7 +259,7 @@ target "indi-simulators" {
   target     = "indi-simulators"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -281,7 +281,7 @@ target "indi-phd2" {
   target     = "indi-phd2"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -303,7 +303,7 @@ target "indi-open" {
   target     = "indi-open"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -325,7 +325,7 @@ target "indi-zwo" {
   target     = "indi-zwo"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -347,7 +347,7 @@ target "indi-qhy" {
   target     = "indi-qhy"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -369,7 +369,7 @@ target "indi-playerone" {
   target     = "indi-playerone"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -391,7 +391,7 @@ target "indi-svbony" {
   target     = "indi-svbony"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -413,7 +413,7 @@ target "indi-atik" {
   target     = "indi-atik"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -435,7 +435,7 @@ target "indi-fli" {
   target     = "indi-fli"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -457,7 +457,7 @@ target "indi-sbig" {
   target     = "indi-sbig"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -479,7 +479,7 @@ target "indi-mi" {
   target     = "indi-mi"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -501,7 +501,7 @@ target "indi-qsi" {
   target     = "indi-qsi"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -523,7 +523,7 @@ target "indi-apogee" {
   target     = "indi-apogee"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -545,7 +545,7 @@ target "indi-astroasis" {
   target     = "indi-astroasis"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -567,7 +567,7 @@ target "indi-gphoto" {
   target     = "indi-gphoto"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -589,7 +589,7 @@ target "indi-touptek" {
   target     = "indi-touptek"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
@@ -612,7 +612,7 @@ target "weston" {
   contexts = {
     "builder" = "vulkan"
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "manifest" = "toolchains/manifest"
     "vulkan" = PUBLISHED_VULKAN != "" ? "docker-image://${PUBLISHED_VULKAN}" : "target:vulkan"
   }
@@ -633,7 +633,7 @@ target "observatory-operator" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
   }
@@ -651,8 +651,8 @@ target "observatory-operator-cli" {
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
   contexts = {
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
@@ -671,7 +671,7 @@ target "astrophotography-operator" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "observatory" = "observatory-operator"
@@ -691,7 +691,7 @@ target "astrophotography-operator-worker" {
   platforms  = ["linux/amd64"]
   contexts = {
     "astrometry" = PUBLISHED_ASTROMETRY != "" ? "docker-image://${PUBLISHED_ASTROMETRY}" : "target:astrometry"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "observatory" = "observatory-operator"
@@ -712,7 +712,7 @@ target "audio-operator" {
   contexts = {
     "builder" = "vulkan"
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
   }
@@ -731,8 +731,8 @@ target "audio-operator-cli" {
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
   contexts = {
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
@@ -751,7 +751,7 @@ target "bluetooth-operator" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
   }
@@ -769,7 +769,7 @@ target "bluetooth-bondfetch" {
   dockerfile = "bondfetch/Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
   }
@@ -789,7 +789,7 @@ target "bluetoothd" {
   contexts = {
     "buildroot" = "docker-image://registry.gitlab.com/buildroot.org/buildroot/base:20250218.2110@sha256:340aa0de68e8e13e4eca70a00aaf94ec68d3a3891c28f3e7495d844829a8c958"
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "manifest" = "toolchains/manifest"
     "notices" = "notices"
@@ -809,8 +809,8 @@ target "bluetooth-operator-cli" {
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
   contexts = {
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
@@ -872,7 +872,7 @@ target "display-operator" {
   target     = "display-operator"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "weston" = PUBLISHED_WESTON != "" ? "docker-image://${PUBLISHED_WESTON}" : "target:weston"
@@ -893,7 +893,7 @@ target "display-capture" {
   platforms  = ["linux/amd64"]
   contexts = {
     "ffmpeg" = PUBLISHED_FFMPEG != "" ? "docker-image://${PUBLISHED_FFMPEG}" : "target:ffmpeg"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
   }
@@ -912,7 +912,7 @@ target "display-api" {
   target     = "display-api"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
   }
@@ -930,8 +930,8 @@ target "display-operator-cli" {
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
   contexts = {
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
@@ -950,7 +950,7 @@ target "equipment-operator" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
   }
@@ -968,7 +968,7 @@ target "firmware-operator" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
@@ -989,7 +989,7 @@ target "firmware-operator-scan" {
   contexts = {
     "builder" = "vulkan"
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
@@ -1011,7 +1011,7 @@ target "git-csi-driver" {
   contexts = {
     "builder" = "vulkan"
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
@@ -1031,7 +1031,7 @@ target "library-operator" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
@@ -1051,7 +1051,7 @@ target "library-operator-ffmpeg" {
   platforms  = ["linux/amd64"]
   contexts = {
     "ffmpeg" = PUBLISHED_FFMPEG != "" ? "docker-image://${PUBLISHED_FFMPEG}" : "target:ffmpeg"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
@@ -1073,7 +1073,7 @@ target "library-operator-media-browser" {
     "brand" = "brand"
     "media-screen" = "media-screen"
     "notices" = "notices"
-    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
+    "rust" = "docker-image://rust:1.100.0-trixie@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8"
     "toolchains" = "toolchains"
     "vulkan" = PUBLISHED_VULKAN != "" ? "docker-image://${PUBLISHED_VULKAN}" : "target:vulkan"
   }
@@ -1094,12 +1094,12 @@ target "library-operator-appearances" {
     "appearances" = "library-operator/appearances"
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "ffmpeg" = PUBLISHED_FFMPEG != "" ? "docker-image://${PUBLISHED_FFMPEG}" : "target:ffmpeg"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "manifest" = "toolchains/manifest"
     "notices" = "notices"
-    "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb"
-    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
+    "oras" = "docker-image://ghcr.io/oras-project/oras:v1.4.0@sha256:5fabb4e523de1781443c227fca62782a51aeacd044413c07f54dc64935d7f013"
+    "rust" = "docker-image://rust:1.100.0-trixie@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8"
     "toolchains" = "toolchains"
   }
   args = {
@@ -1118,12 +1118,12 @@ target "library-operator-titles" {
   contexts = {
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "ffmpeg" = PUBLISHED_FFMPEG != "" ? "docker-image://${PUBLISHED_FFMPEG}" : "target:ffmpeg"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "manifest" = "toolchains/manifest"
     "notices" = "notices"
-    "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb"
-    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
+    "oras" = "docker-image://ghcr.io/oras-project/oras:v1.4.0@sha256:5fabb4e523de1781443c227fca62782a51aeacd044413c07f54dc64935d7f013"
+    "rust" = "docker-image://rust:1.100.0-trixie@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8"
     "titles" = "library-operator/titles"
     "toolchains" = "toolchains"
   }
@@ -1157,8 +1157,8 @@ target "library-operator-cli" {
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
   contexts = {
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
@@ -1180,7 +1180,7 @@ target "mpv" {
     "builder" = "vulkan"
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "ffmpeg" = PUBLISHED_FFMPEG != "" ? "docker-image://${PUBLISHED_FFMPEG}" : "target:ffmpeg"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "manifest" = "toolchains/manifest"
   }
   args = {
@@ -1200,7 +1200,7 @@ target "media-operator" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
   }
@@ -1221,7 +1221,7 @@ target "media-operator-player" {
     "brand" = "brand"
     "builder" = "vulkan"
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "mpv" = PUBLISHED_MPV != "" ? "docker-image://${PUBLISHED_MPV}" : "target:mpv"
     "notices" = "notices"
@@ -1248,7 +1248,7 @@ target "media-operator-idle" {
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "media-screen" = "media-screen"
     "notices" = "notices"
-    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
+    "rust" = "docker-image://rust:1.100.0-trixie@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8"
     "toolchains" = "toolchains"
     "vulkan" = PUBLISHED_VULKAN != "" ? "docker-image://${PUBLISHED_VULKAN}" : "target:vulkan"
   }
@@ -1273,7 +1273,7 @@ target "media-operator-display" {
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "media-screen" = "media-screen"
     "notices" = "notices"
-    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
+    "rust" = "docker-image://rust:1.100.0-trixie@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8"
     "toolchains" = "toolchains"
     "vulkan" = PUBLISHED_VULKAN != "" ? "docker-image://${PUBLISHED_VULKAN}" : "target:vulkan"
   }
@@ -1293,7 +1293,7 @@ target "media-operator-api" {
   platforms  = ["linux/amd64"]
   contexts = {
     "ffmpeg" = PUBLISHED_FFMPEG != "" ? "docker-image://${PUBLISHED_FFMPEG}" : "target:ffmpeg"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
   }
@@ -1312,7 +1312,7 @@ target "media-operator-capabilities" {
   platforms  = ["linux/amd64"]
   contexts = {
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "vaapi" = PUBLISHED_VAAPI != "" ? "docker-image://${PUBLISHED_VAAPI}" : "target:vaapi"
@@ -1331,8 +1331,8 @@ target "media-operator-cli" {
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
   contexts = {
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
@@ -1351,7 +1351,7 @@ target "people-operator" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
@@ -1370,7 +1370,7 @@ target "per-node-csi-driver" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
   }
@@ -1391,10 +1391,10 @@ target "transect" {
     "brand" = "brand"
     "builder" = "vulkan"
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "manifest" = "toolchains/manifest"
     "notices" = "notices"
-    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
+    "rust" = "docker-image://rust:1.100.0-trixie@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8"
     "toolchains" = "toolchains"
     "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
   }
@@ -1417,7 +1417,7 @@ target "bluetoothd-cache-seed" {
   contexts = {
     "buildroot" = "docker-image://registry.gitlab.com/buildroot.org/buildroot/base:20250218.2110@sha256:340aa0de68e8e13e4eca70a00aaf94ec68d3a3891c28f3e7495d844829a8c958"
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "manifest" = "toolchains/manifest"
     "notices" = "notices"
@@ -1437,7 +1437,7 @@ target "bluetoothd-cache-export" {
   contexts = {
     "buildroot" = "docker-image://registry.gitlab.com/buildroot.org/buildroot/base:20250218.2110@sha256:340aa0de68e8e13e4eca70a00aaf94ec68d3a3891c28f3e7495d844829a8c958"
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
-    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
     "kubernetes" = "kubernetes"
     "manifest" = "toolchains/manifest"
     "notices" = "notices"

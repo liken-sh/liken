@@ -39,7 +39,7 @@ spec:
         - name: bus
           # The `eclipse-mosquitto` entry of toolchains/images.toml.
           # Mosquitto 2.1 publishes only the Alpine variant.
-          image: eclipse-mosquitto:2.1.2-alpine
+          image: eclipse-mosquitto:2.1.4-alpine
           command: ["/usr/sbin/mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
           ports:
             - name: mqtt

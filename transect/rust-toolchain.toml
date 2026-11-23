@@ -4,6 +4,6 @@
 # components are the tools the checks run: clippy, rustfmt, and the LLVM
 # tools that cargo-llvm-cov needs to measure coverage.
 [toolchain]
-channel = "1.99.1"
+channel = "1.100.0"
 profile = "minimal"
 components = ["clippy", "llvm-tools", "rustfmt"]

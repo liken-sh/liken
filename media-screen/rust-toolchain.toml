@@ -2,5 +2,5 @@
 # it runs: clippy, rustfmt, and the LLVM tools that cargo-llvm-cov reads
 # coverage with.
 [toolchain]
-channel = "1.99.1"
+channel = "1.100.0"
 components = ["clippy", "llvm-tools", "rustfmt"]

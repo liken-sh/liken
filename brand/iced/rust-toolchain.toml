@@ -2,5 +2,5 @@
 # pin, so the crate's checks here run on the compiler that its
 # consumers build it with. cargo-llvm-cov needs llvm-tools.
 [toolchain]
-channel = "1.99.1"
+channel = "1.100.0"
 components = ["clippy", "llvm-tools", "rustfmt"]
