@@ -112,6 +112,13 @@ for program in "$@"; do
         archive && /^$/ && members { archive = 0 }
         archive { print; if ($0 != "") members = 1; next }
         /^LOAD / { print }' "$map") >"$output/evidence/maps/$program.map"
+    # Every static program takes members of the C library's archive.
+    # A copy with no member means that the map has no archive section
+    # under the heading that the awk program reads, as it would after
+    # an ld release changes the heading. releases/sbom would read that
+    # copy as a program that links no library.
+    grep -q '^/.*\.a(' "$output/evidence/maps/$program.map" ||
+        stop "the link map of $program names no archive member under the heading \"Archive member included to satisfy reference by file (symbol)\". Read $map, and change evidence.sh to the heading that this ld writes"
 done
 cp "$output/build/packages-file-list.txt" "$output/build/packages-file-list-staging.txt" \
     "$output/build/packages-file-list-host.txt" "$output/evidence/"

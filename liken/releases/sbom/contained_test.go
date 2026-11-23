@@ -59,6 +59,8 @@ func TestMergeRefusesEvidenceThatItCannotExplain(t *testing.T) {
 		{"an archive in the build directory of no package", evidenceChange{file: "maps/mke2fs.map", text: "/build/none-1.0/libnone.a(none.o)  mke2fs.o (none)\n"}},
 		{"a member of a thin archive that no package installed", evidenceChange{file: "maps/mke2fs.map", text: "/staging/usr/lib/libnone.a.p/none.c.o  mke2fs.o (none)\n"}},
 		{"a map that names only archives and ld's own stubs", evidenceChange{file: "maps/mke2fs.map", text: "LOAD linker stubs\nLOAD /staging/lib/libc.a\n", replace: true}},
+		{"a map with no section of archive members", evidenceChange{file: "maps/mke2fs.map", text: "LOAD /staging/lib/crt1.o\nLOAD mke2fs.o\nLOAD /staging/usr/lib/libblkid.a\nLOAD /staging/lib/libc.a\n", replace: true}},
+		{"a map whose section of archive members names no member", evidenceChange{file: "maps/mke2fs.map", text: "Archive member included to satisfy reference by file (symbol)\n\nLOAD /staging/lib/crt1.o\nLOAD mke2fs.o\nLOAD /staging/lib/libc.a\n", replace: true}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

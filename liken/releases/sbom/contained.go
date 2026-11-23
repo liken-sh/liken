@@ -235,16 +235,25 @@ func (o *owners) dependsOn(pkg, other string) bool {
 // (symbol)" names, and each file of a LOAD line that is not an
 // archive. The section names a member as archive(member), or by the
 // member's own path when the archive is a thin archive, the kind that
-// meson writes, so the file is the archive or the member itself. ld writes a LOAD line for each archive on the command line,
-// whether or not the link took a member of it, so an archive counts
-// only when that section names one of its members. "linker stubs" is
-// ld's own input, which no package provides.
+// meson writes, so the file is the archive or the member itself. ld
+// writes a LOAD line for each archive on the command line, whether or
+// not the link took a member of it, so an archive counts only when
+// that section names one of its members. "linker stubs" is ld's own
+// input, which no package provides.
+//
+// Every static program takes members of the C library's archive, so a
+// map with no member is a map that lost its section, as it would when
+// an ld release gives the section another heading. linkedFiles refuses
+// such a map, because the merge would otherwise read it as a program
+// that links no library, and exclude each library that the program
+// contains.
 func linkedFiles(name string) ([]string, error) {
 	data, err := os.ReadFile(name)
 	if err != nil {
 		return nil, err
 	}
 	var files []string
+	section, members := false, 0
 	for _, line := range strings.Split(string(data), "\n") {
 		switch {
 		case strings.HasPrefix(line, "LOAD "):
@@ -252,15 +261,21 @@ func linkedFiles(name string) ([]string, error) {
 			if file != "linker stubs" && !strings.HasSuffix(file, ".a") {
 				files = append(files, file)
 			}
-		case line == "" || line == archiveSection || line[0] == ' ' || line[0] == '\t':
+		case line == archiveSection:
+			section = true
+		case line == "" || line[0] == ' ' || line[0] == '\t':
 		default:
 			member := strings.Fields(line)[0]
 			archive, _, _ := strings.Cut(member, "(")
 			files = append(files, archive)
+			members++
 		}
 	}
-	if len(files) == 0 {
-		return nil, fmt.Errorf("the map names no file that the link took")
+	if !section {
+		return nil, fmt.Errorf("the map has no section %q, which ld writes for a link that takes a member of an archive", archiveSection)
+	}
+	if members == 0 {
+		return nil, fmt.Errorf("the map's section %q names no member, and every static program takes members of the C library", archiveSection)
 	}
 	return files, nil
 }

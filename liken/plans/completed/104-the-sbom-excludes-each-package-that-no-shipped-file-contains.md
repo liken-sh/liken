@@ -80,8 +80,15 @@ linker's record, and the merge reads it.
    buildroot package the scope `excluded`.
 4. **Refusals.** The merge stops when a map names a file that no
    package installed, when a shipped program has no map, and when a
-   shipped file has no package. Evidence that the merge cannot explain
-   never passes as "not shipped".
+   shipped file has no package. It also stops when a map has no
+   section of archive members, or when the section names no member.
+   Every static program takes members of the C library's archive, so
+   such a map lost its section, as it would when an ld release gives
+   the section another heading. `evidence.sh` stops the build on the
+   same condition. A review on 2026-11-23 found that such a map
+   passed, and that the merge then excluded each library of the
+   program. Evidence that the merge cannot explain never passes as
+   "not shipped".
 
 ### Details that the build showed
 
