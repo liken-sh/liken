@@ -143,6 +143,7 @@ static struct wl_listener output_created;
 static struct wl_listener output_destroyed;
 static struct wl_listener output_resized;
 static struct wl_listener screenshot_authority;
+static struct wl_listener compositor_destroyed;
 
 /* The control connection */
 
@@ -1321,6 +1322,24 @@ start_control_socket(void)
 	return 0;
 }
 
+/* weston_compositor_shutdown prints a BUG line when a layer is still on
+ * the compositor's list, so the module finishes its background layer
+ * when the compositor is destroyed. The destroy signal comes before the
+ * outputs are destroyed, while the curtains are still views on the
+ * layer, and weston_layer_fini refuses a layer that still has views. So
+ * the curtains go first. */
+static void
+on_compositor_destroyed(struct wl_listener *listener, void *data)
+{
+	struct output_layer *ol;
+
+	(void)listener;
+	(void)data;
+	wl_list_for_each(ol, &output_layers, link)
+		drop_background(ol);
+	weston_layer_fini(&background_layer);
+}
+
 WL_EXPORT int
 wet_module_init(struct weston_compositor *ec, int *argc, char *argv[])
 {
@@ -1373,6 +1392,8 @@ wet_module_init(struct weston_compositor *ec, int *argc, char *argv[])
 	wl_signal_add(&ec->output_destroyed_signal, &output_destroyed);
 	output_resized.notify = on_output_resized;
 	wl_signal_add(&ec->output_resized_signal, &output_resized);
+	compositor_destroyed.notify = on_compositor_destroyed;
+	wl_signal_add(&ec->destroy_signal, &compositor_destroyed);
 
 	return start_control_socket();
 }
