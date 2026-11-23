@@ -4,8 +4,8 @@
 name = "mpv"
 # The date of the snapshot.debian.org archive that the build installs
 # from, as YYYYMMDD. Every base on Debian uses the same date.
-version = "20261101"
-revision = 4
+version = "20261123"
+revision = 1
 license = "MIT"
 
 # The upstream releases that the image holds. Each one is a label of
@@ -17,8 +17,8 @@ license = "MIT"
 # here to tell whether the newest mpv release can build.
 [package.upstream]
 mpv = "0.41.0"
-libplacebo = "7.360.1-1"
-pipewire = "1.6.9-2"
+libplacebo = "7.387.0-2"
+pipewire = "1.6.11-2"
 
 # shellcheck and the whitespace checks, from .pre-commit-config.yaml.
 [[jobs]]
