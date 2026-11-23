@@ -46,7 +46,7 @@ var actionPins = []actionPin{
 	{"docker/bake-action", "v7.5.0", "59cb1203cd42bcefd40a1b6d73b589e48c86040e"},
 	{"docker/login-action", "v4.8.0", "8aa5831fb8d48d8f76594c7ddde61ae58019f550"},
 	{"docker/setup-buildx-action", "v4.4.1", "f87e5991a6d7451dcb8d9637bfbc97413f497069"},
-	{"fluxcd/flux2", "v2.10.0", "3fa784edd773d56630bb9f62645e08f70c2cff0a"},
+	{"fluxcd/flux2", "v2.10.1", "23dcfe98fe672acdf44ecd9c60cbac41b57f5de8"},
 	{"github/codeql-action", "v4.39.4", "1bd86f2fdb4b86187fa4059f16f31a3202acc9ea"},
 	{"j178/prek-action", "v3.1.1", "7b101f8338a08d2bd6fdb3625e4e7692428763a3"},
 	{"taiki-e/install-action", "v2.90.8", "fe3acb53a98b62c772db35de75ce0e4595e7ca8c"},
