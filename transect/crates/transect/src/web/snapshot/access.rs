@@ -268,7 +268,7 @@ mod tests {
         let text = format!(
             "{{metadata: {{namespace: {namespace}, name: p}}, spec: {{serviceAccountName: {account}, containers: [{{name: main, image: '{image}'}}]}}}}"
         );
-        Arc::new(serde_yaml::from_str(&text).unwrap())
+        Arc::new(serde_yaml_ng::from_str(&text).unwrap())
     }
 
     #[test]

@@ -29,7 +29,7 @@ use transect_resources::knowledge::{Column, Columns, Definitions};
 /// other custom kind, keeping the paths of `kept_paths`, as the watch
 /// does.
 pub fn sort(snapshot: &mut Snapshot, yaml: &str) -> Vec<ResourceSlice> {
-    let documents: Vec<DynamicObject> = serde_yaml::Deserializer::from_str(yaml)
+    let documents: Vec<DynamicObject> = serde_yaml_ng::Deserializer::from_str(yaml)
         .map(|document| DynamicObject::deserialize(document).unwrap())
         .collect();
     let kinds = snapshot.resources.kinds.iter();

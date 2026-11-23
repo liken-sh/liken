@@ -183,7 +183,7 @@ mod tests {
 
     #[rstest]
     fn counts_each_secret_once() {
-        let spec: PodSpec = serde_yaml::from_str(
+        let spec: PodSpec = serde_yaml_ng::from_str(
             "containers: [{name: app, env: [\
              {name: A, valueFrom: {secretKeyRef: {name: db, key: password}}},\
              {name: B, valueFrom: {secretKeyRef: {name: db, key: user}}},\

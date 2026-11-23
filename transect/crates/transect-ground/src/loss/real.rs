@@ -117,7 +117,7 @@ mod tests {
             None => "[{type: MemoryPressure, status: 'False'}]".into(),
         };
         Arc::new(
-            serde_yaml::from_str(&format!(
+            serde_yaml_ng::from_str(&format!(
                 "{{metadata: {{name: {name}}}, spec: {{unschedulable: {cordoned}}}, status: {{conditions: {conditions}}}}}"
             ))
             .unwrap(),

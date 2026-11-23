@@ -149,11 +149,11 @@ mod tests {
     use super::*;
 
     fn service() -> Service {
-        serde_yaml::from_str("{metadata: {namespace: shop, name: web}, spec: {ports: [{name: http, port: 80, targetPort: http}, {name: admin, port: 81, targetPort: 9000}, {name: plain, port: 82}]}}").unwrap()
+        serde_yaml_ng::from_str("{metadata: {namespace: shop, name: web}, spec: {ports: [{name: http, port: 80, targetPort: http}, {name: admin, port: 81, targetPort: 9000}, {name: plain, port: 82}]}}").unwrap()
     }
 
     fn ingress(port: &str) -> Ingress {
-        serde_yaml::from_str(&format!("{{metadata: {{namespace: shop, name: web}}, spec: {{rules: [{{host: a.example.test, http: {{paths: [{{path: /, pathType: Prefix, backend: {{service: {{name: web, port: {port}}}}}}}]}}}}]}}}}")).unwrap()
+        serde_yaml_ng::from_str(&format!("{{metadata: {{namespace: shop, name: web}}, spec: {{rules: [{{host: a.example.test, http: {{paths: [{{path: /, pathType: Prefix, backend: {{service: {{name: web, port: {port}}}}}}}]}}}}]}}}}")).unwrap()
     }
 
     #[rstest]

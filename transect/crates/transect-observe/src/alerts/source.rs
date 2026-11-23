@@ -151,7 +151,7 @@ pub mod fixtures {
     /// The section that a cluster declares for the conventions of a
     /// common monitoring stack.  The tests parse alerts with it.
     pub fn source() -> Source {
-        let source: Source = serde_yaml::from_str(
+        let source: Source = serde_yaml_ng::from_str(
             "severity: {label: severity, failing: [critical, error], notice: [info], hidden: [none]}
 namespace: namespace
 objects:
@@ -212,7 +212,7 @@ mod tests {
         "http or https"
     )]
     fn says_why_a_section_does_not_validate(#[case] yaml: &str, #[case] says: &str) {
-        let source: Source = serde_yaml::from_str(yaml).unwrap();
+        let source: Source = serde_yaml_ng::from_str(yaml).unwrap();
         let error = source.validated().unwrap_err();
         assert!(error.contains(says), "{error:?} does not say {says:?}");
     }

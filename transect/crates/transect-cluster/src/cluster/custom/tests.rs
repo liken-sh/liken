@@ -75,7 +75,7 @@ fn watches_whole_objects_only_where_fields_are_read(
 
 #[rstest]
 fn watches_each_crd_at_its_storage_version() {
-    let crd: CustomResourceDefinition = serde_yaml::from_str(
+    let crd: CustomResourceDefinition = serde_yaml_ng::from_str(
         "metadata: {name: widgets.example.io}\n\
          spec: {group: example.io, scope: Namespaced, names: {kind: Widget, plural: widgets}, \
          versions: [{name: v1beta1, served: true, storage: false}, {name: v1, served: true, storage: true}]}",

@@ -84,8 +84,8 @@ struct Spec {
 
 /// The `LogPattern` that `value` declares, or the reason it is not
 /// valid.
-pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<LogPattern, String> {
-    let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
+pub fn parse(doc: DocId, value: serde_yaml_ng::Value) -> Result<LogPattern, String> {
+    let document: Document = serde_yaml_ng::from_value(value).map_err(|error| error.to_string())?;
     let spec = document.spec;
     let matches = spec.matches.trim();
     if matches.is_empty() {
@@ -157,11 +157,11 @@ mod tests {
 
     use super::*;
 
-    fn document(spec: &str) -> serde_yaml::Value {
+    fn document(spec: &str) -> serde_yaml_ng::Value {
         let text = format!(
             "apiVersion: transect.liken.sh/v1alpha1\nkind: LogPattern\nmetadata: {{name: refused}}\nspec: {spec}\n"
         );
-        serde_yaml::from_str(&text).unwrap()
+        serde_yaml_ng::from_str(&text).unwrap()
     }
 
     #[rstest]

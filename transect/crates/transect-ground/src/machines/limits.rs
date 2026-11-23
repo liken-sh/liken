@@ -61,7 +61,7 @@ mod tests {
     use super::*;
 
     fn spec(yaml: &str) -> PodSpec {
-        serde_yaml::from_str(yaml).unwrap()
+        serde_yaml_ng::from_str(yaml).unwrap()
     }
 
     fn amount(text: &str) -> Option<Amount> {

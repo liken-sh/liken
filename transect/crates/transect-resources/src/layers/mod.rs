@@ -41,7 +41,7 @@ impl Layers {
 
     #[cfg(any(test, feature = "fixtures"))]
     pub fn from_yaml(text: &str) -> anyhow::Result<Self> {
-        let value = serde_yaml::from_str(text)?;
+        let value = serde_yaml_ng::from_str(text)?;
         let layers = parse(value).map_err(anyhow::Error::msg)?;
         Ok(Self::new(layers, DocId::default()))
     }

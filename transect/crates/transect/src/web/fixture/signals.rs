@@ -41,7 +41,7 @@ struct Series {
 }
 
 fn signals() -> Signals {
-    serde_yaml::from_str(include_str!("signals.yaml")).expect("parsing signals.yaml")
+    serde_yaml_ng::from_str(include_str!("signals.yaml")).expect("parsing signals.yaml")
 }
 
 /// The series that Prometheus returns for `query`, or none for a query

@@ -87,8 +87,8 @@ impl Key {
 
 /// The `LoadBalancerController` that `value` declares, or why `value`
 /// is not valid.
-pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<LoadBalancerController, String> {
-    let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
+pub fn parse(doc: DocId, value: serde_yaml_ng::Value) -> Result<LoadBalancerController, String> {
+    let document: Document = serde_yaml_ng::from_value(value).map_err(|error| error.to_string())?;
     let listener = document.spec.listener;
     Ok(LoadBalancerController {
         doc,
@@ -163,7 +163,7 @@ mod tests {
 
     fn read(spec: &str) -> Result<LoadBalancerController, String> {
         let text = format!("metadata: {{name: lb}}\nspec: {spec}\n");
-        parse(DocId::default(), serde_yaml::from_str(&text).unwrap())
+        parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap())
     }
 
     #[rstest]
@@ -202,7 +202,7 @@ mod tests {
     }
 
     fn pod(text: &str) -> Pod {
-        serde_yaml::from_str(text).unwrap()
+        serde_yaml_ng::from_str(text).unwrap()
     }
 
     #[rstest]
@@ -216,7 +216,7 @@ mod tests {
         let controllers = vec![
             read("{listener: {name: {label: a/name}, namespace: {label: a/namespace}}}").unwrap(),
         ];
-        let set: DaemonSet = serde_yaml::from_str(
+        let set: DaemonSet = serde_yaml_ng::from_str(
             "{metadata: {namespace: shop, name: web-lb, ownerReferences: [{apiVersion: v1, kind: Service, name: web, uid: b}]}}",
         )
         .unwrap();

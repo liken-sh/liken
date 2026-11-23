@@ -89,7 +89,7 @@ mod tests {
 
     fn budget(namespace: &str, name: &str, spec: &str, allowed: i32) -> Arc<PodDisruptionBudget> {
         Arc::new(
-            serde_yaml::from_str(&format!(
+            serde_yaml_ng::from_str(&format!(
                 "{{metadata: {{namespace: {namespace}, name: {name}}}, spec: {spec}, status: {{disruptionsAllowed: {allowed}, currentHealthy: 0, desiredHealthy: 0, expectedPods: 0}}}}"
             ))
             .unwrap(),

@@ -17,7 +17,7 @@ fn read(roles: &str) -> Result<KindKnowledge, String> {
     let text = format!(
         "metadata: {{name: kiosks.widgets.example.com}}\nspec: {{{REFERENCES}, roles: {roles}}}\n"
     );
-    parse(DocId::default(), serde_yaml::from_str(&text).unwrap())
+    parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap())
 }
 
 fn role(written: &str) -> Role {

@@ -148,7 +148,7 @@ mod tests {
                 format!("{{name: {name}, attributes: {{{key}: {{string: '{value}'}}}}}}")
             })
             .collect();
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{name: {driver}-{machine}}}\nspec: {{driver: {driver}, nodeName: {machine}, pool: {{name: {machine}, generation: 1, resourceSliceCount: 1}}, devices: [{}]}}",
             devices.join(", ")
         ))
@@ -193,7 +193,7 @@ mod tests {
         };
         let objects = pairs.iter().map(|(name, address)| {
             let text = format!("metadata: {{name: {name}}}\nstatus: {{address: '{address}'}}");
-            Arc::new(serde_yaml::from_str(&text).unwrap())
+            Arc::new(serde_yaml_ng::from_str(&text).unwrap())
         });
         let key = (
             "radio.example.com".to_string(),

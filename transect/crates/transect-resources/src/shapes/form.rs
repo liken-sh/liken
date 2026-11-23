@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
-use serde_yaml::Value;
+use serde_yaml_ng::Value;
 
 use super::length::{self, MAX_NUMBER, number, percent};
 use super::place::{self, Edge, Place};
@@ -112,7 +112,7 @@ pub fn parse(doc: DocId, value: Value) -> Result<Shape, String> {
 /// Reads a `Shape` document from `origin`. The library's shapes have
 /// bare names, and an author's have the author's group.
 pub fn read(value: Value, origin: Origin) -> Result<Shape, String> {
-    let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
+    let document: Document = serde_yaml_ng::from_value(value).map_err(|error| error.to_string())?;
     let name = document.metadata.name;
     let named = match origin {
         Origin::Library => bare(&name),

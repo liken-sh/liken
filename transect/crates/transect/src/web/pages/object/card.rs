@@ -106,7 +106,7 @@ mod tests {
     )]
     fn lists_kind_namespace_and_age(#[case] object: Object, #[case] expected: Vec<(&str, &str)>) {
         let meta: ObjectMeta =
-            serde_yaml::from_str("{creationTimestamp: '2026-01-01T00:00:00Z'}").unwrap();
+            serde_yaml_ng::from_str("{creationTimestamp: '2026-01-01T00:00:00Z'}").unwrap();
         let now: Timestamp = "2026-01-03T00:00:00Z".parse().unwrap();
         let found = facts(&object, Some(&meta), now);
         let found: Vec<(&str, &str)> = found.iter().map(|(l, v)| (*l, v.as_str())).collect();

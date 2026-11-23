@@ -103,14 +103,14 @@ mod tests {
     /// A pod of the `Deployment` `scans/scanner`, which runs the image
     /// `example/scanner`.
     fn pod() -> Pod {
-        serde_yaml::from_str(
+        serde_yaml_ng::from_str(
             "{metadata: {namespace: scans, name: scanner-1, ownerReferences: [{apiVersion: apps/v1, kind: Deployment, name: scanner, uid: x, controller: true}]}, spec: {serviceAccountName: scanner, containers: [{name: scanner, image: 'ghcr.io/example/scanner:1.0'}]}, status: {phase: Running}}",
         )
         .unwrap()
     }
 
     fn crd(annotations: &str) -> CustomResourceDefinition {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{name: reports.scans.example.io, annotations: {annotations}}}\nspec: {{group: {GROUP}, scope: Namespaced, names: {{kind: Report, plural: reports}}, versions: []}}"
         ))
         .unwrap()
@@ -184,7 +184,7 @@ mod tests {
     }
 
     fn yaml_meta(annotations: &str) -> k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
-        serde_yaml::from_str(&format!("{{annotations: {annotations}}}")).unwrap()
+        serde_yaml_ng::from_str(&format!("{{annotations: {annotations}}}")).unwrap()
     }
 
     fn by_image() -> Provenance {

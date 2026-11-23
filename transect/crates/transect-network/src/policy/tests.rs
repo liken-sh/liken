@@ -163,7 +163,7 @@ fn edges_reach_only_isolated_workloads() {
 #[rstest]
 fn a_finished_pod_is_no_caller() {
     let mut pods = pods();
-    pods.push(serde_yaml::from_str("metadata: {namespace: shop, name: job, labels: {app: web}}\nstatus: {phase: Succeeded}").unwrap());
+    pods.push(serde_yaml_ng::from_str("metadata: {namespace: shop, name: job, labels: {app: web}}\nstatus: {phase: Succeeded}").unwrap());
     let policies = [to_db("{from: [{podSelector: {}}]}")];
     let allowed = Allowed::evaluate(&policies, &pods, [], &namespaces(), &Ownership::default());
     assert_eq!(allowed.reach(&workload("shop", "job")), None);

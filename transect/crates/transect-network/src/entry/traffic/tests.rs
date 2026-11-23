@@ -46,7 +46,7 @@ fn reads_each_backends_figures_from_the_query_results() {
 
 #[rstest]
 fn reads_the_backends_an_ingress_routes_to() {
-    let ingress: Ingress = serde_yaml::from_str(
+    let ingress: Ingress = serde_yaml_ng::from_str(
         "{metadata: {namespace: shop, name: web}, spec: {defaultBackend: {service: {name: web, port: {number: 80}}}, rules: [{host: a.example, http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}, {path: /api, pathType: Prefix, backend: {service: {name: api, port: {name: http}}}}]}}]}}",
     )
     .unwrap();

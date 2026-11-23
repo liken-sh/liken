@@ -35,8 +35,8 @@ pub struct Cluster {
     admissions: BTreeMap<String, Vec<Admission>>,
 }
 
-fn typed<K: serde::de::DeserializeOwned>(value: &serde_yaml::Value) -> Arc<K> {
-    Arc::new(serde_yaml::from_value(value.clone()).unwrap())
+fn typed<K: serde::de::DeserializeOwned>(value: &serde_yaml_ng::Value) -> Arc<K> {
+    Arc::new(serde_yaml_ng::from_value(value.clone()).unwrap())
 }
 
 pub fn deployment(namespace: &str, name: &str) -> Object {
@@ -46,8 +46,8 @@ pub fn deployment(namespace: &str, name: &str) -> Object {
 impl Cluster {
     pub fn of(text: &str) -> Self {
         let mut cluster = Self::default();
-        for document in serde_yaml::Deserializer::from_str(text) {
-            let value = serde_yaml::Value::deserialize(document).unwrap();
+        for document in serde_yaml_ng::Deserializer::from_str(text) {
+            let value = serde_yaml_ng::Value::deserialize(document).unwrap();
             match value["kind"].as_str().unwrap_or_default() {
                 "Ingress" => cluster.ingresses.push(typed(&value)),
                 "Service" => cluster.services.push(typed(&value)),

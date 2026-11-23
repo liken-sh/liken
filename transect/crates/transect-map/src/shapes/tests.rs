@@ -9,7 +9,7 @@ use transect_resources::shapes::Shapes;
 /// An author's shape whose spec is `spec`.
 fn authored(spec: &str) -> Shape {
     let text = format!("{{metadata: {{name: plate.example.test}}, spec: {spec}}}");
-    transect_resources::shapes::parse(DocId::default(), serde_yaml::from_str(&text).unwrap())
+    transect_resources::shapes::parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap())
         .unwrap()
 }
 

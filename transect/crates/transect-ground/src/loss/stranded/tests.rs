@@ -9,7 +9,7 @@ use crate::storage::fixtures::{claim, csi, local, nfs};
 fn nodes() -> Vec<Arc<Node>> {
     let node = |name: &str, taints: &str| {
         Arc::new(
-            serde_yaml::from_str(&format!(
+            serde_yaml_ng::from_str(&format!(
                 "metadata: {{name: {name}, labels: {{disk: hdd, kubernetes.io/hostname: {name}}}}}\nspec: {{taints: {taints}}}"
             ))
             .unwrap(),
@@ -48,7 +48,7 @@ fn pod(claims: &[&str], radio: bool) -> Pod {
     } else {
         ""
     };
-    serde_yaml::from_str(&format!(
+    serde_yaml_ng::from_str(&format!(
         "metadata: {{namespace: shop, name: web-0}}\nspec: {{nodeName: alpha, {held}containers: [], volumes: [{}]}}",
         volumes.join(", ")
     ))
@@ -67,7 +67,7 @@ fn storage() -> Storage {
         claim("shop", "db", Some("pv-db")),
     ];
     claims[2].spec.as_mut().unwrap().access_modes = Some(vec!["ReadWriteOnce".into()]);
-    let attachment = serde_yaml::from_str(
+    let attachment = serde_yaml_ng::from_str(
         "metadata: {name: a}\nspec: {attacher: csi.example.com, nodeName: alpha, source: {persistentVolumeName: pv-db}}",
     )
     .unwrap();
@@ -76,11 +76,11 @@ fn storage() -> Storage {
 
 /// A USB radio on alpha, allocated to the claim `radio`.
 fn devices() -> Devices {
-    let slice: ResourceSlice = serde_yaml::from_str(
+    let slice: ResourceSlice = serde_yaml_ng::from_str(
         "metadata: {name: alpha-usb}\nspec: {driver: usb.example.com, nodeName: alpha, pool: {name: alpha, generation: 1, resourceSliceCount: 1}, devices: [{name: radio-1}]}",
     )
     .unwrap();
-    let claim: ResourceClaim = serde_yaml::from_str(
+    let claim: ResourceClaim = serde_yaml_ng::from_str(
         "metadata: {namespace: shop, name: radio}\nspec: {}\nstatus: {allocation: {devices: {results: [{request: r, driver: usb.example.com, pool: alpha, device: radio-1}]}}}",
     )
     .unwrap();
@@ -92,7 +92,7 @@ const ALPHA: &str = "alpha";
 /// A pod in shop on alpha with `spec`'s extra fields, as YAML, and
 /// owned by a controller of `kind`.
 fn placed(kind: &str, spec: &str) -> Pod {
-    serde_yaml::from_str(&format!(
+    serde_yaml_ng::from_str(&format!(
         "metadata: {{namespace: shop, name: web-0, ownerReferences: [{{apiVersion: apps/v1, kind: {kind}, name: web, uid: x, controller: true}}]}}\nspec: {{nodeName: alpha, containers: [], {spec}}}"
     ))
     .unwrap()

@@ -120,7 +120,7 @@ mod tests {
     use super::*;
 
     fn ingress(annotations: &str, spec: &str) -> Ingress {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: front, annotations: {annotations}}}\nspec: {spec}"
         ))
         .unwrap()

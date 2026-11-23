@@ -23,7 +23,7 @@ fn read(elevations: &str) -> Result<KindKnowledge, String> {
     let text = format!(
         "metadata: {{name: kiosks.widgets.example.com}}\nspec:\n  {REFERENCES}\n  elevations:\n{elevations}"
     );
-    parse(DocId::default(), serde_yaml::from_str(&text).unwrap())
+    parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap())
 }
 
 const KIOSK: &str = "
@@ -142,7 +142,7 @@ fn poses_a_shape_that_does_not_turn_as_it_is() {
 #[rstest]
 fn reads_a_kind_with_no_elevations() {
     let text = format!("metadata: {{name: kiosks.widgets.example.com}}\nspec:\n  {REFERENCES}\n");
-    let known = parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap();
+    let known = parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap()).unwrap();
     assert_eq!(known.elevations, vec![]);
 }
 

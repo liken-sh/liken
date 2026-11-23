@@ -52,8 +52,8 @@ impl Overlay {
     /// Any field other than `apiVersion`, `kind`, and the four
     /// `metadata` fields is an error, because someone who writes a
     /// `spec` in an overlay expects `transect` to use it.
-    pub fn parse(doc: DocId, file: &str, value: serde_yaml::Value) -> Result<Self, String> {
-        let document: Document = serde_yaml::from_value(value).map_err(|error| {
+    pub fn parse(doc: DocId, file: &str, value: serde_yaml_ng::Value) -> Result<Self, String> {
+        let document: Document = serde_yaml_ng::from_value(value).map_err(|error| {
             format!(
                 "an overlay may set only apiVersion, kind, and metadata's name, namespace, labels, and annotations: {error}"
             )
@@ -242,7 +242,7 @@ metadata:
         let text = format!(
             "metadata: {{namespace: {namespace}, name: {name}, annotations: {{{annotations}}}}}"
         );
-        Arc::new(serde_yaml::from_str(&text).unwrap())
+        Arc::new(serde_yaml_ng::from_str(&text).unwrap())
     }
 
     fn web() -> Object {
@@ -302,7 +302,7 @@ metadata:
     #[case::a_custom_group("cache.example.io/v1beta1", "cache.example.io")]
     fn reads_the_group_from_the_api_version(#[case] api_version: &str, #[case] group: &str) {
         let text = format!("{{apiVersion: {api_version}, kind: Thing, metadata: {{name: one}}}}");
-        let value = serde_yaml::from_str(&text).unwrap();
+        let value = serde_yaml_ng::from_str(&text).unwrap();
         let overlay = Overlay::parse(DocId::default(), "a.yaml", value).unwrap();
         assert_eq!(overlay.group, group);
     }

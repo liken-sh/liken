@@ -15,7 +15,7 @@ fn slice(driver: &str, node: Option<&str>, generation: i64, devices: &str) -> Re
         .map(|node| format!("nodeName: {node}, "))
         .unwrap_or("allNodes: true, ".into());
     let pool = "alpha";
-    serde_yaml::from_str(&format!(
+    serde_yaml_ng::from_str(&format!(
         "metadata: {{name: {pool}-{driver}}}\nspec: {{driver: {driver}, {node}pool: {{name: {pool}, generation: {generation}, resourceSliceCount: 1}}, devices: {devices}}}"
     ))
     .unwrap()
@@ -35,7 +35,7 @@ fn pinned(name: &str, devices: &[(&str, &str)], selector: &str) -> ResourceClaim
             format!("{{request: r, driver: {driver}, pool: alpha, device: {device}}}")
         })
         .collect();
-    serde_yaml::from_str(&format!(
+    serde_yaml_ng::from_str(&format!(
         "metadata: {{namespace: shop, name: {name}}}\nspec: {{}}\nstatus: {{allocation: {{nodeSelector: {selector}, devices: {{results: [{}]}}}}}}",
         results.join(", ")
     ))
@@ -45,7 +45,7 @@ fn pinned(name: &str, devices: &[(&str, &str)], selector: &str) -> ResourceClaim
 /// A pod in shop, owned by the DaemonSet `radio`, with `spec` and
 /// `status` as YAML.
 fn pod(name: &str, spec: &str, status: &str) -> Pod {
-    let mut pod: Pod = serde_yaml::from_str(&format!("spec: {spec}\nstatus: {status}")).unwrap();
+    let mut pod: Pod = serde_yaml_ng::from_str(&format!("spec: {spec}\nstatus: {status}")).unwrap();
     pod.metadata = meta(Some("shop"), name, &[("apps/v1", "DaemonSet", "radio")]);
     pod
 }
@@ -210,7 +210,7 @@ fn a_workload_holds_its_pods_devices(#[case] pods: Vec<Pod>, #[case] names: Vec<
 
 fn machine(name: &str) -> crate::machines::Machine {
     let nodes: Vec<k8s_openapi::api::core::v1::Node> =
-        vec![serde_yaml::from_str(&format!("metadata: {{name: {name}}}")).unwrap()];
+        vec![serde_yaml_ng::from_str(&format!("metadata: {{name: {name}}}")).unwrap()];
     crate::machines::machines(&nodes, &[], None).remove(0)
 }
 

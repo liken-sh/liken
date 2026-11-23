@@ -83,8 +83,8 @@ mod tests {
         trim: fn(&mut K),
     ) -> bool {
         let (mut first, mut second): (K, K) = (
-            serde_yaml::from_str(first).unwrap(),
-            serde_yaml::from_str(second).unwrap(),
+            serde_yaml_ng::from_str(first).unwrap(),
+            serde_yaml_ng::from_str(second).unwrap(),
         );
         trim(&mut first);
         trim(&mut second);
@@ -131,7 +131,7 @@ mod tests {
     }
 
     fn widget(times: &str, reason: &str) -> DynamicObject {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "{{apiVersion: example.io/v1, kind: Widget, metadata: {{name: a}}, status: {{conditions: [{{type: Ready, status: 'True', reason: {reason}, {times}}}]}}}}"
         ))
         .unwrap()

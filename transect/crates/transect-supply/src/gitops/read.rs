@@ -193,7 +193,7 @@ pub mod fixtures {
         name: &str,
         body: &str,
     ) -> DynamicObject {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "apiVersion: {group}/v1\nkind: {kind}\nmetadata: {{namespace: {namespace}, name: {name}}}\n{body}"
         ))
         .unwrap()

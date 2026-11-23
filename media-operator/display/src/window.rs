@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use iced::widget::canvas;
 use iced::{Color, Element, Length, Rectangle, Renderer, Size, Subscription, Task, Theme};
-use jiff::Zoned;
+use jiff::ZonedDateTime;
 use tokio::sync::{broadcast, watch};
 
 mod arranging;
@@ -628,7 +628,7 @@ impl Display {
 
     /// Draws the lower layer. The scrubber has two focus stops but
     /// draws one bar, for the focused axis.
-    fn paint_below(&self, brush: &mut Brush<'_>, now: &Zoned) {
+    fn paint_below(&self, brush: &mut Brush<'_>, now: &ZonedDateTime) {
         let canvas = brush.canvas();
         // The cover draws at full strength whatever the OSD fade is,
         // because a music screen with the OSD down would otherwise be a
@@ -739,7 +739,7 @@ impl Display {
     /// rectangle in the same layer as text would draw under all of the
     /// text. A second layer draws after the whole first layer, so the
     /// dim and the panel cover the text that they must cover.
-    fn paint_above(&self, brush: &mut Brush<'_>, now: &Zoned) {
+    fn paint_above(&self, brush: &mut Brush<'_>, now: &ZonedDateTime) {
         let canvas = brush.canvas();
         if self.strip.capturing().is_some() {
             // Dim the whole frame under the open chooser.

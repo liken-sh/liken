@@ -117,7 +117,7 @@ mod tests {
     /// A pod in `phase` whose only container runs `image`.
     fn pod(name: &str, phase: &str, image: &ImageRef) -> Arc<Pod> {
         Arc::new(
-            serde_yaml::from_str(&format!(
+            serde_yaml_ng::from_str(&format!(
                 "metadata: {{namespace: shop, name: {name}}}\n\
                  spec: {{containers: [{{name: app}}]}}\n\
                  status: {{phase: {phase}, containerStatuses: [{{name: app, ready: true, restartCount: 0, image: app, \

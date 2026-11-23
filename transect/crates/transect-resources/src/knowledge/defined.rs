@@ -161,7 +161,7 @@ mod tests {
     /// The CRD of `Widget` in `widgets.example.com`, with `versions` as
     /// YAML.
     fn crd(versions: &str) -> CustomResourceDefinition {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{name: widgets.widgets.example.com}}\n\
              spec: {{group: widgets.example.com, scope: Namespaced,\
              names: {{kind: Widget, plural: widgets}}, versions: {versions}}}"
@@ -229,7 +229,7 @@ mod tests {
         vec!["widget", "widgets", "wd", "wdg"]
     )]
     fn names_a_kind_as_kubectl_takes_it(#[case] names: &str, #[case] expected: Vec<&str>) {
-        let crd: CustomResourceDefinition = serde_yaml::from_str(&format!(
+        let crd: CustomResourceDefinition = serde_yaml_ng::from_str(&format!(
             "metadata: {{name: widgets.widgets.example.com}}\n\
              spec: {{group: widgets.example.com, scope: Namespaced, names: {names}, versions: []}}"
         ))

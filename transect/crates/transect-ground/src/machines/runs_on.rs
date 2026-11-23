@@ -74,7 +74,7 @@ mod tests {
         let node = node
             .map(|node| format!("nodeName: {node}, "))
             .unwrap_or_default();
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: {namespace}, name: {name}}}\nspec: {{{node}containers: []}}\nstatus: {{phase: {phase}}}"
         ))
         .unwrap()

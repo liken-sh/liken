@@ -132,8 +132,8 @@ const TREE: [&str; 4] = ["{repository}", "{refKind}", "{ref}", "{path}"];
 const COMMIT: [&str; 2] = ["{repository}", "{sha}"];
 
 /// The `Forge` that `value` declares, or why `value` is not valid.
-pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<Forge, String> {
-    let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
+pub fn parse(doc: DocId, value: serde_yaml_ng::Value) -> Result<Forge, String> {
+    let document: Document = serde_yaml_ng::from_value(value).map_err(|error| error.to_string())?;
     let spec = document.spec;
     check("tree", &spec.tree, &TREE, &["{repository}", "{ref}"])?;
     check("commit", &spec.commit, &COMMIT, &COMMIT)?;
@@ -194,9 +194,9 @@ spec: {hosts: [codeberg.org], hostPrefixes: [gitea, forgejo], images: [gitea, fo
 "#;
 
     pub fn layouts() -> Vec<Forge> {
-        serde_yaml::Deserializer::from_str(LAYOUTS)
+        serde_yaml_ng::Deserializer::from_str(LAYOUTS)
             .map(|document| {
-                let value = serde_yaml::Value::deserialize(document).unwrap();
+                let value = serde_yaml_ng::Value::deserialize(document).unwrap();
                 parse(DocId::default(), value).unwrap()
             })
             .collect()
@@ -233,7 +233,7 @@ mod tests {
 
     fn read(spec: &str) -> Result<Forge, String> {
         let text = format!("metadata: {{name: forge}}\nspec: {spec}\n");
-        parse(DocId::default(), serde_yaml::from_str(&text).unwrap())
+        parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap())
     }
 
     #[rstest]

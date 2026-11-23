@@ -45,7 +45,7 @@ iced = { version = "=0.14.0", default-features = false, features = [
 liken-iced = { path = "../../brand/iced" }
 # jiff reads the time zone that TZ names from /usr/share/zoneinfo in the
 # image, so the binary bundles no time zone database.
-jiff = { version = "=0.2.38", default-features = false, features = [
+jiff = { version = "=1.0.2", default-features = false, features = [
     "std",
     "tz-system",
     "tzdb-zoneinfo",
@@ -81,7 +81,7 @@ tokio = { version = "=1.54.1", default-features = false, features = [
 ] }
 # ureq fetches a picture, such as a logo or a cover, that a Play gives as an
 # https URL.
-ureq = { version = "=3.5.0", default-features = false, features = ["rustls"] }
+ureq = { version = "=3.5.2", default-features = false, features = ["rustls"] }
 # tiny-skia draws each antialiased shape into an image, and the frame draws
 # the image. iced's own antialiasing multisamples a render target the size of
 # the window for each layer that has a shape, and an image costs one texture

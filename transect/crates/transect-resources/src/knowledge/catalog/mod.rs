@@ -173,7 +173,7 @@ pub fn judge(
 struct Written {
     name: String,
     title: String,
-    roles: serde_yaml::Mapping,
+    roles: serde_yaml_ng::Mapping,
     elevations: Vec<elevation::Written>,
 }
 
@@ -196,7 +196,7 @@ const SOURCE_KEYS: &[&str] = &["fill", "derive", "kind", "group", "list", "failo
 
 /// The pattern that `module`'s file states.
 fn load(module: &'static Module) -> Result<Definition, String> {
-    let written: Written = serde_yaml::from_str(module.file).map_err(|e| e.to_string())?;
+    let written: Written = serde_yaml_ng::from_str(module.file).map_err(|e| e.to_string())?;
     let name = written.name.clone();
     read(written, module).map_err(|error| format!("the catalog's pattern {name}: {error}"))
 }
@@ -207,7 +207,7 @@ fn read(written: Written, module: &'static Module) -> Result<Definition, String>
     for (name, mut fields) in role::entries(Some(written.roles))? {
         let template = (|| {
             let source: WrittenSource =
-                serde_yaml::from_value(role::take(&mut fields, SOURCE_KEYS).into())
+                serde_yaml_ng::from_value(role::take(&mut fields, SOURCE_KEYS).into())
                     .map_err(|error| error.to_string())?;
             let look = role::look::read(fields, &[])?;
             if source.failover {

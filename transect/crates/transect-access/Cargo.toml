@@ -14,7 +14,7 @@ askama.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
 serde.workspace = true
-serde_yaml.workspace = true
+serde_yaml_ng.workspace = true
 
 [dev-dependencies]
 transect-map = { workspace = true, features = ["fixtures"] }

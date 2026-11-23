@@ -150,7 +150,7 @@ mod tests {
     #[rstest]
     fn a_service_with_no_selector_selects_nothing() {
         let service: Service =
-            serde_yaml::from_str("metadata: {namespace: shop, name: web}\nspec: {}").unwrap();
+            serde_yaml_ng::from_str("metadata: {namespace: shop, name: web}\nspec: {}").unwrap();
         let workload = deployment("shop", "web");
         let pod_labels = labels(&[("app", "web")]);
         let edges = selects(&[Arc::new(service)], [(&workload, vec![&pod_labels])]);

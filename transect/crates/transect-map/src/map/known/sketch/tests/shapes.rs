@@ -19,7 +19,7 @@ fn drawn(sketch: &str, amp: &str, hand: &str) -> Sketch {
         let text = format!(
             "{{metadata: {{name: {name}.widgets.example.com}}, spec: {{summary: A part., size: {{design: [100, 50], width: [80, 120]}}, joins: {joins}}}}}"
         );
-        let value = serde_yaml::from_str(&text).unwrap();
+        let value = serde_yaml_ng::from_str(&text).unwrap();
         std::sync::Arc::new(transect_resources::shapes::parse(DocId::default(), value).unwrap())
     };
     let shapes = Shapes::with(&[shape("rail", "[bottom]"), shape("cart", "[top]")]);
@@ -134,7 +134,7 @@ fn draws_an_expected_role_with_no_part_in_the_shape_of_its_kind() {
 fn row_with(shape: &str) -> Vec<String> {
     let slab = {
         let text = "{metadata: {name: slab.widgets.example.com}, spec: {summary: A slab., size: {design: [100, 50], width: [80, 120]}, joins: [left, right, top, bottom]}}";
-        let value = serde_yaml::from_str(text).unwrap();
+        let value = serde_yaml_ng::from_str(text).unwrap();
         std::sync::Arc::new(transect_resources::shapes::parse(DocId::default(), value).unwrap())
     };
     let shapes = Shapes::with(&[slab]);

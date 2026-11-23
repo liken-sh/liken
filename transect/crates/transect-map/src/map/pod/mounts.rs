@@ -94,7 +94,7 @@ mod tests {
     use transect_ground::storage::fixtures::storage;
 
     fn pod(name: &str, claim: &str) -> Pod {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: {name}}}\nspec: {{containers: [{{name: app, volumeMounts: [{{name: data, mountPath: /data}}]}}], volumes: [{{name: data, persistentVolumeClaim: {{claimName: {claim}}}}}]}}"
         ))
         .unwrap()

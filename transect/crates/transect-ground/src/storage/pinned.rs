@@ -161,14 +161,14 @@ mod tests {
     /// A claim in shop, named for its volume and bound to it, that
     /// requests `mode`.
     fn claim(volume: &str, mode: &str) -> PersistentVolumeClaim {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: {volume}}}\nspec: {{volumeName: {volume}, accessModes: [{mode}]}}"
         ))
         .unwrap()
     }
 
     fn attachment(volume: &str, machine: &str) -> VolumeAttachment {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{name: {volume}-{machine}}}\nspec: {{attacher: csi.example.com, nodeName: {machine}, source: {{persistentVolumeName: {volume}}}}}"
         ))
         .unwrap()
@@ -202,7 +202,7 @@ mod tests {
 
     /// A pod in shop on alpha that mounts the claim `claim`.
     fn pod(claim: &str) -> Pod {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: web-0}}\nspec: {{nodeName: alpha, containers: [], volumes: [{{name: data, persistentVolumeClaim: {{claimName: {claim}}}}}]}}"
         ))
         .unwrap()

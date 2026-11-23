@@ -12,7 +12,7 @@ use transect_graph::edges::Object;
 
 /// A running pod with one address and a container port named `pg`.
 pub fn pod(namespace: &str, name: &str, labels: &str, address: &str) -> Pod {
-    serde_yaml::from_str(&format!(
+    serde_yaml_ng::from_str(&format!(
         "metadata: {{namespace: {namespace}, name: {name}, labels: {{{labels}}}}}
 spec: {{containers: [{{name: main, ports: [{{name: pg, containerPort: 5432}}]}}]}}
 status: {{phase: Running, podIPs: [{{ip: {address}}}]}}"
@@ -39,7 +39,7 @@ pub fn pods() -> Vec<Pod> {
 
 pub fn namespaces() -> Vec<ObjectMeta> {
     let meta = |name: &str, labels: &str| -> ObjectMeta {
-        serde_yaml::from_str(&format!("{{name: {name}, labels: {{{labels}}}}}")).unwrap()
+        serde_yaml_ng::from_str(&format!("{{name: {name}, labels: {{{labels}}}}}")).unwrap()
     };
     vec![
         meta("shop", "tier: apps"),
@@ -49,7 +49,7 @@ pub fn namespaces() -> Vec<ObjectMeta> {
 }
 
 pub fn policy(namespace: &str, spec: &str) -> NetworkPolicy {
-    serde_yaml::from_str(&format!(
+    serde_yaml_ng::from_str(&format!(
         "metadata: {{namespace: {namespace}, name: p}}\nspec: {spec}"
     ))
     .unwrap()

@@ -11,11 +11,11 @@ use serde::Deserialize;
 fn rules() -> Vec<PolicyRule> {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../deploy/rbac.yaml");
     let text = std::fs::read_to_string(path).unwrap();
-    serde_yaml::Deserializer::from_str(&text)
-        .map(serde_yaml::Value::deserialize)
+    serde_yaml_ng::Deserializer::from_str(&text)
+        .map(serde_yaml_ng::Value::deserialize)
         .map(Result::unwrap)
         .filter(|doc| doc["kind"] == "ClusterRole")
-        .map(|doc| serde_yaml::from_value::<ClusterRole>(doc).unwrap())
+        .map(|doc| serde_yaml_ng::from_value::<ClusterRole>(doc).unwrap())
         .flat_map(|role| role.rules.unwrap_or_default())
         .collect()
 }

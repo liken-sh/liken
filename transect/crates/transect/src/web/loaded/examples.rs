@@ -135,8 +135,8 @@ fn served() -> Plurals {
     let mut plurals = Plurals::new();
     for path in deploys.flat_map(|deploy| yaml_under(&deploy)) {
         let text = std::fs::read_to_string(&path).unwrap();
-        for document in serde_yaml::Deserializer::from_str(&text) {
-            let Ok(value) = serde_yaml::Value::deserialize(document) else {
+        for document in serde_yaml_ng::Deserializer::from_str(&text) {
+            let Ok(value) = serde_yaml_ng::Value::deserialize(document) else {
                 continue;
             };
             if value["kind"].as_str() != Some("CustomResourceDefinition") {

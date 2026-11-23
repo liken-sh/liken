@@ -96,7 +96,7 @@ mod tests {
     use crate::logs::level;
 
     fn pod(init_statuses: &str) -> Pod {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: web-1}}\nspec: {{containers: [{{name: web}}, {{name: proxy}}], initContainers: [{{name: migrate}}, {{name: warm}}]}}\nstatus: {{initContainerStatuses: {init_statuses}}}"
         ))
         .unwrap()

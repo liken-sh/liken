@@ -90,7 +90,7 @@ pub trait Sorts: Default {
     /// and stores it as the resource of that kind. It returns the
     /// condition that describes the result, or none when `GROUP` has no
     /// such kind.
-    fn take(&mut self, doc: DocId, kind: &str, value: serde_yaml::Value) -> Option<Condition>;
+    fn take(&mut self, doc: DocId, kind: &str, value: serde_yaml_ng::Value) -> Option<Condition>;
 }
 
 /// The contents of the resources directory: each file, and the
@@ -112,7 +112,7 @@ impl Sorts for Directory {
         self
     }
 
-    fn take(&mut self, _: DocId, _: &str, _: serde_yaml::Value) -> Option<Condition> {
+    fn take(&mut self, _: DocId, _: &str, _: serde_yaml_ng::Value) -> Option<Condition> {
         None
     }
 }

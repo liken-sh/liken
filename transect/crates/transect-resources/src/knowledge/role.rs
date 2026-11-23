@@ -119,7 +119,7 @@ const CATALOG_KEYS: &[&str] = &["fill", "derive"];
 /// `group` is the group of the document's kind. The error names the
 /// first fault and the role it is in.
 pub fn read(
-    written: Option<serde_yaml::Mapping>,
+    written: Option<serde_yaml_ng::Mapping>,
     references: &[Reference],
     group: &str,
 ) -> Result<Vec<Role>, String> {
@@ -131,7 +131,7 @@ pub fn read(
                     "{key} is a field of a role of transect's catalog, and a KindKnowledge fills the roles of its pattern in pattern.roles"
                 ));
             }
-            let fill: WrittenFill = serde_yaml::from_value(take(&mut written, FILL_KEYS).into())
+            let fill: WrittenFill = serde_yaml_ng::from_value(take(&mut written, FILL_KEYS).into())
                 .map_err(|error| error.to_string())?;
             let look = look::read(written, references)?;
             let elevation = fill.elevation;
@@ -154,8 +154,8 @@ pub fn read(
 /// with its fields as a map. A name is checked here, because the page
 /// writes it into the sketch's grid.
 pub fn entries(
-    written: Option<serde_yaml::Mapping>,
-) -> Result<Vec<(String, serde_yaml::Mapping)>, String> {
+    written: Option<serde_yaml_ng::Mapping>,
+) -> Result<Vec<(String, serde_yaml_ng::Mapping)>, String> {
     let mut entries = Vec::new();
     for (name, written) in written.unwrap_or_default() {
         let Some(name) = name.as_str().map(String::from) else {
@@ -166,7 +166,7 @@ pub fn entries(
                 "roles has the name {name:?}, which is not a lower-case letter followed by lower-case letters, digits, and hyphens"
             ));
         }
-        let serde_yaml::Value::Mapping(written) = written else {
+        let serde_yaml_ng::Value::Mapping(written) = written else {
             return Err(format!("roles.{name} is not a map of fields"));
         };
         entries.push((name, written));
@@ -177,8 +177,8 @@ pub fn entries(
 /// The fields of `written` whose keys are in `keys`, which it removes
 /// from `written`, so the fields that are left are those that
 /// `look::read` reads.
-pub fn take(written: &mut serde_yaml::Mapping, keys: &[&str]) -> serde_yaml::Mapping {
-    let mut taken = serde_yaml::Mapping::new();
+pub fn take(written: &mut serde_yaml_ng::Mapping, keys: &[&str]) -> serde_yaml_ng::Mapping {
+    let mut taken = serde_yaml_ng::Mapping::new();
     for key in keys {
         if let Some(value) = written.remove(*key) {
             taken.insert((*key).into(), value);

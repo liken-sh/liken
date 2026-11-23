@@ -11,7 +11,7 @@ fn pods() -> Vec<Arc<Pod>> {
     ["web-0", "web-1"]
         .map(|name| {
             let text = format!("metadata: {{namespace: shop, name: {name}}}");
-            Arc::new(serde_yaml::from_str(&text).unwrap())
+            Arc::new(serde_yaml_ng::from_str(&text).unwrap())
         })
         .to_vec()
 }
@@ -147,7 +147,7 @@ fn only_a_recent_match_is_a_reason(#[case] last: &str, #[case] expected: Vec<&st
 /// The `CronJob` `report`, with its running pod `report-29000020-x7k2q`.
 fn report() -> (Vec<Arc<Pod>>, Ownership) {
     let text = "metadata: {namespace: shop, name: report-29000020-x7k2q}";
-    let pods = vec![Arc::new(serde_yaml::from_str(text).unwrap())];
+    let pods = vec![Arc::new(serde_yaml_ng::from_str(text).unwrap())];
     let ownership = build(&[
         (
             "",

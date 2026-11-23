@@ -16,7 +16,7 @@ use transect_observe::usage;
 use transect_resources::layers::Layers;
 
 fn parse<T: serde::de::DeserializeOwned>(yaml: &str) -> Arc<T> {
-    Arc::new(serde_yaml::from_str(yaml).unwrap())
+    Arc::new(serde_yaml_ng::from_str(yaml).unwrap())
 }
 
 /// One pod named `app` in `namespace`, at `ip`.

@@ -149,7 +149,7 @@ mod tests {
                 format!("{{name: {claim}, persistentVolumeClaim: {{claimName: {claim}}}}}")
             })
             .collect();
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: {name}}}\nspec: {{nodeName: {machine}, containers: [], volumes: [{}]}}",
             volumes.join(", ")
         ))
@@ -204,7 +204,7 @@ mod tests {
             .iter()
             .map(|v| format!("{{name: {v}, nfs: {{server: {server}, path: /{v}}}}}"))
             .collect();
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: {name}}}\nspec: {{nodeName: {machine}, containers: [], volumes: [{}]}}",
             volumes.join(", ")
         ))

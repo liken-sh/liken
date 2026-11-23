@@ -43,7 +43,7 @@ mod tests {
     use super::*;
 
     fn pod(phase: &str, finished: &str) -> Pod {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{creationTimestamp: '2026-01-01T00:00:00Z'}}\n\
              status: {{phase: {phase}, containerStatuses: [{{name: job, image: x, imageID: x, ready: false, restartCount: 0, state: {{terminated: {{exitCode: 0, finishedAt: '{finished}'}}}}}}]}}"
         ))

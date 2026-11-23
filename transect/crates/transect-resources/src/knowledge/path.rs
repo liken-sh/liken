@@ -100,7 +100,7 @@ status:
 ";
 
     fn widget() -> Value {
-        serde_yaml::from_str(WIDGET).unwrap()
+        serde_yaml_ng::from_str(WIDGET).unwrap()
     }
 
     #[rstest]

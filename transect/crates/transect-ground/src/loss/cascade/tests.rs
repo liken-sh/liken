@@ -6,7 +6,7 @@ use transect_graph::edges::{Edge, Provenance};
 /// An `Ingress` in shop with `spec` as YAML.
 fn ingress(name: &str, spec: &str) -> Arc<Ingress> {
     let yaml = format!("metadata: {{namespace: shop, name: {name}}}\nspec: {spec}");
-    Arc::new(serde_yaml::from_str(&yaml).unwrap())
+    Arc::new(serde_yaml_ng::from_str(&yaml).unwrap())
 }
 
 /// An `Ingress` in shop that routes `host` to the `Service` `service`.
@@ -248,7 +248,7 @@ fn only_a_down_workload_cascades_and_never_into_another_down_one() {
 
 #[rstest]
 fn a_loss_has_the_provides_text_of_the_lost_workload(shop: Shop) {
-    let meta: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta = serde_yaml::from_str(
+    let meta: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta = serde_yaml_ng::from_str(
         "{name: db, annotations: {transect.liken.sh/provides: order storage}}",
     )
     .unwrap();

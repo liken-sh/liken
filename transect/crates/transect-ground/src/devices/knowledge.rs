@@ -147,8 +147,8 @@ struct ReferenceSpec {
 }
 
 /// The device knowledge in `value`, or the reason that it is invalid.
-pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<DeviceKnowledge, String> {
-    let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
+pub fn parse(doc: DocId, value: serde_yaml_ng::Value) -> Result<DeviceKnowledge, String> {
+    let document: Document = serde_yaml_ng::from_value(value).map_err(|error| error.to_string())?;
     let references = document.spec.references.into_iter().enumerate();
     let references = references
         .map(|(at, spec)| reference(spec).map_err(|error| format!("references[{at}]: {error}")))
@@ -204,7 +204,7 @@ pub mod fixtures {
     /// The device knowledge for `driver` with `spec`.
     pub fn knowledge(driver: &str, spec: &str) -> DeviceKnowledge {
         let text = format!("metadata: {{name: {driver}}}\nspec: {spec}\n");
-        parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap()
+        parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap()).unwrap()
     }
 }
 
@@ -216,7 +216,7 @@ mod tests {
 
     fn parsed(spec: &str) -> Result<DeviceKnowledge, String> {
         let text = format!("metadata: {{name: radio.example.com}}\nspec: {spec}\n");
-        parse(DocId::default(), serde_yaml::from_str(&text).unwrap())
+        parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap())
     }
 
     #[rstest]

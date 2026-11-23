@@ -43,7 +43,7 @@ const MACHINES: usize = 20;
 const BOUND: Duration = Duration::from_secs(5);
 
 fn parse<T: serde::de::DeserializeOwned>(yaml: &str) -> Arc<T> {
-    Arc::new(serde_yaml::from_str(yaml).unwrap())
+    Arc::new(serde_yaml_ng::from_str(yaml).unwrap())
 }
 
 fn namespace(index: usize) -> Arc<Namespace> {
@@ -101,7 +101,7 @@ fn owner(kind: &str, api: &str, namespace: &str, name: &str) -> String {
 
 fn replica_set(namespace: &str, app: &str) -> Arc<kube::api::PartialObjectMeta<ReplicaSet>> {
     let meta: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta =
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "{{namespace: {namespace}, name: {app}-abc, uid: {namespace}-{app}-abc, {}}}",
             owner("Deployment", "apps/v1", namespace, app)
         ))

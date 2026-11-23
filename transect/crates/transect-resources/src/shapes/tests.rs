@@ -9,16 +9,16 @@ fn shape(spec: &str) -> Result<Shape, String> {
 }
 
 fn shape_named(name: &str, spec: &str) -> Result<Shape, String> {
-    let mut base: serde_yaml::Mapping = serde_yaml::from_str(
+    let mut base: serde_yaml_ng::Mapping = serde_yaml_ng::from_str(
         "{summary: A plate., size: {design: [100, 50], width: [80, 120]}, outline: {round: 4}}",
     )
     .unwrap();
-    let change: serde_yaml::Mapping = serde_yaml::from_str(spec).unwrap();
+    let change: serde_yaml_ng::Mapping = serde_yaml_ng::from_str(spec).unwrap();
     base.extend(change);
-    let mut document = serde_yaml::Mapping::new();
+    let mut document = serde_yaml_ng::Mapping::new();
     document.insert(
         "metadata".into(),
-        serde_yaml::from_str(&format!("{{name: {name:?}}}")).unwrap(),
+        serde_yaml_ng::from_str(&format!("{{name: {name:?}}}")).unwrap(),
     );
     document.insert("spec".into(), base.into());
     parse(DocId::default(), document.into())

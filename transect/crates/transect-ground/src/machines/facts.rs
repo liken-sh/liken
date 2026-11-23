@@ -86,7 +86,7 @@ mod tests {
     use super::*;
 
     fn node(labels: &str, status: &str) -> Node {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{name: alpha, labels: {labels}}}\nstatus: {status}"
         ))
         .unwrap()

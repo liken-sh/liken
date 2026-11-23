@@ -116,7 +116,7 @@ mod tests {
         let yaml = format!(
             "{{metadata: {{namespace: {namespace}, name: {name}, labels: {labels}}}, spec: {{nodeName: {node}, containers: []}}}}"
         );
-        Arc::new(serde_yaml::from_str(&yaml).unwrap())
+        Arc::new(serde_yaml_ng::from_str(&yaml).unwrap())
     }
 
     fn pods() -> Vec<Arc<Pod>> {
@@ -128,7 +128,7 @@ mod tests {
 
     fn services() -> Vec<Arc<Service>> {
         let yaml = "{metadata: {namespace: logs, name: store}, spec: {selector: {app: store}}}";
-        vec![Arc::new(serde_yaml::from_str(yaml).unwrap())]
+        vec![Arc::new(serde_yaml_ng::from_str(yaml).unwrap())]
     }
 
     fn lost(names: &[&str]) -> Lost {

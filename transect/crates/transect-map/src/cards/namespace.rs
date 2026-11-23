@@ -281,7 +281,7 @@ mod tests {
     use super::*;
 
     fn object<K: DeserializeOwned>(yaml: &str) -> Arc<K> {
-        Arc::new(serde_yaml::from_str(yaml).unwrap())
+        Arc::new(serde_yaml_ng::from_str(yaml).unwrap())
     }
 
     fn deployment(namespace: &str, name: &str, replicas: i32) -> Arc<Deployment> {

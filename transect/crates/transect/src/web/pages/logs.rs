@@ -168,7 +168,7 @@ mod tests {
             false => "{running: {}}",
         };
         Arc::new(
-            serde_yaml::from_str(&format!(
+            serde_yaml_ng::from_str(&format!(
                 "metadata:
   namespace: acme-shop
   name: {name}
@@ -229,7 +229,7 @@ status:
     fn with_init() -> Model {
         let mut snapshot = fixture::snapshot();
         snapshot.pods[2] = Arc::new(
-            serde_yaml::from_str(
+            serde_yaml_ng::from_str(
                 "metadata: {namespace: acme-ledger, name: ledger-db-0, uid: ledger-db-0, ownerReferences: [{apiVersion: apps/v1, kind: StatefulSet, name: ledger-db, uid: ledger-db, controller: true}]}
 spec: {initContainers: [{name: migrate}], containers: [{name: main}]}
 status:

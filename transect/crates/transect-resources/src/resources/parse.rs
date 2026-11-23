@@ -47,9 +47,9 @@ pub fn sort<S: Sorts>(files: Vec<Read>) -> S {
 
 /// The YAML documents in `text`, or an error message if `text` is not
 /// valid YAML.
-fn documents(text: &str) -> Result<Vec<serde_yaml::Value>, String> {
-    serde_yaml::Deserializer::from_str(text)
-        .map(serde_yaml::Value::deserialize)
+fn documents(text: &str) -> Result<Vec<serde_yaml_ng::Value>, String> {
+    serde_yaml_ng::Deserializer::from_str(text)
+        .map(serde_yaml_ng::Value::deserialize)
         .collect::<Result<_, _>>()
         .map_err(|error| format!("not YAML: {error}"))
 }
@@ -57,8 +57,8 @@ fn documents(text: &str) -> Result<Vec<serde_yaml::Value>, String> {
 /// A document's kind and its name, as the page lists them.  The name is
 /// `namespace/name` when the document has a namespace.  Either is empty
 /// when the document does not set it.
-fn identify(value: &serde_yaml::Value) -> (String, String) {
-    let text = |value: Option<&serde_yaml::Value>| {
+fn identify(value: &serde_yaml_ng::Value) -> (String, String) {
+    let text = |value: Option<&serde_yaml_ng::Value>| {
         value
             .and_then(|value| value.as_str())
             .unwrap_or_default()
@@ -77,7 +77,12 @@ fn identify(value: &serde_yaml::Value) -> (String, String) {
 /// document of `GROUP/VERSION` goes to `Sorts::take`, a document of
 /// another version of `GROUP` is left out as `UnknownVersion`, and any
 /// other document is parsed as an overlay.
-fn take<S: Sorts>(sorted: &mut S, doc: DocId, path: &str, value: serde_yaml::Value) -> Condition {
+fn take<S: Sorts>(
+    sorted: &mut S,
+    doc: DocId,
+    path: &str,
+    value: serde_yaml_ng::Value,
+) -> Condition {
     let api_version = value.get("apiVersion").and_then(|v| v.as_str());
     let kind = value
         .get("kind")

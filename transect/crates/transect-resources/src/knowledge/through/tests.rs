@@ -21,7 +21,7 @@ fn relation(path: &str, names: Names) -> Relation {
 }
 
 fn stored() -> DynamicObject {
-    serde_yaml::from_str("{apiVersion: pads.example.com/v1, kind: Pad, metadata: {name: kept}}")
+    serde_yaml_ng::from_str("{apiVersion: pads.example.com/v1, kind: Pad, metadata: {name: kept}}")
         .unwrap()
 }
 

@@ -55,7 +55,7 @@ pub fn kinds() -> Kinds {
 /// An object of the tool's `kind`, with `labels`, the YAML of its
 /// labels, and `body`, the YAML of its spec and status.
 pub fn dynamic(kind: &str, namespace: &str, name: &str, labels: &str, body: &str) -> DynamicObject {
-    serde_yaml::from_str(&format!(
+    serde_yaml_ng::from_str(&format!(
         "apiVersion: {GROUP}/v1\nkind: {kind}\nmetadata: {{namespace: {namespace}, name: {name}, labels: {{{labels}}}}}\n{body}"
     ))
     .unwrap()

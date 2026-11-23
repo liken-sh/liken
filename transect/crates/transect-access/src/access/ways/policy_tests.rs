@@ -14,7 +14,7 @@ use super::*;
 use transect_network::policy::{Admission, Caller, Ports};
 
 fn ports(text: &str) -> Ports {
-    let ports: Vec<NetworkPolicyPort> = serde_yaml::from_str(text).unwrap();
+    let ports: Vec<NetworkPolicyPort> = serde_yaml_ng::from_str(text).unwrap();
     Ports::of_rule(&ports, &[])
 }
 

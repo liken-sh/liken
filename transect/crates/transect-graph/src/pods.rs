@@ -39,7 +39,7 @@ mod tests {
 
     fn pod(phase: Option<&str>) -> Pod {
         let status = phase.map(|phase| format!("status: {{phase: {phase}}}"));
-        serde_yaml::from_str(&status.unwrap_or_else(|| "metadata: {}".into())).unwrap()
+        serde_yaml_ng::from_str(&status.unwrap_or_else(|| "metadata: {}".into())).unwrap()
     }
 
     #[rstest]
@@ -80,7 +80,7 @@ status:
         #[case] is_ready: bool,
         #[case] containers: (usize, usize),
     ) {
-        let pod: Pod = serde_yaml::from_str(written).unwrap();
+        let pod: Pod = serde_yaml_ng::from_str(written).unwrap();
         assert_eq!(
             (ready(&pod), ready_containers(&pod)),
             (is_ready, containers)

@@ -49,8 +49,8 @@ const ACCOUNTS: [(&str, &str); 31] = [
     ("naming", "writer"),
 ];
 
-fn typed<K: serde::de::DeserializeOwned>(value: &serde_yaml::Value) -> Arc<K> {
-    Arc::new(serde_yaml::from_value(value.clone()).unwrap())
+fn typed<K: serde::de::DeserializeOwned>(value: &serde_yaml_ng::Value) -> Arc<K> {
+    Arc::new(serde_yaml_ng::from_value(value.clone()).unwrap())
 }
 
 fn access() -> Access {
@@ -63,8 +63,8 @@ fn access() -> Access {
 fn reduce(cluster: &str, mut accounts: Vec<(String, String)>, appliers: Vec<Applier>) -> Access {
     let mut rbac = RbacObjects::default();
     let mut pods: Vec<Running> = Vec::new();
-    for document in serde_yaml::Deserializer::from_str(cluster) {
-        let value = serde_yaml::Value::deserialize(document).unwrap();
+    for document in serde_yaml_ng::Deserializer::from_str(cluster) {
+        let value = serde_yaml_ng::Value::deserialize(document).unwrap();
         let kind = value["kind"].as_str().unwrap_or_default().to_string();
         match kind.as_str() {
             "ClusterRole" => rbac.cluster_roles.push(typed(&value)),

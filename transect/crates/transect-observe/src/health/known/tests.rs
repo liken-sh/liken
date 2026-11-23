@@ -34,7 +34,7 @@ fn widget() -> Object {
 }
 
 fn resource(conditions: &str) -> DynamicObject {
-    serde_yaml::from_str(&format!(
+    serde_yaml_ng::from_str(&format!(
         "apiVersion: widgets.example.com/v1\nkind: Widget\nmetadata: {{namespace: shop, name: front-room}}\nstatus: {{conditions: {conditions}}}\n"
     ))
     .unwrap()
@@ -236,7 +236,7 @@ fn through(pads: bool) -> Kinds {
 /// A pad whose `Connected` condition has `status` and `reason`.
 fn stored_pad(status: &str, reason: &str) -> Lead {
     Lead::Found(Box::new(
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "{{apiVersion: pads.example.com/v1, kind: Pad, metadata: {{name: aa-bb}}, status: {{conditions: [{{type: Connected, status: '{status}', reason: {reason}, message: asleep since noon}}]}}}}"
         ))
         .unwrap(),

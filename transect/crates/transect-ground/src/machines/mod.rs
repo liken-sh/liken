@@ -246,11 +246,11 @@ mod tests {
     use super::*;
 
     fn node(yaml: &str) -> Node {
-        serde_yaml::from_str(yaml).unwrap()
+        serde_yaml_ng::from_str(yaml).unwrap()
     }
 
     fn pod(node: &str, phase: &str, cpu: &str, memory: &str) -> Pod {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             r#"
 metadata: {{name: app}}
 spec:

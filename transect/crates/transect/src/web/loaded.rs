@@ -59,7 +59,7 @@ impl Sorts for Loaded {
         &mut self.directory
     }
 
-    fn take(&mut self, doc: DocId, kind: &str, value: serde_yaml::Value) -> Option<Condition> {
+    fn take(&mut self, doc: DocId, kind: &str, value: serde_yaml_ng::Value) -> Option<Condition> {
         let condition = match kind {
             "Layers" => match layers::parse(value) {
                 Ok(_) if self.layers.doc.is_some() => Condition::left_out(

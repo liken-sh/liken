@@ -69,7 +69,7 @@ mod tests {
     use super::*;
 
     fn levels() -> Levels {
-        serde_yaml::from_str("{error: [err, fatal], warning: [warn], plain: [info, debug]}")
+        serde_yaml_ng::from_str("{error: [err, fatal], warning: [warn], plain: [info, debug]}")
             .unwrap()
     }
 
@@ -89,7 +89,7 @@ mod tests {
     #[case::an_empty_error("{error: ['']}", "levels.error[0] is empty")]
     #[case::a_blank_plain("{error: [err], plain: [info, ' ']}", "levels.plain[1] is empty")]
     fn rejects_an_empty_prefix(#[case] levels: &str, #[case] message: &str) {
-        let levels: Levels = serde_yaml::from_str(levels).unwrap();
+        let levels: Levels = serde_yaml_ng::from_str(levels).unwrap();
         let error = levels.checked().unwrap_err();
         assert!(
             error.contains(message),

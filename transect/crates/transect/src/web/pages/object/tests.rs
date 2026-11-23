@@ -83,7 +83,7 @@ fn a_kind_page_shows_every_column_and_leaves_out_wide_ones() {
 
 fn lease() -> Arc<kube::core::DynamicObject> {
     Arc::new(
-        serde_yaml::from_str(
+        serde_yaml_ng::from_str(
             "apiVersion: coordination.k8s.io/v1\nkind: Lease\n\
              metadata: {name: web, namespace: acme-shop}\nspec: {holderIdentity: web-1}",
         )

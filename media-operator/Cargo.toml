@@ -9,12 +9,9 @@ resolver = "3"
 members = ["display", "idle"]
 
 # The versions are exact and match media-screen's, so a member and
-# media-screen resolve the same rumqttc and serde.
-#
-# rumqttc connects to the broker over plain TCP, so its default features
-# are off and no build includes a TLS stack.
+# media-screen resolve the same serde. media-screen sets rumqttc in its
+# own workspace, which cargo reads when a member builds it.
 [workspace.dependencies]
-rumqttc = { version = "=0.25.1", default-features = false }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 # media-screen calls only the metrics macros, and idle installs the

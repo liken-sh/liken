@@ -133,8 +133,8 @@ struct Queries {
 
 /// The `LogSource` that `value` declares, or the reason it does not
 /// validate.
-pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<LogSource, String> {
-    let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
+pub fn parse(doc: DocId, value: serde_yaml_ng::Value) -> Result<LogSource, String> {
+    let document: Document = serde_yaml_ng::from_value(value).map_err(|error| error.to_string())?;
     let spec = document.spec;
     let language = Language::named(&spec.language)?;
     let url = spec.url.as_deref().map(base_url).transpose()?;
@@ -236,12 +236,12 @@ queries:
 "#;
 
     /// A `LogSource` document named `logs` with `spec`.
-    pub fn document(spec: &str) -> serde_yaml::Value {
+    pub fn document(spec: &str) -> serde_yaml_ng::Value {
         let spec: String = spec.lines().map(|line| format!("  {line}\n")).collect();
         let text = format!(
             "apiVersion: transect.liken.sh/v1alpha1\nkind: LogSource\nmetadata: {{name: logs}}\nspec:\n{spec}"
         );
-        serde_yaml::from_str(&text).unwrap()
+        serde_yaml_ng::from_str(&text).unwrap()
     }
 
     pub fn source() -> LogSource {

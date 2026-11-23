@@ -29,8 +29,8 @@ struct Spec {
 }
 
 /// Returns the `Outside` that `value` declares, or the reason it is invalid.
-pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<Outside, String> {
-    let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
+pub fn parse(doc: DocId, value: serde_yaml_ng::Value) -> Result<Outside, String> {
+    let document: Document = serde_yaml_ng::from_value(value).map_err(|error| error.to_string())?;
     if document.metadata.namespace.is_some() {
         return Err("metadata.namespace is set, but an Outside is not in the cluster, so it has no namespace".into());
     }

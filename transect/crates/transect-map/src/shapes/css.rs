@@ -90,7 +90,7 @@ mod tests {
     use super::*;
 
     fn place_of(text: &str) -> Place {
-        Place::read(serde_yaml::from_str(text).unwrap(), "at").unwrap()
+        Place::read(serde_yaml_ng::from_str(text).unwrap(), "at").unwrap()
     }
 
     #[rstest]
@@ -113,7 +113,7 @@ mod tests {
     #[rstest]
     fn writes_elliptical_corners() {
         let read = transect_resources::shapes::length::round(
-            Some(&serde_yaml::from_str("[50% / 22, 0, 0, 0]").unwrap()),
+            Some(&serde_yaml_ng::from_str("[50% / 22, 0, 0, 0]").unwrap()),
             "round",
         )
         .unwrap();

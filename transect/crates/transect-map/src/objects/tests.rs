@@ -19,7 +19,7 @@ pub fn custom(kind: &str, namespace: &str, name: &str, conditions: &str) -> Arc<
     let text = format!(
         "apiVersion: example.io/v1\nkind: {kind}\nmetadata: {{namespace: {namespace}, name: {name}}}\nstatus: {{conditions: {conditions}}}"
     );
-    Arc::new(serde_yaml::from_str(&text).unwrap())
+    Arc::new(serde_yaml_ng::from_str(&text).unwrap())
 }
 
 const READY: &str = "[{type: Ready, status: 'True'}]";

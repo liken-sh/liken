@@ -37,7 +37,7 @@ fn shapes() -> Shapes {
         let text = format!(
             "{{metadata: {{name: {name}}}, spec: {{summary: A crate., size: {{design: [100, 50], width: [80, 120]}}}}}}"
         );
-        let shape = crate::shapes::parse(DocId::default(), serde_yaml::from_str(&text).unwrap());
+        let shape = crate::shapes::parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap());
         std::sync::Arc::new(shape.unwrap())
     };
     Shapes::with(&[
@@ -127,7 +127,7 @@ fn draws_each_part_in_the_first_shape_stated(
         .map(|(document, (name, spec))| {
             let text = format!("metadata: {{name: {name}}}\nspec: {{{spec}}}\n");
             let doc = DocId { file: 0, document };
-            super::super::parse(doc, serde_yaml::from_str(&text).unwrap()).unwrap()
+            super::super::parse(doc, serde_yaml_ng::from_str(&text).unwrap()).unwrap()
         });
     let served = Plurals::from([
         (
@@ -180,7 +180,7 @@ fn leaves_out_a_wire_that_meets_no_port(
     let wired = WIRED.replace("FROM", from).replace("TO", to);
     let spec = format!("{{{}}}", wired.replace("SKETCH", sketch));
     let text = format!("metadata: {{name: widgets.widgets.example.com}}\nspec: {spec}\n");
-    let undrawn = super::super::parse(DocId::default(), serde_yaml::from_str(&text).unwrap());
+    let undrawn = super::super::parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap());
     let mut kinds = Kinds::resolve(&[undrawn.unwrap()], &plurals(), &[]);
     kinds.find_shapes(&Shapes::default());
     let widget = kinds.of("widgets.example.com", "Widget").unwrap();

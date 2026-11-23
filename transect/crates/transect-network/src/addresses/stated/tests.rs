@@ -32,7 +32,7 @@ fn settings() -> Object {
 }
 
 fn yaml<K: serde::de::DeserializeOwned>(text: &str) -> K {
-    serde_yaml::from_str(text).unwrap()
+    serde_yaml_ng::from_str(text).unwrap()
 }
 
 /// The namespace shop, where web and cache read the `ConfigMap`

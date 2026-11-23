@@ -152,7 +152,7 @@ mod tests {
     use super::*;
 
     fn points() -> EntryPoints {
-        let written: Written = serde_yaml::from_str(
+        let written: Written = serde_yaml_ng::from_str(
             "{annotation: example.io/entrypoints, default: [web, websecure], ports: [{name: web, port: 80, redirectsTo: websecure}, {name: websecure, port: 443, tls: true}]}",
         )
         .unwrap();
@@ -160,7 +160,7 @@ mod tests {
     }
 
     fn ingress(text: &str) -> Ingress {
-        serde_yaml::from_str(text).unwrap()
+        serde_yaml_ng::from_str(text).unwrap()
     }
 
     #[rstest]
@@ -198,7 +198,7 @@ mod tests {
         "redirects to"
     )]
     fn rejects_invalid_entry_points_with_the_reason(#[case] text: &str, #[case] says: &str) {
-        let written: Written = serde_yaml::from_str(text).unwrap();
+        let written: Written = serde_yaml_ng::from_str(text).unwrap();
         let error = read(written).unwrap_err();
         assert!(
             error.contains(says),

@@ -205,7 +205,7 @@ mod tests {
     }
 
     fn object() -> DynamicObject {
-        serde_yaml::from_str(
+        serde_yaml_ng::from_str(
             "apiVersion: example.io/v1\nkind: Widget\n\
              metadata: {name: a, creationTimestamp: '2026-11-06T12:00:00Z'}\n\
              spec: {hosts: [a.test], tls: {secret: s}}\n\
@@ -286,7 +286,7 @@ mod tests {
         #[case] version: &str,
         #[case] expected: &[&str],
     ) {
-        let crd: CustomResourceDefinition = serde_yaml::from_str(
+        let crd: CustomResourceDefinition = serde_yaml_ng::from_str(
             "metadata: {name: widgets.example.io}\n\
              spec: {group: example.io, scope: Namespaced, names: {kind: Widget, plural: widgets}, versions: [\
              {name: v1beta1, served: true, storage: false, additionalPrinterColumns: [{name: Old, type: string, jsonPath: .a}]},\

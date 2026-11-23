@@ -136,7 +136,7 @@ mod tests {
 
     fn read(conditions: &str, healthy: Option<&str>) -> Vec<(String, Status)> {
         let data: Value =
-            serde_yaml::from_str(&format!("status: {{conditions: {conditions}}}")).unwrap();
+            serde_yaml_ng::from_str(&format!("status: {{conditions: {conditions}}}")).unwrap();
         let deciding = Deciding {
             condition: Some(healthy.unwrap_or("Ready").into()),
             calm: vec!["Idle".into()],
@@ -162,7 +162,7 @@ mod tests {
     #[case::another_one_false("[{type: Active, status: 'False'}]", "dot dot-gray")]
     fn colors_only_the_deciding_condition(#[case] conditions: &str, #[case] expected: &str) {
         let data: Value =
-            serde_yaml::from_str(&format!("status: {{conditions: {conditions}}}")).unwrap();
+            serde_yaml_ng::from_str(&format!("status: {{conditions: {conditions}}}")).unwrap();
         let deciding = Deciding {
             condition: Some("Ready".into()),
             calm: vec!["Idle".into()],

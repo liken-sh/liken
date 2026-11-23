@@ -6,7 +6,7 @@ fn read(name: &str, spec: &str) -> Result<KindKnowledge, String> {
     let text = format!(
         "apiVersion: transect.liken.sh/v1alpha1\nkind: KindKnowledge\nmetadata: {{name: {name}}}\nspec: {spec}\n"
     );
-    parse(DocId::default(), serde_yaml::from_str(&text).unwrap())
+    parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap())
 }
 
 #[rstest]

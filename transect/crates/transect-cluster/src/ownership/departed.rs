@@ -83,7 +83,7 @@ mod tests {
 
     fn pod(name: &str) -> Arc<Pod> {
         let yaml = format!("metadata: {{namespace: shop, name: {name}}}");
-        Arc::new(serde_yaml::from_str(&yaml).unwrap())
+        Arc::new(serde_yaml_ng::from_str(&yaml).unwrap())
     }
 
     /// The pod `web-1`, which the `Deployment` `web` owns through a

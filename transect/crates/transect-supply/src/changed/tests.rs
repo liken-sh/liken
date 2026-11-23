@@ -113,7 +113,7 @@ fn arranges_changes_newest_first_with_restarts_under_their_rollout(
 }
 
 fn meta(yaml: &str) -> ObjectMeta {
-    serde_yaml::from_str(yaml).unwrap()
+    serde_yaml_ng::from_str(yaml).unwrap()
 }
 
 fn link(object: &Object) -> Option<String> {
@@ -169,14 +169,14 @@ fn reads_a_cron_jobs_last_run(#[case] status: &str, #[case] expected: &str) {
     let yaml = format!(
         "{{metadata: {{namespace: shop, name: report}}, spec: {{schedule: '* * * * *', jobTemplate: {{}}}}, status: {status}}}"
     );
-    let cron_job: CronJob = serde_yaml::from_str(&yaml).unwrap();
+    let cron_job: CronJob = serde_yaml_ng::from_str(&yaml).unwrap();
     let found = scheduled(&cron_job, &link).unwrap();
     assert_eq!(found.text(), expected);
 }
 
 fn node(conditions: &str) -> Node {
     let yaml = format!("{{metadata: {{name: machine-a}}, status: {{conditions: [{conditions}]}}}}");
-    serde_yaml::from_str(&yaml).unwrap()
+    serde_yaml_ng::from_str(&yaml).unwrap()
 }
 
 const READY: &str = "{type: Ready, status: \"True\", lastTransitionTime: \"2026-01-02T10:00:20Z\"}";
@@ -210,7 +210,7 @@ fn reads_a_nodes_conditions_at_their_last_transitions(
 
 #[rstest]
 fn reads_a_containers_last_termination_as_a_restart() {
-    let pod: Pod = serde_yaml::from_str(
+    let pod: Pod = serde_yaml_ng::from_str(
         "{metadata: {namespace: shop, name: web-1}, status: {containerStatuses: [{name: web, image: web, imageID: '', ready: true, restartCount: 1, lastState: {terminated: {exitCode: 137, reason: OOMKilled, finishedAt: \"2026-01-02T10:00:00Z\"}}}, {name: sidecar, image: s, imageID: '', ready: true, restartCount: 0}]}}",
     )
     .unwrap();

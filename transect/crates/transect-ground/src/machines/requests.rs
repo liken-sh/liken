@@ -116,7 +116,7 @@ mod tests {
     /// Parses a pod spec from YAML, so each case looks like the manifest
     /// that it tests.
     fn spec(yaml: &str) -> PodSpec {
-        serde_yaml::from_str(yaml).unwrap()
+        serde_yaml_ng::from_str(yaml).unwrap()
     }
 
     fn resources(cpu: &str, memory: &str) -> Resources {

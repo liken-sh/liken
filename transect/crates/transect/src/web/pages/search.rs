@@ -102,7 +102,7 @@ mod tests {
     fn model() -> Model {
         let mut snapshot = fixture::snapshot();
         snapshot.pods.push(Arc::new(
-            serde_yaml::from_str(
+            serde_yaml_ng::from_str(
                 "metadata: {namespace: acme-ops, name: crashing-pod, uid: crashing-pod}
 spec: {containers: [{name: main}]}
 status:
@@ -112,7 +112,7 @@ status:
             .unwrap(),
         ));
         snapshot.nodes[0] = Arc::new(
-            serde_yaml::from_str(
+            serde_yaml_ng::from_str(
                 "metadata: {name: node-alpha}
 status: {conditions: [{type: Ready, status: 'False'}]}",
             )

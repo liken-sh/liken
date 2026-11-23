@@ -56,7 +56,7 @@ pub struct Written {
     #[serde(default)]
     wires: Vec<wire::Written>,
     align: Option<String>,
-    roles: Option<serde_yaml::Value>,
+    roles: Option<serde_yaml_ng::Value>,
 }
 
 /// The elevations of `written`, which place the roles named in

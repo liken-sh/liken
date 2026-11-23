@@ -99,7 +99,7 @@ mod tests {
 
     fn pod(name: &str) -> Arc<Pod> {
         let text = format!("metadata: {{namespace: shop, name: {name}}}");
-        Arc::new(serde_yaml::from_str(&text).unwrap())
+        Arc::new(serde_yaml_ng::from_str(&text).unwrap())
     }
 
     fn pods() -> Vec<Arc<Pod>> {

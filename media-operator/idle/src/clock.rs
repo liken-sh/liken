@@ -14,7 +14,7 @@ pub struct Time {
 }
 
 pub fn now() -> Time {
-    let now = jiff::Zoned::now();
+    let now = jiff::ZonedDateTime::now();
     Time {
         hour: now.hour() as u8,
         minute: now.minute() as u8,
@@ -25,7 +25,7 @@ pub fn now() -> Time {
 /// minute. The screen's own clock counts from its first frame, so the screen
 /// needs this to schedule the frame at the minute turn.
 pub fn into_minute() -> f64 {
-    let now = jiff::Zoned::now();
+    let now = jiff::ZonedDateTime::now();
     f64::from(now.second()) + f64::from(now.subsec_nanosecond()) / 1e9
 }
 

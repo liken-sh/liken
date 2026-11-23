@@ -52,8 +52,8 @@ struct Spec {
 
 /// Returns the `IngressController` in `value`, or an error message
 /// that says which field is invalid.
-pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<IngressController, String> {
-    let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
+pub fn parse(doc: DocId, value: serde_yaml_ng::Value) -> Result<IngressController, String> {
+    let document: Document = serde_yaml_ng::from_value(value).map_err(|error| error.to_string())?;
     let spec = document.spec;
     if spec.controller.trim().is_empty() {
         return Err("spec.controller is empty, and must name an IngressClass controller".into());
@@ -78,7 +78,7 @@ pub mod fixtures {
     /// An `IngressController` named `proxy` with `spec`.
     pub fn controller(spec: &str) -> IngressController {
         let text = format!("metadata: {{name: proxy}}\nspec: {spec}\n");
-        parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap()
+        parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap()).unwrap()
     }
 }
 
@@ -90,7 +90,7 @@ mod tests {
 
     fn read(spec: &str) -> Result<IngressController, String> {
         let text = format!("metadata: {{name: proxy}}\nspec: {spec}\n");
-        parse(DocId::default(), serde_yaml::from_str(&text).unwrap())
+        parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap())
     }
 
     #[rstest]

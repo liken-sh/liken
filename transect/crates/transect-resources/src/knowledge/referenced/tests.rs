@@ -28,7 +28,7 @@ fn ingress(name: &str) -> Object {
 }
 
 fn meta(annotation: &str) -> ObjectMeta {
-    serde_yaml::from_str(&format!(
+    serde_yaml_ng::from_str(&format!(
         "{{annotations: {{example.com/gates: '{annotation}'}}}}"
     ))
     .unwrap()
@@ -100,7 +100,7 @@ fn issued(annotation: &str) -> Vec<(String, String, Option<Duty>)> {
         issuer("ops", "internal"),
         issuer("ops", "public"),
     ];
-    let meta: ObjectMeta = serde_yaml::from_str(&format!(
+    let meta: ObjectMeta = serde_yaml_ng::from_str(&format!(
         "{{annotations: {{certs.example.com/issuer: '{annotation}'}}}}"
     ))
     .unwrap();

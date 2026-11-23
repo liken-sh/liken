@@ -17,7 +17,7 @@ use super::{Pattern, Source, definitions};
 struct Written {
     name: String,
     #[serde(default)]
-    roles: serde_yaml::Mapping,
+    roles: serde_yaml_ng::Mapping,
 }
 
 /// One role of `pattern.roles`, which names an entry of `references`.
@@ -29,9 +29,9 @@ struct WrittenRole {
 
 /// The pattern that `written`, a document's `pattern`, fills from
 /// `references`, the document's own. The error names the first fault.
-pub fn fill(written: serde_yaml::Value, references: &[Reference]) -> Result<Pattern, String> {
+pub fn fill(written: serde_yaml_ng::Value, references: &[Reference]) -> Result<Pattern, String> {
     let written: Written =
-        serde_yaml::from_value(written).map_err(|error| format!("pattern: {error}"))?;
+        serde_yaml_ng::from_value(written).map_err(|error| format!("pattern: {error}"))?;
     let Some(definition) = definitions().iter().find(|d| d.name == written.name) else {
         let names: Vec<&str> = definitions().iter().map(|d| d.name.as_str()).collect();
         return Err(format!(
@@ -52,7 +52,7 @@ pub fn fill(written: serde_yaml::Value, references: &[Reference]) -> Result<Patt
                 definition.name
             ));
         };
-        let role: WrittenRole = serde_yaml::from_value(fields.into()).map_err(|error| {
+        let role: WrittenRole = serde_yaml_ng::from_value(fields.into()).map_err(|error| {
             format!("pattern.roles.{name}: {error}, and a role of a pattern has only reference")
         })?;
         let path = role.reference;

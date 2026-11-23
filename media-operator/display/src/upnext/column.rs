@@ -6,7 +6,7 @@
 //! on the card, because the column is read from across the room.
 
 use iced::{Color, Point, Rectangle, Size};
-use jiff::Zoned;
+use jiff::ZonedDateTime;
 
 use super::{Art, Offer, ends_at};
 use crate::canvas::{Anchor, Brush, Canvas, Line, clip};
@@ -46,7 +46,7 @@ pub(super) fn draw(
     offer: &Offer,
     focused: bool,
     art: &dyn Art,
-    now: &Zoned,
+    now: &ZonedDateTime,
 ) {
     let canvas = brush.canvas();
     let x = left(&canvas);
@@ -84,7 +84,7 @@ fn centred(canvas: &Canvas, plate: Rectangle, size: Size) -> Rectangle {
 
 /// The lines under the art, each clipped to the column's width. A field the
 /// offer does not have draws no line, and the other lines keep their rows.
-fn lines(canvas: &Canvas, offer: &Offer, now: &Zoned) -> Vec<Line> {
+fn lines(canvas: &Canvas, offer: &Offer, now: &ZonedDateTime) -> Vec<Line> {
     let x = left(canvas);
     let room = ART.width;
     let line = |text: &str, y: f32, size: f32, color: Color| {
@@ -147,7 +147,7 @@ mod tests {
     }
 
     /// 1970-01-01 22:30 UTC.
-    fn evening() -> jiff::Zoned {
+    fn evening() -> jiff::ZonedDateTime {
         crate::clock::at(22 * 3600 + 30 * 60)
     }
 

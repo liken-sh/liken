@@ -180,7 +180,7 @@ mod tests {
         machine: &str,
         phase: &str,
     ) -> Pod {
-        let mut pod: Pod = serde_yaml::from_str(&format!(
+        let mut pod: Pod = serde_yaml_ng::from_str(&format!(
             "spec: {{nodeName: {machine}, containers: []}}\nstatus: {{phase: {phase}}}"
         ))
         .unwrap();

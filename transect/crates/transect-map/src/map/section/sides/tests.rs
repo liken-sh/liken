@@ -284,7 +284,8 @@ fn said(database: &str, worker: &str) -> Intents {
     let meta = |name: &str,
                 annotations: &str|
      -> k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
-        serde_yaml::from_str(&format!("{{name: {name}, annotations: {{{annotations}}}}}")).unwrap()
+        serde_yaml_ng::from_str(&format!("{{name: {name}, annotations: {{{annotations}}}}}"))
+            .unwrap()
     };
     let (database_meta, worker_meta) = (meta("database", database), meta("worker", worker));
     let objects = [

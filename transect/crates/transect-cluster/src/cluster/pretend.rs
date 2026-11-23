@@ -63,7 +63,7 @@ mod tests {
 
     fn node(name: &str) -> Arc<Node> {
         Arc::new(
-            serde_yaml::from_str(&format!(
+            serde_yaml_ng::from_str(&format!(
                 "{{metadata: {{name: {name}}}, status: {{conditions: [{{type: Ready, status: 'True'}}, {{type: DiskPressure, status: 'False'}}]}}}}"
             ))
             .unwrap(),

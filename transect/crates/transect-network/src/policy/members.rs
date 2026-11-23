@@ -196,7 +196,7 @@ mod tests {
     /// A running pod of the `StatefulSet` `db`, with the label that names
     /// the pod itself.
     fn replica(name: &str) -> Pod {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: {name}, labels: {{app: db, statefulset.kubernetes.io/pod-name: {name}}},
   ownerReferences: [{{apiVersion: apps/v1, kind: StatefulSet, name: db, uid: db, controller: true}}]}}
 status: {{phase: Running}}"
@@ -205,7 +205,7 @@ status: {{phase: Running}}"
     }
 
     fn policy(selector: &str) -> NetworkPolicy {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: p}}\nspec: {{podSelector: {selector}}}"
         ))
         .unwrap()
@@ -223,7 +223,8 @@ status: {{phase: Running}}"
         #[case] count: usize,
     ) {
         let pods = [replica("db-0"), replica("db-1")];
-        let set: ObjectMeta = serde_yaml::from_str("{namespace: shop, name: db, uid: db}").unwrap();
+        let set: ObjectMeta =
+            serde_yaml_ng::from_str("{namespace: shop, name: db, uid: db}").unwrap();
         let entries = pods.iter().map(|pod| Entry {
             group: "",
             kind: "Pod",

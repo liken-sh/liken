@@ -113,7 +113,7 @@ mod tests {
 
     fn pod(spec: &str) -> Pod {
         let text = format!("{{metadata: {{namespace: shop, name: web-1}}, spec: {spec}}}");
-        serde_yaml::from_str(&text).unwrap()
+        serde_yaml_ng::from_str(&text).unwrap()
     }
 
     #[rstest]
@@ -137,7 +137,7 @@ mod tests {
     #[test]
     fn a_finished_pod_is_not_read() {
         let mut finished = pod("{containers: [{name: main}]}");
-        finished.status = serde_yaml::from_str("{phase: Succeeded}").unwrap();
+        finished.status = serde_yaml_ng::from_str("{phase: Succeeded}").unwrap();
         assert_eq!(Running::read(&finished), None);
     }
 }

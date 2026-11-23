@@ -139,7 +139,7 @@ mod tests {
         let text = format!(
             "apiVersion: example.io/v1\nkind: Widget\nmetadata: {{name: a, namespace: shop, {meta}}}\nstatus: {status}"
         );
-        let mut object: DynamicObject = serde_yaml::from_str(&text).unwrap();
+        let mut object: DynamicObject = serde_yaml_ng::from_str(&text).unwrap();
         trim::conditions_and_columns(&mut object, &[], &[]);
         object
     }
@@ -222,7 +222,7 @@ mod tests {
 
     /// A `Job` as a metadata-only store holds it, parsed from `yaml`.
     fn job(yaml: &str) -> PartialObjectMeta<Job> {
-        let mut job: PartialObjectMeta<Job> = serde_yaml::from_str(yaml).unwrap();
+        let mut job: PartialObjectMeta<Job> = serde_yaml_ng::from_str(yaml).unwrap();
         trim::meta(&mut job.metadata);
         job
     }

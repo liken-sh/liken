@@ -11,7 +11,7 @@ use super::*;
 use transect_observe::health::{Kind, Reason, Workload};
 
 fn yaml<K: DeserializeOwned>(text: &str) -> K {
-    serde_yaml::from_str(text).unwrap()
+    serde_yaml_ng::from_str(text).unwrap()
 }
 
 fn deployment(name: &str, replicas: i32, template: &str) -> Arc<Deployment> {

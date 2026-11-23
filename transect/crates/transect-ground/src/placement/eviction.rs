@@ -63,7 +63,7 @@ mod tests {
     use super::*;
 
     fn spec(tolerations: &str) -> PodSpec {
-        serde_yaml::from_str(&format!("{{containers: [], tolerations: {tolerations}}}")).unwrap()
+        serde_yaml_ng::from_str(&format!("{{containers: [], tolerations: {tolerations}}}")).unwrap()
     }
 
     const DEFAULTS: &str = "[{key: node.kubernetes.io/not-ready, operator: Exists, effect: NoExecute, tolerationSeconds: 300}, {key: node.kubernetes.io/unreachable, operator: Exists, effect: NoExecute, tolerationSeconds: 300}]";

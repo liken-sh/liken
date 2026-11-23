@@ -167,7 +167,7 @@ mod tests {
     use super::*;
 
     fn candidate(name: &str, container: &str, image: &str, command: &str) -> Candidate {
-        let pod: Pod = serde_yaml::from_str(&format!(
+        let pod: Pod = serde_yaml_ng::from_str(&format!(
             "{{spec: {{serviceAccountName: {name}, containers: [{{name: {container}, image: '{image}', command: ['{command}']}}]}}}}"
         ))
         .unwrap();

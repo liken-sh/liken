@@ -105,14 +105,14 @@ mod tests {
         let text = format!(
             "{{metadata: {{name: pv-{dsm}}}, spec: {{csi: {{driver: {driver}, volumeHandle: a, volumeAttributes: {{dsm: {dsm}}}}}}}}}"
         );
-        Arc::new(serde_yaml::from_str(&text).unwrap())
+        Arc::new(serde_yaml_ng::from_str(&text).unwrap())
     }
 
     fn class(driver: &str, dsm: &str) -> Arc<StorageClass> {
         let text = format!(
             "{{metadata: {{name: sc-{dsm}}}, provisioner: {driver}, parameters: {{dsm: {dsm}}}}}"
         );
-        Arc::new(serde_yaml::from_str(&text).unwrap())
+        Arc::new(serde_yaml_ng::from_str(&text).unwrap())
     }
 
     #[rstest]

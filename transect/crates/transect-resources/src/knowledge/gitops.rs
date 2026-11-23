@@ -422,7 +422,7 @@ mod tests {
         let text = format!("metadata: {{name: trees.apply.example.test}}\nspec: {spec}\n");
         let found = super::super::parse(
             crate::resources::DocId::default(),
-            serde_yaml::from_str(&text).unwrap(),
+            serde_yaml_ng::from_str(&text).unwrap(),
         )
         .unwrap_err();
         assert!(found.contains(error), "{found}");

@@ -38,7 +38,7 @@ struct Shop {
 fn shop() -> Shop {
     let services: Vec<Arc<Service>> = vec![service("shop", "db", "{app: db}")];
     let nodes: Vec<Arc<Node>> = vec![Arc::new(
-        serde_yaml::from_str("metadata: {name: alpha}").unwrap(),
+        serde_yaml_ng::from_str("metadata: {name: alpha}").unwrap(),
     )];
     let addresses = Addresses::build(&services, &[], &nodes, "cluster.local");
     let db = deployment("db");
@@ -109,7 +109,7 @@ impl Shop {
             watched: &self.watched,
             reading: &reading,
         };
-        let data = serde_yaml::from_str(yaml).unwrap();
+        let data = serde_yaml_ng::from_str(yaml).unwrap();
         let edges = guesses(kinds, &widget(), &data, &lookup, &self.graph);
         assert!(edges.iter().all(|e| e.guessed && e.kind == Kind::DependsOn));
         edges

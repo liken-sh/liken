@@ -152,7 +152,7 @@ mod tests {
 
     /// A running pod, `web-0` of the `StatefulSet` `shop/web`.
     fn pods() -> Vec<Arc<Pod>> {
-        let pod = serde_yaml::from_str("metadata: {namespace: shop, name: web-0}").unwrap();
+        let pod = serde_yaml_ng::from_str("metadata: {namespace: shop, name: web-0}").unwrap();
         vec![Arc::new(pod)]
     }
 

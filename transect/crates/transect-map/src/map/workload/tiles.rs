@@ -117,7 +117,7 @@ mod tests {
     use transect_observe::usage::fixtures::sample;
 
     fn pod(name: &str, phase: &str, ready: bool) -> Pod {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             r#"
 metadata: {{namespace: shop, name: {name}, labels: {{pod-template-hash: 5d8f}}}}
 spec:

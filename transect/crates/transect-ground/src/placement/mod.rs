@@ -196,12 +196,12 @@ mod tests {
     use super::*;
 
     fn template(yaml: &str) -> PodSpec {
-        serde_yaml::from_str(&format!("{{containers: [], {yaml}}}")).unwrap()
+        serde_yaml_ng::from_str(&format!("{{containers: [], {yaml}}}")).unwrap()
     }
 
     /// A machine named `web-1` with `labels` and `taints`, as YAML.
     fn node(labels: &str, taints: &str) -> Node {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{name: web-1, labels: {labels}}}\nspec: {{taints: {taints}}}"
         ))
         .unwrap()

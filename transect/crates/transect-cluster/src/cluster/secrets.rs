@@ -93,7 +93,7 @@ mod tests {
 
     #[rstest]
     fn removes_every_annotation_but_transects() {
-        let mut meta: ObjectMeta = serde_yaml::from_str(
+        let mut meta: ObjectMeta = serde_yaml_ng::from_str(
             "{name: login, annotations: {transect.liken.sh/depends-on: db, kubectl.kubernetes.io/last-applied-configuration: '{\"data\": {}}', example.com/note: x}}",
         )
         .unwrap();

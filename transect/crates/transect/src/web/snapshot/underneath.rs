@@ -105,7 +105,7 @@ mod tests {
     fn namespaced() -> Snapshot {
         let mut snapshot = Snapshot::empty();
         snapshot.nodes = vec![Arc::new(
-            serde_yaml::from_str("{metadata: {name: node-beta}}").unwrap(),
+            serde_yaml_ng::from_str("{metadata: {name: node-beta}}").unwrap(),
         )];
         let resource = kube::api::ApiResource {
             group: "hosts.example.test".into(),
@@ -114,7 +114,7 @@ mod tests {
             kind: "Host".into(),
             plural: "hosts".into(),
         };
-        let host: Custom = serde_yaml::from_str(
+        let host: Custom = serde_yaml_ng::from_str(
             "{apiVersion: hosts.example.test/v1, kind: Host, metadata: {namespace: racks, name: rack-2}, status: {nodeRef: {name: node-beta}}}",
         )
         .unwrap();

@@ -26,7 +26,7 @@ pub struct Look {
 struct Written {
     label: Option<String>,
     shape: Option<String>,
-    expected: Option<serde_yaml::Value>,
+    expected: Option<serde_yaml_ng::Value>,
     #[serde(default)]
     reads: Vec<WrittenColumn>,
     #[serde(default)]
@@ -42,7 +42,7 @@ struct Written {
 #[serde(untagged)]
 enum WrittenColumn {
     Name(String),
-    Through(serde_yaml::Mapping),
+    Through(serde_yaml_ng::Mapping),
 }
 
 #[derive(Deserialize)]
@@ -64,9 +64,9 @@ enum WrittenShow {
 /// The look of a role whose other fields `written` has, checked against
 /// `references`, the references of the page's own object that `shows`
 /// can follow.
-pub fn read(written: serde_yaml::Mapping, references: &[Reference]) -> Result<Look, String> {
+pub fn read(written: serde_yaml_ng::Mapping, references: &[Reference]) -> Result<Look, String> {
     let written: Written =
-        serde_yaml::from_value(written.into()).map_err(|error| error.to_string())?;
+        serde_yaml_ng::from_value(written.into()).map_err(|error| error.to_string())?;
     if written
         .label
         .as_deref()
@@ -112,7 +112,7 @@ fn column(written: WrittenColumn) -> Result<Column, String> {
             through: None,
         },
         WrittenColumn::Through(map) => {
-            let written: WrittenThrough = serde_yaml::from_value(map.into())
+            let written: WrittenThrough = serde_yaml_ng::from_value(map.into())
                 .map_err(|error| format!("a column with through: {error}"))?;
             Column {
                 name: written.column,
@@ -129,18 +129,20 @@ fn columns(written: Vec<WrittenColumn>) -> Result<Vec<Column>, String> {
 
 /// `expected`, as written: `true`, `false`, or `{while: <condition
 /// type>}`.
-fn expected(written: serde_yaml::Value) -> Result<Expected, String> {
+fn expected(written: serde_yaml_ng::Value) -> Result<Expected, String> {
     let fault = || {
         format!(
             "expected is {}, and it is true, false, or {{while: <condition type>}}",
-            serde_yaml::to_string(&written).unwrap_or_default().trim()
+            serde_yaml_ng::to_string(&written)
+                .unwrap_or_default()
+                .trim()
         )
     };
     match &written {
-        serde_yaml::Value::Bool(true) => Ok(Expected::Always),
-        serde_yaml::Value::Bool(false) => Ok(Expected::Never),
-        serde_yaml::Value::Mapping(map) if map.len() == 1 => {
-            let condition = map.get("while").and_then(serde_yaml::Value::as_str);
+        serde_yaml_ng::Value::Bool(true) => Ok(Expected::Always),
+        serde_yaml_ng::Value::Bool(false) => Ok(Expected::Never),
+        serde_yaml_ng::Value::Mapping(map) if map.len() == 1 => {
+            let condition = map.get("while").and_then(serde_yaml_ng::Value::as_str);
             let condition = condition.filter(|condition| !condition.trim().is_empty());
             condition
                 .map(|c| Expected::While(c.into()))

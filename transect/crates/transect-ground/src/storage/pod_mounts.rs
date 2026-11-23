@@ -185,7 +185,7 @@ mod tests {
     use crate::storage::{Backend, Type};
 
     fn pod(name: &str, spec: &str) -> Pod {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: {name}}}\nspec: {spec}"
         ))
         .unwrap()

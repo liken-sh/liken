@@ -62,7 +62,7 @@ fn reach(relation: &Relation) -> Reached {
 /// have pages, and nothing else does.
 fn board(card: Option<WorkloadCard>) -> KnownPage {
     let known = knowledge("jukeboxes.widgets.example.com", SPEC);
-    let data = serde_yaml::from_str(JUKEBOX).unwrap();
+    let data = serde_yaml_ng::from_str(JUKEBOX).unwrap();
     let relations = knowledge::relations(
         &known,
         &jukebox(),

@@ -9,7 +9,7 @@ use super::*;
 use crate::ownership::Entry;
 
 fn yaml<K: DeserializeOwned>(text: &str) -> Arc<K> {
-    Arc::new(serde_yaml::from_str(text).unwrap())
+    Arc::new(serde_yaml_ng::from_str(text).unwrap())
 }
 
 /// A pod in `shop` with the given readiness and phase. `owner` is the

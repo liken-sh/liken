@@ -180,7 +180,7 @@ pub mod fixtures {
     /// `ConfigMap`s. Every plain value contains `plain-value`, so a test
     /// can check that none of them reaches the output.
     pub fn spec() -> PodSpec {
-        serde_yaml::from_str(
+        serde_yaml_ng::from_str(
             r#"
 containers:
   - name: app

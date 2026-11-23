@@ -4,7 +4,7 @@
 //! a piece placed against both edges stretches with the part.
 
 use serde::Deserialize;
-use serde_yaml::Value;
+use serde_yaml_ng::Value;
 
 use super::length::Length;
 
@@ -223,7 +223,7 @@ mod tests {
     use super::*;
 
     fn place(text: &str) -> Result<Place, String> {
-        Place::read(serde_yaml::from_str(text).unwrap(), "at")
+        Place::read(serde_yaml_ng::from_str(text).unwrap(), "at")
     }
 
     #[rstest]
@@ -268,7 +268,7 @@ mod tests {
     #[rstest]
     fn refuses_a_field_a_place_does_not_have() {
         let written: Result<Written, _> =
-            serde_yaml::from_str("{left: 0, width: 1, top: 0, height: 1, z: 2}");
+            serde_yaml_ng::from_str("{left: 0, width: 1, top: 0, height: 1, z: 2}");
         assert!(written.is_err());
     }
 

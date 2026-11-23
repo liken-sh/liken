@@ -68,7 +68,7 @@ mod tests {
 
     /// The ownership of one `Deployment`, `web` in `shop`.
     fn ownership() -> Ownership {
-        let meta = serde_yaml::from_str("{namespace: shop, name: web, uid: web}").unwrap();
+        let meta = serde_yaml_ng::from_str("{namespace: shop, name: web, uid: web}").unwrap();
         Ownership::build([Entry {
             group: "apps",
             kind: "Deployment",

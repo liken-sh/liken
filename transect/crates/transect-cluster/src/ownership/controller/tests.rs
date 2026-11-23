@@ -9,7 +9,7 @@ use crate::ownership::fixtures::meta;
 use transect_resources::knowledge::fixtures::knowledge;
 
 fn yaml<K: DeserializeOwned>(text: &str) -> K {
-    serde_yaml::from_str(text).unwrap()
+    serde_yaml_ng::from_str(text).unwrap()
 }
 
 /// A cluster with one `Cache` in `shop` that owns a `StatefulSet`, and

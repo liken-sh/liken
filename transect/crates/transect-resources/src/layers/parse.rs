@@ -26,8 +26,8 @@ struct LayersSpec {
 /// The layers listed in a `Layers` document, in document order from top
 /// to bottom, or an error message if the document is invalid.  A layer
 /// name used twice and an invalid namespace selector are invalid.
-pub fn parse(value: serde_yaml::Value) -> Result<Vec<Layer>, String> {
-    let layers = serde_yaml::from_value::<LayersDocument>(value)
+pub fn parse(value: serde_yaml_ng::Value) -> Result<Vec<Layer>, String> {
+    let layers = serde_yaml_ng::from_value::<LayersDocument>(value)
         .map_err(|error| error.to_string())?
         .spec
         .layers;
@@ -58,8 +58,8 @@ mod tests {
 
     use super::*;
 
-    fn value(text: &str) -> serde_yaml::Value {
-        serde_yaml::from_str(text).unwrap()
+    fn value(text: &str) -> serde_yaml_ng::Value {
+        serde_yaml_ng::from_str(text).unwrap()
     }
 
     #[rstest]

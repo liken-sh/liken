@@ -120,7 +120,7 @@ mod tests {
     }
 
     fn pod(name: &str, c: char) -> Pod {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: {name}}}\n\
              spec: {{containers: [{{name: app, image: 'registry.example/team/app:1'}}]}}\n\
              status: {{containerStatuses: [{{name: app, ready: true, restartCount: 0, image: app, imageID: 'registry.example/team/app@{}'}}]}}",

@@ -112,7 +112,7 @@ fn lists_each_guard_and_how_it_holds(
 fn deployment(template: &str) -> Arc<Deployment> {
     let template: Vec<String> = template.lines().map(|line| format!("    {line}")).collect();
     Arc::new(
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: web}}\nspec:\n  replicas: 3\n  selector: {{}}\n  template:\n{}",
             template.join("\n")
         ))
@@ -122,7 +122,7 @@ fn deployment(template: &str) -> Arc<Deployment> {
 
 fn budget_for(app: &str) -> Arc<PodDisruptionBudget> {
     Arc::new(
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "{{metadata: {{namespace: shop, name: {app}}}, spec: {{selector: {{matchLabels: {{app: {app}}}}}, maxUnavailable: 1}}, status: {{disruptionsAllowed: 1, currentHealthy: 3, desiredHealthy: 2, expectedPods: 3}}}}"
         ))
         .unwrap(),
@@ -134,7 +134,7 @@ fn budget_for(app: &str) -> Arc<PodDisruptionBudget> {
 fn services() -> Vec<Arc<Service>> {
     let service = |name: &str, spec: &str| -> Arc<Service> {
         Arc::new(
-            serde_yaml::from_str(&format!(
+            serde_yaml_ng::from_str(&format!(
                 "{{metadata: {{namespace: shop, name: {name}}}, spec: {spec}}}"
             ))
             .unwrap(),

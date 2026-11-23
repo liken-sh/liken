@@ -352,7 +352,7 @@ mod tests {
         let text = format!(
             "{{metadata: {{namespace: auth, name: {name}}}, spec: {{rules: [{{host: {host}, http: {{paths: [{{path: /, pathType: Prefix, backend: {{service: {{name: {service}, port: {{number: 80}}}}}}}}]}}}}]}}}}"
         );
-        Arc::new(serde_yaml::from_str(&text).unwrap())
+        Arc::new(serde_yaml_ng::from_str(&text).unwrap())
     }
 
     fn workload(name: &str) -> Object {

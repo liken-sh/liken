@@ -121,8 +121,8 @@ struct Spec {
 
 /// The `RegistryMirror` that `value` declares, or why `value` is not
 /// valid.
-pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<RegistryMirror, String> {
-    let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
+pub fn parse(doc: DocId, value: serde_yaml_ng::Value) -> Result<RegistryMirror, String> {
+    let document: Document = serde_yaml_ng::from_value(value).map_err(|error| error.to_string())?;
     let host = document.spec.host.trim().to_ascii_lowercase();
     if host.is_empty() {
         return Err("host is empty".into());
@@ -183,7 +183,7 @@ mod tests {
     #[rstest]
     fn reads_a_resource() {
         let text = "metadata: {name: images}\nspec: {host: Images.Example, mirror: api-server}\n";
-        let found = parse(DocId::default(), serde_yaml::from_str(text).unwrap()).unwrap();
+        let found = parse(DocId::default(), serde_yaml_ng::from_str(text).unwrap()).unwrap();
         assert_eq!(
             (found.host.as_str(), found.mirror),
             ("images.example", Mirror::ApiServer)

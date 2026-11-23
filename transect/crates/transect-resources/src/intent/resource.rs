@@ -77,9 +77,9 @@ struct Metadata {
 }
 
 impl Intent {
-    pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<Self, String> {
+    pub fn parse(doc: DocId, value: serde_yaml_ng::Value) -> Result<Self, String> {
         let document: Document =
-            serde_yaml::from_value(value).map_err(|error| error.to_string())?;
+            serde_yaml_ng::from_value(value).map_err(|error| error.to_string())?;
         let namespace = document
             .metadata
             .namespace
@@ -187,7 +187,7 @@ pub mod fixtures {
     /// An `Intent` called `name` in the namespace `shop`, with `spec`.
     pub fn intent(name: &str, spec: &str) -> Intent {
         let text = format!("metadata: {{namespace: shop, name: {name}}}\nspec: {spec}");
-        Intent::parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap()
+        Intent::parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap()).unwrap()
     }
 }
 
@@ -265,7 +265,7 @@ mod tests {
         "metadata: {namespace: shop, name: db}\nspec: {selects: [{resource: deployments, name: db}], wyh: typo}"
     )]
     fn refuses(#[case] text: &str) {
-        let value = serde_yaml::from_str(text).unwrap();
+        let value = serde_yaml_ng::from_str(text).unwrap();
         assert!(Intent::parse(DocId::default(), value).is_err());
     }
 }

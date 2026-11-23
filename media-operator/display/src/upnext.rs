@@ -6,7 +6,7 @@
 //! to start the next work.
 
 use iced::{Point, Rectangle, Size};
-use jiff::Zoned;
+use jiff::ZonedDateTime;
 use serde_json::Value;
 
 mod column;
@@ -101,7 +101,7 @@ pub trait Art {
 /// at `now`, such as "46m · ends at 11:15 pm". Under a minute, the line
 /// is the end time alone. Returns `None` when the offer has no
 /// `remaining`. The card and the column both draw this line.
-fn ends_at(offer: &Offer, now: &Zoned) -> Option<String> {
+fn ends_at(offer: &Offer, now: &ZonedDateTime) -> Option<String> {
     let seconds = offer.remaining?;
     let ends = clock::reading(&now.saturating_add(jiff::Span::new().seconds(seconds)));
     Some(match clock::runtime(seconds) {
@@ -461,7 +461,7 @@ impl UpNext {
     /// The text rows of the card, each clipped to the width inside the
     /// padding: `reason`, `title`, `detail`, and the end time computed
     /// from the wall clock `now`.
-    fn card_lines(&self, canvas: &Canvas, now: &Zoned) -> Vec<Line> {
+    fn card_lines(&self, canvas: &Canvas, now: &ZonedDateTime) -> Vec<Line> {
         let Some(offer) = self.offer.as_ref() else {
             return Vec::new();
         };
@@ -534,7 +534,7 @@ impl UpNext {
     }
 
     /// The card: the art above the text rows.
-    fn card(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art, now: &Zoned) {
+    fn card(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art, now: &ZonedDateTime) {
         let canvas = brush.canvas();
         let box_ = self.card_box(&canvas);
         if focused {
@@ -565,7 +565,7 @@ impl UpNext {
     /// as the card after it, with the OSD's fade. The OSD draws nothing
     /// for a taken offer, which fades on its own clock, or for a
     /// stepped-back film, which has the column.
-    pub fn draw(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art, now: &Zoned) {
+    pub fn draw(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art, now: &ZonedDateTime) {
         if self.chip_showing() {
             self.chip(brush, focused);
         } else if self.offer.is_some() && !self.waiting && !self.stepped {
@@ -592,7 +592,7 @@ impl UpNext {
         osd_visible: bool,
         focused: bool,
         art: &dyn Art,
-        now: &Zoned,
+        now: &ZonedDateTime,
     ) {
         if !self.draws_outside(osd_visible) {
             return;
@@ -624,7 +624,13 @@ impl UpNext {
 
     /// Draws the column with its own fade, whether or not the OSD is
     /// showing.
-    fn draw_column(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art, now: &Zoned) {
+    fn draw_column(
+        &self,
+        brush: &mut Brush<'_>,
+        focused: bool,
+        art: &dyn Art,
+        now: &ZonedDateTime,
+    ) {
         let Some(offer) = self.offer.as_ref() else {
             return;
         };
@@ -681,7 +687,7 @@ mod tests {
 
     /// 1970-01-01 22:30 UTC, the wall clock for most tests of the card's
     /// lines.
-    fn evening() -> Zoned {
+    fn evening() -> ZonedDateTime {
         crate::clock::at(22 * 3600 + 30 * 60)
     }
 

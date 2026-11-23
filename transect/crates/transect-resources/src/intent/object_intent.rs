@@ -272,7 +272,7 @@ mod tests {
 
     fn meta(annotations: &str) -> ObjectMeta {
         let text = format!("{{name: web, namespace: shop, annotations: {{{annotations}}}}}");
-        serde_yaml::from_str(&text).unwrap()
+        serde_yaml_ng::from_str(&text).unwrap()
     }
 
     /// The intent of `web` and the messages of the conditions, when
@@ -467,7 +467,7 @@ mod tests {
         };
         let mut overlaid = Overlaid::new(Arc::new(vec![overlay]));
         let live: Arc<Deployment> =
-            Arc::new(serde_yaml::from_str("metadata: {name: web, namespace: shop}").unwrap());
+            Arc::new(serde_yaml_ng::from_str("metadata: {name: web, namespace: shop}").unwrap());
         let merged = overlaid.apply(vec![live]);
         let objects = [(web(), &merged[0].metadata)];
         let found = Intents::read(&objects, &[], &overlaid, &plurals());

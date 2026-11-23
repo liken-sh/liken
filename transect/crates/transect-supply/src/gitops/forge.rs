@@ -281,9 +281,9 @@ spec: {hosts: [git.tilde.example], tree: '{repository}/tree/{ref}/item/{path}', 
 metadata: {name: at}
 spec: {hosts: [at.example], tree: '{repository}/tree/{ref}/{path}', commit: '{repository}/commit/{sha}'}
 "#;
-        let layouts: Vec<_> = serde_yaml::Deserializer::from_str(layouts)
+        let layouts: Vec<_> = serde_yaml_ng::Deserializer::from_str(layouts)
             .map(|document| {
-                let value = <serde_yaml::Value as serde::Deserialize>::deserialize(document);
+                let value = <serde_yaml_ng::Value as serde::Deserialize>::deserialize(document);
                 crate::forge::parse(
                     transect_resources::resources::DocId::default(),
                     value.unwrap(),

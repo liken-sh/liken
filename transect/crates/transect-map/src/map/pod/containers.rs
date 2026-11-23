@@ -259,7 +259,7 @@ pub mod fixtures {
     /// A pod in shop named `name`, with `spec` and `status` as YAML flow
     /// mappings.
     pub fn pod(name: &str, spec: &str, status: &str) -> Pod {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: {name}}}\nspec: {spec}\nstatus: {status}"
         ))
         .unwrap()

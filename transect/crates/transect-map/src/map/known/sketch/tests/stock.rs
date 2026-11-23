@@ -114,7 +114,7 @@ pub fn room_page(room: &str, stock: &Stock, standing: Standing) -> KnownPage {
     let scoped = ClusterScoped::default();
     let read = |object: &Object, spec: &str| {
         let known = of(&object.kind);
-        let data = serde_yaml::from_str(&format!("{{spec: {spec}}}")).unwrap();
+        let data = serde_yaml_ng::from_str(&format!("{{spec: {spec}}}")).unwrap();
         knowledge::relations(known, object, &data, &scoped, &Matches::default())
     };
     let relations: Vec<(Object, Vec<Relation>)> = stock
@@ -139,7 +139,7 @@ pub fn room_page(room: &str, stock: &Stock, standing: Standing) -> KnownPage {
     };
     let ends = Ends {
         ladders: &stock.ladders,
-        stored: serde_yaml::from_str(
+        stored: serde_yaml_ng::from_str(
             "{apiVersion: stock.example.com/v1, kind: Ladder, metadata: {name: a}}",
         )
         .unwrap(),

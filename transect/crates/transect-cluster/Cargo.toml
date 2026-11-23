@@ -33,7 +33,7 @@ http-body-util.workspace = true
 hyper = { workspace = true, features = ["server"] }
 hyper-util = { workspace = true, features = ["server"] }
 rstest.workspace = true
-serde_yaml.workspace = true
+serde_yaml_ng.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 [lib]

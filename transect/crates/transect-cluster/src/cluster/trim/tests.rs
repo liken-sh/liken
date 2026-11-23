@@ -6,7 +6,7 @@ use rstest::rstest;
 use super::*;
 
 fn object_meta() -> ObjectMeta {
-    serde_yaml::from_str(
+    serde_yaml_ng::from_str(
         "{annotations: {kubectl.kubernetes.io/last-applied-configuration: '{}', note: kept}, managedFields: [{manager: kubectl, operation: Apply, fieldsType: FieldsV1, fieldsV1: {'f:spec': {}}}, {manager: operator, operation: Update, subresource: status, fieldsType: FieldsV1, fieldsV1: {'f:status': {}}}]}",
     )
     .unwrap()
@@ -47,7 +47,7 @@ fn trimmed_pod() -> Pod {
     let text = format!(
         "metadata: {{name: web-1}}\nspec: {SPEC}\nstatus: {{allocatedResources: {{cpu: '1'}}, containerStatuses: [{{name: web, image: web:1, imageID: 'sha256:1', ready: true, restartCount: 2, containerID: 'containerd://1', allocatedResources: {{cpu: '1'}}}}]}}"
     );
-    let mut found: Pod = serde_yaml::from_str(&text).unwrap();
+    let mut found: Pod = serde_yaml_ng::from_str(&text).unwrap();
     pod(&mut found);
     found
 }
@@ -85,7 +85,7 @@ fn running(meta: &str, status: &str) -> Pod {
     let text = format!(
         "metadata: {{name: job-1{meta}}}\nspec: {SPEC}\nstatus: {{phase: Running{status}}}"
     );
-    let mut found: Pod = serde_yaml::from_str(&text).unwrap();
+    let mut found: Pod = serde_yaml_ng::from_str(&text).unwrap();
     pod(&mut found);
     found
 }
@@ -136,10 +136,10 @@ fn keeps_what_a_container_may_do_on_its_machine(
     #[case] expected: Option<&str>,
 ) {
     let mut found: Container =
-        serde_yaml::from_str(&format!("{{name: web, securityContext: {context}}}")).unwrap();
+        serde_yaml_ng::from_str(&format!("{{name: web, securityContext: {context}}}")).unwrap();
     container(&mut found);
     let expected: Option<SecurityContext> =
-        expected.map(|text| serde_yaml::from_str(text).unwrap());
+        expected.map(|text| serde_yaml_ng::from_str(text).unwrap());
     assert_eq!(found.security_context, expected);
 }
 
@@ -147,7 +147,7 @@ fn keeps_what_a_container_may_do_on_its_machine(
 fn trims_a_workloads_pod_template() {
     let text =
         format!("metadata: {{name: web}}\nspec: {{selector: {{}}, template: {{spec: {SPEC}}}}}");
-    let mut found: Deployment = serde_yaml::from_str(&text).unwrap();
+    let mut found: Deployment = serde_yaml_ng::from_str(&text).unwrap();
     deployment(&mut found);
     let template = found.spec.template.spec.unwrap();
     let web = &template.containers[0];
@@ -159,7 +159,7 @@ fn trims_a_workloads_pod_template() {
 
 fn widget(yaml: &str) -> DynamicObject {
     let text = format!("apiVersion: example.io/v1\nkind: Widget\n{yaml}");
-    serde_yaml::from_str(&text).unwrap()
+    serde_yaml_ng::from_str(&text).unwrap()
 }
 
 fn column(name: &str, path: &str) -> Column {
@@ -220,7 +220,7 @@ fn keeps_the_metadata_of_an_unread_kind() {
 
 #[rstest]
 fn keeps_only_a_crds_top_description_and_columns() {
-    let mut crd: CustomResourceDefinition = serde_yaml::from_str(
+    let mut crd: CustomResourceDefinition = serde_yaml_ng::from_str(
         "metadata: {name: widgets.widgets.example.com}\n\
          spec: {group: widgets.example.com, scope: Namespaced, \
          names: {kind: Widget, plural: widgets}, versions: [{name: v1, served: true, \
@@ -244,12 +244,12 @@ fn keeps_only_a_crds_top_description_and_columns() {
 
 #[test]
 fn keeps_only_the_secrets_an_ephemeral_container_reads() {
-    let mut found: Pod = serde_yaml::from_str(
+    let mut found: Pod = serde_yaml_ng::from_str(
         "{metadata: {name: web-1}, spec: {containers: [{name: web}], ephemeralContainers: [{name: debug, image: busybox, stdin: true, env: [{name: A, valueFrom: {secretKeyRef: {name: api-token, key: a}}}], envFrom: [{secretRef: {name: db-login}}]}]}}",
     )
     .unwrap();
     pod(&mut found);
-    let expected: Vec<EphemeralContainer> = serde_yaml::from_str(
+    let expected: Vec<EphemeralContainer> = serde_yaml_ng::from_str(
         "[{name: debug, env: [{name: A, valueFrom: {secretKeyRef: {name: api-token, key: a}}}], envFrom: [{secretRef: {name: db-login}}]}]",
     )
     .unwrap();

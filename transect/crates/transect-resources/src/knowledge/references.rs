@@ -228,7 +228,7 @@ status:
 
     fn read(spec: &str) -> Vec<Relation> {
         let knowledge = knowledge("jukeboxes.widgets.example.com", spec);
-        let data: Value = serde_yaml::from_str(JUKEBOX).unwrap();
+        let data: Value = serde_yaml_ng::from_str(JUKEBOX).unwrap();
         relations(
             &knowledge,
             &jukebox(),
@@ -301,7 +301,7 @@ status:
             let namespace = namespace.map_or(String::new(), |n| format!(", namespace: {n}"));
             let text =
                 format!("metadata: {{name: {name}{namespace}}}\nstatus: {{address: '{address}'}}");
-            std::sync::Arc::new(serde_yaml::from_str(&text).unwrap())
+            std::sync::Arc::new(serde_yaml_ng::from_str(&text).unwrap())
         });
         let key = (
             "amps.example.com".to_string(),
@@ -354,7 +354,7 @@ status:
         #[case] expected: Vec<(Option<Kind>, Names)>,
     ) {
         let knowledge = knowledge("jukeboxes.widgets.example.com", spec);
-        let data: Value = serde_yaml::from_str(JUKEBOX).unwrap();
+        let data: Value = serde_yaml_ng::from_str(JUKEBOX).unwrap();
         let found = relations(&knowledge, &jukebox(), &data, &scoped(), &amps(amps_held));
         let read: Vec<(Option<Kind>, Names)> =
             found.into_iter().map(|r| (r.edge, r.names)).collect();
@@ -403,7 +403,7 @@ status:
     #[case::its_own_name("{writesSecret: metadata.name}", "front-room")]
     fn reads_the_secret_it_writes(#[case] spec: &str, #[case] secret: &str) {
         let knowledge = knowledge("jukeboxes.widgets.example.com", spec);
-        let data: Value = serde_yaml::from_str(JUKEBOX).unwrap();
+        let data: Value = serde_yaml_ng::from_str(JUKEBOX).unwrap();
         let found = written_secret(&knowledge, &jukebox(), &data).map(|r| r.names);
         assert_eq!(found, Some(object("", "Secret", Some("shop"), secret)));
     }

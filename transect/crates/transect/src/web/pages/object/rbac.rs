@@ -127,7 +127,7 @@ mod tests {
     #[case::named("{verbs: [update], apiGroups: [apps], resources: [deployments], resourceNames: [web]}", ["update", "apps", "deployments", "web"])]
     #[case::urls("{verbs: [get], nonResourceURLs: [/healthz]}", ["get", "none", "/healthz", "any"])]
     fn reads_each_rule_as_a_row(#[case] rule: &str, #[case] expected: [&str; 4]) {
-        let rule: PolicyRule = serde_yaml::from_str(rule).unwrap();
+        let rule: PolicyRule = serde_yaml_ng::from_str(rule).unwrap();
         assert_eq!(
             table(&[rule]).rows,
             vec![expected.map(String::from).to_vec()]

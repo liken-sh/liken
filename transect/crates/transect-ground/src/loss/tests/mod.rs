@@ -17,7 +17,7 @@ use transect_cluster::workloads::{Objects, Revisions};
 use transect_graph::edges::Graph;
 
 fn yaml<K: DeserializeOwned>(text: &str) -> Arc<K> {
-    Arc::new(serde_yaml::from_str(text).unwrap())
+    Arc::new(serde_yaml_ng::from_str(text).unwrap())
 }
 
 /// A ready, running pod in `shop` on `node`, controlled by `owner`,
@@ -96,7 +96,7 @@ struct Shop {
 /// `pod`, mounting the claim `claim`.
 fn mounting(pod: Arc<Pod>, claim: &str) -> Arc<Pod> {
     let mut pod = Arc::unwrap_or_clone(pod);
-    let volume = serde_yaml::from_str(&format!(
+    let volume = serde_yaml_ng::from_str(&format!(
         "{{name: data, persistentVolumeClaim: {{claimName: {claim}}}}}"
     ))
     .unwrap();

@@ -174,12 +174,12 @@ mod tests {
         let text = format!(
             "{{metadata: {{namespace: edge, name: {workload}-1, ownerReferences: [{{apiVersion: apps/v1, kind: Deployment, name: {workload}, uid: {workload}, controller: true}}]}}, spec: {{containers: [{{name: main, image: '{image}'}}]}}, status: {{phase: Running}}}}"
         );
-        Arc::new(serde_yaml::from_str(&text).unwrap())
+        Arc::new(serde_yaml_ng::from_str(&text).unwrap())
     }
 
     fn class(name: &str, controller: &str) -> Arc<IngressClass> {
         let text = format!("{{metadata: {{name: {name}}}, spec: {{controller: {controller}}}}}");
-        Arc::new(serde_yaml::from_str(&text).unwrap())
+        Arc::new(serde_yaml_ng::from_str(&text).unwrap())
     }
 
     /// A `Serving` where the class `web` has the controller

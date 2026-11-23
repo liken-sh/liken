@@ -41,8 +41,8 @@ struct Spec {
     disruptions: Option<String>,
     /// The field of the proof of concept that named the primary pod,
     /// read only to refuse it.
-    primary: Option<serde_yaml::Value>,
-    pattern: Option<serde_yaml::Value>,
+    primary: Option<serde_yaml_ng::Value>,
+    pattern: Option<serde_yaml_ng::Value>,
     docs: Option<String>,
     applies: Option<gitops::WrittenApplies>,
     #[serde(default)]
@@ -59,7 +59,7 @@ struct Spec {
     node: Option<String>,
     findings: Option<findings::Written>,
     shape: Option<String>,
-    roles: Option<serde_yaml::Mapping>,
+    roles: Option<serde_yaml_ng::Mapping>,
     #[serde(default)]
     elevations: Vec<elevation::Written>,
 }
@@ -119,8 +119,8 @@ struct Written {
     role: Option<String>,
 }
 
-pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<KindKnowledge, String> {
-    let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
+pub fn parse(doc: DocId, value: serde_yaml_ng::Value) -> Result<KindKnowledge, String> {
+    let document: Document = serde_yaml_ng::from_value(value).map_err(|error| error.to_string())?;
     let name = document.metadata.name;
     let (plural, group) = split_name(&name).ok_or_else(|| {
         format!("the name {name:?} is not <plural>.<group>, the form of a custom resource definition's name")

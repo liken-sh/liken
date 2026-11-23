@@ -43,7 +43,7 @@ pub fn default() -> Arc<Shape> {
 }
 
 fn load(file: &str, text: &str) -> Result<Shape, String> {
-    let value = serde_yaml::from_str(text).map_err(|error| format!("{file}: {error}"))?;
+    let value = serde_yaml_ng::from_str(text).map_err(|error| format!("{file}: {error}"))?;
     let shape = read(value, Origin::Library).map_err(|error| format!("{file}: {error}"))?;
     match file.strip_suffix(".yaml") == Some(shape.name.as_str()) {
         true => Ok(shape),

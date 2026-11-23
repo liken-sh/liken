@@ -135,7 +135,7 @@ mod tests {
     /// An IPv4 slice of `service` in shop, with `endpoints` in YAML.
     fn slice(service: &str, endpoints: &str) -> Arc<EndpointSlice> {
         Arc::new(
-            serde_yaml::from_str(&format!(
+            serde_yaml_ng::from_str(&format!(
                 "metadata: {{namespace: shop, name: {service}-x, labels: {{kubernetes.io/service-name: {service}}}}}\naddressType: IPv4\nendpoints: {endpoints}"
             ))
             .unwrap(),
@@ -207,7 +207,7 @@ mod tests {
     }
 
     fn with_spec(spec: &str) -> Service {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: web}}\nspec: {spec}"
         ))
         .unwrap()

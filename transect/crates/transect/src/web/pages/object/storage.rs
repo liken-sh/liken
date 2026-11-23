@@ -123,7 +123,7 @@ mod tests {
 
     fn class(name: &str, provisioner: &str) -> Arc<StorageClass> {
         Arc::new(
-            serde_yaml::from_str(&format!(
+            serde_yaml_ng::from_str(&format!(
                 "{{metadata: {{name: {name}}}, provisioner: {provisioner}}}"
             ))
             .unwrap(),

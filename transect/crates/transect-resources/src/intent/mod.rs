@@ -53,7 +53,7 @@ mod tests {
     use super::*;
 
     fn meta(labels: &str) -> ObjectMeta {
-        serde_yaml::from_str(&format!("labels: {{{labels}}}")).unwrap()
+        serde_yaml_ng::from_str(&format!("labels: {{{labels}}}")).unwrap()
     }
 
     #[rstest]

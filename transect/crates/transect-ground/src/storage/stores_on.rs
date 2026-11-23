@@ -105,7 +105,7 @@ mod tests {
     /// A pod in shop, owned by the `ReplicaSet` `owner` when one is given,
     /// on `node`, with `volumes` as YAML.
     fn pod(name: &str, owner: Option<&str>, node: &str, volumes: &str) -> Pod {
-        let mut pod: Pod = serde_yaml::from_str(&format!(
+        let mut pod: Pod = serde_yaml_ng::from_str(&format!(
             "spec: {{nodeName: {node}, containers: [], volumes: {volumes}}}"
         ))
         .unwrap();

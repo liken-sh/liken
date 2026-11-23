@@ -240,7 +240,7 @@ pub mod fixtures {
     /// Parses an `Outside` named `name` with the YAML `spec`.
     pub fn outside(name: &str, spec: &str) -> Outside {
         let text = format!("metadata: {{name: {name}}}\nspec: {spec}\n");
-        parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap()
+        parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap()).unwrap()
     }
 }
 

@@ -12,7 +12,7 @@ use transect_cluster::ownership::{self, Ownership};
 use transect_graph::edges::{Edge, Object, Provenance};
 
 pub(super) fn object<K: DeserializeOwned>(yaml: &str) -> Arc<K> {
-    Arc::new(serde_yaml::from_str(yaml).unwrap())
+    Arc::new(serde_yaml_ng::from_str(yaml).unwrap())
 }
 
 /// `spec` is the rest of the `Service`'s spec, in YAML.
@@ -73,7 +73,7 @@ fn cluster() -> Cluster {
         service("blog", "db", 5432, "selector: {app: db}"),
     ];
     let mut public = (*services[1]).clone();
-    public.status = serde_yaml::from_str("loadBalancer: {ingress: [{ip: 192.0.2.10}]}").unwrap();
+    public.status = serde_yaml_ng::from_str("loadBalancer: {ingress: [{ip: 192.0.2.10}]}").unwrap();
     services[1] = Arc::new(public);
     let outpost = "{rules: [{host: shop.example.com, http: {paths: [{path: /outpost, pathType: Prefix, backend: {service: {name: sign-in, port: {number: 80}}}}]}}]}";
     let ingresses = vec![
@@ -135,7 +135,7 @@ pub(super) fn pod_spec(env: &[&str], args: &[&str]) -> PodSpec {
         .enumerate()
         .map(|(index, value)| format!("{{name: TARGET_{index}_HOST, value: {value:?}}}"))
         .collect();
-    serde_yaml::from_str(&format!(
+    serde_yaml_ng::from_str(&format!(
         "containers: [{{name: app, env: [{}], args: {args:?}}}]",
         env.join(", ")
     ))
@@ -247,7 +247,7 @@ fn reads_arguments_and_shows_only_host_and_port(cluster: Cluster) {
 #[case::a_variable_that_holds_a_host("DB_HOST", 1)]
 #[case::a_variable_that_holds_a_name("DB_NAME", 0)]
 fn a_bare_name_counts_only_as_a_host(cluster: Cluster, #[case] name: &str, #[case] count: usize) {
-    let spec: PodSpec = serde_yaml::from_str(&format!(
+    let spec: PodSpec = serde_yaml_ng::from_str(&format!(
         "containers: [{{name: app, env: [{{name: {name}, value: db}}]}}]"
     ))
     .unwrap();

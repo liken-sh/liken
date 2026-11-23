@@ -56,7 +56,7 @@ struct Cluster {
 fn cluster() -> Cluster {
     let services: Vec<Arc<Service>> = vec![service("messages", "broker", "{app: broker}")];
     let nodes: Vec<Arc<Node>> = vec![Arc::new(
-        serde_yaml::from_str("metadata: {name: alpha}").unwrap(),
+        serde_yaml_ng::from_str("metadata: {name: alpha}").unwrap(),
     )];
     let addresses = Addresses::build(&services, &[], &nodes, "cluster.local");
     let broker_labels = labels(&[("app", "broker")]);

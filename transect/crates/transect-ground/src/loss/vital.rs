@@ -114,7 +114,7 @@ mod tests {
     use transect_cluster::ownership::Entry;
 
     fn yaml<K: serde::de::DeserializeOwned>(text: &str) -> Arc<K> {
-        Arc::new(serde_yaml::from_str(text).unwrap())
+        Arc::new(serde_yaml_ng::from_str(text).unwrap())
     }
 
     /// A running pod with no owner, so it is its own workload.

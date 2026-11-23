@@ -18,7 +18,7 @@ fn clue(path: &str, value: &str, hint: Hint) -> Clue {
 }
 
 fn read(yaml: &str) -> Vec<Clue> {
-    clues(&serde_yaml::from_str(yaml).unwrap())
+    clues(&serde_yaml_ng::from_str(yaml).unwrap())
 }
 
 #[rstest]

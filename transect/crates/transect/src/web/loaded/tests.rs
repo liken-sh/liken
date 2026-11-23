@@ -178,7 +178,7 @@ fn keeps_the_first_of_two_layers() {
 
 #[rstest]
 fn keeps_the_first_of_two_log_sources() {
-    let source = serde_yaml::to_string(&transect_observe::logs::source::fixtures::document(
+    let source = serde_yaml_ng::to_string(&transect_observe::logs::source::fixtures::document(
         transect_observe::logs::source::fixtures::SPEC,
     ))
     .unwrap();
@@ -196,7 +196,7 @@ fn keeps_the_first_of_two_log_sources() {
 
 #[rstest]
 fn keeps_the_first_of_two_metrics_sources() {
-    let source = serde_yaml::to_string(&transect_observe::metrics::source::fixtures::document(
+    let source = serde_yaml_ng::to_string(&transect_observe::metrics::source::fixtures::document(
         transect_observe::metrics::source::fixtures::VOLUME_USED,
     ))
     .unwrap();

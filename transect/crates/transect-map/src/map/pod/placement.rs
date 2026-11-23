@@ -59,7 +59,7 @@ mod tests {
 
     fn cluster() -> Vec<Machine> {
         let node = |name: &str, labels: &str| {
-            serde_yaml::from_str(&format!(
+            serde_yaml_ng::from_str(&format!(
                 "metadata: {{name: {name}, labels: {{{labels}}}}}\nstatus: {{allocatable: {{cpu: '4', memory: 8Gi}}}}"
             ))
             .unwrap()

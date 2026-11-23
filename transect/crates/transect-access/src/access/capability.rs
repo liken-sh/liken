@@ -301,7 +301,7 @@ mod tests {
     use super::*;
 
     fn rule(text: &str) -> PolicyRule {
-        serde_yaml::from_str(text).unwrap()
+        serde_yaml_ng::from_str(text).unwrap()
     }
 
     fn gitops() -> Vec<GitOpsKind> {

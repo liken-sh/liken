@@ -105,7 +105,7 @@ mod tests {
     use super::*;
 
     fn yaml<K: DeserializeOwned>(text: &str) -> K {
-        serde_yaml::from_str(text).unwrap()
+        serde_yaml_ng::from_str(text).unwrap()
     }
 
     #[rstest]

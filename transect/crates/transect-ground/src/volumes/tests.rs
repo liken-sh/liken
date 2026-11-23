@@ -3,7 +3,7 @@ use rstest::rstest;
 use super::*;
 
 fn yaml<K: serde::de::DeserializeOwned>(text: &str) -> Arc<K> {
-    Arc::new(serde_yaml::from_str(text).unwrap())
+    Arc::new(serde_yaml_ng::from_str(text).unwrap())
 }
 
 /// A pod `name` in `shop` on node `alpha` in `phase`, with one container

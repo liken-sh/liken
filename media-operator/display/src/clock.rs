@@ -19,7 +19,7 @@
 use std::time::Duration;
 
 use iced::Point;
-use jiff::Zoned;
+use jiff::ZonedDateTime;
 
 use crate::canvas::{Anchor, Canvas, Line};
 use crate::film::Film;
@@ -28,25 +28,25 @@ use crate::theme;
 const TOP_Y: f32 = theme::MARGIN_Y;
 const ENDS_Y: f32 = theme::MARGIN_Y + theme::LINE_PITCH;
 
-pub fn now() -> Zoned {
-    Zoned::now()
+pub fn now() -> ZonedDateTime {
+    ZonedDateTime::now()
 }
 
 /// How long until the minute changes. The display sleeps this long before
 /// each redraw, so the clock changes at the start of the minute.
-pub fn until_next_minute(now: &Zoned) -> Duration {
+pub fn until_next_minute(now: &ZonedDateTime) -> Duration {
     let into = now.timestamp().as_millisecond().rem_euclid(60_000);
     Duration::from_millis((60_000 - into) as u64)
 }
 
 /// Whole minutes since the Unix epoch.
-pub fn minute(now: &Zoned) -> i64 {
+pub fn minute(now: &ZonedDateTime) -> i64 {
     now.timestamp().as_second().div_euclid(60)
 }
 
 /// Format a time as "3:01 pm": twelve-hour, no leading zero, lowercase
 /// suffix.
-pub fn reading(at: &Zoned) -> String {
+pub fn reading(at: &ZonedDateTime) -> String {
     let hour = at.hour();
     let suffix = if hour < 12 { "am" } else { "pm" };
     let twelve = match hour % 12 {
@@ -59,7 +59,7 @@ pub fn reading(at: &Zoned) -> String {
 /// The time `seconds` after `now`, as "ends 2:15 pm". It rounds to the
 /// nearest minute, as the scrubber's "1h 36m left" does, so the clock plus
 /// the time left on screen equals the end time on screen.
-pub fn ends(now: &Zoned, seconds: f64) -> String {
+pub fn ends(now: &ZonedDateTime, seconds: f64) -> String {
     let minutes = (seconds.max(0.0) / 60.0 + 0.5).floor() as i64;
     format!(
         "ends {}",
@@ -88,7 +88,7 @@ pub fn length(seconds: f64) -> Option<String> {
 /// The clock, and under it the end time when the film has a positive
 /// duration and a position. While the film is paused, the end time is when
 /// it would end if it resumed now.
-pub fn lines(canvas: &Canvas, film: &Film, now: &Zoned) -> Vec<Line> {
+pub fn lines(canvas: &Canvas, film: &Film, now: &ZonedDateTime) -> Vec<Line> {
     let right = canvas.right();
     let mut lines = vec![Line::new(
         reading(now),
@@ -119,10 +119,10 @@ pub fn lines(canvas: &Canvas, film: &Film, now: &Zoned) -> Vec<Line> {
 
 /// A time for a test, in UTC so the results do not depend on the local zone.
 #[cfg(test)]
-pub fn at(unix: i64) -> Zoned {
+pub fn at(unix: i64) -> ZonedDateTime {
     jiff::Timestamp::from_second(unix)
         .expect("a second inside the clock's range")
-        .to_zoned(jiff::tz::TimeZone::UTC)
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
 }
 
 #[cfg(test)]
@@ -131,7 +131,7 @@ mod tests {
     use serde_json::json;
 
     /// A time of day on 1970-01-01, in UTC.
-    fn wall(hour: i64, minute: i64) -> Zoned {
+    fn wall(hour: i64, minute: i64) -> ZonedDateTime {
         at(hour * 3600 + minute * 60)
     }
 
@@ -245,7 +245,7 @@ mod tests {
                 "a part second before",
                 jiff::Timestamp::from_millisecond(15 * 60_000 + 59_750)
                     .expect("a millisecond inside the clock's range")
-                    .to_zoned(jiff::tz::TimeZone::UTC),
+                    .to_zoned_datetime(jiff::tz::TimeZone::UTC),
                 Duration::from_millis(250),
             ),
         ];

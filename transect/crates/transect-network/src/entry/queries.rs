@@ -109,7 +109,7 @@ mod tests {
 spec: {spec}
 "
         );
-        let error = parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap_err();
+        let error = parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap()).unwrap_err();
         assert!(error.contains(message), "{error:?} lacks {message:?}");
     }
 }

@@ -20,7 +20,7 @@ use transect_resources::layers::Layers;
 fn node(name: &str, ready: &str, cordoned: bool) -> Arc<Node> {
     let since = Timestamp::now() - 200.seconds();
     Arc::new(
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{name: {name}, labels: {{node-role.kubernetes.io/control-plane: 'true'}}}}
 spec: {{unschedulable: {cordoned}}}
 status: {{conditions: [{{type: Ready, status: '{ready}', lastTransitionTime: '{since}'}}]}}"
@@ -40,7 +40,7 @@ fn page(
 ) -> Option<(String, Option<String>, Vec<String>)> {
     let mut snapshot = Snapshot::empty();
     snapshot.namespaces = vec![Arc::new(
-        serde_yaml::from_str::<Namespace>("metadata: {name: shop}").unwrap(),
+        serde_yaml_ng::from_str::<Namespace>("metadata: {name: shop}").unwrap(),
     )];
     snapshot.nodes = vec![
         node("alpha", "True", false),

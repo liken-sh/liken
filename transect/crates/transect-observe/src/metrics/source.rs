@@ -85,8 +85,8 @@ struct Queries {
 }
 
 /// The `MetricsSource` that `value` declares, or why it does not validate.
-pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<MetricsSource, String> {
-    let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
+pub fn parse(doc: DocId, value: serde_yaml_ng::Value) -> Result<MetricsSource, String> {
+    let document: Document = serde_yaml_ng::from_value(value).map_err(|error| error.to_string())?;
     let spec = document.spec;
     let queries = spec.queries;
     let volume_used = queries.volume_used;
@@ -135,11 +135,11 @@ pub mod fixtures {
     }
 
     /// A `MetricsSource` document with `spec` as its spec.
-    pub fn document(spec: &str) -> serde_yaml::Value {
+    pub fn document(spec: &str) -> serde_yaml_ng::Value {
         let text = format!(
             "apiVersion: transect.liken.sh/v1alpha1\nkind: MetricsSource\nmetadata: {{name: metrics}}\nspec: {spec}\n"
         );
-        serde_yaml::from_str(&text).unwrap()
+        serde_yaml_ng::from_str(&text).unwrap()
     }
 
     pub const VOLUME_USED: &str = "{queries: {volumeUsed: {query: used_bytes, labels: {namespace: namespace, claim: persistentvolumeclaim}}}}";

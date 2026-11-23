@@ -42,7 +42,7 @@ fn filling(definition: &Definition) -> KindKnowledge {
         definition.name,
         roles.join(", ")
     );
-    parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap()
+    parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap()).unwrap()
 }
 
 /// Each role of each pattern names a shape that the library has, and
@@ -64,7 +64,7 @@ fn definition(roles: &str) -> Result<Definition, String> {
     let text = format!(
         "{{name: a-pattern, title: a pattern, roles: {roles}, elevations: [{{name: the store, question: Where?, sketch: one}}]}}"
     );
-    let written: Written = serde_yaml::from_str(&text).unwrap();
+    let written: Written = serde_yaml_ng::from_str(&text).unwrap();
     read(written, &primary_with_replicas::MODULE)
 }
 
@@ -125,7 +125,7 @@ fn store(pattern: &str) -> Result<KindKnowledge, String> {
     let text = format!(
         "metadata: {{name: ledgers.ledgers.example.test}}\nspec: {{{REFERENCES}, pattern: {pattern}}}\n"
     );
-    parse(DocId::default(), serde_yaml::from_str(&text).unwrap())
+    parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap())
 }
 
 #[rstest]

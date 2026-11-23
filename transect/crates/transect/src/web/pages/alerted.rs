@@ -21,10 +21,10 @@ use transect_resources::layers::Layers;
 fn page(alerts: alerts::Reading) -> String {
     let mut snapshot = Snapshot::empty();
     snapshot.namespaces = vec![Arc::new(
-        serde_yaml::from_str::<Namespace>("metadata: {name: shop}").unwrap(),
+        serde_yaml_ng::from_str::<Namespace>("metadata: {name: shop}").unwrap(),
     )];
     snapshot.nodes = vec![Arc::new(
-        serde_yaml::from_str::<Node>(
+        serde_yaml_ng::from_str::<Node>(
             "metadata: {name: alpha}
 status: {conditions: [{type: Ready, status: 'True'}]}",
         )

@@ -338,7 +338,7 @@ pub mod fixtures {
     /// in a shape of the library, as if no other kind stated a shape.
     pub fn knowledge(name: &str, spec: &str) -> KindKnowledge {
         let text = format!("metadata: {{name: {name}}}\nspec: {spec}\n");
-        let mut known = parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap();
+        let mut known = parse(DocId::default(), serde_yaml_ng::from_str(&text).unwrap()).unwrap();
         known.draw_with(&Shapes::default(), |_, _| None);
         known
     }

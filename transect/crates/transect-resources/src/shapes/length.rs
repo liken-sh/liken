@@ -4,7 +4,7 @@
 //! from those numbers alone: no character of the author's text reaches
 //! a style attribute.
 
-use serde_yaml::Value;
+use serde_yaml_ng::Value;
 
 /// The largest number, in design units, that a length or a size may
 /// have. It keeps every drawing within a size that a page can lay out.
@@ -265,7 +265,7 @@ mod tests {
     use super::*;
 
     fn yaml(text: &str) -> Value {
-        serde_yaml::from_str(text).unwrap()
+        serde_yaml_ng::from_str(text).unwrap()
     }
 
     fn term(value: f64, unit: Unit) -> Term {

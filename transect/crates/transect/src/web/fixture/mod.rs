@@ -178,7 +178,7 @@ pub fn model() -> Model {
 /// as already read: a `Lease` as a leader election writes it.
 pub fn reads() -> transect_map::objects::reads::Reads {
     use transect_map::objects::reads::{Key, Read, Reads};
-    let lease: kube::core::DynamicObject = serde_yaml::from_str(
+    let lease: kube::core::DynamicObject = serde_yaml_ng::from_str(
         "apiVersion: coordination.k8s.io/v1
 kind: Lease
 metadata: {name: storefront-leader, namespace: acme-shop, creationTimestamp: '2026-01-01T00:00:00Z'}

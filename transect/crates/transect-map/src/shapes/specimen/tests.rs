@@ -21,7 +21,7 @@ impl Sorts for Loaded {
         &mut self.directory
     }
 
-    fn take(&mut self, doc: DocId, kind: &str, value: serde_yaml::Value) -> Option<Condition> {
+    fn take(&mut self, doc: DocId, kind: &str, value: serde_yaml_ng::Value) -> Option<Condition> {
         (kind == "Shape").then(|| match transect_resources::shapes::parse(doc, value) {
             Ok(shape) => {
                 self.shapes.push(Arc::new(shape));

@@ -216,7 +216,7 @@ mod tests {
         let text = format!("metadata: {{name: scans.scan.example.io}}\nspec: {spec}\n");
         let parsed = crate::knowledge::parse(
             crate::resources::DocId::default(),
-            serde_yaml::from_str(&text).unwrap(),
+            serde_yaml_ng::from_str(&text).unwrap(),
         );
         assert!(parsed.is_err());
     }

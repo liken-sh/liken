@@ -204,7 +204,7 @@ mod tests {
     use super::*;
 
     fn pod(name: &str, spec: &str, status: &str) -> Pod {
-        serde_yaml::from_str(&format!(
+        serde_yaml_ng::from_str(&format!(
             "metadata: {{namespace: shop, name: {name}}}\nspec: {spec}\nstatus: {status}"
         ))
         .unwrap()
@@ -212,7 +212,7 @@ mod tests {
 
     fn node(name: &str, architecture: &str) -> Arc<Node> {
         Arc::new(
-            serde_yaml::from_str(&format!(
+            serde_yaml_ng::from_str(&format!(
                 "metadata: {{name: {name}}}\nstatus: {{nodeInfo: {{operatingSystem: linux, architecture: {architecture}, \
                  machineID: '', systemUUID: '', bootID: '', kernelVersion: '', osImage: '', containerRuntimeVersion: '', \
                  kubeletVersion: '', kubeProxyVersion: ''}}}}"

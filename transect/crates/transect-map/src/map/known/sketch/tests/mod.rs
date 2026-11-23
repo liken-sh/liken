@@ -110,7 +110,7 @@ pub(super) fn page_of_known(
     slug: Option<&str>,
     judged: Option<&Judged>,
 ) -> KnownPage {
-    let data = serde_yaml::from_str(KIOSK).unwrap();
+    let data = serde_yaml_ng::from_str(KIOSK).unwrap();
     let relations = knowledge::relations(
         known,
         &kiosk(),

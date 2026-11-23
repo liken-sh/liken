@@ -27,7 +27,7 @@ spec:
 ";
 
 fn knowledge() -> KindKnowledge {
-    parse(DocId::default(), serde_yaml::from_str(STORE).unwrap()).unwrap()
+    parse(DocId::default(), serde_yaml_ng::from_str(STORE).unwrap()).unwrap()
 }
 
 fn pod(name: &str) -> Object {
@@ -253,7 +253,7 @@ spec:
 
 #[rstest]
 fn says_what_a_kind_that_fills_no_service_leaves_without_a_signal() {
-    let known = parse(DocId::default(), serde_yaml::from_str(UNFILLED).unwrap()).unwrap();
+    let known = parse(DocId::default(), serde_yaml_ng::from_str(UNFILLED).unwrap()).unwrap();
     let judged = judge(&known, &ledger(), &three()).unwrap();
     assert_eq!(
         lines(&judged),
@@ -341,7 +341,7 @@ fn finds_the_mark_on_a_part() {
 
 #[rstest]
 fn rests_a_promoter_that_no_knowledge_names() {
-    let known = parse(DocId::default(), serde_yaml::from_str(UNFILLED).unwrap()).unwrap();
+    let known = parse(DocId::default(), serde_yaml_ng::from_str(UNFILLED).unwrap()).unwrap();
     let lab = Lab {
         controller: false,
         ..three()

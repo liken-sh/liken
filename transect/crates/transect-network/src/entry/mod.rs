@@ -164,7 +164,7 @@ pub mod fixtures {
     /// A `ClusterIP` `Service` on port 80 with `selector` as YAML.
     pub fn service(namespace: &str, name: &str, selector: &str) -> Arc<Service> {
         Arc::new(
-            serde_yaml::from_str(&format!(
+            serde_yaml_ng::from_str(&format!(
                 "metadata: {{namespace: {namespace}, name: {name}}}\nspec: {{selector: {selector}, ports: [{{port: 80}}]}}"
             ))
             .unwrap(),
@@ -174,7 +174,7 @@ pub mod fixtures {
     /// An `Ingress` in shop with `spec` as YAML.
     pub fn ingress(name: &str, spec: &str) -> Arc<Ingress> {
         Arc::new(
-            serde_yaml::from_str(&format!(
+            serde_yaml_ng::from_str(&format!(
                 "metadata: {{namespace: shop, name: {name}}}\nspec: {spec}"
             ))
             .unwrap(),
