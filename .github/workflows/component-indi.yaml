@@ -90,7 +90,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: setup-go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: indi/shim/go.mod
           cache: false
@@ -199,12 +199,12 @@ jobs:
       # that prekSHA256 in ci/workflow.go pins, because the action checks
       # only the versions in its own table. SKIP leaves out the hooks
       # that another job of this workflow runs.
-      - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
+      - uses: j178/prek-action@7b101f8338a08d2bd6fdb3625e4e7692428763a3 # v3.1.1
         env:
           SKIP: gofmt,go-vet,go-mod-tidy
         with:
-          prek-version: 0.5.9
-          sha256: 2fee13923018dd517c19dba032ddcae8010cadfb81bc47e742ad5e8981a3f126
+          prek-version: 0.5.11
+          sha256: a4ff4c70aef6f21925aa52b82d0746095fbd66893ac3b053e859f6d3454c16ae
           extra-args: --all-files indi/
 
   codeql-go:
@@ -224,7 +224,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: setup-go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: indi/shim/go.mod
           cache: false
@@ -263,7 +263,7 @@ jobs:
       # a module with a directory of another component, and that
       # component's own job analyzes it. CodeQL traces the build in the
       # next step and extracts each package that the build compiles.
-      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           languages: go
           build-mode: manual
@@ -276,7 +276,7 @@ jobs:
       # The category keeps this job's alerts apart from every other
       # analysis: code scanning closes an alert only when a later upload
       # in the same category no longer reports it.
-      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           category: codeql/indi/go
 
@@ -300,7 +300,7 @@ jobs:
       # configuration names paths, so the configuration limits the
       # analysis to this job's directory. The analysis reads the sources
       # without a build.
-      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           languages: python
           build-mode: none
@@ -311,7 +311,7 @@ jobs:
       # The category keeps this job's alerts apart from every other
       # analysis: code scanning closes an alert only when a later upload
       # in the same category no longer reports it.
-      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           category: codeql/indi/python
 
@@ -373,7 +373,7 @@ jobs:
       # A pinned base writes its branch cache on every branch, so its job
       # logs in on every branch too.
       - if: ${{ inputs.publish != 'none' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || matrix.pinned }}
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -475,7 +475,7 @@ jobs:
           fetch-depth: 0
 
       - id: setup-go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: ci/go.mod
           cache: false
@@ -552,7 +552,7 @@ jobs:
 
       # A dry run pushes nothing, so it needs no login.
       - if: ${{ !inputs.dryrun }}
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -586,8 +586,8 @@ jobs:
       - if: ${{ !inputs.dryrun }}
         continue-on-error: true
         env:
-          TRIVY_VERSION: 0.76.1
-          TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
+          TRIVY_VERSION: 0.76.2
+          TRIVY_SHA256: bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf
         run: |
           archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/$archive" \
@@ -625,7 +625,7 @@ jobs:
       # failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi.sarif
           category: trivy/indi
@@ -642,7 +642,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-simulators.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-simulators.sarif
           category: trivy/indi-simulators
@@ -659,7 +659,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-phd2.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-phd2.sarif
           category: trivy/indi-phd2
@@ -676,7 +676,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-open.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-open.sarif
           category: trivy/indi-open
@@ -693,7 +693,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-zwo.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-zwo.sarif
           category: trivy/indi-zwo
@@ -710,7 +710,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-qhy.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-qhy.sarif
           category: trivy/indi-qhy
@@ -727,7 +727,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-playerone.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-playerone.sarif
           category: trivy/indi-playerone
@@ -744,7 +744,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-svbony.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-svbony.sarif
           category: trivy/indi-svbony
@@ -761,7 +761,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-atik.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-atik.sarif
           category: trivy/indi-atik
@@ -778,7 +778,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-fli.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-fli.sarif
           category: trivy/indi-fli
@@ -795,7 +795,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-sbig.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-sbig.sarif
           category: trivy/indi-sbig
@@ -812,7 +812,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-mi.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-mi.sarif
           category: trivy/indi-mi
@@ -829,7 +829,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-qsi.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-qsi.sarif
           category: trivy/indi-qsi
@@ -846,7 +846,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-apogee.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-apogee.sarif
           category: trivy/indi-apogee
@@ -863,7 +863,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-astroasis.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-astroasis.sarif
           category: trivy/indi-astroasis
@@ -880,7 +880,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-gphoto.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-gphoto.sarif
           category: trivy/indi-gphoto
@@ -897,7 +897,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-touptek.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy/indi-touptek.sarif
           category: trivy/indi-touptek

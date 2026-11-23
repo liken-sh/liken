@@ -40,16 +40,16 @@ var actionPins = []actionPin{
 	{"actions/checkout", "v7.0.1", "3d3c42e5aac5ba805825da76410c181273ba90b1"},
 	{"actions/deploy-pages", "v5.0.1", "368f82528645a54fb793d4d04e342629a3f51346"},
 	{"actions/download-artifact", "v8.0.2", "9000827ccba6bdab643e8b6fd33ac0654aef8333"},
-	{"actions/setup-go", "v7.0.0", "b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"},
+	{"actions/setup-go", "v7.1.0", "d8cbb8045d7f43706b9177cceb36c1f91a6644d5"},
 	{"actions/upload-artifact", "v7.0.2", "cf430e030ddbb5b0abf93d22962f4752f3646cd9"},
 	{"actions/upload-pages-artifact", "v5.0.0", "fc324d3547104276b827a68afc52ff2a11cc49c9"},
 	{"docker/bake-action", "v7.5.0", "59cb1203cd42bcefd40a1b6d73b589e48c86040e"},
-	{"docker/login-action", "v4.7.0", "81c6f93d4bc991e510b342a00b419b3bb4efc5c6"},
+	{"docker/login-action", "v4.8.0", "8aa5831fb8d48d8f76594c7ddde61ae58019f550"},
 	{"docker/setup-buildx-action", "v4.4.1", "f87e5991a6d7451dcb8d9637bfbc97413f497069"},
 	{"fluxcd/flux2", "v2.10.0", "3fa784edd773d56630bb9f62645e08f70c2cff0a"},
-	{"github/codeql-action", "v4.39.1", "9b3254085494b55a0f7c4c2b3d2d52cc712ce370"},
-	{"j178/prek-action", "v3.1.0", "44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d"},
-	{"taiki-e/install-action", "v2.88.1", "68a389c788b2cd04016ce8c80ee23b80d2ab3d68"},
+	{"github/codeql-action", "v4.39.4", "1bd86f2fdb4b86187fa4059f16f31a3202acc9ea"},
+	{"j178/prek-action", "v3.1.1", "7b101f8338a08d2bd6fdb3625e4e7692428763a3"},
+	{"taiki-e/install-action", "v2.90.8", "fe3acb53a98b62c772db35de75ce0e4595e7ca8c"},
 }
 
 const fluxActionRepository = "fluxcd/flux2"

@@ -12,7 +12,7 @@ import (
 
 // trivyVersion is the Trivy release that every workflow step installs.
 // ci/latest.sh compares it with Trivy's newest release.
-const trivyVersion = "0.76.1"
+const trivyVersion = "0.76.2"
 
 // trivySHA256 is the SHA-256 of Trivy's Linux-64bit archive at
 // trivyVersion. The install step checks the archive against it before
@@ -22,7 +22,7 @@ const trivyVersion = "0.76.1"
 // changed upstream would change what CI runs. `ci/latest.sh --bump
 // trivy` writes this digest and trivyVersion, after it verifies the
 // archive against the Sigstore signature of Trivy's release workflow.
-const trivySHA256 = "c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0"
+const trivySHA256 = "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf"
 
 // scanImage runs Trivy on one published image and writes the findings
 // as SARIF to <dir>/<image>.sarif, which the job uploads to code

@@ -77,8 +77,8 @@ jobs:
       # with the change it would make. sha256 is the digest
       # that prekSHA256 in ci/workflow.go pins, because the action checks
       # only the versions in its own table.
-      - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
+      - uses: j178/prek-action@7b101f8338a08d2bd6fdb3625e4e7692428763a3 # v3.1.1
         with:
-          prek-version: 0.5.9
-          sha256: 2fee13923018dd517c19dba032ddcae8010cadfb81bc47e742ad5e8981a3f126
+          prek-version: 0.5.11
+          sha256: a4ff4c70aef6f21925aa52b82d0746095fbd66893ac3b053e859f6d3454c16ae
           extra-args: --all-files liken/userland/
