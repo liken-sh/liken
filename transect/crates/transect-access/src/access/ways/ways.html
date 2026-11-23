@@ -10,14 +10,14 @@
 
 {% block masthead_access %} masthead-current{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- What may reach each port from outside the cluster: a row per way
     in, with the three gates on the way to it, grouped in runs whose
     headings name what their rows share. -#}
-<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="board-page ax-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view view-wide" id="view">
+<main class="board-page ax-page" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 {% call switcher::switcher(true) %}{% endcall %}
 <h1 class="ax-title">What may reach each port from outside the cluster<span class="ax-count">{{ count() }} ways in</span></h1>
 <p class="ax-legend">A row is one way in: a host or an address, and a port. <span class="ax-key"><span class="ax-dot ax-dot-on"></span> the cluster puts this gate on the way</span> <span class="ax-key"><span class="ax-dot ax-dot-half"></span> on some of its routes or pods</span> <span class="ax-key"><span class="ax-dot ax-dot-declared"></span> stored text declares it</span> <span class="ax-key"><span class="ax-dot ax-dot-off"></span> it puts none.</span></p>

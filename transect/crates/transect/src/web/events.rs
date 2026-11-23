@@ -15,18 +15,18 @@ use tokio::sync::watch;
 use super::AppState;
 use super::view::{self, Page};
 
-/// The SSE event name that each page's `sse-swap` attribute listens for.
-pub const VIEW: &str = "view";
-
 /// Sends the latest rendering when a browser connects, then each new
-/// rendering. The first event matters after a server restart, because
-/// htmx reconnects by itself and the page it shows may be minutes old.
+/// rendering. Each event has no name, because htmx's `hx-sse` swaps the
+/// data of an unnamed event into the page and dispatches a named event
+/// as a DOM event. The first event matters after a server restart, and
+/// when a tab shows again, because `hx-sse` reconnects by itself in
+/// both cases and the page it shows may be minutes old.
 /// When the browser disconnects, axum drops the stream and `latest`
 /// with it. The view's task stops when no receiver is left.
 pub fn stream(
     latest: watch::Receiver<Arc<str>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let events = renderings(latest).map(|html| Ok(Event::default().event(VIEW).data(&*html)));
+    let events = renderings(latest).map(|html| Ok(Event::default().data(&*html)));
     // Proxies and load balancers often close a connection that is idle
     // for a minute. axum's default keep-alive sends a comment every 15
     // seconds, so the connection stays open while the cluster is quiet.

@@ -5,7 +5,7 @@
 
 {% block elevation %}<a href="/">cluster</a><span aria-hidden="true">/</span><a href="/kinds">kinds</a><span aria-hidden="true">/</span><span class="elevation-current">shapes</span>{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- Every shape that transect has loaded, a section for each, under
@@ -14,7 +14,7 @@
     so a cell shows what a sketch would draw.  A section's id is the
     shape's name, which the parser limited to lower-case letters,
     digits, hyphens, and dots, so `/resources` links to it. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<div class="view" id="view">
 <main class="shapes-page">
 <h1 class="shapes-title">Shapes</h1>
 <p class="shapes-lede">A sketch draws each part in a shape. A shape states its size, its pieces, and where its text goes, and transect draws every state and every text the same way on each shape. Each shape is drawn here in each state with the same texts. The bars on its first drawing are its ports, where a wire attaches. The KindKnowledge of a kind states the shape that every sketch draws its objects in, and a role of a sketch can state another. A name finds the shape of its kind's own group before the library's.</p>

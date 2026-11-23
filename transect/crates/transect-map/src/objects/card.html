@@ -4,7 +4,7 @@
     name with its health, its CRD's description of the kind, the workload
     whose controller reconciles it, where its code is, and its kind's
     knowledge. -#}
-<aside class="sidebar workload-card" aria-label="{{ card.name }} card" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<aside class="sidebar workload-card" aria-label="{{ card.name }} card" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <div class="workload-card-head">
 <b class="workload-card-name">{{ transect_graph::edges::kind_and_name(card.kind, card.name) }}</b>
 {%- if let Some(status) = card.status_text() %}

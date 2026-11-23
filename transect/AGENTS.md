@@ -43,9 +43,12 @@ files.
 
 - The server is Rust, on kube-rs for watches and caches and axum for
   HTTP.
-- The server renders the pages, HTMX swaps fragments, and server-sent
-  events push changes.  It is not a single-page application.  Each
-  elevation has its own URL.
+- The server renders the pages, htmx 4 swaps fragments, and server-sent
+  events push changes through htmx's `hx-sse` extension.  It is not a
+  single-page application.  Each elevation has its own URL.  htmx 4
+  inherits an attribute only when its name ends in `:inherited`, so a
+  `main` or an `aside` sets `hx-target:inherited="body"` and its
+  `hx-swap` and `hx-push-url` the same way for the links inside it.
 - The pages are dark by default, calm, and gray where things are
   healthy.
 - The runtime makes no language model calls.  Every sentence is a
@@ -141,7 +144,7 @@ job of `.github/workflows/ci.yaml` fails when the committed workflow
 differs from what `ci/` writes.
 
 The `rust` job runs `make test`, the target a workstation runs.  It
-checks the format with `cargo fmt --check`, then checks the two htmx
+checks the format with `cargo fmt --check`, then checks the htmx
 files in `crates/transect/src/web/static/` against `htmx.sha256`, so a
 file that differs from its pin fails.  Then clippy runs twice with
 warnings denied: once on the code as it ships, and once with the
@@ -168,8 +171,12 @@ across every `Cargo.toml` in the repository, and holds the channel of
 copy in one commit.  It also checks `htmx.sha256` against `pin.toml`
 beside it, and that the `Dockerfile` builds with `cargo auditable
 build`.  `crates/transect/src/web/static/latest.sh` reports the newest
-release of each htmx file, and `latest.sh --bump` writes the files,
-their sums, and their pins.
+release of the npm package `htmx.org`, which contains `htmx.min.js`,
+`hx-sse.min.js`, and the license.  `latest.sh --bump` writes the files,
+`htmx.sha256`, and `pin.toml`, and it stops at a new major version,
+which needs a port of the templates and the scripts first.  The
+`bump-components` skill's `references/htmx.md` gives the port and the
+browser check that proves it.
 
 `docker buildx bake transect --load` at the top of the repository
 builds the image into the local Docker daemon, as
@@ -190,7 +197,7 @@ date, with `vulkan/closure.sh`, and the last stage copies that tree
 onto `scratch`.  The image also holds the CA bundle of the `trust`
 component, the license notices of the Rust standard library, of each
 linked crate, of each Debian package, of the fonts, and of htmx, and a
-CycloneDX record of the two htmx files for the image's SBOM.  It runs
+CycloneDX record of the htmx files for the image's SBOM.  It runs
 as user 65534, the user that `deploy/transect.yaml` sets, and it has no
 shell.
 

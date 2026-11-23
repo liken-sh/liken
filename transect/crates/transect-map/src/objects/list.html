@@ -6,13 +6,13 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- One kind's objects in one namespace, under a strip of the
     namespace's custom kinds, beside the kind's card. -#}
-<div class="view{% if wide() %} view-wide{% endif %}" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view{% if wide() %} view-wide{% endif %}" id="view">
+<main class="board-page" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <nav class="switcher" aria-label="Custom resources in {{ namespace }}">
 <a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
 {%- for entry in kind_links %}

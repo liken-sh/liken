@@ -10,15 +10,15 @@
 
 {% block masthead_access %} masthead-current{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- A workload's access page has two drawings, with the workload's card
     beside them.  The first shows what may reach each port that the
     workload serves and what the workload may reach.  The second shows
     who may change it. -#}
-<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="section-map ax-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view view-wide" id="view">
+<main class="section-map ax-map" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <nav class="switcher" aria-label="{{ name }}">
 <a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
 <a class="switch switch-current" href="{{ workload_path }}" hx-get="{{ workload_path }}">{{ name }}</a>

@@ -121,12 +121,11 @@ COPY --from=closure /out /
 COPY --from=trust / /
 COPY --from=compile /notices /
 # The SIL Open Font License requires that the license travel with the
-# embedded fonts. htmx and its SSE extension use the Zero-Clause BSD
-# license, which does not require it, and the image includes their
-# license files too.
+# embedded fonts. htmx and its SSE extension, which come from one npm
+# package, use the Zero-Clause BSD license, which does not require it,
+# and the image includes the package's license file too.
 COPY --from=brand fonts/LICENSE.md /usr/share/doc/source-sans-3/LICENSE.md
 COPY crates/transect/src/web/static/htmx.LICENSE /usr/share/doc/htmx.org/LICENSE
-COPY crates/transect/src/web/static/sse.LICENSE /usr/share/doc/htmx-ext-sse/LICENSE
 COPY --from=record /transect.cdx.json /usr/share/doc/liken/transect.cdx.json
 # deploy/transect.yaml also runs the pod as 65534, so `docker run`
 # behaves the same way.

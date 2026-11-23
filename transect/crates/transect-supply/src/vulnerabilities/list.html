@@ -9,13 +9,13 @@
 
 {% block masthead_vulnerabilities %} masthead-current{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- Every finding id in a current report, with the workloads that run
     an image that contains it.  The words come from the scanner. -#}
-<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view view-wide" id="view">
+<main class="board-page" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 {% call choices::choices(choices) %}{% endcall %}
 <p class="vn-lead">{{ lead() }}</p>
 {%- if !described %}

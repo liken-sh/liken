@@ -22,7 +22,6 @@ image=$1
   usr/share/doc/rust/COPYRIGHT-library.html \
   usr/share/doc/source-sans-3/LICENSE.md \
   usr/share/doc/htmx.org/LICENSE \
-  usr/share/doc/htmx-ext-sse/LICENSE \
   usr/share/doc/mozilla-ca/copyright \
   usr/share/doc/liken/transect.cdx.json \
   etc/ssl/certs/ca-certificates.crt

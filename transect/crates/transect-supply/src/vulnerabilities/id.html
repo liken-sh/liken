@@ -8,13 +8,13 @@
 
 {% block masthead_vulnerabilities %} masthead-current{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- One id: what the scanner reports about it, and, by container, every
     workload that runs an image where a current report found the id. -#}
-<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view view-wide" id="view">
+<main class="board-page" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <section class="board-box board-wide" aria-label="{{ id }}">
 <div class="board-label">{{ id }}</div>
 {%- if let Some(title) = title %}

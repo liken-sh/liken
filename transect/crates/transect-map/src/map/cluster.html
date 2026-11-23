@@ -4,15 +4,15 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{#- Each push replaces the pushed block whole, so an sse-connect on that
-    block would reconnect on every push.  The stream connects from the
-    page instead. -#}
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{#- Each push replaces the pushed block whole, so an `hx-sse:connect` on
+    that block would reconnect on every push.  The stream connects from
+    the page instead. -#}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- The map and the sidebar swap as one block, so the sidebar never names
     a namespace the map has already turned gray. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<div class="view" id="view">
 {#- A click on a tile swaps in the whole page for its selection and
     pushes its URL, so back, forward, and a pasted link all open the
     same view.  The body swaps, not the view, because the masthead's
@@ -25,9 +25,12 @@
     otherwise to the plain cluster.  Escape acts on keydown and only
     while no dialog is open, so the Escape that closes quick search
     leaves the selection alone, because the dialog closes on keydown
-    and its keyup would reach the body after it had closed. -#}
-<main class="cluster" hx-target="body" hx-swap="innerHTML" hx-push-url="true"
-{%- if away() %} hx-get="{{ away_href() }}" hx-trigger="click[!target.closest('.ns-tile, .strip-name')], keydown[key=='Escape' && !document.querySelector('dialog[open]')] from:body"{% endif %}>
+    and its keyup would reach the body after it had closed.  htmx ends
+    a trigger's filter at its first `]`, so the filter finds the open
+    dialog with `dialog:modal`, which quick search's dialog matches
+    while it is open, and not with `dialog[open]`. -#}
+<main class="cluster" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true"
+{%- if away() %} hx-get="{{ away_href() }}" hx-trigger="click[!target.closest('.ns-tile, .strip-name')], keydown[key=='Escape' && !document.querySelector('dialog:modal')] from:body"{% endif %}>
 <div class="bands">
 {%- for band in map.bands %}
 <section class="band" id="{{ band.name }}" aria-label="{{ band.name }}">

@@ -22,6 +22,8 @@ below.
 * **A toolchain, an outside image, or a GitHub Action:** step 5c.
 * **The Go and Rust graphs, Dependabot, or a CVE:** step 5d.
 * **The bluetoothd or appearances image:** step 5e.
+* **htmx, which `transect` serves:** step 2, rule 6, and
+  [`references/htmx.md`](references/htmx.md).
 
 The bumps themselves are quick edits to the working tree. The value
 of a pass is in the research, and in the builds that prove each
@@ -136,6 +138,11 @@ after another, in one background task. Follow these rules:
    the same commit, because a release can change the upstream's
    license or its copyright line. A new component whose license
    requires the source needs a mirror in `liken/licensing/sources.sh`.
+6. `transect/crates/transect/src/web/static/latest.sh --bump` stops
+   at a new major version of htmx, because the templates and the
+   scripts of `transect` need a port first.
+   [`references/htmx.md`](references/htmx.md) gives the port, the
+   bump that follows it, and the browser check that proves both.
 
 Each bump prints a `next:` line that names the make target that
 rebuilds its domain. Run the line from the pin's own directory. For

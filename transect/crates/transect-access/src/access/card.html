@@ -4,7 +4,7 @@
     true when no kind knowledge fills the last column of the accounts
     page. -#}
 {%- macro card(no_gitops) -%}
-<aside class="sidebar workload-card" aria-label="About access" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<aside class="sidebar workload-card" aria-label="About access" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <div class="workload-card-head"><b class="workload-card-name">Access</b></div>
 <div class="ax-card-facts">
 <div>{% call links::object_link("Ways in", Some(String::from("/access")), "") %}{% endcall %}: every port that answers from outside the cluster, and the gates on the way to it.</div>

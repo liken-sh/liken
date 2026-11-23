@@ -5,14 +5,14 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- Any object: its board, with its own conditions and facts in the
     middle and what names it and what it names around them, and its
     card beside.  Never its spec. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view" id="view">
+<main class="board-page" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <nav class="switcher" aria-label="{{ label }}">
 {%- if let Some((namespace, _)) = place %}
 <a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>

@@ -4,7 +4,7 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% import "edges/provenance.html" as provenance %}
 {% import "links/link.html" as links %}
@@ -17,8 +17,8 @@
     before and a line never points to where a box was.  Every position
     is computed on the server and written inline, and nothing in the
     page measures. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="section-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view" id="view">
+<main class="section-map" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <nav class="switcher" aria-label="{{ name }}">
 <a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
 <a class="switch switch-current" href="{{ workload_path }}" hx-get="{{ workload_path }}">{{ name }}</a>

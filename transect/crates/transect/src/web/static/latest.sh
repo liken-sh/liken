@@ -1,32 +1,36 @@
 #!/usr/bin/env bash
 #
-# Report the two htmx files that transect serves, and the newest
-# release of each npm package that they come from.
+# Report the htmx files that transect serves, and the newest release of
+# the npm package htmx.org that they come from.
 #
-# htmx.min.js is dist/htmx.min.js of the package htmx.org, and
-# sse.min.js is dist/sse.min.js of the package htmx-ext-sse. The binary
-# embeds both with include_bytes!, so the files are in the repository,
-# and pin.toml beside this script names each one for the image's SBOM
-# record.
+# htmx.min.js is dist/htmx.min.js of htmx.org, hx-sse.min.js is
+# dist/ext/hx-sse.min.js of the same package, and htmx.LICENSE is the
+# package's LICENSE. The binary embeds both scripts with include_bytes!,
+# so the files are in the repository, and pin.toml beside this script
+# names each one for the image's SBOM record.
 #
-# A channel is an npm dist-tag. npm installs the release that the tag
-# `latest` names, and htmx.org also publishes a newer major version
-# under the tag `next`, so the report names `next` as the newest
-# channel when its release is newer and not a pre-release. The htmx pin
-# is a hold on `latest`: htmx 4 is a new major version, and transect's
-# templates, its stream.js, and the htmx-ext-sse extension are written
-# for htmx 2. Moving to htmx 4 is a port, which no bump does.
+# A channel is an npm dist-tag. htmx.org publishes its releases under
+# more than one tag: `latest` and `next` have each named the newest
+# major version at some time. The pin follows the tag whose release is
+# the newest that is not a pre-release, so the report names that tag as
+# both the channel and the newest channel.
+#
+# A new major version of htmx changes the attributes, the events, and
+# the extensions that transect's templates and scripts use. So --bump
+# stops when the newest release has another major version than the
+# pin, and --bump --major writes it after the port. The bump-components
+# skill's reference htmx.md gives the port and its proof.
 #
 # A bump downloads the package's tarball from the npm registry, checks
 # it against the sha512 `integrity` that the registry gives for the
-# release, and copies the file and the package's LICENSE out of it.
-# npm signs the registry's metadata, and this script does not check
-# that signature, so each digest rests on the HTTPS connection to
-# registry.npmjs.org.
+# release, and copies the files out of it. npm signs the registry's
+# metadata, and this script does not check that signature, so each
+# digest rests on the HTTPS connection to registry.npmjs.org.
 #
 # Usage:
-#   latest.sh          report both pins
-#   latest.sh --bump   write the newest release of `latest` of each
+#   latest.sh                  report the pin
+#   latest.sh --bump           write the newest release of the same major version
+#   latest.sh --bump --major   write the newest release of any major version
 
 set -euo pipefail
 
@@ -39,19 +43,11 @@ require_tools jq tar sha256sum base64 xxd
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-# Each pin: the manifest entry, the npm package, the file of the
-# package, and the file in this directory.
-entries=(htmx htmx-ext-sse)
-declare -A package=([htmx]=htmx.org [htmx-ext-sse]=htmx-ext-sse)
-declare -A file=([htmx]=htmx.min.js [htmx-ext-sse]=sse.min.js)
-declare -A license=([htmx]=htmx.LICENSE [htmx-ext-sse]=sse.LICENSE)
-
-# tags <package>: print the package's dist-tags, one "tag version" on
-# each line.
-tags() {
-    fetch_text "https://registry.npmjs.org/$1" --max-time 30 |
-        jq -r '."dist-tags" | to_entries[] | "\(.key) \(.value)"'
-}
+package=htmx.org
+# Each entry of pin.toml and the file of the package that it names. The
+# file in this directory has the same name as the last part of the path.
+entries=(htmx hx-sse)
+declare -A file=([htmx]=dist/htmx.min.js [hx-sse]=dist/ext/hx-sse.min.js)
 
 # newest_channel <tags file>: print the tag whose release is the
 # newest, of the tags whose release is not a pre-release.
@@ -59,49 +55,42 @@ newest_channel() {
     awk '$2 !~ /-/ { print $2, $1 }' "$1" | sort -V | tail -1 | cut -d' ' -f2
 }
 
-hold() {
-    case "$1" in
-    htmx) echo "htmx 4 needs a port of the templates, stream.js, and the SSE extension" ;;
-    *) echo - ;;
-    esac
-}
-
-for entry in "${entries[@]}"; do
-    pinned="$(pin_value "$entry" version)"
-    tags "${package[$entry]}" >"$work/$entry.tags" || : >"$work/$entry.tags"
-    latest="$(awk '$1 == "latest" { print $2 }' "$work/$entry.tags")"
-    newest="$(newest_channel "$work/$entry.tags")"
-    row "$entry" "$pinned" "$latest" latest "${newest:-?}" "$(hold "$entry")" \
-        "the release of the npm dist-tag latest of ${package[$entry]}"
-done
+fetch_text "https://registry.npmjs.org/$package" --max-time 30 |
+    jq -r '."dist-tags" | to_entries[] | "\(.key) \(.value)"' >"$work/tags" || : >"$work/tags"
+channel="$(newest_channel "$work/tags")"
+newest="$(awk -v tag="$channel" '$1 == tag { print $2 }' "$work/tags")"
+pinned="$(pin_value htmx version)"
+row htmx "$pinned" "$newest" "${channel:-?}" "${channel:-?}" - \
+    "$package: htmx.min.js and hx-sse.min.js, the release of the newest npm dist-tag"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
+bump_needed htmx "$pinned" "$newest" || exit 0
+if [[ "${pinned%%.*}" != "${newest%%.*}" && "${2:-}" != "--major" ]]; then
+    fail "htmx $newest is a new major version, which needs a port of the templates first;" \
+        "see .agents/skills/bump-components/references/htmx.md, then run latest.sh --bump --major"
+fi
 
+meta="$(fetch_text "https://registry.npmjs.org/$package/$newest" --max-time 30)"
+tarball="$(jq -r .dist.tarball <<<"$meta")"
+integrity="$(jq -r .dist.integrity <<<"$meta")"
+[[ "$integrity" == sha512-* ]] || fail "$package $newest has no sha512 integrity"
+sha512="$(base64 -d <<<"${integrity#sha512-}" | xxd -p -c 64)"
+
+fetch_file "$tarball" "$work/package.tgz"
+digest_matches "$sha512" "$work/package.tgz" ||
+    fail "$tarball does not match the integrity that the registry gives"
+tar -xzf "$work/package.tgz" -C "$work" "${file[@]/#/package/}" package/LICENSE
+cp "$work/package/LICENSE" "$here/htmx.LICENSE"
 for entry in "${entries[@]}"; do
-    pinned="$(pin_value "$entry" version)"
-    latest="$(awk '$1 == "latest" { print $2 }' "$work/$entry.tags")"
-    bump_needed "$entry" "$pinned" "$latest" || continue
-
-    name="${package[$entry]}"
-    meta="$(fetch_text "https://registry.npmjs.org/$name/$latest" --max-time 30)"
-    tarball="$(jq -r .dist.tarball <<<"$meta")"
-    integrity="$(jq -r .dist.integrity <<<"$meta")"
-    [[ "$integrity" == sha512-* ]] || fail "$name $latest has no sha512 integrity"
-    sha512="$(base64 -d <<<"${integrity#sha512-}" | xxd -p -c 64)"
-
-    fetch_file "$tarball" "$work/$entry.tgz"
-    digest_matches "$sha512" "$work/$entry.tgz" ||
-        fail "$tarball does not match the integrity that the registry gives"
-    mkdir -p "$work/$entry"
-    tar -xzf "$work/$entry.tgz" -C "$work/$entry" "package/dist/${file[$entry]}" package/LICENSE
-    cp "$work/$entry/package/dist/${file[$entry]}" "$here/${file[$entry]}"
-    cp "$work/$entry/package/LICENSE" "$here/${license[$entry]}"
-
-    sha256="$(sha256sum "$here/${file[$entry]}" | cut -d' ' -f1)"
-    set_pin "$entry" "$latest" "https://cdn.jsdelivr.net/npm/$name@$latest/dist/${file[$entry]}" \
-        "$sha256" "pkg:npm/$name@$latest"
-    bumped "$entry" "$pinned" "$latest"
+    path="${file[$entry]}"
+    name="$(basename "$path")"
+    cp "$work/package/$path" "$here/$name"
+    sha256="$(sha256sum "$here/$name" | cut -d' ' -f1)"
+    purl="pkg:npm/$package@$newest"
+    [[ "$entry" == htmx ]] || purl="$purl#$path"
+    set_pin "$entry" "$newest" "https://cdn.jsdelivr.net/npm/$package@$newest/$path" "$sha256" "$purl"
 done
+bumped htmx "$pinned" "$newest"
 
-(cd "$here" && sha256sum htmx.min.js htmx.LICENSE sse.min.js sse.LICENSE >htmx.sha256)
-next_step "update the versions in the comments of crates/transect/src/web/assets.rs, then make -C transect test"
+(cd "$here" && sha256sum htmx.min.js hx-sse.min.js htmx.LICENSE >htmx.sha256)
+next_step "update the versions in the comments of ../assets.rs, then make -C ../../../../.. test"

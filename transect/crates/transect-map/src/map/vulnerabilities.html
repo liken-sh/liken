@@ -8,13 +8,13 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- What the scanner reports of each image the workload runs now, a
     box per container, then the reports of images it no longer runs. -#}
-<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view view-wide" id="view">
+<main class="board-page" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <nav class="switcher" aria-label="{{ name }}">
 <a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
 <a class="switch switch-current" href="{{ workload_path }}" hx-get="{{ workload_path }}">{{ name }}</a>

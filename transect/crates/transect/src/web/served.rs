@@ -24,7 +24,10 @@ async fn get(url: &str) -> (StatusCode, String) {
 }
 
 async fn get_from(router: Router, url: &str) -> (StatusCode, String) {
-    let request = Request::get(url).body(Body::empty()).unwrap();
+    send(router, Request::get(url).body(Body::empty()).unwrap()).await
+}
+
+async fn send(router: Router, request: Request<Body>) -> (StatusCode, String) {
     let response = router.oneshot(request).await.unwrap();
     let status = response.status();
     let body = response.into_body().collect().await.unwrap().to_bytes();
@@ -238,4 +241,42 @@ async fn a_page_never_waits_for_a_model_build() {
     .map(|(status, _)| status);
     drop(held);
     assert_eq!(status, Ok(StatusCode::OK));
+}
+
+/// Quick search asks for its rows with the `HX-Target` header, which
+/// htmx writes as the list's tag and id, and receives the rows alone.
+#[rstest]
+#[case::the_dialogs_list("ol#search-results")]
+#[case::the_pages_list("ol#search-page-results")]
+#[tokio::test]
+async fn search_sends_only_the_rows_to_a_list(#[case] target: &str) {
+    let (changes, _) = watch::channel(());
+    let router = super::router(&changes, super::fixture_sources(&changes).unwrap());
+    let request = Request::get("/search?q=store")
+        .header("HX-Target", target)
+        .body(Body::empty())
+        .unwrap();
+    let (status, html) = send(router, request).await;
+    assert_eq!(
+        (status, html.contains("storefront"), html.contains("<html")),
+        (StatusCode::OK, true, false),
+        "GET /search?q=store with HX-Target {target} returned {html:?}, want only the rows"
+    );
+}
+
+/// A page's event stream sends the view as an event with no name,
+/// because htmx's `hx-sse` swaps the data of an unnamed event into the
+/// page and dispatches a named event as a DOM event.
+#[tokio::test]
+async fn the_event_stream_sends_the_view_in_an_unnamed_event() {
+    let (changes, _) = watch::channel(());
+    let router = super::router(&changes, super::fixture_sources(&changes).unwrap());
+    let request = Request::get("/events/").body(Body::empty()).unwrap();
+    let response = router.oneshot(request).await.unwrap();
+    let frame = response.into_body().frame().await.unwrap().unwrap();
+    let event = String::from_utf8_lossy(frame.data_ref().unwrap()).into_owned();
+    assert!(
+        event.starts_with("data: <div class=\"view\" id=\"view\">"),
+        "the first event of /events/ is {event:?}, want the view in an unnamed event"
+    );
 }

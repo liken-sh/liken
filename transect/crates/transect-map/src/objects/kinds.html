@@ -5,15 +5,15 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- Every custom kind the cluster serves, a box per API group: each kind
     with its count, how many are not ready, and its controllers, or the
     group's once when every kind in it shares them.  The kinds with no
     objects fold into the last box. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view" id="view">
+<main class="board-page" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <div class="kinds-boxes">
 {%- for group in groups %}
 {%- if let Some(domain) = heading(loop.index0) %}
@@ -53,7 +53,7 @@
 {%- endif %}
 </div>
 </main>
-<aside class="sidebar workload-card" aria-label="Kinds card" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<aside class="sidebar workload-card" aria-label="Kinds card" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 {%- let (kinds, objects) = totals() %}
 <div class="workload-card-head">
 <b class="workload-card-name">Kinds</b>

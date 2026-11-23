@@ -5,15 +5,15 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- A GitOps object's card in place of the sidebar, beside the row of its
     kind's objects in its namespace and what reconciles from it, in the
     panels a workload's page draws.  Every object listed opens its own
     page. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="gitops-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view" id="view">
+<main class="gitops-map" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <nav class="switcher" aria-label="{{ detail.object.kind }} objects in {{ namespace() }}">
 <a class="switcher-namespace" href="/namespaces/{{ namespace() }}" hx-get="/namespaces/{{ namespace() }}">{{ namespace() }}</a>
 {%- for sibling in siblings %}
@@ -44,7 +44,7 @@
 {%- endfor %}
 </section>
 </main>
-<aside class="sidebar workload-card" aria-label="{{ name() }} card" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<aside class="sidebar workload-card" aria-label="{{ name() }} card" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <div class="workload-card-head">
 <b class="workload-card-name">{{ title() }}</b>
 <span class="workload-card-status"><span class="dot {{ dot_class() }}"></span>{{ ready_text() }}</span>

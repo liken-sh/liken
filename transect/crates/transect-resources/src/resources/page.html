@@ -4,7 +4,7 @@
 
 {% block elevation %}<a href="/">cluster</a><span aria-hidden="true">/</span><span class="elevation-current">resources</span>{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- The page lists each file under `--resources` and each document in
@@ -13,7 +13,7 @@
     `--warm`; a document that loaded shows "loaded", faint.  Each
     condition's title holds its type, status, and reason as a CRD's
     `status.conditions` would. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<div class="view" id="view">
 <main class="resources">
 <p class="resources-summary">{{ summary() }}</p>
 <div class="resources-panel">

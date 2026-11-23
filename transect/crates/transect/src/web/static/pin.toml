@@ -1,34 +1,32 @@
-# The two files of htmx that transect serves to the browser, for the
-# SBOM record that the transect image carries. The binary embeds both
-# files, so the files are in the repository beside this manifest, and
-# htmx.sha256 names each one by the digest below. `make test` checks
+# The htmx files that transect serves to the browser, for the SBOM
+# record that the transect image carries. The binary embeds both
+# scripts, so the files are in the repository beside this manifest,
+# and htmx.sha256 names each one by the digest below. `make test` checks
 # the files against htmx.sha256, and `ci pins` checks htmx.sha256
 # against this manifest. latest.sh --bump writes the files, the sums,
 # and the version, url, sha256, and purl of each entry, and
 # toolchains/pin.sh describes each field. The url serves the same
-# bytes as the file of the same name in the package's npm tarball.
+# bytes as the file of the same path in the package's npm tarball.
 #
-# NVD lists no CPE for htmx or for its extensions, so no entry names
-# one.
+# NVD lists no CPE for htmx, so no entry names one.
 
-# htmx itself: dist/htmx.min.js of the npm package htmx.org. Its
-# LICENSE, in htmx.LICENSE, is the Zero-Clause BSD license.
+# htmx itself: dist/htmx.min.js of the npm package htmx.org. The
+# package's LICENSE, in htmx.LICENSE, is the Zero-Clause BSD license.
 [htmx]
-version = "2.0.11"
-url = "https://cdn.jsdelivr.net/npm/htmx.org@2.0.11/dist/htmx.min.js"
-sha256 = "d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717"
-purl = "pkg:npm/htmx.org@2.0.11"
+version = "4.0.2"
+url = "https://cdn.jsdelivr.net/npm/htmx.org@4.0.2/dist/htmx.min.js"
+sha256 = "fd25ba3fe5e44768756f23862a6daa4f928192199a121e825e882e719bc8aabd"
+purl = "pkg:npm/htmx.org@4.0.2"
 license = "0BSD"
 type = "library"
 
-# The extension that opens a server-sent event stream and swaps a
-# fragment on each event: dist/sse.min.js of the npm package
-# htmx-ext-sse. Its LICENSE, in sse.LICENSE, is the Zero-Clause BSD
-# license.
-[htmx-ext-sse]
-version = "2.2.4"
-url = "https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.4/dist/sse.min.js"
-sha256 = "98a46496de0c3605fbffdce9167ba427bdd9553184f83f149c261891a92c0136"
-purl = "pkg:npm/htmx-ext-sse@2.2.4"
+# The extension that streams server-sent events into a page:
+# dist/ext/hx-sse.min.js of the same package, under the same license.
+# The purl's subpath names the file in the package.
+[hx-sse]
+version = "4.0.2"
+url = "https://cdn.jsdelivr.net/npm/htmx.org@4.0.2/dist/ext/hx-sse.min.js"
+sha256 = "650d88a96a017a50ca0e16ffcf8663ca9ebd12a7e2e73ab22086540e5924ce5f"
+purl = "pkg:npm/htmx.org@4.0.2#dist/ext/hx-sse.min.js"
 license = "0BSD"
 type = "library"

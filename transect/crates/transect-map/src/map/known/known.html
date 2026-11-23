@@ -7,15 +7,15 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- A custom resource of a known kind: the sketch of its kind's first
     elevation, or the object in the middle and a box per reference of its
     kind's knowledge around it, each naming the field it was read from.
     The column, the board, and the card swap as one block. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="known-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view" id="view">
+<main class="known-map" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <nav class="switcher" aria-label="{{ kind }} objects in {{ namespace }}">
 <a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
 {%- for entry in column %}

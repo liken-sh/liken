@@ -6,14 +6,14 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- One kind's objects in every namespace, with its printer columns,
     under a strip of the other kinds of its API group, beside its
     card. -#}
-<div class="view{% if wide() %} view-wide{% endif %}" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view{% if wide() %} view-wide{% endif %}" id="view">
+<main class="board-page" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <nav class="switcher" aria-label="Kinds in {{ card.group }}">
 <a class="switcher-namespace" href="/kinds" hx-get="/kinds">kinds</a>
 {%- for entry in kind_links %}

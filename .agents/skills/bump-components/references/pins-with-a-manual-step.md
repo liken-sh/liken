@@ -17,3 +17,7 @@ Each of these scripts needs a step that no section of the skill gives.
   bump reads the root through Sigstore's TUF repository with the
   pinned cosign, so it needs docker. Read its diff for each key that
   was added or removed.
+- **`transect/crates/transect/src/web/static/latest.sh`** writes the
+  htmx files that `transect` serves. It stops at a new major version
+  of htmx, which needs a port of the templates and the scripts, and
+  [`htmx.md`](htmx.md) gives the port and its proof.

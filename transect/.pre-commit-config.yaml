@@ -2,10 +2,10 @@
 # commit.  The tests and the coverage gate run in CI, through the `make`
 # targets that package.toml names.
 #
-# htmx and its sse extension are minified upstream files that end
+# htmx and its SSE extension are minified upstream files that end
 # without a newline.  htmx.sha256 and pin.toml beside them pin their
 # digests, so no hook may rewrite them.
-exclude: ^crates/transect/src/web/static/(htmx|sse)\.min\.js$
+exclude: ^crates/transect/src/web/static/(htmx|hx-sse)\.min\.js$
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

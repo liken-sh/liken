@@ -194,10 +194,9 @@ const ASSETS: &[Asset] = &[
         "transect-access/src/access/access.css",
         CSS
     ),
-    // htmx.org 2.0.11, dist/htmx.min.js
+    // htmx.org 4.0.2, dist/htmx.min.js
     asset!("htmx.min.js", "transect/src/web/static/htmx.min.js", JS),
     asset!("web/links.js", "transect/src/web/links.js", JS),
-    asset!("web/stream.js", "transect/src/web/stream.js", JS),
     asset!("search/search.js", "transect-map/src/search/search.js", JS),
     asset!(
         "map/known/wires.js",
@@ -209,12 +208,8 @@ const ASSETS: &[Asset] = &[
         "transect-map/src/search/search.css",
         CSS
     ),
-    // htmx-ext-sse 2.2.4, dist/sse.min.js
-    asset!(
-        "htmx-ext-sse.min.js",
-        "transect/src/web/static/sse.min.js",
-        JS
-    ),
+    // htmx.org 4.0.2, dist/ext/hx-sse.min.js
+    asset!("hx-sse.min.js", "transect/src/web/static/hx-sse.min.js", JS),
 ];
 
 pub async fn serve(Path(url): Path<String>, headers: HeaderMap) -> Response {

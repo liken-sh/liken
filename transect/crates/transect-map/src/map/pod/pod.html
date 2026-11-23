@@ -9,14 +9,14 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- The row, the containers, and the placement swap as one block.  A pod
     in the row, or the workload before them, links to its own page,
     which swaps the body and pushes its URL. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="pod-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view" id="view">
+<main class="pod-map" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <nav class="switcher" aria-label="Pods of {% if let Some(workload) = workload %}{{ workload.name }}{% else %}{{ name }}{% endif %}">
 {%- if let Some(workload) = workload %}
 {%- if let Some(href) = workload.href %}

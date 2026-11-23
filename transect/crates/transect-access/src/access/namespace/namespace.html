@@ -12,15 +12,15 @@
 
 {% block masthead_access %} masthead-current{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- A namespace's access: what may reach each port its workloads serve,
     a row per way in beside the workload it reaches, then what each
     account may do here, a row per account, then its Pod Security
     level, with the namespace's card beside them. -#}
-<div class="view view-wider" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="board-page ax-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view view-wider" id="view">
+<main class="board-page ax-page" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <nav class="switcher" aria-label="{{ namespace }}">
 <a class="switcher-namespace" href="/?select={{ namespace }}#{{ layer }}" hx-get="/?select={{ namespace }}#{{ layer }}">{{ layer }}</a>
 <a class="switch switch-current" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>

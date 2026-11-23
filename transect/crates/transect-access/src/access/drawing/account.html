@@ -10,7 +10,7 @@
 
 {% block masthead_access %} masthead-current{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- An account's page.  One drawing shows what runs as the account, the
@@ -18,8 +18,8 @@
     drawing, the page shows who may run as the account, and the
     account's card is beside them.  A ServiceAccount's page is this
     page. -#}
-<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="section-map ax-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view view-wide" id="view">
+<main class="section-map ax-map" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 {%- if let Some(namespace) = namespace() %}
 <nav class="switcher" aria-label="{{ name }}">
 <a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>

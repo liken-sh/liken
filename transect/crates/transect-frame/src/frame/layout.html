@@ -43,9 +43,8 @@
 <link rel="stylesheet" href="/static/access/access.css">
 <link rel="stylesheet" href="/static/vulnerabilities/vulnerabilities.css">
 <script src="/static/htmx.min.js" defer></script>
-<script src="/static/htmx-ext-sse.min.js" defer></script>
+<script src="/static/hx-sse.min.js" defer></script>
 <script src="/static/web/links.js" defer></script>
-<script src="/static/web/stream.js" defer></script>
 <script src="/static/search/search.js" defer></script>
 <script src="/static/map/known/wires.js" defer></script>
 </head>
@@ -78,6 +77,16 @@
 </div>
 <ol class="search-results" id="search-results" aria-label="Results"></ol>
 </dialog>
+{#- A page that changes with the cluster sets `hx-sse:connect` here, in
+    its stream block.  Each event of the stream contains the page's main
+    block again, and `hx-sse` replaces this element's content with it,
+    because its default swap puts an event into the element that
+    connected, as `innerHTML`.  A browser keeps at most six HTTP/1.1 connections to one
+    host, so a few tabs left open, each with its stream, would stall
+    every page load.  `hx-sse` closes the stream of a hidden tab and
+    opens it again when the tab shows, and the server sends the current
+    view first on each new stream, so the page shows what changed while
+    the tab was hidden. -#}
 <div class="page"{% block stream %}{% endblock %}>
 {% block main %}{% endblock %}
 </div>

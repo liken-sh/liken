@@ -5,7 +5,7 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- The logs lens, full width: the row with the lenses, the pods of a
@@ -13,8 +13,8 @@
     to switch between, then one container's lines and the lines each
     pattern tags.  Log text is untrusted, so it is escaped like every
     other value, and no filter in this template marks it safe. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="logs-lens" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view" id="view">
+<main class="logs-lens" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <nav class="switcher" aria-label="Logs of {{ name() }}">
 <a class="switcher-namespace" href="{{ overview() }}" hx-get="{{ overview() }}">{{ name() }}</a>
 {%- for choice in pods %}

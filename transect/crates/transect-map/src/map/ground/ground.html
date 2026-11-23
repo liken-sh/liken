@@ -6,14 +6,14 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- One outside system as a board: how it is reached on the left, the thing
     itself in the middle with its link out and its Outside's lines,
     and what it keeps and what depends on it on the right. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="board-page board-page-alone" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view" id="view">
+<main class="board-page board-page-alone" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <section class="board" aria-label="{{ title }} and what uses it">
 <div class="board-side board-left">
 {% call boxes::section_box(reached) %}{% endcall %}

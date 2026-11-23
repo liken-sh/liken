@@ -4,7 +4,7 @@
     objects it has and how many are not ready, its CRD's description,
     and the workloads that control its objects with how they were
     found. -#}
-<aside class="sidebar workload-card" aria-label="{{ card.label }} card" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<aside class="sidebar workload-card" aria-label="{{ card.label }} card" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <div class="workload-card-head">
 <b class="workload-card-name">{{ card.label }}</b>
 <span class="workload-card-status"><span class="{{ card.dot_class() }}"></span>{{ card.status_text() }}</span>

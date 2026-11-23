@@ -4,12 +4,12 @@
 
 {% block elevation %}<a href="/">cluster</a><span aria-hidden="true">/</span><span class="elevation-current">changed</span>{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- Every change of the last day that the cluster's objects still
     record, newest first, in one panel. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<div class="view" id="view">
 <main class="changed">
 <p class="changed-summary">{{ listed.summary() }}</p>
 <p class="changed-note">{{ sources() }}</p>

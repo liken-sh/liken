@@ -6,14 +6,14 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- The bands, the open namespace, the machines, and the card swap as
     one block, as the cluster page's do.  A namespace named in a folded
     band links to its own page, which swaps the body and pushes its URL. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="cluster namespace-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view" id="view">
+<main class="cluster namespace-map" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 {#- The namespace's lens tabs are at the right end of this row, as on
     its access tab, so a click between the two leaves the pointer over
     them. -#}

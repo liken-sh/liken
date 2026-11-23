@@ -10,14 +10,14 @@
 
 {% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- One machine: what it is, how full it is, what runs there, and the
     devices it publishes.  The row of machines, the sections, and the card of the
     resource below it swap as one block. -#}
-<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="machine-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view" id="view">
+<main class="machine-page" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 <nav class="switcher" aria-label="Machines">
 <a class="switcher-namespace" href="/" hx-get="/">cluster</a>
 {%- for switch in switches %}

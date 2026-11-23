@@ -8,14 +8,12 @@
 // on every navigation, so each lookup finds the dialog again rather
 // than keeping a reference to it.
 //
-// htmx saves the body to its history before a row's page replaces it.
-// A dialog saved open comes back on Back with its `open` attribute but
-// not as a modal, where Escape does nothing, so the dialog is closed
-// before each save, and closed again on any restore that still has it
-// open.
+// Back and Forward request their page again before htmx swaps it in,
+// so the dialog closes when a restore starts, and does not stay open
+// over the page that the reader is leaving.
 //
 // The script runs in a function of its own, because every page script
-// shares one global scope and stream.js already names `open`.
+// shares one global scope.
 (() => {
   const dialog = () => document.getElementById("search");
 
@@ -69,8 +67,7 @@
     box.querySelector(".search-results")?.replaceChildren();
   }
 
-  document.addEventListener("htmx:beforeHistorySave", close);
-  document.addEventListener("htmx:historyRestore", close);
+  document.addEventListener("htmx:before:history:restore", close);
   document.addEventListener("click", (event) => {
     if (event.target.closest?.(".search-close")) close();
     else if (event.target.closest?.(".search-open")) open("");
@@ -134,14 +131,14 @@
   }
 
   // A request's rows are swapped in before htmx reports the request
-  // done.  An older request that a newer one replaced also ends here,
-  // with the older query, so the rows stay out of date until the newest
-  // request's rows arrive.
-  document.addEventListener("htmx:afterRequest", (event) => {
-    if (!event.detail.elt.matches?.(".search-input")) return;
-    const path = event.detail.pathInfo?.finalRequestPath ?? "";
-    const asked = new URL(path, location.origin).searchParams.get("q") ?? "";
-    event.detail.elt.dataset.shown = asked;
+  // finished.  An older request that a newer one replaced also ends
+  // here, with the older query, so the rows stay out of date until the
+  // newest request's rows arrive.
+  document.addEventListener("htmx:finally:request", (event) => {
+    const { ctx } = event.detail;
+    if (!ctx.sourceElement.matches?.(".search-input")) return;
+    const asked = new URL(ctx.request.action, location.origin).searchParams.get("q") ?? "";
+    ctx.sourceElement.dataset.shown = asked;
     if (pending()) return;
     if (openWhenSwapped) {
       openWhenSwapped = false;

@@ -11,14 +11,14 @@
 
 {% block masthead_access %} masthead-current{% endblock %}
 
-{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+{% block stream %} hx-sse:connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
 {#- What each account may do, and where.  The page has a row for each
     account and a column for each capability, in runs whose headings
     name what their rows share. -#}
-<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
-<main class="board-page ax-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="view view-wide" id="view">
+<main class="board-page ax-page" hx-target:inherited="body" hx-swap:inherited="innerHTML" hx-push-url:inherited="true">
 {% call switcher::switcher(false) %}{% endcall %}
 <h1 class="ax-title">What each account may do, and where<span class="ax-count">{{ count() }} accounts, one row each</span></h1>
 <p class="ax-legend">Every account in the cluster that a binding grants one of these six. <span class="ax-key"><span class="ax-block ax-block-d"></span> a binding grants it</span> <span class="ax-key"><span class="ax-block ax-block-f"></span> it follows from a grant.</span> A full block is every namespace; a short one is the namespaces named beside it.</p>
