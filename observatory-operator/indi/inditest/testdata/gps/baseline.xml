@@ -1,4 +1,4 @@
-<defSwitchVector device="GPS Simulator" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-14T15:19:07">
+<defSwitchVector device="GPS Simulator" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-23T14:29:34">
     <defSwitch name="CONNECT" label="Connect">
 Off
     </defSwitch>
@@ -6,7 +6,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defTextVector device="GPS Simulator" name="DRIVER_INFO" label="Driver Info" group="General Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-14T15:19:07">
+<defTextVector device="GPS Simulator" name="DRIVER_INFO" label="Driver Info" group="General Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-23T14:29:34">
     <defText name="DRIVER_NAME" label="Name">
 GPS Simulator
     </defText>
@@ -20,7 +20,7 @@ indi_simulator_gps
 64
     </defText>
 </defTextVector>
-<defSwitchVector device="GPS Simulator" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-11-14T15:19:07">
+<defSwitchVector device="GPS Simulator" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-11-23T14:29:34">
     <defSwitch name="CONFIG_LOAD" label="Load">
 Off
     </defSwitch>
