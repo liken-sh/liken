@@ -73,6 +73,22 @@ for path in \
 	cp -a "$work/intel$path" "$out$path"
 done
 
+# The ffmpeg base holds Debian's build of gmmlib, which its media
+# driver links, and the libigdgmm.so.12 link above replaces the base's
+# link. When Debian's release is not Intel's, the base's library file
+# has another name, so it would stay in the image beside Intel's, and
+# no dpkg record would name it, because the record below replaces the
+# base's. A scanner reads the records, so it would not see that file.
+# Each such file becomes a link to Intel's file here, and the layer
+# puts the link in the file's place. The image then holds one gmmlib,
+# the one that the record names.
+intel_gmm=$(readlink "$out$lib/libigdgmm.so.12")
+for old in "$base$lib"/libigdgmm.so.12.*; do
+	[ -e "$old" ] || continue
+	name=$(basename "$old")
+	[ -e "$out$lib/$name" ] || ln -s "$intel_gmm" "$out$lib/$name"
+done
+
 # Each license of the files above asks that its notice travel with
 # them, and the copies above leave the notices behind. The archive's
 # docs/licensing/ holds Intel's distribution license, which covers the
