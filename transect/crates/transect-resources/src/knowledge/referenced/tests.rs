@@ -159,7 +159,7 @@ fn drawn(relations: Vec<Relation>, behind: Vec<Object>) -> Vec<(Kind, Endpoint, 
         annotation: "example.com/gates".into(),
         role: None,
     }];
-    let relations = HashMap::from([(gate("id", "login"), relations)]);
+    let relations = BTreeMap::from([(gate("id", "login"), relations)]);
     let reached = |_: &Object, _: &Relation| Reached {
         ends: vec![idp()],
         guessed: false,

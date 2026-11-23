@@ -3,7 +3,7 @@
 //! kind: which condition means an object is healthy, which layer its
 //! namespaces belong to, and which fields refer to other objects.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use kube::core::ApiResource;
@@ -149,8 +149,8 @@ impl Snapshot {
 
     /// Reads the references to other objects in the fields that each
     /// custom resource's kind knowledge names.
-    pub(super) fn read_relations(&self) -> HashMap<Object, Vec<Relation>> {
-        let mut relations = HashMap::new();
+    pub(super) fn read_relations(&self) -> BTreeMap<Object, Vec<Relation>> {
+        let mut relations = BTreeMap::new();
         let wanted = self
             .kinds
             .kinds()
@@ -408,5 +408,20 @@ mod tests {
                 ("west-vent", Some(Level::Warning), false),
             ]
         );
+    }
+
+    /// The edges of every object that kind knowledge reads are added to
+    /// the graph in the order `relations` is iterated, and the pages list
+    /// them in the order the graph has them. The fixture has enough
+    /// objects with relations that a random order is sorted by chance
+    /// less often than once in a million runs.
+    #[rstest]
+    fn reads_relations_in_the_order_of_the_objects() {
+        let snapshot = fixture::snapshot();
+        let objects: Vec<_> = snapshot.relations.keys().cloned().collect();
+        let mut sorted = objects.clone();
+        sorted.sort();
+        assert!(objects.len() >= 10);
+        assert_eq!(objects, sorted);
     }
 }

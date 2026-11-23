@@ -16,7 +16,7 @@
 //! one, as an annotation that gives an issuer by name alone means the
 //! issuer in the same namespace.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 
@@ -114,7 +114,7 @@ pub(super) fn render(template: &str, object: &Object) -> String {
 /// field, the annotation, and the referrer.
 pub fn referred_edges(
     referrals: &[Referral],
-    relations: &HashMap<Object, Vec<Relation>>,
+    relations: &BTreeMap<Object, Vec<Relation>>,
     reached: impl Fn(&Object, &Relation) -> Reached,
     behind: impl Fn(&Object) -> Vec<Object>,
     owns: impl Fn(&Object, &Endpoint) -> bool,

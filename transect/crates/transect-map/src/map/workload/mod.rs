@@ -12,7 +12,7 @@ mod switches;
 mod tile_text;
 pub(super) mod tiles;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use askama::Template;
@@ -166,7 +166,7 @@ pub struct Contents<'a> {
     pub kinds: &'a Kinds,
     /// For each custom resource of a kind with knowledge, the objects
     /// that its fields refer to.
-    pub relations: &'a HashMap<Object, Vec<Relation>>,
+    pub relations: &'a BTreeMap<Object, Vec<Relation>>,
     /// The description from each custom kind's CRD.  It opens the card
     /// of a custom workload that has no `why` and no knowledge summary.
     pub definitions: &'a Definitions,

@@ -2,7 +2,7 @@
 //! render, and the values that every page derives from it in the same
 //! way: health, the map, the machines, and the graph of edges.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use k8s_openapi::api::apps::v1::{
@@ -153,8 +153,12 @@ pub struct Snapshot {
     /// The kinds discovery found that are not namespaced.
     pub cluster_scoped: ClusterScoped,
     /// The objects that each custom resource of a known kind refers to,
-    /// as its kind knowledge describes.
-    pub relations: HashMap<Object, Vec<Relation>>,
+    /// as its kind knowledge describes. The map is ordered because the
+    /// graph takes its edges in the order of this map, and each page
+    /// lists them in the graph's order. A hash map's order differs from
+    /// one process to the next, so the same cluster would render two
+    /// ways.
+    pub relations: BTreeMap<Object, Vec<Relation>>,
     /// The description in each custom kind's CRD.
     pub definitions: Definitions,
     /// The issuer of each `Ingress`'s certificate, found through the
@@ -257,7 +261,7 @@ impl Snapshot {
             intents: Intents::default(),
             kinds: Kinds::default(),
             cluster_scoped: cluster.cluster_scoped(),
-            relations: HashMap::new(),
+            relations: BTreeMap::new(),
             definitions: cluster.definitions(),
             issuers: Default::default(),
             paged,
@@ -370,7 +374,7 @@ impl Snapshot {
             intents: Intents::default(),
             kinds: Kinds::default(),
             cluster_scoped: ClusterScoped::default(),
-            relations: HashMap::new(),
+            relations: BTreeMap::new(),
             definitions: Definitions::default(),
             issuers: Default::default(),
             paged: Paged::default(),

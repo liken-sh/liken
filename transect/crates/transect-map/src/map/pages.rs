@@ -1,7 +1,7 @@
 //! Decides which objects have a page, so that the map links only to a
 //! page that exists. `links` builds the URL of each page.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use transect_cluster::ownership::Ownership;
 use transect_graph::edges::{Object, Plurals};
@@ -19,7 +19,7 @@ pub struct Pages<'a> {
     pub with_pages: &'a std::collections::HashSet<Object>,
     pub ownership: &'a Ownership,
     /// The custom resources of kinds that transect has knowledge of.
-    pub relations: &'a HashMap<Object, Vec<Relation>>,
+    pub relations: &'a BTreeMap<Object, Vec<Relation>>,
     pub gitops: &'a GitOps,
     pub plurals: &'a Plurals,
 }
@@ -58,6 +58,8 @@ impl Pages<'_> {
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
+
+    use std::collections::HashMap;
 
     use super::*;
     use transect_cluster::ownership::Entry;
@@ -117,7 +119,7 @@ mod tests {
     )]
     fn links_only_an_object_with_a_page(#[case] object: Object, #[case] expected: Option<&str>) {
         let (ownership, plurals) = (ownership(), plurals());
-        let relations = HashMap::new();
+        let relations = BTreeMap::new();
         let gitops = GitOps::off(transect_supply::gitops::Off::NoKnowledge);
         let with_pages = std::collections::HashSet::from([
             Object::new("", "Service", Some("shop"), "web"),
