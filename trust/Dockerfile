@@ -7,8 +7,8 @@
 # The snapshot is the one that VERSION names, fetched by the checksum
 # that curl.se publishes beside it.
 FROM scratch AS fetch
-ADD --checksum=sha256:796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe \
-    https://curl.se/ca/cacert-2026-10-20.pem /cacert.pem
+ADD --checksum=sha256:427c064216761a1e72a8b30f0d954d08cb6e4435a82091fb865afd20c8497285 \
+    https://curl.se/ca/cacert-2026-11-05.pem /cacert.pem
 
 # syft finds no package in a file that a build fetches, so the image
 # carries a CycloneDX record of the bundle that image-sbom writes from

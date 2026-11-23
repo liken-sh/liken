@@ -220,13 +220,13 @@ target "trust" {
     "manifest" = "toolchains/manifest"
   }
   args = {
-    VERSION = "20261020"
+    VERSION = "20261105"
   }
-  tags       = ["ghcr.io/liken-sh/trust:20261020-5"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache", "type=registry,ref=ghcr.io/liken-sh/trust:buildcache-20261020-5"]
+  tags       = ["ghcr.io/liken-sh/trust:20261105-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache", "type=registry,ref=ghcr.io/liken-sh/trust:buildcache-20261105-1"]
   cache-to = concat(
     CACHE_WRITE == "trust" ? ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "trust" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache-20261020-5,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "trust" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache-20261105-1,mode=max,ignore-error=true"] : [],
   )
 }
 

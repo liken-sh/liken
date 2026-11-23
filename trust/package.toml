@@ -9,12 +9,12 @@ name = "trust"
 # date as curl names it, and the Dockerfile fetches that snapshot by
 # its checksum. latest.sh --bump writes all three, and the smoke check
 # fails when they disagree.
-version = "20261020"
-revision = 5
+version = "20261105"
+revision = 1
 license = "MIT"
 
 [package.upstream]
-mozilla-ca = "2026-10-20"
+mozilla-ca = "2026-11-05"
 
 # The image writes its SBOM record with image-sbom, which builds from
 # toolchains/manifest on the Go image of toolchains.
