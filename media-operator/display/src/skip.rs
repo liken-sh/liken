@@ -9,13 +9,17 @@
 //! The button is on the up-next chip's row, with the chip's metrics and
 //! the card's fill, so it looks like part of the same set of controls.
 //! It is at the left margin, and the chip and the card are at the right
-//! margin, so they do not overlap. It shows over the bare video, with
-//! its own fade, for as long as the playhead is inside the span. While
-//! the OSD is up, it is one of the OSD's focus stops.
+//! margin, so they do not overlap. While the OSD is up, it is one of the
+//! OSD's focus stops for as long as the playhead is inside the span.
 //!
-//! Over the bare video, the intro and recap button is drawn focused and
-//! a select activates it, so a viewer can skip with one press of the
-//! remote. The post-credits button is drawn unfocused there, and a
+//! Over the bare video, with its own fade, the intro and recap button
+//! shows only while the playhead is in the first [`ALONE`] seconds of
+//! its span, so it does not sit over a long recap. It is drawn focused
+//! there, and a select activates it, so a viewer can skip with one
+//! press of the remote. The window follows the playhead, not a timer,
+//! so a pause does not use it up and a seek back to the start of the
+//! span shows the button again. The post-credits button shows over the
+//! bare video for its whole span. It is drawn unfocused there, and a
 //! select pauses the film, because the up-next card is also up during
 //! the credits and a viewer may want to pause and read them.
 
@@ -28,6 +32,10 @@ use crate::ipc::Command;
 use crate::marks::{Jump, Kind};
 use crate::theme;
 use crate::upnext::{CARD_ALPHA, CHIP_H, CHIP_PAD_X, CHIP_PAD_Y, CHIP_R, CHIP_Y};
+
+/// The seconds from the start of an intro or a recap during which its
+/// button shows over the bare video.
+pub const ALONE: f64 = 15.0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Skip {
@@ -42,6 +50,8 @@ pub struct Skip {
     /// for those reports. A report of any other span, or of none, clears
     /// this field, so a later seek back into the span offers it again.
     passed: Option<Jump>,
+    /// Whether the button shows over the bare video at the playhead.
+    alone: bool,
     clock: Clock,
 }
 
@@ -54,26 +64,28 @@ impl Skip {
         self.clock.fade_mut()
     }
 
-    /// Sets the jump that the marks offer at the playhead, or `None`.
-    /// Returns whether the offered jump changed, so the frame loop
-    /// redraws only on a change.
-    pub fn on_position(&mut self, inside: Option<Jump>) -> bool {
+    /// Sets the playhead and the jump that the marks offer there, or
+    /// `None`. Returns whether the offered jump or its place over the bare
+    /// video changed, so the frame loop redraws only on a change.
+    pub fn on_position(&mut self, at: Option<f64>, inside: Option<Jump>) -> bool {
         if self.passed != inside {
             self.passed = None;
         }
         let offered = inside.filter(|jump| Some(*jump) != self.passed);
-        if offered == self.jump {
+        let alone = offered.is_some_and(|jump| shows_alone(jump, at));
+        if offered == self.jump && alone == self.alone {
             return false;
         }
         self.jump = offered;
-        match offered {
-            Some(jump) => {
-                self.kind = Some(jump.span.kind);
-                // The button stays up for the whole span, so it requests
-                // no hide timer.
-                self.clock.show(Hide::Keep);
-            }
-            None => self.clock.hide(),
+        self.alone = alone;
+        if let Some(jump) = offered {
+            self.kind = Some(jump.span.kind);
+        }
+        // The playhead ends the button's time over the bare video, so it
+        // requests no hide timer.
+        match alone {
+            true => self.clock.show(Hide::Keep),
+            false => self.clock.hide(),
         }
         true
     }
@@ -85,9 +97,10 @@ impl Skip {
     }
 
     /// Returns whether a select over the bare video activates the
-    /// button, which it does while it offers an intro or a recap.
+    /// button, which it does while an intro or a recap button shows
+    /// there.
     pub fn takes_select_outside(&self) -> bool {
-        self.jump.is_some_and(|jump| takes_select(jump.span.kind))
+        self.alone && self.jump.is_some_and(|jump| takes_select(jump.span.kind))
     }
 
     /// Returns the command that seeks to the jump's target. The seek is
@@ -99,6 +112,7 @@ impl Skip {
             return Vec::new();
         };
         self.passed = Some(jump);
+        self.alone = false;
         self.clock.hide();
         vec![vec![json!("seek"), json!(jump.to), json!("absolute+exact")]]
     }
@@ -129,6 +143,16 @@ impl Skip {
     /// loop adds no layer when the button is not visible.
     pub fn draws_outside(&self, osd_visible: bool) -> bool {
         !osd_visible && self.kind.is_some() && self.fade().value() > 0.0
+    }
+}
+
+/// Returns whether the button for a jump shows over the bare video at
+/// the playhead: for the whole credits span, and for the first [`ALONE`]
+/// seconds of an intro or a recap.
+fn shows_alone(jump: Jump, at: Option<f64>) -> bool {
+    match jump.span.kind {
+        Kind::Intro | Kind::Recap => at.is_some_and(|at| at < jump.span.start + ALONE),
+        _ => true,
     }
 }
 
@@ -208,7 +232,7 @@ mod tests {
     #[test]
     fn outside_every_span_the_button_offers_nothing() {
         let mut skip = Skip::default();
-        assert!(!skip.on_position(None));
+        assert!(!skip.on_position(Some(200.0), None));
         assert!(!skip.available());
         assert!(!skip.draws_outside(false));
         assert!(skip.take().is_empty());
@@ -217,15 +241,15 @@ mod tests {
     #[test]
     fn the_button_follows_the_playhead_through_the_span() {
         let mut skip = Skip::default();
-        assert!(skip.on_position(Some(intro())));
+        assert!(skip.on_position(Some(7.0), Some(intro())));
         assert!(skip.available());
         settle(&mut skip);
         assert!(skip.draws_outside(false));
         assert!(!skip.draws_outside(true));
         // A second report from inside the same span changes nothing.
-        assert!(!skip.on_position(Some(intro())));
+        assert!(!skip.on_position(Some(7.0), Some(intro())));
 
-        assert!(skip.on_position(None));
+        assert!(skip.on_position(Some(200.0), None));
         assert!(!skip.available());
         // The label stays while the fade runs out.
         assert!(skip.draws_outside(false));
@@ -238,13 +262,13 @@ mod tests {
     #[test]
     fn a_select_seeks_to_the_end_and_the_button_stays_hidden() {
         let mut skip = Skip::default();
-        skip.on_position(Some(intro()));
+        skip.on_position(Some(7.0), Some(intro()));
         assert_eq!(
             skip.take(),
             vec![vec![json!("seek"), json!(107.0), json!("absolute+exact")]]
         );
         assert!(!skip.available());
-        assert!(!skip.on_position(Some(intro())));
+        assert!(!skip.on_position(Some(7.0), Some(intro())));
         assert!(!skip.available());
     }
 
@@ -253,14 +277,17 @@ mod tests {
     #[test]
     fn a_select_in_the_credits_seeks_to_the_scene() {
         let mut skip = Skip::default();
-        skip.on_position(Some(Jump {
-            span: Span {
-                kind: Kind::Credits,
-                start: 5801.777,
-                end: 6400.0,
-            },
-            to: 6371.111,
-        }));
+        skip.on_position(
+            Some(5900.0),
+            Some(Jump {
+                span: Span {
+                    kind: Kind::Credits,
+                    start: 5801.777,
+                    end: 6400.0,
+                },
+                to: 6371.111,
+            }),
+        );
         assert_eq!(
             skip.take(),
             vec![vec![
@@ -284,13 +311,16 @@ mod tests {
                 !skip.takes_select_outside(),
                 "a new Skip takes Select outside for {kind:?}, want false"
             );
-            skip.on_position(Some(Jump {
-                span: Span {
-                    kind,
-                    ..intro().span
-                },
-                ..intro()
-            }));
+            skip.on_position(
+                Some(7.0),
+                Some(Jump {
+                    span: Span {
+                        kind,
+                        ..intro().span
+                    },
+                    ..intro()
+                }),
+            );
             assert_eq!(
                 skip.takes_select_outside(),
                 takes,
@@ -307,11 +337,75 @@ mod tests {
     #[test]
     fn a_seek_back_into_a_skipped_span_offers_it_again() {
         let mut skip = Skip::default();
-        skip.on_position(Some(intro()));
+        skip.on_position(Some(7.0), Some(intro()));
         skip.take();
-        skip.on_position(None);
-        assert!(skip.on_position(Some(intro())));
+        skip.on_position(Some(200.0), None);
+        assert!(skip.on_position(Some(7.0), Some(intro())));
         assert!(skip.available());
+    }
+
+    /// Over the bare video, the intro button shows for the first 15
+    /// seconds of the span, from 7 to 22 seconds. After that it is still
+    /// a stop of the OSD, and a select at the bare video no longer takes
+    /// it.
+    #[test]
+    fn the_intro_button_shows_alone_for_the_first_fifteen_seconds() {
+        let mut skip = Skip::default();
+        skip.on_position(Some(7.0), Some(intro()));
+        settle(&mut skip);
+        assert!(!skip.on_position(Some(21.9), Some(intro())));
+        assert!(skip.draws_outside(false));
+        assert!(skip.takes_select_outside());
+
+        assert!(skip.on_position(Some(22.0), Some(intro())));
+        settle(&mut skip);
+        assert!(!skip.draws_outside(false));
+        assert!(!skip.takes_select_outside());
+        assert!(skip.available());
+        // A later report from the same span changes nothing.
+        assert!(!skip.on_position(Some(60.0), Some(intro())));
+    }
+
+    /// A seek into the middle of an intro offers the button on the OSD
+    /// only.
+    #[test]
+    fn a_seek_past_the_first_fifteen_seconds_shows_nothing_alone() {
+        let mut skip = Skip::default();
+        assert!(skip.on_position(Some(50.0), Some(intro())));
+        settle(&mut skip);
+        assert!(skip.available());
+        assert!(!skip.draws_outside(false));
+        assert!(!skip.takes_select_outside());
+    }
+
+    /// A seek back to the start of the span shows the button alone
+    /// again.
+    #[test]
+    fn a_seek_back_to_the_start_shows_the_button_alone_again() {
+        let mut skip = Skip::default();
+        skip.on_position(Some(50.0), Some(intro()));
+        assert!(skip.on_position(Some(8.0), Some(intro())));
+        settle(&mut skip);
+        assert!(skip.draws_outside(false));
+    }
+
+    /// The post-credits button stays over the bare video for the whole
+    /// span, because the credits run for minutes and the up-next card is
+    /// up beside it.
+    #[test]
+    fn the_post_credits_button_stays_for_the_whole_span() {
+        let credits = Jump {
+            span: Span {
+                kind: Kind::Credits,
+                start: 5801.777,
+                end: 6400.0,
+            },
+            to: 6371.111,
+        };
+        let mut skip = Skip::default();
+        skip.on_position(Some(5900.0), Some(credits));
+        settle(&mut skip);
+        assert!(skip.draws_outside(false));
     }
 
     /// The button ends above row 846, where the scrubber's time label

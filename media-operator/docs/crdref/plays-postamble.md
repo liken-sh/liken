@@ -181,9 +181,13 @@ film.
 
 When an item's `marks` put the playback position inside an intro, a
 recap, or the credits before a post-credits scene, the display shows a
-skip control, and `select` skips. Skipping to a post-credits scene
-works only while the on-screen display is showing. The display never
-skips by itself.
+skip control, and `select` skips. An intro or recap control shows on
+its own over the film only for the first 15 seconds of its span. For
+the rest of the span it shows with the on-screen display: `up` or
+`down` shows the display with the control focused, and the control
+hides when the display hides. Skipping to a post-credits scene works
+only while the on-screen display is showing. The display never skips
+by itself.
 
 In a track chooser, the focused row is bright and underlined in the
 accent color, and a dot marks the track that plays now. The on-screen

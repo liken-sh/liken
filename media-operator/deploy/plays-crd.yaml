@@ -243,8 +243,11 @@ spec:
                               kind, and the display merges spans that overlap
                               into one, from their median start and median
                               end. While the playhead is in an intro or a
-                              recap, the display shows a skip control, and
-                              with the OSD hidden, select skips. Credits count
+                              recap, the display shows a skip control. It
+                              shows over the bare video for the first 15
+                              seconds of the span, and select there skips.
+                              After that it shows only with the OSD, which up
+                              or down opens with the control focused. Credits count
                               only when they start in the second half of the
                               item. A scene after the credits is a
                               `post-credits` span or the gap between two

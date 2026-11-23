@@ -509,7 +509,7 @@ impl Display {
             .presentation
             .marks()
             .skippable(self.film.position, self.film.duration);
-        if !self.skip.on_position(inside) {
+        if !self.skip.on_position(self.film.position, inside) {
             return;
         }
         let mut focus = self.focus;
@@ -1856,14 +1856,37 @@ mod tests {
         {"kind":"intro","start":1100.0,"end":1250.0},
         {"kind":"credits","start":5400.0,"end":5900.0}]}"#;
 
+    /// With the display down, the skip control shows for the first 15
+    /// seconds of the intro. The two candidates merge into a span that
+    /// starts at 550 seconds, the median of 0 and 1100, so the control
+    /// shows alone from 550 to 565 seconds, and then only as a stop of
+    /// the display until the intro ends.
     #[tokio::test]
-    async fn the_skip_control_follows_the_intro_with_the_display_down() {
+    async fn the_skip_control_shows_alone_for_the_start_of_the_intro() {
         let (mut display, _) = display();
         let _ = display.update(present(MARKED));
+        let _ = display.update(property("time-pos", json!(550.0)));
         settle(&mut display);
         assert!(display.skip.available());
         assert!(display.skip.draws_outside(false));
         assert!(!display.focus.visible());
+
+        let _ = display.update(property("time-pos", json!(565.0)));
+        settle(&mut display);
+        assert!(display.skip.available());
+        assert!(!display.skip.draws_outside(false));
+        assert!(!display.draws(Part::Above));
+
+        // Down raises the display with the control focused, and the
+        // control leaves with it.
+        let _ = display.update(message("down"));
+        assert!(display.focus.visible());
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Skip));
+        let _ = display.update(message("back"));
+        settle(&mut display);
+        assert!(!display.focus.visible());
+        assert!(!display.skip.draws_outside(false));
+        assert!(!display.draws(Part::Above));
 
         let _ = display.update(property("time-pos", json!(1300.0)));
         settle(&mut display);

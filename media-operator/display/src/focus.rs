@@ -531,9 +531,16 @@ mod tests {
             }
         }
 
-        /// Puts the playhead inside the intro, so the skip control shows.
+        /// Puts the playhead at the start of the intro, so the skip control
+        /// shows over the bare video.
         fn intro(&mut self) {
-            self.skip.on_position(Some(INTRO));
+            self.skip.on_position(Some(INTRO.span.start), Some(INTRO));
+        }
+
+        /// Puts the playhead 100 seconds into the intro, past the 15 seconds
+        /// that the skip control shows over the bare video.
+        fn late_intro(&mut self) {
+            self.skip.on_position(Some(1200.0), Some(INTRO));
         }
 
         fn offer(&mut self) {
@@ -1440,10 +1447,13 @@ mod tests {
     fn a_select_at_the_bare_video_skips_an_intro_or_a_recap() {
         for kind in [Kind::Intro, Kind::Recap] {
             let mut display = Display::new("{}");
-            display.skip.on_position(Some(Jump {
-                span: Span { kind, ..INTRO.span },
-                ..INTRO
-            }));
+            display.skip.on_position(
+                Some(INTRO.span.start),
+                Some(Jump {
+                    span: Span { kind, ..INTRO.span },
+                    ..INTRO
+                }),
+            );
             assert_eq!(display.press(Action::Select), skip_to_the_end(), "{kind:?}");
             assert!(
                 !display.skip.available(),
@@ -1456,20 +1466,55 @@ mod tests {
         }
     }
 
+    /// Past the first 15 seconds of the intro, the skip control shows only
+    /// on the OSD. Up or down shows the OSD with the control focused, and
+    /// the select after it skips.
+    #[test]
+    fn a_direction_after_the_first_fifteen_seconds_focuses_the_skip_control() {
+        for action in [Action::Up, Action::Down] {
+            let mut display = Display::new("{}");
+            display.late_intro();
+            assert!(
+                display.press(action).is_empty(),
+                "pressing {action:?} runs a command, want none"
+            );
+            assert!(display.focus.visible(), "{action:?} left the OSD hidden");
+            assert_eq!(display.focus.focused_stop(), Some(Stop::Skip), "{action:?}");
+            assert_eq!(
+                display.press(Action::Select),
+                skip_to_the_end(),
+                "{action:?}"
+            );
+        }
+    }
+
+    /// Past the first 15 seconds of the intro, no control shows over the
+    /// bare video, so a select there pauses.
+    #[test]
+    fn a_select_at_the_bare_video_after_the_first_fifteen_seconds_pauses() {
+        let mut display = Display::new("{}");
+        display.late_intro();
+        assert_eq!(display.press(Action::Select), pause_toggle());
+        assert!(display.skip.available());
+    }
+
     /// While the OSD is hidden, the control that skips the credits draws
     /// unfocused, so a select pauses, for a viewer who wants to read the
     /// credits.
     #[test]
     fn a_select_at_the_bare_video_pauses_in_the_credits() {
         let mut display = Display::new("{}");
-        display.skip.on_position(Some(Jump {
-            span: Span {
-                kind: Kind::Credits,
-                start: 5300.0,
-                end: 5600.0,
-            },
-            to: 5600.0,
-        }));
+        display.skip.on_position(
+            Some(5400.0),
+            Some(Jump {
+                span: Span {
+                    kind: Kind::Credits,
+                    start: 5300.0,
+                    end: 5600.0,
+                },
+                to: 5600.0,
+            }),
+        );
         assert_eq!(display.press(Action::Select), pause_toggle());
         assert!(
             display.skip.available(),
@@ -1547,10 +1592,13 @@ mod tests {
         for (kind, want) in cases {
             let mut display = Display::new("{}");
             display.rise();
-            display.skip.on_position(Some(Jump {
-                span: Span { kind, ..INTRO.span },
-                ..INTRO
-            }));
+            display.skip.on_position(
+                Some(INTRO.span.start),
+                Some(Jump {
+                    span: Span { kind, ..INTRO.span },
+                    ..INTRO
+                }),
+            );
             assert!(
                 !display.card_takes_select(),
                 "for {kind:?} the card takes Select, want it not to"
@@ -1605,7 +1653,7 @@ mod tests {
         display.summon();
         assert_eq!(display.focus.focused_stop(), Some(Stop::Skip));
 
-        display.skip.on_position(None);
+        display.skip.on_position(Some(1250.0), None);
         display.refocus();
         assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
         assert_eq!(display.press(Action::Select), pause_toggle());
