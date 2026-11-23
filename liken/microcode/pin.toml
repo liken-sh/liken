@@ -15,10 +15,10 @@
 # the release. microcode/latest.sh --bump writes the cpe with the
 # version.
 [intel-microcode]
-version = "20260925"
-url = "https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/archive/refs/tags/microcode-20260925.tar.gz"
-sha256 = "0ec19023dad1e6dd0c5909174b8dff2555b91cf01671e36271a1ef36655c0cfc"
-purl = "pkg:github/intel/intel-linux-processor-microcode-data-files@microcode-20260925"
+version = "20261110"
+url = "https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/archive/refs/tags/microcode-20261110.tar.gz"
+sha256 = "989a5cd345808babee491da69ed80ae5741697bc87743a71d0ba611f3fd6afa5"
+purl = "pkg:github/intel/intel-linux-processor-microcode-data-files@microcode-20261110"
 license = "LicenseRef-Intel-Microcode"
 type = "firmware"
-cpe = "cpe:2.3:o:intel:microcode:20260925:*:*:*:*:*:*:*"
+cpe = "cpe:2.3:o:intel:microcode:20261110:*:*:*:*:*:*:*"
