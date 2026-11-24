@@ -222,3 +222,23 @@ pub(super) const BIBLIOGRAPHIC: [(&str, &str); 20] = [
     ("tib", "bo"),
     ("wel", "cy"),
 ];
+
+/// The languages with no two-letter code that films carry on their tracks,
+/// each with its three-letter code and its English name: ISO 639-2 codes,
+/// and the ISO 639-3 codes that releases use for the Chinese languages. The
+/// codes `mul`, `zxx`, and `mis` name no one language, so they have no
+/// name here.
+pub(super) const THREE_LETTER: [(&str, &str); 12] = [
+    ("ast", "Asturian"),
+    ("chr", "Cherokee"),
+    ("cmn", "Mandarin Chinese"),
+    ("fil", "Filipino"),
+    ("gsw", "Swiss German"),
+    ("haw", "Hawaiian"),
+    ("hak", "Hakka Chinese"),
+    ("nan", "Min Nan Chinese"),
+    ("nds", "Low German"),
+    ("sco", "Scots"),
+    ("tlh", "Klingon"),
+    ("yue", "Cantonese"),
+];

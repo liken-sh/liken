@@ -67,3 +67,6 @@ component makes it.
   when you add a fact to the operator, add it there too.
 - The browser and `media-operator`'s command sidecar read the cases of
   the subtitle rule from `media-operator/testdata/subtitle-rule.json`.
+  The browser's `tracks/` has the choice of a track. The roles, the
+  language names, and the format words that the browser draws are in
+  `media-screen`, which `media-operator`'s display also links.

@@ -128,6 +128,27 @@ func TestTheSubtitleTracksTravelThroughTheRequest(t *testing.T) {
 	}
 }
 
+// The format of each audio stream travels through the request unread, and a
+// fact that the browser left out stays absent.
+func TestTheAudioFormatsTravelThroughTheRequest(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	audio := `[{"stream":1,"codec":"eac3","profile":"Dolby Digital Plus + Dolby Atmos",` +
+		`"channels":6,"layout":"5.1(side)"},{"stream":2,"codec":"aac","channels":2},{"stream":3}]`
+	payload := `{"library":"` + testLibraryKey + `","items":[{"path":"` + testFilmPath + `",` +
+		`"presentation":{"type":"video","audio":` + audio + `}}]}`
+	publishPlay(operator, []byte(payload))
+
+	operator.pass()
+
+	written, err := json.Marshal(cluster.heldPlays()[0].Spec.Items[0].Presentation.Audio)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != audio {
+		t.Errorf("audio = %s, want %s", written, audio)
+	}
+}
+
 func TestAPlayCarriesThePresentationTheBrowserResolved(t *testing.T) {
 	operator, cluster := playingHouse(t)
 	publishPlay(operator, filmRequest(film(testFilmPath)))

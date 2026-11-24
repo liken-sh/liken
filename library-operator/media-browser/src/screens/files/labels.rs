@@ -1,7 +1,11 @@
 // The words the files section writes for a file and its streams. The probe
 // records ffprobe's own names, such as `hevc`, `truehd`, and
 // `hdmv_pgs_subtitle`, and a person reads the names on a disc's box: HEVC,
-// TrueHD, and PGS.
+// TrueHD, and PGS. The words for the picture and the quality are the
+// browser's own. The words for an audio or subtitle format are in
+// media-screen's `tracks::format`, which the film's display also uses.
+
+use media_screen::tracks::format;
 
 use crate::catalog::FileFacts;
 use crate::catalog::stream::Stream;
@@ -145,87 +149,15 @@ fn frame_rate(rate: &str) -> String {
 }
 
 /// One sound track: its codec, Atmos where its profile names it, and its
-/// channels.
+/// channels. media-screen has the words, because the film's display names
+/// a track the same way.
 pub fn sound(stream: &Stream) -> String {
-    let atmos = stream.profile.to_lowercase().contains("atmos");
-    let codec = audio_codec(stream);
-    let parts = [
-        codec.as_str(),
-        if atmos { "Atmos" } else { "" },
-        &channels(stream),
-    ];
-    parts
-        .iter()
-        .filter(|part| !part.is_empty())
-        .copied()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn audio_codec(stream: &Stream) -> String {
-    let named = match stream.codec.as_str() {
-        "truehd" => "TrueHD",
-        "ac3" => "AC3",
-        "eac3" => "E-AC3",
-        "aac" => "AAC",
-        "flac" => "FLAC",
-        "opus" => "Opus",
-        "mp3" => "MP3",
-        "vorbis" => "Vorbis",
-        "alac" => "ALAC",
-        // ffprobe names the DTS extensions in the profile: DTS-HD MA,
-        // DTS-HD HRA, and DTS Express.
-        "dts" if stream.profile.starts_with("DTS") => {
-            return stream
-                .profile
-                .split(" + ")
-                .next()
-                .unwrap_or("DTS")
-                .to_string();
-        }
-        "dts" => "DTS",
-        pcm if pcm.starts_with("pcm_") => "PCM",
-        other => other,
-    };
-    named.to_string()
-}
-
-// The channels in the form a box states them: 7.1, 5.1, 2.0, or 1.0.
-fn channels(stream: &Stream) -> String {
-    let layout = stream.layout.split('(').next().unwrap_or_default();
-    match layout {
-        "mono" => "1.0".to_string(),
-        "stereo" => "2.0".to_string(),
-        layout if layout.starts_with(|c: char| c.is_ascii_digit()) => layout.to_string(),
-        _ => match stream.channels {
-            1 => "1.0".to_string(),
-            2 => "2.0".to_string(),
-            6 => "5.1".to_string(),
-            8 => "7.1".to_string(),
-            0 => String::new(),
-            count => format!("{count} ch"),
-        },
-    }
-}
-
-/// One subtitle track's format: the codec of an embedded stream, or the
-/// extension of a file beside the video, which reads as a file.
-pub fn subtitle(codec: &str, file: bool) -> String {
-    let named = match codec.to_lowercase().as_str() {
-        "subrip" | "srt" => "SRT".to_string(),
-        "ass" => "ASS".to_string(),
-        "ssa" => "SSA".to_string(),
-        "webvtt" | "vtt" => "VTT".to_string(),
-        "mov_text" => "Timed Text".to_string(),
-        "hdmv_pgs_subtitle" => "PGS".to_string(),
-        "dvd_subtitle" => "VobSub".to_string(),
-        "dvb_subtitle" => "DVB".to_string(),
-        _ => codec.to_uppercase(),
-    };
-    match file {
-        true => format!("{named} file"),
-        false => named,
-    }
+    format::audio(
+        &stream.codec,
+        &stream.profile,
+        &stream.layout,
+        stream.channels,
+    )
 }
 
 /// How many events a subtitle track holds, as lines, and nothing where the

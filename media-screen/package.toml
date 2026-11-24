@@ -12,6 +12,10 @@ run = "make test"
 timeout = 20
 env = { CARGO_INCREMENTAL = "0" }
 coverage = ["coverage-media-screen.xml"]
+# The subtitle roles in src/tracks are the ones that media-operator's
+# command sidecar gives. Both programs' tests read the rule's cases from
+# this one file, so a change to it runs both.
+reads = ["media-operator/testdata/subtitle-rule.json"]
 
 # Runs the hooks of .pre-commit-config.yaml.
 [[jobs]]

@@ -16,22 +16,22 @@ use crate::theme;
 pub(super) const ART: Size = Size::new(704.0, 396.0);
 /// The top of the art, just below the clock's end time, whose line box ends
 /// at y 170. The positions are fixed from the bottom up: near the credits the
-/// scrubber draws the current time under the column's right end, from y 846
+/// scrubber draws the current time under the column's right end, from y 870
 /// down to the bar, and the focus panel has to end above it. So a new line
 /// in the column moves the lines above it and the art up.
 const ART_Y: f32 = 176.0;
 const _: () = assert!(ART_Y >= theme::MARGIN_Y + theme::LINE_PITCH + theme::type_scale::SMALL);
 /// The top of each line under the art. The 12 in `ENDS_DROP` is the gap that
 /// `theme::LINE_PITCH` puts between lines.
-const REASON_Y: f32 = 604.0;
-const TITLE_Y: f32 = 652.0;
-const DETAIL_Y: f32 = 740.0;
+const REASON_Y: f32 = 628.0;
+const TITLE_Y: f32 = 676.0;
+const DETAIL_Y: f32 = 764.0;
 const ENDS_Y: f32 = DETAIL_Y + ENDS_DROP;
 const ENDS_DROP: f32 = theme::type_scale::LABEL + 12.0;
 /// How far the focus panel extends past the column on the left, the right,
 /// and the top. `FOCUS_BOTTOM` sets its bottom edge.
 const FOCUS_PAD: f32 = 16.0;
-const FOCUS_BOTTOM: f32 = 858.0;
+const FOCUS_BOTTOM: f32 = 882.0;
 const _: () = assert!(ENDS_Y + theme::type_scale::LABEL + FOCUS_PAD <= FOCUS_BOTTOM);
 
 /// The column's left edge. The column ends at the right margin.
@@ -168,10 +168,10 @@ mod tests {
         assert_eq!(
             placed,
             [
-                ("NEXT IN HARBOR LIGHTS · S02".to_string(), 1120.0, 604.0),
-                ("E05 · The Long Tide".to_string(), 1120.0, 652.0),
-                ("Harbor Lights · S02".to_string(), 1120.0, 740.0),
-                ("45m · ends at 11:15 pm".to_string(), 1120.0, 792.0),
+                ("NEXT IN HARBOR LIGHTS · S02".to_string(), 1120.0, 628.0),
+                ("E05 · The Long Tide".to_string(), 1120.0, 676.0),
+                ("Harbor Lights · S02".to_string(), 1120.0, 764.0),
+                ("45m · ends at 11:15 pm".to_string(), 1120.0, 816.0),
             ]
         );
     }
@@ -202,14 +202,14 @@ mod tests {
             .iter()
             .map(|line| line.at.y)
             .collect();
-        assert_eq!(rows, [604.0, 652.0, 740.0]);
+        assert_eq!(rows, [628.0, 676.0, 764.0]);
     }
 
     #[test]
     fn the_art_top_and_the_focus_panel_bottom_keep_their_positions() {
         assert_eq!(ART_Y, 176.0);
-        assert_eq!(FOCUS_BOTTOM, 858.0);
-        assert_eq!(ENDS_Y, 792.0);
+        assert_eq!(FOCUS_BOTTOM, 882.0);
+        assert_eq!(ENDS_Y, 816.0);
     }
 
     #[test]

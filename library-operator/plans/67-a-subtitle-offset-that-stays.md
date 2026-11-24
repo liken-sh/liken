@@ -1,22 +1,32 @@
 # 67, A subtitle offset that stays with the media
 
-This is a stub for later. Nothing here is built. When a person nudges the
-subtitle offset on the screen, the offset is saved beside the library's
-files, and the next play of the same video with the same subtitle track
-starts with that offset.
+This is a stub for later. When a person nudges the subtitle offset on
+the screen, the offset is saved beside the library's files, and the
+next play of the same video with the same subtitle track starts with
+that offset.
+
+Status on 2026-11-23: the section "The strip names the direction" is
+built, by
+[`media-operator` plan 48](../../media-operator/plans/completed/48-one-panel-for-a-track-and-its-timing.md).
+The words differ from what the section proposed. The panel has no hint
+for the keys. Its readout names what moves and the direction, such as
+"Subtitles 0.3 s later", and "Subtitles as timed in the file" at zero,
+and the ends of its scale read "sooner" and "later". The strip's value
+ends with the same words, as in "English · 0.3 s later". Nothing else
+in this plan is built.
 
 ## The problem
 
-Some subtitle tracks are early or late against the video. The control
-strip on the media-operator screen has a subtitle offset that moves
-mpv's `sub-delay` by 100 ms for each press, so a person can correct the
-timing by hand. The correction is lost when the play ends. The next play
-of the same film starts at 0, and the person must find the same offset
-again.
+Some subtitle tracks are early or late against the video. The subtitle
+panel of the control strip on the media-operator screen moves mpv's
+`sub-delay` by 100 ms for each press of left or right, so a person can
+correct the timing by hand. The correction is lost when the play ends.
+The next play of the same film starts at 0, and the person must find
+the same offset again.
 
-The strip also does not say which direction is which. Right makes the
-offset larger and left makes it smaller, but a person who sees "+300 ms"
-cannot tell whether the subtitles now show sooner or later.
+When this plan was written, the strip also did not say which direction
+was which: a person who saw "+300 ms" could not tell whether the
+subtitles showed sooner or later.
 
 ## The idea
 
@@ -66,7 +76,7 @@ design that builds this plan decides how to meet them.
   plays at 0, and that 0 must not erase the saved offset.
 - A subtitle file that is renamed or removed leaves its saved offset
   with no track. The scanner's mark-and-sweep must remove it.
-- The adjuster clamps the offset to 10 seconds in each direction.
+- The subtitle panel clamps the offset to 10 seconds in each direction.
 
 ## Not in this plan
 

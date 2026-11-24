@@ -17,6 +17,11 @@ them with `Wiring::from_environment`. Each client links the crate by
 path, so every client follows the same rules. For example,
 `library-operator`'s media browser is a client.
 
+The crate also names the audio and subtitle tracks of a file. The media
+browser shows them on a movie's page, and `media-operator`'s display shows
+them while the film plays. Both link the crate, so a track has the same
+name on both screens.
+
 ## The modules
 
 - `screen` contains `Screen`, which has the rules. `Screen` opens no
@@ -30,6 +35,16 @@ path, so every client follows the same rules. For example,
   panel, and status topics.
 - `metrics` reports the crate's gauges to the `metrics` recorder that
   the client installs.
+- `language` reads a track's language tag, such as `eng`, `en-US`, or
+  `ger`, as its base language, and gives the English name of the
+  language.
+- `tracks::subtitle` gives each subtitle track its role: full, SDH,
+  forced, commentary, or empty. It applies the same rule as
+  `media-operator`'s command sidecar, and `Role::label` is the word a
+  screen draws for the role.
+- `tracks::format` names the format of an audio track, such as
+  `E-AC3 Atmos 5.1`, and of a subtitle track, such as `PGS` or
+  `SRT file`, from ffprobe's codec names.
 
 ## What the crate does
 

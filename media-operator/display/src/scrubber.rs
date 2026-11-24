@@ -657,20 +657,20 @@ mod tests {
         assert_eq!(bar.live, None);
         assert_eq!(bar.current, None);
         assert_eq!(bar.time.content, "20:00");
-        assert_eq!(bar.time.at, Point::new(442.0, 886.0));
+        assert_eq!(bar.time.at, Point::new(442.0, 910.0));
         assert_eq!(bar.time.anchor, Anchor::BottomCentre);
         assert_eq!(bar.time.size, 40.0);
         assert_eq!(bar.time.color.a, theme::alpha::OPAQUE);
 
         let chapter = bar.chapter.expect("a chaptered film has a chapter line");
         assert_eq!(chapter.content, "The road   \u{00B7}   2 of 3");
-        assert_eq!(chapter.at, Point::new(96.0, 922.0));
+        assert_eq!(chapter.at, Point::new(96.0, 946.0));
         assert_eq!(chapter.anchor, Anchor::TopLeft);
         assert_eq!(chapter.size, 34.0);
         assert_eq!(chapter.color.a, theme::alpha::SUBDUED);
 
         assert_eq!(bar.times.content, "20:00  \u{00B7}  1h 20m left");
-        assert_eq!(bar.times.at, Point::new(1824.0, 922.0));
+        assert_eq!(bar.times.at, Point::new(1824.0, 946.0));
         assert_eq!(bar.times.anchor, Anchor::TopRight);
         assert_eq!(bar.times.color.a, theme::alpha::OPAQUE);
     }

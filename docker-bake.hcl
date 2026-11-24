@@ -1262,7 +1262,7 @@ target "media-operator-idle" {
 }
 
 target "media-operator-display" {
-  description = "The display that media-operator draws over a playing film, with the scrubber, the clock, the track menus, and what plays next, on the vulkan image."
+  description = "The display that media-operator draws over a playing film, with the scrubber, the clock, the track panels, and what plays next, on the vulkan image."
   context    = "media-operator"
   dockerfile = "Dockerfile.screen"
   target     = "display"

@@ -63,14 +63,14 @@ impl Scrim {
     }
 
     /// The opacity of the scrim at one canvas row, from 0 to the peak,
-    /// `alpha::SCRIM_EDGE`.
+    /// `alpha::SCRIM`.
     pub fn opacity_at(&self, row: f32) -> f32 {
         let from_edge = match self.edge {
             Edge::Top => row,
             Edge::Bottom => theme::CANVAS_HEIGHT - row,
         };
         let t = ((from_edge - self.hold) / (self.clear - self.hold)).clamp(0.0, 1.0);
-        theme::alpha::SCRIM_EDGE * (1.0 - t * t * (3.0 - 2.0 * t))
+        theme::alpha::SCRIM * (1.0 - t * t * (3.0 - 2.0 * t))
     }
 
     /// The scrim as an image one texel wide and one texel per output row,
@@ -164,7 +164,7 @@ mod tests {
     /// from `clear` on.
     #[test]
     fn a_scrim_is_at_its_peak_to_hold_and_clear_from_clear() {
-        let peak = theme::alpha::SCRIM_EDGE;
+        let peak = theme::alpha::SCRIM;
         let (top, bottom) = (Scrim::top(), Scrim::bottom());
         assert_eq!(top.opacity_at(0.0), peak);
         assert_eq!(top.opacity_at(theme::SCRIM_TOP_HOLD), peak);
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn the_cast_scrim_is_at_its_peak_over_the_heading_and_covers_the_bottom() {
         let (cast, bottom) = (Scrim::cast(), Scrim::bottom());
-        assert_eq!(cast.opacity_at(640.0), theme::alpha::SCRIM_EDGE);
+        assert_eq!(cast.opacity_at(crate::cast::TOP), theme::alpha::SCRIM);
         assert!((0..1080).all(|row| cast.opacity_at(row as f32) >= bottom.opacity_at(row as f32)));
     }
 

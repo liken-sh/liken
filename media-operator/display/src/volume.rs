@@ -237,7 +237,7 @@ impl Volume {
             brush.rounded(
                 self.surface(&canvas),
                 SURFACE_R,
-                theme::at(theme::color::SHADOW, theme::alpha::SCRIM_EDGE),
+                theme::at(theme::color::SHADOW, theme::alpha::VOLUME_ROW),
             );
             brush.rounded(
                 self.track(&canvas),

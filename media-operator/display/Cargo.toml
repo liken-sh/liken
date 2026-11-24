@@ -60,6 +60,12 @@ image = { version = "=0.25.10", default-features = false, features = [
 # the item's `presentation.art` gives no cover, before it looks for a cover file
 # in the track's folder.
 lofty = "=0.25.5"
+# media-screen names a track's language, the role of a subtitle track, and
+# a track's format, so a track reads the same on the media browser's page
+# and in the display's track panel. The image build copies media-screen to
+# /media-screen, so this path also resolves in the image. The display calls
+# none of the crate's bus code, so it starts no MQTT connection.
+media-screen = { path = "../../media-screen" }
 serde_json = { workspace = true }
 # The display binds the compositor's liken_arrangement_v1 protocol on winit's
 # Wayland connection, because the compositor identifies a client by its

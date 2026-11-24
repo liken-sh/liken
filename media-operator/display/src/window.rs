@@ -164,6 +164,10 @@ pub struct Display {
     /// When the display started, on a monotonic clock. The scrubber
     /// times its scans from it, and a wall-clock jump would break them.
     started: Instant,
+    /// How many frame ticks have run. The track panel's glides read this
+    /// clock, so a glide moves only on frames that the display draws, and
+    /// a test moves it by sending ticks.
+    tick: u64,
     /// The `Signature` of the last position that was drawn.
     signature: Option<Signature>,
     /// The layout space of the surface that the compositor configured.
@@ -227,6 +231,7 @@ impl Display {
             card: HideTimer::new(theme::CARD_HIDE),
             row: HideTimer::new(theme::IDLE_HIDE),
             started: Instant::now(),
+            tick: 0,
             signature: None,
             canvas,
             density: 1.0,
@@ -260,6 +265,7 @@ impl Display {
             }
             Message::Mpv(ipc::Event::Detached) => self.on_detached(),
             Message::Tick => {
+                self.tick += 1;
                 self.focus.fade_mut().step();
                 self.upnext.fade_mut().step();
                 self.upnext.column_mut().step();
@@ -360,7 +366,7 @@ impl Display {
         self.below.clear();
     }
 
-    /// Clears the upper layer, which holds an open chooser, the volume
+    /// Clears the upper layer, which holds an open track panel, the volume
     /// row, and the up-next card and the skip control while they draw
     /// over the bare video. The card's and the row's hide timers clear
     /// only this layer.
@@ -378,6 +384,7 @@ impl Display {
             scrubber: &mut self.scrubber,
             strip: &mut self.strip,
             now,
+            tick: self.tick,
             upnext: &mut self.upnext,
             skip: &mut self.skip,
             cast: &mut self.cast,
@@ -412,6 +419,7 @@ impl Display {
         } else if word == ipc::PRESENTATION {
             self.presentation
                 .receive(words.get(1).map_or("", String::as_str));
+            self.presentation.arrived_at(self.film.playlist_pos);
             // A `presentation` block starts a new item, so drop the
             // previous item's pictures and the cached text measurements.
             crate::canvas::forget_measurements();
@@ -455,7 +463,17 @@ impl Display {
     /// `rise`, and shows or hides the skip control at the edges of an
     /// intro or a recap. Both happen while the display is down too.
     fn on_property(&mut self, name: &str, value: &serde_json::Value) -> Task<Message> {
+        // The scale's mark glides from the delay it showed to the new one.
+        let before = match name {
+            "audio-delay" => Some(self.film.audio_delay),
+            "sub-delay" => Some(self.film.sub_delay),
+            _ => None,
+        };
         self.film.apply(name, value);
+        if let Some(before) = before {
+            self.strip
+                .on_delay(name, before, &self.presentation, self.tick);
+        }
         if name == "time-pos" {
             let rose = self
                 .upnext
@@ -487,6 +505,15 @@ impl Display {
             };
         }
         self.redraw();
+        // The next file can have no track of the open panel's kind. The
+        // panel then closes without a press, so the hide timer that it held
+        // off starts again.
+        if name == "track-list" && self.strip.on_tracks(&self.presentation, &self.film) {
+            let mut focus = self.focus;
+            focus.summon(&self.parts());
+            self.focus = focus;
+            return self.arm_hide_timers();
+        }
         if name == "pause" {
             let mut focus = self.focus;
             focus.on_pause(value.as_bool().unwrap_or(false), &mut self.parts());
@@ -496,6 +523,7 @@ impl Display {
         // The up-next offer belongs to the item that the `Play` started
         // on, so a move to another playlist entry drops it.
         if name == "playlist-pos" {
+            self.presentation.on_playlist_pos(value.as_i64());
             self.upnext.on_playlist_pos(value.as_i64());
         }
         Task::none()
@@ -559,7 +587,7 @@ impl Display {
 
     /// Whether the pictures of the OSD are drawn: the logo, the scan
     /// thumbnail, and the cast row. They hide with the OSD and while a
-    /// chooser is open.
+    /// track panel is open.
     fn showing(&self) -> bool {
         self.focus.visible() && self.strip.capturing().is_none()
     }
@@ -672,10 +700,8 @@ impl Display {
             Vec::new()
         };
         let on_strip = self.focus.focused_stop() == Some(Stop::Strip);
-        let strip = self
-            .strip
-            .lines(&canvas, &self.presentation, &self.film, on_strip);
-        if bar.is_some() || !counter.is_empty() || !strip.is_empty() {
+        let strip = Strip::available(&self.presentation, &self.film);
+        if bar.is_some() || !counter.is_empty() || strip {
             // While the cast row shows, the taller cast scrim replaces
             // the bottom scrim, so the row is darkened as well.
             let scrim = match self.cast_showing() {
@@ -685,18 +711,17 @@ impl Display {
             if let Some(bottom) = scrim {
                 brush.scrim(bottom);
             }
+            // The track panel's darkening is in this layer, so it is under
+            // the scrubber's and the strip's words.
+            self.strip.draw_shade(brush, &self.presentation, &self.film);
             if let Some(bar) = bar.as_ref() {
                 self.scrubber.draw(brush, bar);
             }
-            if let Some(mark) = self
-                .strip
-                .mark(&canvas, &self.presentation, &self.film, on_strip)
-            {
-                brush.rect(mark, theme::color::focus());
-            }
-            for line in counter.into_iter().chain(strip) {
+            for line in counter {
                 brush.text(line);
             }
+            self.strip
+                .draw(brush, &self.presentation, &self.film, on_strip);
         }
         // While the up-next card shows, the cast row stops
         // `CARD_CLEAR` short of the card.
@@ -734,24 +759,15 @@ impl Display {
 
     /// Draws the upper layer.
     ///
-    /// The chooser needs a layer of its own. iced_wgpu draws one layer
-    /// in four passes: quads, then meshes, then images, then text. A
-    /// rectangle in the same layer as text would draw under all of the
-    /// text. A second layer draws after the whole first layer, so the
-    /// dim and the panel cover the text that they must cover.
+    /// This layer has the parts that fade on their own timers, the up-next
+    /// column, the skip control, and the volume row, and the track panel.
+    /// The panel's darkening is in the lower layer, under the scrubber's
+    /// and the strip's words, and the panel does not dim the film, because
+    /// the viewer judges a delay by watching the film.
     fn paint_above(&self, brush: &mut Brush<'_>, now: &ZonedDateTime) {
         let canvas = brush.canvas();
-        if self.strip.capturing().is_some() {
-            // Dim the whole frame under the open chooser.
-            brush.rect(
-                Rectangle::new(
-                    iced::Point::ORIGIN,
-                    Size::new(canvas.width(), canvas.height()),
-                ),
-                theme::at(theme::color::SHADOW, theme::alpha::DIM),
-            );
-            self.strip.draw_chooser(brush, &self.film);
-        }
+        self.strip
+            .draw_panel(brush, &self.presentation, &self.film, self.tick);
         // The up-next card appears at `rise` with the OSD down, and a
         // selected card fades out while the next work starts, with the
         // OSD up or down. So it has its own fade outside the OSD. While
@@ -771,8 +787,8 @@ impl Display {
         // bare video for the whole intro or recap.
         self.skip.draw_outside(brush, self.focus.visible());
         // A volume change shows only the volume row, so the row has
-        // its own fade and hide timer. It draws last, on top of a
-        // chooser's dim.
+        // its own fade and hide timer. It draws last, on top of the
+        // track panel.
         self.volume.draw(brush);
     }
 
@@ -863,7 +879,8 @@ impl Display {
                 || self.upnext.fade().running()
                 || self.upnext.column().running()
                 || self.skip.fade().running()
-                || self.volume.fade().running())
+                || self.volume.fade().running()
+                || self.strip.moving(self.tick))
     }
 }
 
@@ -1276,11 +1293,11 @@ mod tests {
         assert_eq!(display.idle.armed, None);
     }
 
-    /// The timer that a summon armed fires while the audio chooser is
-    /// open, and the display stays up. Closing the chooser with back
+    /// The timer that a summon armed fires while the audio panel is
+    /// open, and the display stays up. Closing the panel with back
     /// arms a new timer, which hides the display.
     #[tokio::test]
-    async fn the_idle_timer_leaves_an_open_chooser_up() {
+    async fn the_idle_timer_leaves_an_open_panel_up() {
         let (mut display, _) = display();
         let _ = display.update(message("summon"));
         let summoned = display.idle.armed.expect("a summon arms an idle window");
@@ -1296,13 +1313,57 @@ mod tests {
         assert_eq!(display.idle.armed, None);
 
         let _ = display.update(message("back"));
-        let closed = display
-            .idle
-            .armed
-            .expect("closing the chooser arms a window");
+        let closed = display.idle.armed.expect("closing the panel arms a window");
         let _ = display.update(Message::Hide(closed));
         settle(&mut display);
         assert!(!display.focus.visible());
+    }
+
+    /// A delay that mpv reports while the audio panel is open starts the
+    /// mark's glide, the display asks for frames while it moves, and the
+    /// frame ticks end it. A delay with the panel closed starts nothing.
+    #[tokio::test]
+    async fn a_new_delay_glides_the_mark_for_a_few_frames() {
+        let (mut display, _) = display();
+        let _ = display.update(property("audio-delay", json!(0.05)));
+        assert!(
+            !display.fading(),
+            "a delay with the panel closed asks for frames"
+        );
+
+        for word in ["summon", "down", "down", "select"] {
+            let _ = display.update(message(word));
+        }
+        settle(&mut display);
+        assert!(display.strip.capturing().is_some());
+        let _ = display.update(property("audio-delay", json!(0.1)));
+        assert!(display.fading(), "the mark does not glide, want it to");
+        for _ in 0..crate::motion::GLIDE {
+            let _ = display.update(Message::Tick);
+        }
+        assert!(!display.fading(), "the mark still glides after its length");
+    }
+
+    /// A `track-list` with no track of the open panel's kind closes the
+    /// panel, and the hide timer that the panel held off starts again.
+    #[tokio::test]
+    async fn a_panel_whose_tracks_leave_closes_and_the_display_can_hide() {
+        let (mut display, _) = display();
+        for word in ["summon", "down", "down", "select"] {
+            let _ = display.update(message(word));
+        }
+        assert!(display.strip.capturing().is_some());
+        assert_eq!(display.idle.armed, None);
+
+        let _ = display.update(property(
+            "track-list",
+            json!([{ "id": 1, "type": "sub", "lang": "eng", "selected": true }]),
+        ));
+        assert_eq!(display.strip.capturing(), None);
+        assert!(
+            display.idle.armed.is_some(),
+            "closing the panel arms no hide timer"
+        );
     }
 
     #[tokio::test]
@@ -1699,7 +1760,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_open_chooser_hides_the_logo_and_the_thumbnail() {
+    async fn an_open_panel_hides_the_logo_and_the_thumbnail() {
         let (mut display, _) = display();
         let _ = display.update(present(r#"{"title":"A Film","trickplay":"/art/tiles"}"#));
         let _ = display.update(message("summon"));

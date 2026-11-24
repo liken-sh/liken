@@ -47,7 +47,7 @@ pub mod color {
     }
 
     /// The underline of the focused stop of the control strip and of the
-    /// focused row of a chooser, drawn in the accent color.
+    /// focused row of a track panel, drawn in the accent color.
     pub fn focus() -> Color {
         fill()
     }
@@ -64,12 +64,14 @@ pub mod alpha {
     pub const OPAQUE: f32 = opacity(0x00);
     pub const SUBDUED: f32 = opacity(0x80);
     pub const TRACK: f32 = opacity(0x50);
-    pub const DIM: f32 = opacity(0xA8);
     pub const PANEL: f32 = opacity(0x14);
     pub const HIGHLIGHT: f32 = opacity(0x30);
-    /// The opacity of the scrim where it is darkest, and of the volume
-    /// row's background.
-    pub const SCRIM_EDGE: f32 = opacity(0x34);
+    /// The opacity of each scrim where it is darkest. It is as light as
+    /// the text over it allows, because the scrims darken the film the
+    /// viewer is watching, most of the frame while the cast row shows.
+    pub const SCRIM: f32 = opacity(0x60);
+    /// The opacity of the volume row's background.
+    pub const VOLUME_ROW: f32 = opacity(0x34);
 }
 
 /// Converts an ASS alpha byte to an opacity. An ASS alpha runs from 00,
@@ -147,7 +149,7 @@ pub fn type_size(height: f32) -> f32 {
 }
 
 /// The underline that marks the focus. The control strip's focused stop
-/// and a chooser's focused row both draw it, so the two look the same. It
+/// and a track panel's focused row both draw it, so the two look the same. It
 /// is a bar under the text instead of a box around it, so the mark stays
 /// as quiet as the text, and it is thick enough to see from across a room
 /// at 1080p.
@@ -177,25 +179,23 @@ pub const MARGIN_Y: f32 = 90.0;
 
 /// The y position of the scrubber bar's center line, which the image
 /// counter shares.
-pub const BAR_Y: f32 = 904.0;
-
-/// The y position of the bottom of a chooser or an adjuster panel. The
-/// panel grows upward from it.
-pub const PANEL_BOTTOM: f32 = 876.0;
+pub const BAR_Y: f32 = 928.0;
 
 /// The distance between lines in the top-right column.
 pub const LINE_PITCH: f32 = type_scale::SMALL + 12.0;
 
 /// How far each scrim reaches from its screen edge, in canvas pixels. It
 /// stays at its darkest out to `HOLD` and is clear at `CLEAR`.
+/// Each one holds its darkest only over its own text: the top one to the
+/// line under the title, the bottom one to the time over the scrubber.
 pub const SCRIM_TOP_HOLD: f32 = 180.0;
-pub const SCRIM_TOP_CLEAR: f32 = 380.0;
-pub const SCRIM_BOTTOM_HOLD: f32 = 230.0;
-pub const SCRIM_BOTTOM_CLEAR: f32 = 450.0;
-/// The top of the cast row's heading is 428 pixels above the bottom edge,
-/// so its scrim stays at its darkest to 470 and is clear at 700.
-pub const SCRIM_CAST_HOLD: f32 = 470.0;
-pub const SCRIM_CAST_CLEAR: f32 = 700.0;
+pub const SCRIM_TOP_CLEAR: f32 = 300.0;
+pub const SCRIM_BOTTOM_HOLD: f32 = 206.0;
+pub const SCRIM_BOTTOM_CLEAR: f32 = 360.0;
+/// The top of the cast row's heading is 404 pixels above the bottom edge,
+/// so its scrim stays at its darkest to 420 and is clear at 560.
+pub const SCRIM_CAST_HOLD: f32 = 420.0;
+pub const SCRIM_CAST_CLEAR: f32 = 560.0;
 
 #[cfg(test)]
 mod tests {
@@ -227,10 +227,10 @@ mod tests {
             (alpha::OPAQUE, 0x00),
             (alpha::SUBDUED, 0x80),
             (alpha::TRACK, 0x50),
-            (alpha::DIM, 0xA8),
             (alpha::PANEL, 0x14),
             (alpha::HIGHLIGHT, 0x30),
-            (alpha::SCRIM_EDGE, 0x34),
+            (alpha::SCRIM, 0x60),
+            (alpha::VOLUME_ROW, 0x34),
         ] {
             assert_eq!(coverage, 1.0 - f32::from(byte as u8) / 255.0, "{byte:#04x}");
         }
@@ -238,10 +238,10 @@ mod tests {
         assert_eq!(opacity(0xFF), 0.0);
         assert!((alpha::SUBDUED - 0.498).abs() < 0.001);
         assert!((alpha::TRACK - 0.686).abs() < 0.001);
-        assert!((alpha::DIM - 0.341).abs() < 0.001);
         assert!((alpha::PANEL - 0.922).abs() < 0.001);
         assert!((alpha::HIGHLIGHT - 0.812).abs() < 0.001);
-        assert!((alpha::SCRIM_EDGE - 0.796).abs() < 0.001);
+        assert!((alpha::SCRIM - 0.624).abs() < 0.001);
+        assert!((alpha::VOLUME_ROW - 0.796).abs() < 0.001);
     }
 
     #[test]

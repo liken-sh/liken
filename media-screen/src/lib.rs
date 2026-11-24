@@ -10,12 +10,19 @@
 //! sends its publishes. A client can add topics of its own, so that it reads
 //! back retained state that it publishes. The crate has no window and no
 //! drawing toolkit, so each client draws a sleeping screen in its own way.
+//!
+//! [`language`] and [`tracks`] name the audio and subtitle tracks of a file:
+//! the language, the role of a subtitle track, and the format. The media
+//! browser and the film's display both draw these names, so a track has the
+//! same name before a play and during it.
 
+pub mod language;
 pub mod metrics;
 pub mod panel;
 pub mod reader;
 pub mod screen;
 pub mod status;
+pub mod tracks;
 pub mod volume;
 pub mod wiring;
 

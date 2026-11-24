@@ -189,9 +189,24 @@ hides when the display hides. Skipping to a post-credits scene works
 only while the on-screen display is showing. The display never skips
 by itself.
 
-In a track chooser, the focused row is bright and underlined in the
-accent color, and a dot marks the track that plays now. The on-screen
-display stays visible while a chooser or an adjuster is open.
+The strip at the bottom of the on-screen display names the audio and
+the subtitles that play, and their delay when one is set, as in
+"English SDH · 0.7 s sooner". `left` and `right` move between its
+stops, and `select` opens the stop's track panel on the center line of
+the screen. Each row names a track: the language, written once for
+each language, then for a subtitle track its kind, *full*, *SDH*,
+*forced*, or *commentary*, then its title and its format. A dot marks
+the track that plays. In the panel, `up` and
+`down` move through the tracks, and `select` plays the focused track.
+`select` on the track that plays closes the panel.
+
+The row above the tracks sets the timing. `left` shows the track
+sooner and `right` shows it later, from any row of the panel, by
+0.05 s for audio and 0.1 s for subtitles, up to 5 s and 10 s each way.
+To check a correction, move to that row and press `select`: the delay
+goes to zero, so you see the track as the file times it, and the next
+`select` sets the delay back. The on-screen display stays visible
+while a panel is open.
 
 While the on-screen display is showing, it moves the subtitles up so
 that the last line of a cue stays just above whatever the display draws
@@ -202,7 +217,7 @@ at a fixed point, or to an image cue in the upper half of the picture.
 
 `back` does the first of these that applies:
 
-1. It closes an open chooser.
+1. It closes an open track panel.
 2. It cancels a scan's preview.
 3. It hides the on-screen display.
 4. When the display is hidden and the film is stepped back beside the

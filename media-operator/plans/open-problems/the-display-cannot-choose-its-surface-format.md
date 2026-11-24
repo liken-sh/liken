@@ -29,6 +29,29 @@ from the environment and lists `B8G8R8A8_UNORM` first, and iced takes
 it. With the option set, `vulkaninfo` on the same Intel Arc GPU lists
 `B8G8R8A8_UNORM` first.
 
+## What a run outside the image showed, 2026-11-23
+
+A debug build of the display, run on a laptop under a headless Weston
+with Vulkan and without the driconf option, committed buffers of
+format `AB30`, `DRM_FORMAT_ABGR2101010`, as `WAYLAND_DEBUG=client`
+showed in each `create_immed` request. Every translucent pixel of the
+overlay rounded to a quarter step. The bottom scrim drew as flat bands
+at rows 695 and 759, and a darkening whose picture ramps smoothly from
+0 to 0.55 drew as two flat rounded rectangles of 0.34 and 0.66.
+`media-operator` plan 48's track panel depends on such a darkening
+having no edge, so the format matters to it more than to the scrims.
+
+The same build committed `AR24`, `DRM_FORMAT_ARGB8888`, and drew the
+darkening smoothly, in two cases: with `vk_wsi_force_bgra8_unorm_first=true`
+in its environment, as the image sets it, and with `WGPU_BACKEND=gl`.
+A program that runs the display outside the image, such as a capture
+script on a workstation, has to set the option itself.
+
+Nobody has checked which format a `liken` machine's compositor and
+Mesa offer first for the display in the image, so whether the option
+takes effect on every machine is known only from the `vulkaninfo`
+check above.
+
 ## Why it is not finished
 
 The option is specific to Mesa. It also always chooses 8-bit color,

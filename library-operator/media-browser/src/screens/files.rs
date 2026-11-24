@@ -12,10 +12,12 @@ mod labels;
 
 pub use draw::draw;
 
+use media_screen::language;
+use media_screen::tracks::format;
+
 use crate::catalog::FileFacts;
 use crate::catalog::stream::{Stream, Tracks};
 use crate::catalog::{Subtitle, Track as Entry};
-use crate::language;
 use crate::look;
 use crate::screens::{facts, foot};
 use crate::tracks::subtitle::{self, Choice, Role};
@@ -242,9 +244,9 @@ fn subtitle_rows(
         .map(|preferences| subtitle::choose(&classified, audio_language, preferences));
     let details = embedded
         .iter()
-        .map(|stream| labels::subtitle(&stream.codec, false))
+        .map(|stream| format::subtitle(&stream.codec, false))
         .chain(tracks.beside.iter().filter_map(|entry| match &entry.track {
-            Entry::File(name) => Some(labels::subtitle(extension(name), true)),
+            Entry::File(name) => Some(format::subtitle(extension(name), true)),
             Entry::Stream(_) => None,
         }));
     classified
@@ -255,12 +257,7 @@ fn subtitle_rows(
         .map(|(index, (one, format))| Row {
             language: named(&one.language),
             detail: facts::joined(&[&format, &labels::lines(one.track.events)]),
-            role: match one.role {
-                Role::Sdh => "SDH",
-                Role::Forced => "forced",
-                Role::Commentary => "commentary",
-                Role::Full | Role::Empty => "",
-            },
+            role: one.role.label(),
             plays: shown == Some(Choice::Track(index)),
         })
         .collect()

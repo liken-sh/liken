@@ -28,8 +28,8 @@ const PAD_X: f32 = 22.0;
 const PAD_Y: f32 = 16.0;
 pub(crate) const CARD_R: f32 = 14.0;
 /// The fill of the card when it is not focused. It is dark enough to
-/// read the text over a bright frame. A focused card uses the same
-/// panel fill as the chooser.
+/// read the text over a bright frame. A focused card uses the darker
+/// `theme::alpha::PANEL`.
 pub(crate) const CARD_ALPHA: f32 = theme::opacity(0x54);
 /// The distance from the top of each text row of the card to the top of
 /// the next row, sized for the type of that row.
@@ -43,10 +43,10 @@ const CARD_H: f32 = ART_H + PAD_Y + REASON_PITCH + TITLE_PITCH + DETAIL_PITCH + 
 
 /// The chip is on the row of the scrubber's time label, at the right end.
 /// `CHIP_Y` is the top of the label's line box and `CHIP_H` is the height
-/// of that line box. The box around the label spans y 800 to 846, with
+/// of that line box. The box around the label spans y 824 to 870, with
 /// the same padding above and below the line. The skip control uses the
 /// same dimensions.
-pub(crate) const CHIP_Y: f32 = 809.0;
+pub(crate) const CHIP_Y: f32 = 833.0;
 pub(crate) const CHIP_H: f32 = theme::type_scale::TINY;
 pub(crate) const CHIP_PAD_X: f32 = 22.0;
 pub(crate) const CHIP_PAD_Y: f32 = 9.0;
@@ -665,7 +665,7 @@ mod tests {
     const TEXT_X: f32 = 1406.0;
     /// The row where the scrubber's own text starts, which the offer must
     /// stay above.
-    const FLOOR: f32 = 820.0;
+    const FLOOR: f32 = 844.0;
 
     fn film(duration: f64) -> Film {
         let mut film = Film::default();
@@ -759,7 +759,7 @@ mod tests {
 
         let line = upnext.chip_line(&canvas(), false);
         assert_eq!(line.content, "Up next  E05 \u{b7} The Long Tide");
-        assert_eq!(line.at, Point::new(RIGHT, 823.0));
+        assert_eq!(line.at, Point::new(RIGHT, 847.0));
         assert_eq!(line.anchor, Anchor::Right);
         assert_eq!(line.size, theme::type_scale::TINY);
         assert_eq!(line.color, theme::color::muted());
@@ -789,7 +789,7 @@ mod tests {
         );
         assert!((panel.width - (label + 44.0)).abs() < 0.01);
         assert!((panel.x - (RIGHT + 22.0 - panel.width)).abs() < 0.01);
-        assert_eq!(panel.y, 800.0);
+        assert_eq!(panel.y, 824.0);
         assert_eq!(panel.height, 46.0);
         assert_eq!(
             panel.center().y,
@@ -824,7 +824,7 @@ mod tests {
         let mut upnext = UpNext::default();
         upnext.receive(OFFER);
         let panel = upnext.chip_panel(&canvas());
-        assert!(panel.y + panel.height <= 846.0);
+        assert!(panel.y + panel.height <= 870.0);
     }
 
     /// The card rises at whichever amount leaves less time. A four-hour film

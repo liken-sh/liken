@@ -2,7 +2,9 @@ package main
 
 // The cases are in testdata/subtitle-rule.json. The media browser in
 // library-operator applies the same rule to show which track a play will
-// choose, and its tests read the same file, so a change to the rule in one
+// choose. The roles of that rule are in the media-screen crate, which the
+// browser and the display both link, and the choice is in the browser. The
+// tests of both crates read the same file, so a change to the rule in one
 // program fails a test until the other program matches.
 
 import (

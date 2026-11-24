@@ -1,9 +1,12 @@
 // The read behind a movie page's files section: every stream of one video
-// file, and the text subtitle files mpv loads beside it.
+// file, and the text subtitle files mpv loads beside it. A play request also
+// reads the audio streams here, so the film's display can name the format of
+// each audio track.
 
 use rusqlite::Connection;
 
 use super::{collect, subtitles};
+use crate::catalog::Audio;
 use crate::catalog::stream::{Stream, Tracks};
 
 /// Every stream of one file in container order, and the subtitle files
@@ -43,4 +46,25 @@ pub fn tracks(connection: &Connection, library: &str, path: &str) -> rusqlite::R
         streams,
         beside: subtitles::beside(connection, library, path)?,
     })
+}
+
+/// Every audio stream of one file in container order, with its format. A
+/// file that the probe has not read has no rows, so it has no audio
+/// streams here.
+pub fn audio(connection: &Connection, library: &str, path: &str) -> rusqlite::Result<Vec<Audio>> {
+    collect(
+        connection,
+        "SELECT ordinal, codec, profile, channels, layout \
+         FROM streams WHERE library = ? AND path = ? AND kind = 'audio' ORDER BY ordinal",
+        &[&library, &path],
+        |row| {
+            Ok(Audio {
+                stream: row.get(0)?,
+                codec: row.get(1)?,
+                profile: row.get(2)?,
+                channels: row.get(3)?,
+                layout: row.get(4)?,
+            })
+        },
+    )
 }

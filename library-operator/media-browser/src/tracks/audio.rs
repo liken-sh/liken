@@ -7,7 +7,7 @@
 // record, so a file whose tracks differ only in those can play another
 // track than the page marks.
 
-use crate::language;
+use media_screen::language;
 
 /// One audio track, with the two fields the choice reads.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -491,6 +491,26 @@ type Presentation struct {
 	// `file` is a base name and not a reference, so the resolver does
 	// not rewrite it.
 	Subtitles []PlaySubtitle `json:"subtitles,omitempty"`
+
+	// Audio is the format of each audio stream of the file, from the
+	// library's probe. mpv reports the profile and the channel layout only
+	// of the audio track that it decodes, so the display reads these
+	// entries to name the format of the other tracks. The display matches
+	// an entry to a track of mpv's `track-list` by `ff-index`. The operator
+	// copies the entries to the display and does not read them.
+	Audio []PlayAudio `json:"audio,omitempty"`
+}
+
+// PlayAudio is the format of one audio stream, in ffprobe's own values.
+// `stream` is the stream index in the container, which ffprobe reports as
+// the index and mpv as `ff-index`. An empty `profile` or `layout` and a
+// zero `channels` are values that ffprobe did not report.
+type PlayAudio struct {
+	Stream   int    `json:"stream"`
+	Codec    string `json:"codec,omitempty"`
+	Profile  string `json:"profile,omitempty"`
+	Channels int    `json:"channels,omitempty"`
+	Layout   string `json:"layout,omitempty"`
 }
 
 // PlaySubtitle is what the library measured of one subtitle track. The

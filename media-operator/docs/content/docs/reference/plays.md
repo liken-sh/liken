@@ -116,6 +116,7 @@ What the display shows about the item. A library that supplies the item sets the
 | <span id="specitemspresentation--contributors"></span>`contributors` | string | no | The URI of the library's `.contributors` directory, as `claim://`, `nfs://`, or `https://`, resolved like `uri`. The `appearances` file names each person's portrait by its path under this directory. |
 | <span id="specitemspresentation--marks"></span>`marks` | [\[\]object](#specitemspresentationmarks) | no | Where the intro, the recap, the credits, a scene after the credits, and a preview are in the file. The list can hold several spans of one kind, and the display merges spans that overlap into one, from their median start and median end. While the playhead is in an intro or a recap, the display shows a skip control. It shows over the bare video for the first 10 seconds of the span, and select there skips. After that it shows only with the OSD, which up or down opens with the control focused. Credits count only when they start in the second half of the item. A scene after the credits is a `post-credits` span or the gap between two `credits` spans, and during the credits before it the display offers to skip to the scene. Select takes that offer only while the OSD is visible. The marks also set when the up-next card appears, as the `next` field describes. |
 | <span id="specitemspresentation--subtitles"></span>`subtitles` | [\[\]object](#specitemspresentationsubtitles) | no | The number of subtitle events in each subtitle track of the item, which library-operator writes from its probe because mpv does not report it. The command sidecar uses the counts to choose a subtitle track when the file's flags are wrong. It never chooses a track with no events. It treats a track with fewer than a fifth as many events as the largest track in its language as forced, even when no flag or title says so. A track with no entry here is judged by its flags, title, and file name alone. An entry for an image track can also carry `image`, the measurement that the display uses to place the track. |
+| <span id="specitemspresentation--audio"></span>`audio` | [\[\]object](#specitemspresentationaudio) | no | The format of each audio stream of the item's file. library-operator's media browser writes it from what library-operator's probe read of the file. mpv reports the profile and the channel layout only of the audio track that it decodes, so the display reads this list to name the format of every other audio track, such as `E-AC3 Atmos 5.1`. A file that the probe has not read gets no list, and the display names each track from what mpv reports. |
 
 #### spec.items[].presentation.marks[]
 
@@ -148,6 +149,18 @@ Where an image track draws its text and how tall the text is, which library-oper
 | <span id="specitemspresentationsubtitlesimage--canvasheight"></span>`canvasHeight` | integer | yes | The height of the track's canvas, such as `1080` for a Blu-ray. |
 | <span id="specitemspresentationsubtitlesimage--lineheight"></span>`lineHeight` | integer | yes | The height of one line of the track's text, from the top of its tallest letter to the bottom of its lowest. |
 | <span id="specitemspresentationsubtitlesimage--inkbottom"></span>`inkBottom` | integer | yes | The row just below the last line of a usual cue at the bottom of the canvas. |
+
+#### spec.items[].presentation.audio[]
+
+The format of one audio stream, in ffprobe's own values.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specitemspresentationaudio--stream"></span>`stream` | integer | yes | The index of the stream in its container: the stream index from ffprobe, which is mpv's `ff-index`. |
+| <span id="specitemspresentationaudio--codec"></span>`codec` | string | no | ffprobe's codec name, such as `eac3`, `truehd`, or `aac`. |
+| <span id="specitemspresentationaudio--profile"></span>`profile` | string | no | ffprobe's profile, such as `Dolby Digital Plus + Dolby Atmos` or `DTS-HD MA`. Omit it when ffprobe reports none. |
+| <span id="specitemspresentationaudio--channels"></span>`channels` | integer | no | The number of channels. |
+| <span id="specitemspresentationaudio--layout"></span>`layout` | string | no | ffprobe's channel layout, such as `5.1(side)` or `stereo`. Omit it when ffprobe reports none. |
 
 ### spec.next
 
@@ -389,9 +402,24 @@ hides when the display hides. Skipping to a post-credits scene works
 only while the on-screen display is showing. The display never skips
 by itself.
 
-In a track chooser, the focused row is bright and underlined in the
-accent color, and a dot marks the track that plays now. The on-screen
-display stays visible while a chooser or an adjuster is open.
+The strip at the bottom of the on-screen display names the audio and
+the subtitles that play, and their delay when one is set, as in
+"English SDH · 0.7 s sooner". `left` and `right` move between its
+stops, and `select` opens the stop's track panel on the center line of
+the screen. Each row names a track: the language, written once for
+each language, then for a subtitle track its kind, *full*, *SDH*,
+*forced*, or *commentary*, then its title and its format. A dot marks
+the track that plays. In the panel, `up` and
+`down` move through the tracks, and `select` plays the focused track.
+`select` on the track that plays closes the panel.
+
+The row above the tracks sets the timing. `left` shows the track
+sooner and `right` shows it later, from any row of the panel, by
+0.05 s for audio and 0.1 s for subtitles, up to 5 s and 10 s each way.
+To check a correction, move to that row and press `select`: the delay
+goes to zero, so you see the track as the file times it, and the next
+`select` sets the delay back. The on-screen display stays visible
+while a panel is open.
 
 While the on-screen display is showing, it moves the subtitles up so
 that the last line of a cue stays just above whatever the display draws
@@ -402,7 +430,7 @@ at a fixed point, or to an image cue in the upper half of the picture.
 
 `back` does the first of these that applies:
 
-1. It closes an open chooser.
+1. It closes an open track panel.
 2. It cancels a scan's preview.
 3. It hides the on-screen display.
 4. When the display is hidden and the film is stepped back beside the

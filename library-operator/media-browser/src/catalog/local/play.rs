@@ -5,7 +5,7 @@
 
 use rusqlite::Connection;
 
-use super::{collect, item, place, subtitles};
+use super::{collect, item, place, streams, subtitles};
 use crate::catalog::{Mark, PlayItem, Presentation, art};
 
 // The join from an item to one of its video files. A title with a
@@ -111,8 +111,9 @@ fn logoed(
 // A play list with the marks of each item's main file, so the display can
 // skip an intro and place the credits, with the spans of a file the
 // appearances fact found faces in, so the display can show who is on
-// screen when the film pauses, and with the file's subtitle tracks and
-// their event counts, so the display can choose a track by its role.
+// screen when the film pauses, with the file's subtitle tracks and their
+// event counts, so the display can choose a track by its role, and with the
+// format of each audio stream, so the display can name each audio track.
 fn marked(
     connection: &Connection,
     library: &str,
@@ -125,6 +126,7 @@ fn marked(
         }
         item.presentation.marks = marks(connection, library, &item.path)?;
         item.presentation.subtitles = subtitles::subtitles(connection, library, &item.path)?;
+        item.presentation.audio = streams::audio(connection, library, &item.path)?;
     }
     Ok(items)
 }

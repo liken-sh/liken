@@ -1,5 +1,6 @@
 use super::*;
 use crate::tracks::preferences::{AUTO, AVOID, ON, PREFER};
+use media_screen::tracks::format;
 
 const REMUX: &str = "Film (2024)/Film (2024) [Remux-2160p].mkv";
 const ENCODE: &str = "Film (2024)/Film (2024) [Bluray-1080p].mkv";
@@ -367,7 +368,7 @@ fn a_subtitle_format_reads_as_its_common_name() {
         ("sup", true, "SUP file"),
     ];
     for (codec, file, named) in cases {
-        assert_eq!(labels::subtitle(codec, file), named, "{codec}");
+        assert_eq!(format::subtitle(codec, file), named, "{codec}");
     }
     assert_eq!(labels::lines(Some(1)), "1 line");
     assert_eq!(labels::lines(None), "");

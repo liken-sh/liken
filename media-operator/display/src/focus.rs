@@ -89,6 +89,9 @@ pub struct Parts<'a> {
     pub strip: &'a mut Strip,
     /// A monotonic time in seconds, for the scrubber's seek acceleration.
     pub now: f64,
+    /// The display's frame clock, a count of the ticks of its fades, which
+    /// times the glides of the track panel.
+    pub tick: u64,
     pub upnext: &'a mut UpNext,
     pub skip: &'a mut Skip,
     pub cast: &'a mut Cast,
@@ -191,7 +194,7 @@ impl Focus {
     }
 
     /// Shows the OSD and arms its hide timer, unless the film is paused or a
-    /// chooser is open. When the OSD was hidden, focus goes to the first
+    /// track panel is open. When the OSD was hidden, focus goes to the first
     /// stop below the cast row and the up-next offer: the skip control when
     /// it is shown, and otherwise the bar. Focus never starts on the offer,
     /// because a viewer who presses select to pause would take the offer
@@ -211,25 +214,25 @@ impl Focus {
         self.clock.show(self.idle_window(parts));
     }
 
-    /// Whether a chooser or an adjuster of the strip is open and receives
+    /// Whether a track panel of the strip is open and receives
     /// every press.
-    fn chooser_open(parts: &Parts<'_>) -> bool {
+    fn panel_open(parts: &Parts<'_>) -> bool {
         parts.strip.capturing().is_some()
     }
 
     /// The hide-timer change for a shown OSD. The timer is cancelled while
-    /// the film is paused, and while a chooser or an adjuster is open so
+    /// the film is paused, and while a track panel is open so
     /// that the OSD does not hide a list the viewer is reading. Otherwise
     /// it is armed.
     fn idle_window(self, parts: &Parts<'_>) -> Hide {
-        match self.paused || Self::chooser_open(parts) {
+        match self.paused || Self::panel_open(parts) {
             true => Hide::Cancel,
             false => Hide::Arm,
         }
     }
 
     /// Hides the OSD and cancels its hide timer. It also collapses an
-    /// expanded up-next card and closes an open chooser, so the next summon
+    /// expanded up-next card and closes an open track panel, so the next summon
     /// shows the strip and the offer as they first appear.
     pub fn dismiss(&mut self, parts: &mut Parts<'_>) {
         self.summoned = false;
@@ -338,12 +341,14 @@ impl Focus {
         }
     }
 
-    /// Handles select. It acts on an open chooser, the focused stop, or a
+    /// Handles select. It acts on an open track panel, the focused stop, or a
     /// control that draws focused over the hidden OSD, and otherwise toggles
     /// pause.
     fn select(&mut self, parts: &mut Parts<'_>) -> Vec<Command> {
         if parts.strip.capturing().is_some() {
-            return parts.strip.handle(Action::Select, parts.film);
+            return parts
+                .strip
+                .handle(Action::Select, parts.presentation, parts.film, parts.tick);
         }
         if self.summoned {
             if self.focused == Some(Stop::Next) {
@@ -394,22 +399,22 @@ impl Focus {
 
     /// Handles one press and returns the mpv commands it produces.
     ///
-    /// A press that opens a chooser or an adjuster cancels the hide timer,
+    /// A press that opens a track panel cancels the hide timer,
     /// and the press that closes it arms the timer again, so the OSD hides a
-    /// full timeout after the chooser closes.
+    /// full timeout after the panel closes.
     pub fn nav(&mut self, action: Action, parts: &mut Parts<'_>) -> Vec<Command> {
-        let chooser_was_open = Self::chooser_open(parts);
+        let panel_was_open = Self::panel_open(parts);
         let commands = self.handle_press(action, parts);
-        if Self::chooser_open(parts) {
+        if Self::panel_open(parts) {
             self.clock.request_hide(Hide::Cancel);
-        } else if chooser_was_open && self.summoned {
+        } else if panel_was_open && self.summoned {
             self.clock.request_hide(self.idle_window(parts));
         }
         commands
     }
 
     /// Back does the first of these that applies: it closes an open
-    /// chooser, cancels a scan, hides the OSD, or returns a film that was
+    /// track panel, cancels a scan, hides the OSD, or returns a film that was
     /// shrunk beside the up-next offer to the whole screen. When none
     /// applies, back asks the sidecar to end the run.
     fn handle_press(&mut self, action: Action, parts: &mut Parts<'_>) -> Vec<Command> {
@@ -452,7 +457,9 @@ impl Focus {
         }
 
         if parts.strip.capturing().is_some() {
-            return parts.strip.handle(action, parts.film);
+            return parts
+                .strip
+                .handle(action, parts.presentation, parts.film, parts.tick);
         }
 
         match action {
@@ -482,7 +489,7 @@ fn set_pause() -> Command {
 mod tests {
     use super::*;
     use crate::marks::{Jump, Kind, Span};
-    use crate::strip::Control;
+    use crate::track::Track;
     use serde_json::json;
 
     /// A film and every module that a press can reach.
@@ -493,6 +500,7 @@ mod tests {
         strip: Strip,
         focus: Focus,
         now: f64,
+        tick: u64,
         upnext: UpNext,
         skip: Skip,
         cast: Cast,
@@ -525,6 +533,7 @@ mod tests {
                 strip: Strip::default(),
                 focus: Focus::new(),
                 now: 100.0,
+                tick: 0,
                 upnext: UpNext::default(),
                 skip: Skip::default(),
                 cast: Cast::default(),
@@ -575,6 +584,7 @@ mod tests {
                 scrubber: &mut self.scrubber,
                 strip: &mut self.strip,
                 now: self.now,
+                tick: self.tick,
                 upnext: &mut self.upnext,
                 skip: &mut self.skip,
                 cast: &mut self.cast,
@@ -663,10 +673,11 @@ mod tests {
             vec![Stop::Fine, Stop::Chapter]
         );
 
-        // A film with no tracks still has the strip's audio offset control.
+        // A file with no audio, subtitle, or second video track has
+        // nothing for the strip to show.
         let mut bare = Display::new("{}");
         bare.film = Film::default();
-        assert_eq!(Focus::present(&bare.parts()), vec![Stop::Strip]);
+        assert_eq!(Focus::present(&bare.parts()), vec![]);
     }
 
     /// A summon focuses the first stop below the offer, so select still
@@ -792,7 +803,7 @@ mod tests {
     }
 
     #[test]
-    fn the_strip_stop_opens_a_chooser_on_select() {
+    fn the_strip_stop_opens_a_panel_on_select() {
         let mut display = Display::new("{}");
         display.summon();
         display.press(Action::Down);
@@ -809,15 +820,12 @@ mod tests {
         );
     }
 
-    /// A down press moves inside the open chooser, not to another stop, and
-    /// a select applies the choice and closes the chooser.
+    /// A down press moves inside the open panel, not to another stop,
+    /// and a select plays the focused track and leaves the panel open.
     #[test]
-    fn an_open_chooser_captures_every_press_but_back() {
+    fn an_open_panel_captures_every_press_but_back() {
         let mut display = Display::new("{}");
-        display.summon();
-        display.press(Action::Down);
-        display.press(Action::Down);
-        display.press(Action::Select);
+        open_the_audio_panel(&mut display);
 
         display.press(Action::Down);
         assert_eq!(display.focus.focused_stop(), Some(Stop::Strip));
@@ -825,32 +833,29 @@ mod tests {
             display.press(Action::Select),
             vec![vec![json!("set_property"), json!("aid"), json!("2")]]
         );
-        assert!(
-            display.strip.capturing().is_none(),
-            "the strip is capturing a key, want not capturing"
-        );
+        assert_eq!(display.strip.capturing(), Some(Track::Audio));
     }
 
-    /// Back closes an open adjuster and leaves the strip's focus on its
-    /// control, so the next select opens the same adjuster.
+    /// Back closes an open panel and leaves the strip's focus on its stop,
+    /// so the next select opens the same panel.
     #[test]
-    fn back_returns_the_focus_to_the_offset_whose_adjuster_it_closed() {
+    fn back_returns_the_focus_to_the_stop_whose_panel_it_closed() {
         let mut display = Display::new("{}");
         display.summon();
         display.press(Action::Down);
         display.press(Action::Down);
         display.press(Action::Right);
         display.press(Action::Select);
-        assert_eq!(display.strip.capturing(), Some(Control::AudioOffset));
+        assert_eq!(display.strip.capturing(), Some(Track::Subtitles));
 
         display.press(Action::Back);
         assert_eq!(display.strip.capturing(), None);
         assert_eq!(display.focus.focused_stop(), Some(Stop::Strip));
         display.press(Action::Select);
-        assert_eq!(display.strip.capturing(), Some(Control::AudioOffset));
+        assert_eq!(display.strip.capturing(), Some(Track::Subtitles));
     }
 
-    /// Back closes an open chooser, then cancels a scan, then hides the OSD,
+    /// Back closes an open track panel, then cancels a scan, then hides the OSD,
     /// and then ends the run.
     #[test]
     fn back_undoes_one_thing_at_a_time_and_then_ends_the_run() {
@@ -1039,69 +1044,63 @@ mod tests {
         assert_eq!(display.focus.take_hide(), Hide::Cancel);
     }
 
-    fn open_the_chooser(display: &mut Display) {
+    fn open_the_audio_panel(display: &mut Display) {
         display.summon();
         display.press(Action::Down);
         display.press(Action::Down);
         display.press(Action::Select);
-        assert_eq!(display.strip.capturing(), Some(Control::Audio));
+        assert_eq!(display.strip.capturing(), Some(Track::Audio));
     }
 
-    /// An open chooser cancels the hide timer, a press inside it does not
-    /// arm the timer, and the select that applies a track closes the chooser
-    /// and arms the timer.
+    /// An open panel cancels the hide timer, and a press inside it, a step
+    /// of the delay, or the select that plays another track does not arm
+    /// the timer. The back that closes the panel arms it.
     #[test]
-    fn an_open_chooser_keeps_the_display_shown() {
+    fn an_open_panel_keeps_the_display_shown() {
         let mut display = Display::new("{}");
-        open_the_chooser(&mut display);
+        open_the_audio_panel(&mut display);
         assert_eq!(display.focus.take_hide(), Hide::Cancel);
 
-        display.press(Action::Down);
-        assert_ne!(display.focus.take_hide(), Hide::Arm);
-
-        display.press(Action::Select);
-        assert_eq!(display.strip.capturing(), None);
-        assert_eq!(display.focus.take_hide(), Hide::Arm);
-    }
-
-    /// An open adjuster cancels the hide timer the same way, and the back
-    /// that closes it arms the timer.
-    #[test]
-    fn an_open_adjuster_keeps_the_display_shown() {
-        let mut display = Display::new("{}");
-        display.summon();
-        display.press(Action::Down);
-        display.press(Action::Down);
-        display.press(Action::Right);
-        display.press(Action::Select);
-        assert_eq!(display.strip.capturing(), Some(Control::AudioOffset));
-        assert_eq!(display.focus.take_hide(), Hide::Cancel);
-
-        display.press(Action::Right);
-        assert_ne!(display.focus.take_hide(), Hide::Arm);
+        for press in [Action::Down, Action::Right, Action::Select] {
+            display.press(press);
+            assert_ne!(display.focus.take_hide(), Hide::Arm, "after {press:?}");
+        }
 
         display.press(Action::Back);
         assert_eq!(display.strip.capturing(), None);
         assert_eq!(display.focus.take_hide(), Hide::Arm);
     }
 
+    /// A select on the track that plays closes the panel and arms the hide
+    /// timer.
+    #[test]
+    fn a_select_on_the_playing_track_closes_the_panel_and_arms_the_timer() {
+        let mut display = Display::new("{}");
+        open_the_audio_panel(&mut display);
+        display.focus.take_hide();
+
+        assert!(display.press(Action::Select).is_empty());
+        assert_eq!(display.strip.capturing(), None);
+        assert_eq!(display.focus.take_hide(), Hide::Arm);
+    }
+
     /// The command sidecar summons the OSD after a seek that it sends. A
-    /// summon while a chooser is open must not arm the hide timer, which
+    /// summon while a track panel is open must not arm the hide timer, which
     /// would close the list.
     #[test]
-    fn a_summon_over_an_open_chooser_arms_nothing() {
+    fn a_summon_over_an_open_panel_arms_nothing() {
         let mut display = Display::new("{}");
-        open_the_chooser(&mut display);
+        open_the_audio_panel(&mut display);
         display.focus.take_hide();
 
         display.summon();
         assert_eq!(display.focus.take_hide(), Hide::Cancel);
     }
 
-    /// While the film is paused, closing a chooser does not arm the hide
+    /// While the film is paused, closing a track panel does not arm the hide
     /// timer.
     #[test]
-    fn a_chooser_that_closes_over_a_pause_arms_nothing() {
+    fn a_panel_that_closes_over_a_pause_arms_nothing() {
         let mut display = Display::new("{}");
         display.pause(false);
         display.pause(true);
@@ -1122,7 +1121,7 @@ mod tests {
         "people":{"p/pilot":{"name":"Jane Roe"}},
         "spans":[{"start":1190.0,"end":1205.0,"people":["p/pilot"]}]}"#;
 
-    /// A select on the cast row plays or pauses, opens no chooser, does not
+    /// A select on the cast row plays or pauses, opens no panel, does not
     /// cancel the hide timer, and leaves focus on the row.
     #[test]
     fn a_select_on_a_cast_card_opens_nothing() {
@@ -1188,7 +1187,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dismiss_closes_an_open_chooser() {
+    fn a_dismiss_closes_an_open_panel() {
         let mut display = Display::new("{}");
         display.summon();
         display.press(Action::Down);

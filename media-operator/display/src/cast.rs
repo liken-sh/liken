@@ -68,8 +68,8 @@ const TEXT_GAP: f32 = 12.0;
 /// The top edge of the cards and of the heading. The cards end above the
 /// skip control and the up-next chip, so the row stays in place when either
 /// one appears.
-const ROW_TOP: f32 = 688.0;
-const HEADING_Y: f32 = 652.0;
+const ROW_TOP: f32 = 712.0;
+const HEADING_Y: f32 = 676.0;
 /// The highest y that the row draws at, the top of the heading.
 pub const TOP: f32 = HEADING_Y;
 const HEADING: &str = "In this scene";

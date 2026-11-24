@@ -4,7 +4,9 @@
 # relays, acts on a remote's presses only while the remote's focus is on
 # this `Player`, and requests that media-operator move that focus. Both
 # media-operator's idle screen and library-operator's media browser link
-# it, so the two programs follow the same rules.
+# it, so the two programs follow the same rules. It also names the audio
+# and subtitle tracks of a file, its language, role, and format, for the
+# media browser and media-operator's display.
 #
 # The crate depends on no window or drawing library, because each client
 # draws with its own toolkit.

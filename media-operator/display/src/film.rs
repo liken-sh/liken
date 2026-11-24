@@ -31,6 +31,21 @@ pub struct Track {
     pub ff_index: Option<i64>,
     pub external: bool,
     pub external_filename: Option<String>,
+    /// The container's forced flag. mpv also sets it for an external
+    /// file whose name has a `forced` part.
+    pub forced: bool,
+    /// The flag of a subtitle track that also describes the sounds, for
+    /// a viewer who cannot hear them.
+    pub hearing_impaired: bool,
+    /// The flag of an audio track that also describes the picture, for
+    /// a viewer who cannot see it.
+    pub visual_impaired: bool,
+    /// How many channels an audio track has, as the container states it.
+    /// mpv 0.41 also reports a profile and a channel layout, but only for
+    /// the audio track that it decodes, so the display reads neither: a
+    /// format that changed when a track was selected would move the
+    /// columns of the track panel.
+    pub channels: Option<i64>,
 }
 
 /// mpv's `osd-dimensions`: the size of the window that mpv draws into, in
@@ -43,23 +58,6 @@ pub struct Screen {
     pub bottom: i64,
     pub left: i64,
     pub right: i64,
-}
-
-impl Track {
-    /// The name a viewer sees for the track: its title and language. When
-    /// the file sets neither, the label is `Track <id>`.
-    pub fn label(&self) -> String {
-        let lang = self.lang.as_ref().map(|lang| lang.to_uppercase());
-        match (
-            self.title.as_deref().filter(|title| !title.is_empty()),
-            lang,
-        ) {
-            (Some(title), Some(lang)) => format!("{title} ({lang})"),
-            (Some(title), None) => title.to_string(),
-            (None, Some(lang)) => lang,
-            (None, None) => format!("Track {}", self.id),
-        }
-    }
 }
 
 /// The last value of each observed mpv property. Drawing code reads these
@@ -170,6 +168,19 @@ fn text(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Whether a chapter title is only a time, such as `00:07:40.835` or
+/// `12:30`, which some files write in place of a name. The scrubber shows
+/// the time already, so such a title says nothing.
+fn is_a_time(title: &str) -> bool {
+    let (clock, fraction) = title.split_once(['.', ',']).unwrap_or((title, "0"));
+    let fields: Vec<&str> = clock.split(':').collect();
+    (2..=3).contains(&fields.len())
+        && fields
+            .iter()
+            .chain([&fraction])
+            .all(|field| !field.is_empty() && field.chars().all(|c| c.is_ascii_digit()))
+}
+
 fn chapters(value: &Value) -> Vec<Chapter> {
     value
         .as_array()
@@ -177,7 +188,10 @@ fn chapters(value: &Value) -> Vec<Chapter> {
             list.iter()
                 .map(|entry| Chapter {
                     time: entry.get("time").and_then(Value::as_f64).unwrap_or(0.0),
-                    title: entry.get("title").and_then(text),
+                    title: entry
+                        .get("title")
+                        .and_then(text)
+                        .filter(|title| !is_a_time(title)),
                 })
                 .collect()
         })
@@ -198,21 +212,24 @@ fn tracks(value: &Value) -> Vec<Track> {
                         .to_string(),
                     title: entry.get("title").and_then(text),
                     lang: entry.get("lang").and_then(text),
-                    selected: entry
-                        .get("selected")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
+                    selected: flag(entry, "selected"),
                     codec: entry.get("codec").and_then(text),
                     ff_index: entry.get("ff-index").and_then(Value::as_i64),
-                    external: entry
-                        .get("external")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
+                    external: flag(entry, "external"),
                     external_filename: entry.get("external-filename").and_then(text),
+                    forced: flag(entry, "forced"),
+                    hearing_impaired: flag(entry, "hearing-impaired"),
+                    visual_impaired: flag(entry, "visual-impaired"),
+                    channels: entry.get("demux-channel-count").and_then(Value::as_i64),
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// A boolean field of a `track-list` entry. A missing field is false.
+fn flag(entry: &Value, name: &str) -> bool {
+    entry.get(name).and_then(Value::as_bool).unwrap_or(false)
 }
 
 fn screen(value: &Value) -> Option<Screen> {
@@ -299,24 +316,78 @@ mod tests {
         assert_eq!(film.media_title, None);
     }
 
+    /// The entries are in the shape that mpv 0.41 sends. The profile and
+    /// the layout of the decoded audio track are not read.
     #[test]
-    fn a_track_reads_by_its_title_its_language_or_its_id() {
-        let label = |title: Option<&str>, lang: Option<&str>| {
-            Track {
-                id: 3,
-                kind: "audio".to_string(),
-                title: title.map(str::to_string),
-                lang: lang.map(str::to_string),
-                ..Track::default()
-            }
-            .label()
-        };
+    fn a_track_keeps_its_flags_and_its_channel_count() {
+        let mut film = Film::default();
+        film.apply(
+            "track-list",
+            &json!([
+                { "id": 1, "type": "audio", "codec": "eac3", "selected": true,
+                  "codec-profile": "Dolby Digital Plus + Dolby Atmos",
+                  "demux-channel-count": 6, "demux-channels": "5.1(side)" },
+                { "id": 2, "type": "audio", "visual-impaired": true,
+                  "demux-channel-count": 2, "demux-channels": "unknown2" },
+                { "id": 1, "type": "sub", "forced": true, "default": true },
+                { "id": 2, "type": "sub", "hearing-impaired": true },
+            ]),
+        );
+        let read: Vec<_> = film
+            .tracks
+            .iter()
+            .map(|track| {
+                (
+                    track.kind.as_str(),
+                    track.forced,
+                    track.hearing_impaired,
+                    track.visual_impaired,
+                    track.channels,
+                )
+            })
+            .collect();
+        assert_eq!(
+            read,
+            vec![
+                ("audio", false, false, false, Some(6)),
+                ("audio", false, false, true, Some(2)),
+                ("sub", true, false, false, None),
+                ("sub", false, true, false, None),
+            ]
+        );
+    }
 
-        assert_eq!(label(Some("Commentary"), Some("eng")), "Commentary (ENG)");
-        assert_eq!(label(Some("Commentary"), None), "Commentary");
-        assert_eq!(label(None, Some("spa")), "SPA");
-        assert_eq!(label(None, None), "Track 3");
-        assert_eq!(label(Some(""), Some("eng")), "ENG");
+    /// Some files title each chapter with its start time. A title that is
+    /// only a time says nothing that the scrubber does not, so it counts
+    /// as no title.
+    #[test]
+    fn a_chapter_titled_with_a_time_has_no_title() {
+        let mut film = Film::default();
+        film.apply(
+            "chapter-list",
+            &json!([
+                { "title": "00:07:40.835", "time": 460.835 },
+                { "title": "1:02:03", "time": 3723.0 },
+                { "title": "12:30", "time": 750.0 },
+                { "title": "Chapter 3", "time": 900.0 },
+                { "title": "The road at 10:30", "time": 1000.0 },
+            ]),
+        );
+        let titles: Vec<Option<&str>> = film
+            .chapters
+            .iter()
+            .map(|chapter| chapter.title.as_deref())
+            .collect();
+        assert_eq!(
+            titles,
+            vec![
+                None,
+                None,
+                None,
+                Some("Chapter 3"),
+                Some("The road at 10:30")
+            ]
+        );
     }
 
     #[test]

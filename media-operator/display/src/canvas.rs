@@ -9,9 +9,12 @@ use crate::theme;
 pub mod brush;
 pub mod raster;
 pub mod scrim;
+pub mod shade;
 pub mod shape;
 
-pub use brush::{Anchor, Brush, ELLIPSIS, Line, clip, forget_measurements, measure};
+pub use brush::{
+    Anchor, Brush, ELLIPSIS, Line, clip, forget_measurements, measure, measure_italic,
+};
 pub use scrim::{Picture, Scrims};
 
 /// The mapping from canvas units to output pixels. Both axes use the same

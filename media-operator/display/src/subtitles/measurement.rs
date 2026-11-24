@@ -8,6 +8,7 @@
 use serde_json::Value;
 
 use crate::film::Track;
+use crate::streams::same_stream;
 
 /// The numbers of one image track.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,22 +66,12 @@ fn measurement(image: &Value) -> Option<Measurement> {
     })
 }
 
-/// The measurement of `track`, or `None` when no entry matches it. An
-/// embedded track matches an entry by its index in the container, and an
-/// external file by its base name, because the pod mounts the media at
-/// another path than the library's. `subtitleEvents` in the command
-/// sidecar matches a track to its event count the same way.
+/// The measurement of `track`, or `None` when no entry matches it.
+/// `streams::same_stream` says which entry describes a track.
 pub fn find(measured: &[Measured], track: &Track) -> Option<Measurement> {
-    let name = track
-        .external_filename
-        .as_deref()
-        .map(|path| path.rsplit('/').next().unwrap_or(path));
     measured
         .iter()
-        .find(|entry| match track.external {
-            true => entry.file.is_some() && entry.file.as_deref() == name,
-            false => entry.stream.is_some() && entry.stream == track.ff_index,
-        })
+        .find(|entry| same_stream(entry.stream, entry.file.as_deref(), track))
         .map(|entry| entry.measurement)
 }
 

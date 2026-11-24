@@ -1,12 +1,14 @@
-// Language tags as files and preferences write them, and the names a page
+// Language tags as files and preferences write them, and the names a screen
 // shows for them. A Matroska track writes `eng` or `ger`, a subtitle file
 // name writes `en` or `pt-BR`, and a `MediaPreferences` writes whatever its
-// author typed. The subtitle rule and the audio choice compare tags by
-// their base language, and a page names each language once in English.
+// author typed. The subtitle rule and the media browser's audio choice
+// compare tags by their base language. The media browser's pages and the
+// film's display both name each language once in English, so a person reads
+// the same name for a track before a play and during it.
 
 mod codes;
 
-use codes::{BIBLIOGRAPHIC, CODES};
+use codes::{BIBLIOGRAPHIC, CODES, THREE_LETTER};
 
 /// The base language of a tag, in one form for each language: `en` for
 /// `en`, `eng`, `EN`, and `en-US`, and `de` for `de`, `deu`, and `ger`. A
@@ -58,7 +60,8 @@ pub fn same(a: &str, b: &str) -> bool {
     !canonical_a.is_empty() && canonical_a == canonical(b)
 }
 
-/// The English name of a tag's language. A tag this table does not name
+/// The English name of a tag's language, from the two-letter languages and
+/// the three-letter ones that films carry. A tag these tables do not name
 /// draws as the file carries it, because a tag a person can read is better
 /// than nothing at all.
 pub fn name(tag: &str) -> &str {
@@ -66,7 +69,14 @@ pub fn name(tag: &str) -> &str {
     CODES
         .iter()
         .find(|(code, _, _)| *code == base)
-        .map_or(tag, |(_, _, name)| *name)
+        .map(|(_, _, name)| *name)
+        .or_else(|| {
+            THREE_LETTER
+                .iter()
+                .find(|(code, _)| *code == base)
+                .map(|(_, name)| *name)
+        })
+        .unwrap_or(tag)
 }
 
 #[cfg(test)]
@@ -106,7 +116,10 @@ mod tests {
             ("fre", "French"),
             ("no", "Norwegian"),
             ("qq", "qq"),
-            ("fil", "fil"),
+            ("fil", "Filipino"),
+            ("cmn", "Mandarin Chinese"),
+            ("yue", "Cantonese"),
+            ("xyz", "xyz"),
         ];
         for (tag, named) in cases {
             assert_eq!(name(tag), named, "{tag}");

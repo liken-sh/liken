@@ -72,13 +72,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     && sh /cargo.sh /notices --no-default-features -p idle-screen
 
 FROM deps AS build-display
+COPY --from=media-screen src/ /media-screen/src/
 COPY display/src/ display/src/
 COPY --from=notices cargo.sh /
 # As in build-idle, touch forces cargo to recompile the crates and reuse
 # the dependencies, and cargo.sh copies the license files.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    touch display/src/main.rs display/src/lib.rs /brand/iced/src/*.rs \
+    touch display/src/main.rs display/src/lib.rs /brand/iced/src/*.rs /media-screen/src/lib.rs \
     && cargo auditable build --release --locked -p media-display \
     && sh /cargo.sh /notices -p media-display
 

@@ -26,6 +26,17 @@ so the crate handles no volume key and publishes no volume. The crate
 depends on no window library, because each client draws with its own
 toolkit.
 
+The crate also has the names that both screens give a track: the
+language in `language`, the role of a subtitle track in
+`tracks::subtitle`, and the format in `tracks::format`. The media
+browser names the tracks of a file before a play, and
+`media-operator`'s display in `media-operator/display/` names them
+during it. Both link this one copy, so a track has the same name on
+both screens. The choice of a track stays in the browser's
+`tracks/`, because the display does not choose: `media-operator`'s
+command sidecar does, in Go. The roles here and the sidecar's roles are
+tested against the cases in `media-operator/testdata/subtitle-rule.json`.
+
 ## Finding things
 
 - `src/wiring.rs` and `media-operator/wire.go` declare the same

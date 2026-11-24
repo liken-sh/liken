@@ -41,7 +41,7 @@ const TILE_H: f32 = 220.0;
 
 /// The y coordinate of the thumbnail's bottom edge, above the time
 /// label and the scrub bar.
-const TILE_BOTTOM_Y: f32 = 836.0;
+const TILE_BOTTOM_Y: f32 = 860.0;
 /// The y coordinate of the top of the tallest thumbnail. Subtitles move
 /// above it while a thumbnail shows.
 pub const TILE_TOP: f32 = TILE_BOTTOM_Y - TILE_H;
@@ -50,7 +50,7 @@ pub const TILE_TOP: f32 = TILE_BOTTOM_Y - TILE_H;
 /// between the side margins, and from below the header to above the
 /// scrub bar.
 const REGION_TOP: f32 = 300.0;
-const REGION_BOTTOM: f32 = 832.0;
+const REGION_BOTTOM: f32 = 856.0;
 const BOX_H: f32 = REGION_BOTTOM - REGION_TOP;
 const CENTER_Y: f32 = REGION_TOP + BOX_H / 2.0;
 
@@ -708,7 +708,7 @@ mod tests {
             None,
             &[],
         );
-        assert_eq!(boxes(&cover), [(Kind::Album, 1728, 532)]);
+        assert_eq!(boxes(&cover), [(Kind::Album, 1728, 556)]);
 
         let tile = art.sync(
             &block(r#"{"trickplay":"/art/tiles"}"#),
@@ -766,7 +766,7 @@ mod tests {
             None,
             &[],
         );
-        assert_eq!(boxes(&cover), [(Kind::Album, 3456, 1064)]);
+        assert_eq!(boxes(&cover), [(Kind::Album, 3456, 1112)]);
     }
 
     /// A music item requests no logo even when it declares one, and an
@@ -1227,9 +1227,9 @@ mod tests {
     fn the_tile_is_centered_on_the_playhead_and_clamped_to_the_screen() {
         let tile = picture(360, 220).expect("a tile");
         for (cursor, at) in [
-            (960.0, Point::new(780.0, 616.0)),
-            (96.0, Point::new(0.0, 616.0)),
-            (1824.0, Point::new(1560.0, 616.0)),
+            (960.0, Point::new(780.0, 640.0)),
+            (96.0, Point::new(0.0, 640.0)),
+            (1824.0, Point::new(1560.0, 640.0)),
         ] {
             assert_eq!(tile_at(&canvas(), &tile, cursor), at, "at {cursor}");
         }
@@ -1248,9 +1248,9 @@ mod tests {
     #[test]
     fn the_cover_is_centered_in_its_region() {
         let cover = picture(532, 532).expect("a cover");
-        assert_eq!(cover_at(&canvas(), &cover), Point::new(694.0, 300.0));
+        assert_eq!(cover_at(&canvas(), &cover), Point::new(694.0, 312.0));
 
         let huge = picture(1000, 1).expect("a wide cover");
-        assert_eq!(cover_at(&canvas(), &huge), Point::new(460.0, 566.0));
+        assert_eq!(cover_at(&canvas(), &huge), Point::new(460.0, 578.0));
     }
 }

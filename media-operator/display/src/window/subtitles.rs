@@ -13,7 +13,7 @@ impl Display {
     /// or `None` when the controls are faded out or no subtitle track is
     /// selected. The controls are the time over the scrubber, the up-next
     /// chip or the skip control, the cast row, a scan's thumbnail, and an
-    /// open chooser or adjuster.
+    /// open track panel.
     fn band_top(&self) -> Option<f32> {
         if !self.focus.fade().shown() || self.film.selected_subtitle().is_none() {
             return None;
@@ -24,7 +24,7 @@ impl Display {
                 .then_some(crate::upnext::CHIP_TOP),
             self.cast_showing().then_some(crate::cast::TOP),
             self.previewing().map(|_| crate::art::TILE_TOP),
-            self.strip.panel_top(&self.film),
+            self.strip.panel_top(&self.presentation, &self.film),
         ]
         .into_iter()
         .flatten()
@@ -52,7 +52,7 @@ impl Display {
         let top = self.band_top();
         let film = &self.film;
         let placed = film.selected_subtitle().and_then(|track| {
-            let measured = measurement::find(self.presentation.measured(), track);
+            let measured = measurement::find(self.presentation.measured(film), track);
             placement::place(track, film.script.as_ref(), film.screen.as_ref(), measured)
                 .map(|placement| (track, placement))
         });
@@ -161,16 +161,32 @@ mod tests {
         assert!(sent(&mut commands).is_empty());
     }
 
+    /// The top of the open track panel, which is above the scrubber time.
+    fn panel_top(display: &Display) -> f32 {
+        let top = display
+            .strip
+            .panel_top(&display.presentation, &display.film)
+            .expect("an open track panel");
+        assert!(
+            top < crate::scrubber::TOP,
+            "the panel's top is at {top}, below the scrubber time"
+        );
+        top
+    }
+
+    /// The presses after a summon, and the row the subtitles then clear.
+    type Clears = (&'static [&'static str], fn(&Display) -> f32);
+
     /// Each case is the key presses after a summon and the row that the
     /// subtitles must clear. With the strip focused, the highest control
-    /// is still the scrubber time. The audio chooser's two-row panel is
-    /// higher.
+    /// is still the scrubber time. The audio panel is higher.
     #[tokio::test]
     async fn the_subtitles_clear_the_highest_thing_in_the_band() {
-        let cases: [(&[&str], f32); 3] = [
-            (&[], crate::scrubber::TOP),
-            (&["down", "down"], crate::scrubber::TOP),
-            (&["down", "down", "select"], crate::chooser::top(2)),
+        let scrubber = |_: &Display| crate::scrubber::TOP;
+        let cases: [Clears; 3] = [
+            (&[], scrubber),
+            (&["down", "down"], scrubber),
+            (&["down", "down", "select"], panel_top),
         ];
         for (presses, top) in cases {
             let (mut display, mut commands) = display();
@@ -182,8 +198,8 @@ mod tests {
             settle(&mut display);
             assert_eq!(
                 positions(&sent(&mut commands)).last(),
-                Some(&rounded(lifted(REST, Lift::Share, top))),
-                "after a summon and the presses {presses:?}, the last sub-pos is not the one above the chooser or adjuster"
+                Some(&rounded(lifted(REST, Lift::Share, top(&display)))),
+                "after a summon and the presses {presses:?}, the last sub-pos is not the one above the highest control"
             );
         }
     }
@@ -249,7 +265,7 @@ mod tests {
             lines,
             [
                 "media-display: subtitle track 1, codec \"subrip\", ends on the house row, with sub-ass-override scale, stretch-image-subs-to-screen no, sub-scale 1, and sub-pos 100",
-                "media-display: subtitles move above row 846 of the display, to sub-pos 79.9",
+                "media-display: subtitles move above row 870 of the display, to sub-pos 82.2",
                 "media-display: subtitles return to their place, sub-pos 100",
             ]
         );

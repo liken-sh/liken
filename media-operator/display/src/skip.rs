@@ -408,7 +408,7 @@ mod tests {
         assert!(skip.draws_outside(false));
     }
 
-    /// The button ends above row 846, where the scrubber's time label
+    /// The button ends above row 870, where the scrubber's time label
     /// starts.
     #[test]
     fn the_button_is_on_the_chips_row_at_the_left_margin() {
@@ -420,16 +420,16 @@ mod tests {
         for (kind, words) in cases {
             let line = pill_line(kind);
             assert_eq!(line.content, words);
-            assert_eq!(line.at, Point::new(96.0, 823.0));
+            assert_eq!(line.at, Point::new(96.0, 847.0));
             assert_eq!(line.anchor, Anchor::Left);
             assert_eq!(line.size, theme::type_scale::TINY);
 
             let shape = pill_box(kind);
             assert_eq!(shape.x, 74.0);
-            assert_eq!(shape.y, 800.0);
+            assert_eq!(shape.y, 824.0);
             assert_eq!(shape.height, 46.0);
             assert_eq!(shape.center().y, line.at.y, "the label centres in the box");
-            assert!(shape.y + shape.height <= 846.0);
+            assert!(shape.y + shape.height <= 870.0);
             let room = measure(words, theme::type_scale::TINY) + 44.0;
             assert!((shape.width - room).abs() < 0.01);
         }

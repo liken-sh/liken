@@ -57,7 +57,7 @@ mod tests {
         let lines = lines(&Canvas::default(), &film(2, 7));
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].content, "3 of 7");
-        assert_eq!(lines[0].at, Point::new(960.0, 904.0));
+        assert_eq!(lines[0].at, Point::new(960.0, 928.0));
         assert_eq!(lines[0].anchor, Anchor::Centre);
         assert_eq!(lines[0].size, 34.0);
     }

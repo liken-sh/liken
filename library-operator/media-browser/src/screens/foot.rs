@@ -17,9 +17,9 @@ pub mod more;
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle};
+use media_screen::language;
 
 use crate::catalog::FileFacts;
-use crate::language;
 use crate::look;
 use crate::screens::facts;
 use crate::views::{area, text};

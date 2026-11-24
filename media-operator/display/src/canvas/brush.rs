@@ -97,13 +97,13 @@ fn faces() {
 
 // The text parameters shared by measuring and drawing, so a measured
 // width matches the width of the drawn line.
-fn shaped(content: &str, size: f32) -> text::Text<&str> {
+fn shaped(content: &str, size: f32, italic: bool) -> text::Text<&str> {
     text::Text {
         content,
         bounds: Size::INFINITE,
         size: Pixels(theme::type_size(size)),
         line_height: LineHeight::Absolute(Pixels(size)),
-        font: liken_iced::font::REGULAR,
+        font: face(italic),
         align_x: text::Alignment::Left,
         align_y: Vertical::Top,
         shaping: Shaping::Advanced,
@@ -117,16 +117,33 @@ fn shaped(content: &str, size: f32) -> text::Text<&str> {
 // A fade rebuilds the layer on every frame, which measures the same text
 // again, so widths are cached until `forget_measurements` clears them.
 pub fn measure(content: &str, size: f32) -> f32 {
+    measure_face(content, size, false)
+}
+
+/// The width of `content` in the italic face, for a word such as a
+/// track's role that follows regular text on one line.
+pub fn measure_italic(content: &str, size: f32) -> f32 {
+    measure_face(content, size, true)
+}
+
+fn measure_face(content: &str, size: f32, italic: bool) -> f32 {
     MEASURED.with_borrow_mut(|cache| {
-        let runs = cache.entry(size.to_bits()).or_default();
+        let runs = cache.entry((size.to_bits(), italic)).or_default();
         if let Some(width) = runs.get(content) {
             return *width;
         }
         faces();
-        let width = Paragraph::with_text(shaped(content, size)).min_width();
+        let width = Paragraph::with_text(shaped(content, size, italic)).min_width();
         runs.insert(content.to_string(), width);
         width
     })
+}
+
+fn face(italic: bool) -> iced::Font {
+    match italic {
+        true => liken_iced::font::ITALIC,
+        false => liken_iced::font::REGULAR,
+    }
 }
 
 /// Clears the cached widths and clips. The window calls it when a new
@@ -136,10 +153,12 @@ pub fn forget_measurements() {
     CLIPPED.with_borrow_mut(HashMap::clear);
 }
 
-// The keys are the bits of the size, and for a clip also of the room,
+// The keys are the bits of the size, for a measure also whether the face
+// is italic, and for a clip also the bits of the room,
 // then the content.
 thread_local! {
-    static MEASURED: RefCell<HashMap<u32, HashMap<String, f32>>> = RefCell::new(HashMap::new());
+    static MEASURED: RefCell<HashMap<(u32, bool), HashMap<String, f32>>> =
+        RefCell::new(HashMap::new());
     static CLIPPED: RefCell<HashMap<(u32, u32), HashMap<String, String>>> =
         RefCell::new(HashMap::new());
 }
@@ -245,6 +264,15 @@ impl<'a> Brush<'a> {
             .draw_image(scrim.bounds, picture(&scrim.handle, self.fade));
     }
 
+    /// Draws a soft darkening over `bounds` now, its ramps as long as
+    /// `reach` says and `peak` dark at its middle, at output resolution.
+    pub fn shade(&mut self, bounds: Rectangle, reach: super::shade::Reach, peak: f32) {
+        let per_unit = self.canvas.scale() * self.density;
+        for (strip, handle) in super::shade::strips(bounds, reach, peak, per_unit) {
+            self.frame.draw_image(strip, picture(&handle, self.fade));
+        }
+    }
+
     /// The fade factor, from 0 (invisible) to 1 (fully drawn).
     pub fn fade(&self) -> f32 {
         self.fade
@@ -323,8 +351,8 @@ impl<'a> Brush<'a> {
         );
     }
 
-    /// The panel's dark fill without its border. A chooser or an adjuster
-    /// marks its focus inside the plate, so a bordered plate would show a
+    /// The panel's dark fill without its border. The track panel marks
+    /// its focus inside the plate, so a bordered plate would show a
     /// second frame around it.
     pub fn plate(&mut self, shape: Rectangle) {
         self.paint(
@@ -335,7 +363,7 @@ impl<'a> Brush<'a> {
     }
 
     /// Fills a path in canvas coordinates, for a mark that the shapes above
-    /// do not cover, such as a chooser's dot.
+    /// do not cover, such as the track panel's dot.
     pub fn shape(&mut self, path: &Path, color: Color) {
         self.paint(path, Paint::Fill, color);
     }
@@ -386,29 +414,45 @@ impl<'a> Brush<'a> {
     /// Draws one line of text with no outline or shadow, because the scrim
     /// provides the contrast.
     pub fn text(&mut self, line: Line) {
-        self.frame.fill_text(Text {
-            content: line.content,
-            position: line.at,
-            color: theme::faded(line.color, self.fade),
-            size: Pixels(theme::type_size(line.size)),
-            line_height: LineHeight::Absolute(Pixels(line.size)),
-            font: match line.italic {
-                true => liken_iced::font::ITALIC,
-                false => liken_iced::font::REGULAR,
-            },
-            align_x: match line.anchor {
-                Anchor::TopLeft | Anchor::Left => text::Alignment::Left,
-                Anchor::TopRight | Anchor::Right => text::Alignment::Right,
-                Anchor::Centre | Anchor::BottomCentre => text::Alignment::Center,
-            },
-            align_y: match line.anchor {
-                Anchor::TopLeft | Anchor::TopRight => Vertical::Top,
-                Anchor::Left | Anchor::Right | Anchor::Centre => Vertical::Center,
-                Anchor::BottomCentre => Vertical::Bottom,
-            },
-            shaping: Shaping::Advanced,
-            ..Text::default()
-        });
+        self.frame.fill_text(drawn(line, self.fade));
+    }
+}
+
+/// The toolkit's text for a line, at `fade`.
+///
+/// The toolkit lays a line out in a box as wide as `max_width`, and it
+/// places a right-to-left line, such as a track titled in Arabic, from the
+/// right edge of that box. With the default, an unbounded width, that edge
+/// is at infinity, and the glyph cache overflows when it turns the place
+/// into a pixel. So each line is laid out in a box as wide as the line
+/// itself, and the display places the box by the line's measured width
+/// for a right or centred anchor.
+fn drawn(line: Line, fade: f32) -> Text {
+    let width = measure_face(&line.content, line.size, line.italic);
+    let left = match line.anchor {
+        Anchor::TopLeft | Anchor::Left => line.at.x,
+        Anchor::TopRight | Anchor::Right => line.at.x - width,
+        Anchor::Centre | Anchor::BottomCentre => line.at.x - width / 2.0,
+    };
+    Text {
+        content: line.content,
+        position: Point::new(left, line.at.y),
+        // The toolkit aligns a right-to-left line to the right of the box
+        // even when told left, so the box has only half a pixel of room
+        // over the measured width. The measure shapes the line the same
+        // way, so the line does not wrap.
+        max_width: width + 0.5,
+        color: theme::faded(line.color, fade),
+        size: Pixels(theme::type_size(line.size)),
+        line_height: LineHeight::Absolute(Pixels(line.size)),
+        font: face(line.italic),
+        align_x: text::Alignment::Left,
+        align_y: match line.anchor {
+            Anchor::TopLeft | Anchor::TopRight => Vertical::Top,
+            Anchor::Left | Anchor::Right | Anchor::Centre => Vertical::Center,
+            Anchor::BottomCentre => Vertical::Bottom,
+        },
+        shaping: Shaping::Advanced,
     }
 }
 
@@ -426,6 +470,66 @@ const PANEL_BORDER: f32 = 2.0;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A line of right-to-left text, such as a subtitle track titled in
+    /// Arabic or Hebrew, lays out its glyphs at finite places near its
+    /// position. With an unbounded width, the toolkit placed them from the
+    /// right edge of an infinite line, and the glyph cache overflowed.
+    #[test]
+    fn a_right_to_left_line_lays_out_near_its_position() {
+        let cases = [
+            (
+                "Arabic",
+                "\u{627}\u{644}\u{639}\u{631}\u{628}\u{64a}\u{629}",
+                Anchor::Left,
+            ),
+            (
+                "Hebrew",
+                "\u{5e2}\u{5d1}\u{5e8}\u{5d9}\u{5ea}",
+                Anchor::Left,
+            ),
+            ("mixed", "Title \u{5e2}\u{5d1}", Anchor::Left),
+            (
+                "Hebrew, right-aligned",
+                "\u{5e2}\u{5d1}\u{5e8}\u{5d9}\u{5ea}",
+                Anchor::Right,
+            ),
+            (
+                "Hebrew, centred",
+                "\u{5e2}\u{5d1}\u{5e8}\u{5d9}\u{5ea}",
+                Anchor::Centre,
+            ),
+        ];
+        for (name, content, anchor) in cases {
+            let line = Line::new(
+                content,
+                Point::new(984.0, 600.0),
+                anchor,
+                38.5,
+                Color::WHITE,
+            );
+            let width = measure(content, 38.5);
+            let (low, high) = match anchor {
+                Anchor::Right => (984.0 - width, 984.0),
+                Anchor::Centre => (984.0 - width / 2.0, 984.0 + width / 2.0),
+                _ => (984.0, 984.0 + width),
+            };
+            let mut xs = Vec::new();
+            drawn(line, 1.0).draw_with(|path, _| {
+                for event in path.raw().iter() {
+                    xs.push(event.from().x);
+                }
+            });
+            assert!(!xs.is_empty(), "{name}: no glyph drew");
+            assert!(
+                xs.iter()
+                    .all(|x| x.is_finite() && *x >= low - 2.0 && *x <= high + 2.0),
+                "{name}: glyphs from {:?} to {:?}, want between {low} and {high}",
+                xs.iter().cloned().fold(f32::INFINITY, f32::min),
+                xs.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
+            );
+        }
+    }
 
     /// A longer run measures wider, and an empty one measures zero.
     #[test]

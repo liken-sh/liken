@@ -12,16 +12,20 @@ each `Player`, `Play`, and `Remote` needs, and it writes the status of
 each of its kinds. It plays no media in its own process.
 
 Several of the operator's pods run the pod build of this Go program.
-The pod build is the same code built with the build tag `pod`, and
-it leaves out leader election. For each `Play`, the operator creates
-a playback pod. In that pod, the `player` container builds the
-arguments for `mpv` and runs `mpv`. The `command` sidecar is the only
-program that writes to `mpv`'s IPC socket. It reads presses and
+The pod build is the same code built with the build tag `pod`, and it
+leaves out leader election. For each `Play`, the operator creates a
+playback pod. In that pod, the `player` container builds the arguments
+for `mpv` and runs `mpv`. The `command` sidecar reads presses and
 commands from the bus, and it publishes the report of the run. The
-`display` sidecar runs the Rust program in `display/`, which draws
-the on-screen display over the film. An idle pod runs the Rust
-program in `idle/`, which links the `media-screen` crate. The pod of
-each `Remote` publishes each press of its controller.
+`display` sidecar runs the Rust program in `display/`, which draws the
+on-screen display over the film. Both sidecars write to `mpv`'s IPC
+socket. The `command` sidecar sends each navigation press to the
+display as a script message, and the display sends `mpv` the command
+that the press makes, such as a seek, a pause, a track, or a delay.
+The display also sets the properties that place the subtitles. An idle
+pod runs the Rust program in `idle/`, which links the `media-screen`
+crate. The pod of each `Remote` publishes each press of its
+controller.
 
 Presses, commands, reports, and screen requests go through the
 Mosquitto broker in `deploy/bus.yaml`. A screen client from another

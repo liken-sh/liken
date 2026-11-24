@@ -155,9 +155,9 @@ test-go:
 	go test -race -covermode=atomic -coverprofile=coverage.out ./...
 	go tool go-test-coverage --config=.testcoverage.yml
 
-# The Rust half is a cargo workspace with two members: the idle screen,
-# which draws with the media-screen library at the top of the
-# repository, and the display that a playback pod draws over the film.
+# The Rust half is a cargo workspace with two members: the idle screen
+# and the display that a playback pod draws over the film. Both link the
+# media-screen library at the top of the repository.
 #
 # The Rust checks are the format, the lints, and the tests under a
 # coverage gate. The idle screen's integration test runs its binary

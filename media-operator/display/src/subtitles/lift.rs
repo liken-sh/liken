@@ -7,8 +7,8 @@ use crate::theme;
 
 /// The space, in canvas rows, between the lowest line of a cue and the
 /// highest thing the display draws in the band. It equals the padding
-/// that a chooser keeps around its rows, so a raised cue is as far from
-/// the band as a row is from the edge of its panel.
+/// that the track panel keeps around its rows, so a raised cue is as far
+/// from the band as a row is from the edge of the panel.
 pub const GAP: f32 = 24.0;
 
 /// The canvas row where the lowest line of a cue ends at its resting
@@ -60,9 +60,8 @@ mod tests {
 
     const REST: f64 = 100.0;
 
-    /// The rows are the tops of the time above the scrubber at 846, the
-    /// up-next chip at 800, a one-row chooser at 770, the cast row at
-    /// 652, and bands at or below the cue's resting place.
+    /// The rows are band tops across the range that the display draws at,
+    /// and bands at or below the cue's resting place.
     #[test]
     fn a_plain_cue_ends_one_gap_above_the_band() {
         let cases = [

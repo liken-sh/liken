@@ -364,6 +364,26 @@ func TestBuildPodBakesTheImageMeasurementOfASubtitleTrack(t *testing.T) {
 	mustMatch(t, got, want)
 }
 
+// The format of each audio stream reaches the display as the library wrote
+// it, and a fact that ffprobe did not report stays absent. The operator
+// copies the entries and does not read them.
+func TestBuildPodBakesTheFormatOfEachAudioStream(t *testing.T) {
+	play := testPlay()
+	play.Spec.Items = []PlayItem{{
+		URI: "nfs://nas.example/export/films/film.mkv",
+		Presentation: &Presentation{Audio: []PlayAudio{
+			{Stream: 1, Codec: "eac3", Profile: "Dolby Digital Plus + Dolby Atmos", Channels: 6, Layout: "5.1(side)"},
+			{Stream: 2, Codec: "aac", Channels: 2},
+		}},
+	}}
+	claim := buildClaim(play, testPlayer())
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, nil, "")
+
+	got := envValue(initContainer(t, pod, commandContainer), presentationsVariable)
+	want := `[{"audio":[{"stream":1,"codec":"eac3","profile":"Dolby Digital Plus + Dolby Atmos","channels":6,"layout":"5.1(side)"},{"stream":2,"codec":"aac","channels":2}]}]`
+	mustMatch(t, got, want)
+}
+
 // The marks reach the display as the library wrote them: every
 // candidate in order, a missing start or end still missing, and an
 // unknown kind still present. The display interprets the marks, and the

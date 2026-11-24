@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 
 use crate::film::Film;
 use crate::marks::Marks;
+use crate::streams::{self, Streams};
 use crate::subtitles::measurement::{self, Measured};
 
 /// The kind of item that the block's `type` declares. The scrubber, the
@@ -23,9 +24,17 @@ pub enum Kind {
 }
 
 /// The block for the current item. `receive` parses the kind, the line
-/// under a series title, the marks, and the measured subtitle tracks
-/// once, because the display reads them on every redraw and they change
-/// only when a new block arrives.
+/// under a series title, the marks, the measured subtitle tracks, and the
+/// facts of the streams once, because the display reads them on every
+/// redraw and they change only when a new block arrives.
+///
+/// The block does not say which item it describes. The command sidecar
+/// sends it when mpv reports a new `playlist-pos`, and mpv sends the next
+/// file's `track-list` while the block is on its way. So `item` records
+/// the `playlist-pos` that the display had when the block arrived, and
+/// the facts that a track finds by its index in the container apply only
+/// while mpv still plays that item. Without the check, the previous
+/// file's stream 3 would name the next file's stream 3 for a moment.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Presentation {
     block: Map<String, Value>,
@@ -33,6 +42,8 @@ pub struct Presentation {
     second: Option<String>,
     marks: Marks,
     measured: Vec<Measured>,
+    streams: Streams,
+    item: Option<i64>,
 }
 
 impl Presentation {
@@ -54,11 +65,44 @@ impl Presentation {
         self.second = crate::header::second_line(self);
         self.marks = Marks::parse(self.field("marks"));
         self.measured = measurement::parse(self.field("subtitles"));
+        self.streams = Streams::parse(self.field("subtitles"), self.field("audio"));
     }
 
-    /// The entries of `subtitles` that have an `image` block.
-    pub fn measured(&self) -> &[Measured] {
-        &self.measured
+    /// Records the `playlist-pos` that mpv reported when the block
+    /// arrived, the item that the block describes.
+    pub fn arrived_at(&mut self, playlist_pos: Option<i64>) {
+        self.item = playlist_pos;
+    }
+
+    /// Records a `playlist-pos` that mpv reported. A block that arrived
+    /// before mpv's first position has no item, so it takes this one.
+    pub fn on_playlist_pos(&mut self, playlist_pos: Option<i64>) {
+        if self.item.is_none() {
+            self.item = playlist_pos;
+        }
+    }
+
+    /// Whether mpv still plays the item that the block describes.
+    fn describes(&self, film: &Film) -> bool {
+        self.item == film.playlist_pos
+    }
+
+    /// The entries of `subtitles` that have an `image` block, or none
+    /// while mpv plays another item than the block's.
+    pub fn measured(&self, film: &Film) -> &[Measured] {
+        match self.describes(film) {
+            true => &self.measured,
+            false => &[],
+        }
+    }
+
+    /// The facts of the file's streams, or none while mpv plays another
+    /// item than the block's.
+    pub fn streams(&self, film: &Film) -> &Streams {
+        match self.describes(film) {
+            true => &self.streams,
+            false => &streams::NONE,
+        }
     }
 
     /// The spans of the intro, the recap, the credits, and the preview.
@@ -360,8 +404,62 @@ mod tests {
             r#"{"subtitles":[{"stream":3,"events":1382,
                 "image":{"canvasHeight":1080,"lineHeight":61,"inkBottom":918}}]}"#,
         );
-        assert_eq!(presentation.measured().len(), 1);
+        assert_eq!(presentation.measured(&film()).len(), 1);
         presentation.receive(r#"{"subtitles":[{"stream":3,"events":1382}]}"#);
-        assert_eq!(presentation.measured(), []);
+        assert_eq!(presentation.measured(&film()), []);
+    }
+
+    /// The display can receive the first block before mpv's first
+    /// `playlist-pos`. The block then takes the position that arrives, so
+    /// the first item keeps its facts, and a later position does not move
+    /// it.
+    #[test]
+    fn a_block_that_arrives_before_the_first_position_takes_it() {
+        let at = |playlist_pos: i64| {
+            let mut film = film();
+            film.apply("playlist-pos", &json!(playlist_pos));
+            film
+        };
+        let track = crate::film::Track {
+            kind: "sub".to_string(),
+            ff_index: Some(3),
+            ..crate::film::Track::default()
+        };
+        let mut presentation = block(r#"{"subtitles":[{"stream":3,"events":1382}]}"#);
+        presentation.arrived_at(None);
+        presentation.on_playlist_pos(Some(0));
+        assert_eq!(presentation.streams(&at(0)).events(&track), Some(1382));
+        presentation.on_playlist_pos(Some(1));
+        assert_eq!(presentation.streams(&at(1)).events(&track), None);
+    }
+
+    /// mpv sends the next file's `track-list` before the command sidecar's
+    /// block for it arrives, so the facts of the block apply only while
+    /// mpv plays the item the block arrived for.
+    #[test]
+    fn the_stream_facts_apply_only_to_the_item_the_block_arrived_for() {
+        let at = |playlist_pos: i64| {
+            let mut film = film();
+            film.apply("playlist-pos", &json!(playlist_pos));
+            film
+        };
+        let track = crate::film::Track {
+            kind: "sub".to_string(),
+            ff_index: Some(3),
+            ..crate::film::Track::default()
+        };
+        let mut presentation = block(
+            r#"{"subtitles":[{"stream":3,"events":1382,
+                "image":{"canvasHeight":1080,"lineHeight":61,"inkBottom":918}}]}"#,
+        );
+        presentation.arrived_at(Some(0));
+        assert_eq!(presentation.streams(&at(0)).events(&track), Some(1382));
+        assert_eq!(presentation.measured(&at(0)).len(), 1);
+        assert_eq!(presentation.streams(&at(1)).events(&track), None);
+        assert_eq!(presentation.measured(&at(1)), []);
+
+        presentation.receive(r#"{"subtitles":[{"stream":3,"events":40}]}"#);
+        presentation.arrived_at(Some(1));
+        assert_eq!(presentation.streams(&at(1)).events(&track), Some(40));
     }
 }

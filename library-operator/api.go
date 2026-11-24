@@ -843,6 +843,23 @@ type PlayPresentation struct {
 	// count the probe read for each, which media-operator reads to choose a
 	// track by its role. The operator carries them unread.
 	Subtitles []PlaySubtitle `json:"subtitles,omitempty"`
+	// Audio is the format of each audio stream of the item's file, from the
+	// probe, which media-operator's display reads to name the format of an
+	// audio track that mpv is not decoding. The operator carries it unread.
+	Audio []PlayAudio `json:"audio,omitempty"`
+}
+
+// PlayAudio is one audio stream of a file, in media-operator's own field
+// names and ffprobe's own values. Stream is the container's index of the
+// stream, the index ffprobe reports and mpv calls ff-index. An empty
+// Profile or Layout and a zero Channels are values that ffprobe did not
+// report.
+type PlayAudio struct {
+	Stream   int    `json:"stream"`
+	Codec    string `json:"codec,omitempty"`
+	Profile  string `json:"profile,omitempty"`
+	Channels int    `json:"channels,omitempty"`
+	Layout   string `json:"layout,omitempty"`
 }
 
 // PlaySubtitle is one subtitle track of a file, in media-operator's own field

@@ -6,7 +6,7 @@
 use serde_json::{Map, Value};
 
 use super::next;
-use crate::catalog::{Identity, Mark, PlayItem, Presentation, Subtitle, Track};
+use crate::catalog::{Audio, Identity, Mark, PlayItem, Presentation, Subtitle, Track};
 use crate::screens::upnext::Next;
 
 /// The request as bytes. `library` is the catalog's library column,
@@ -135,6 +135,34 @@ fn presentation(presentation: &Presentation) -> Value {
             "subtitles".into(),
             Value::Array(presentation.subtitles.iter().map(subtitle).collect()),
         );
+    }
+    if !presentation.audio.is_empty() {
+        object.insert(
+            "audio".into(),
+            Value::Array(presentation.audio.iter().map(audio).collect()),
+        );
+    }
+    Value::Object(object)
+}
+
+// One audio stream, in media-operator's own field names: `stream`, and each
+// format fact that ffprobe reported. A text that ffprobe did not report is
+// empty in the catalog, and a count it did not report is zero, so each is
+// left out.
+fn audio(audio: &Audio) -> Value {
+    let mut object = Map::new();
+    object.insert("stream".into(), Value::from(audio.stream));
+    for (name, text) in [
+        ("codec", &audio.codec),
+        ("profile", &audio.profile),
+        ("layout", &audio.layout),
+    ] {
+        if !text.is_empty() {
+            object.insert(name.into(), Value::from(text.as_str()));
+        }
+    }
+    if audio.channels != 0 {
+        object.insert("channels".into(), Value::from(audio.channels));
     }
     Value::Object(object)
 }
@@ -401,6 +429,43 @@ mod tests {
                 {"stream": 5},
                 {"stream": 6, "events": 1382,
                  "image": {"canvasHeight": 1080, "lineHeight": 61, "inkBottom": 918}},
+            ])
+        );
+    }
+
+    /// Each audio stream travels by its stream index with the format facts
+    /// that ffprobe reported, and a fact it did not report is left out.
+    #[test]
+    fn a_request_carries_the_format_of_every_audio_stream_of_the_file() {
+        let mut item = movie();
+        item.presentation.audio = vec![
+            Audio {
+                stream: 1,
+                codec: "eac3".into(),
+                profile: "Dolby Digital Plus + Dolby Atmos".into(),
+                channels: 6,
+                layout: "5.1(side)".into(),
+            },
+            Audio {
+                stream: 2,
+                codec: "aac".into(),
+                profile: String::new(),
+                channels: 2,
+                layout: String::new(),
+            },
+            Audio {
+                stream: 3,
+                ..Audio::default()
+            },
+        ];
+
+        assert_eq!(
+            decoded("default/films", &[item])["items"][0]["presentation"]["audio"],
+            serde_json::json!([
+                {"stream": 1, "codec": "eac3", "profile": "Dolby Digital Plus + Dolby Atmos",
+                 "channels": 6, "layout": "5.1(side)"},
+                {"stream": 2, "codec": "aac", "channels": 2},
+                {"stream": 3},
             ])
         );
     }

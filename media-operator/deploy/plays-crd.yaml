@@ -375,6 +375,56 @@ spec:
                                       description: >-
                                         The row just below the last line of a
                                         usual cue at the bottom of the canvas.
+                          audio:
+                            type: array
+                            x-kubernetes-list-type: atomic
+                            description: >-
+                              The format of each audio stream of the item's
+                              file. library-operator's media browser writes it
+                              from what library-operator's probe read of the
+                              file. mpv reports the profile and the channel
+                              layout only of the audio track that it decodes, so
+                              the display reads this list to name the format of
+                              every other audio track, such as `E-AC3 Atmos
+                              5.1`. A file that the probe has not read gets no
+                              list, and the display names each track from what
+                              mpv reports.
+                            items:
+                              type: object
+                              description: >-
+                                The format of one audio stream, in ffprobe's
+                                own values.
+                              required: [stream]
+                              properties:
+                                stream:
+                                  type: integer
+                                  minimum: 0
+                                  description: >-
+                                    The index of the stream in its container:
+                                    the stream index from ffprobe, which is
+                                    mpv's `ff-index`.
+                                codec:
+                                  type: string
+                                  description: >-
+                                    ffprobe's codec name, such as `eac3`,
+                                    `truehd`, or `aac`.
+                                profile:
+                                  type: string
+                                  description: >-
+                                    ffprobe's profile, such as `Dolby Digital
+                                    Plus + Dolby Atmos` or `DTS-HD MA`. Omit it
+                                    when ffprobe reports none.
+                                channels:
+                                  type: integer
+                                  minimum: 1
+                                  description: >-
+                                    The number of channels.
+                                layout:
+                                  type: string
+                                  description: >-
+                                    ffprobe's channel layout, such as
+                                    `5.1(side)` or `stereo`. Omit it when
+                                    ffprobe reports none.
                 start:
                   type: string
                   description: >-

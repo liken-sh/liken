@@ -2,8 +2,9 @@
 # screen, and display, which a playback pod draws over the film. One
 # workspace has one lock file, one toolchain pin, and one target
 # directory, so the members resolve the same versions and the image
-# build caches one dependency layer. idle depends on ../media-screen,
-# the message bus code that every screen client shares.
+# build caches one dependency layer. Both members depend on
+# ../media-screen: idle for the message bus code that every screen
+# client shares, and display for the names of a track.
 [workspace]
 resolver = "3"
 members = ["display", "idle"]

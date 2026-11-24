@@ -54,6 +54,10 @@ pub mod mark;
 // which a play request carries to the display.
 pub mod subtitle;
 
+// The audio module: one audio stream of a file and its format, which a play
+// request carries to the display.
+pub mod audio;
+
 // The streams of one video file and the subtitle files beside it, which
 // a movie's page shows and chooses a play's tracks from.
 pub mod stream;
@@ -67,6 +71,7 @@ pub mod alike;
 pub mod studio;
 
 pub use alike::Alike;
+pub use audio::Audio;
 pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
 pub use identity::Identity;
 pub use mark::Mark;
@@ -810,6 +815,9 @@ pub struct Presentation {
     /// The main file's embedded subtitle streams in container order, then
     /// the text subtitle files beside it that mpv loads, in name order.
     pub subtitles: Vec<Subtitle>,
+    /// The main file's audio streams in container order. It is empty for a
+    /// file that the probe has not read.
+    pub audio: Vec<Audio>,
 }
 
 #[cfg(test)]

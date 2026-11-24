@@ -3,7 +3,7 @@
 //! is showing something at the foot of the frame.
 //!
 //! The command sidecar chooses the track, and a person can choose another
-//! in the display's chooser. The display observes `track-list`, so it
+//! in the display's track panel. The display observes `track-list`, so it
 //! sees the selected track whoever selected it, and it is the one program
 //! that sets the properties that place a track: `sub-ass-override`,
 //! `stretch-image-subs-to-screen`, `sub-scale`, and `sub-pos`.

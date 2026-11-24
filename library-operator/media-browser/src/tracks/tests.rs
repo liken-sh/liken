@@ -1,6 +1,8 @@
-// The subtitle rule against the cases media-operator's tests read. The file
-// is media-operator's, and library-operator's package.toml names it in the
-// Rust job's reads, so a change to it runs this test too.
+// The choice of the subtitle rule against the cases media-operator's tests
+// read. The file is media-operator's, and library-operator's package.toml
+// names it in the Rust job's reads, so a change to it runs this test too.
+// media-screen's tests read the cases of the roles, the file names, and the
+// languages from the same file.
 
 use serde_json::Value;
 
@@ -84,50 +86,8 @@ fn id(choice: Choice) -> i64 {
 fn each(section: &str) -> Vec<Value> {
     let all = cases();
     let list = all[section].as_array().cloned().unwrap_or_default();
-    assert!(!list.is_empty(), "the shared cases hold no {section}");
+    assert!(!list.is_empty(), "the shared cases have no {section}");
     list
-}
-
-#[test]
-fn every_track_takes_the_role_media_operator_gives_it() {
-    let all = cases();
-    for case in each("classify") {
-        let roles: Vec<&str> = subtitle::classify(&tracks(&all, &case))
-            .iter()
-            .map(|one| one.role.word())
-            .collect();
-        assert_eq!(roles, strings(&case["roles"]), "{}", text(&case, "name"));
-    }
-}
-
-#[test]
-fn a_file_name_says_what_media_operator_reads_from_it() {
-    for case in each("fileNames") {
-        let parsed = subtitle::file_name(&text(&case, "name"));
-        assert_eq!(
-            (parsed.language, parsed.forced, parsed.sdh),
-            (
-                text(&case, "language"),
-                case["forced"].as_bool().unwrap_or_default(),
-                case["sdh"].as_bool().unwrap_or_default()
-            ),
-            "{}",
-            text(&case, "name")
-        );
-    }
-}
-
-#[test]
-fn two_tags_name_the_same_language_where_media_operator_says_so() {
-    for case in each("sameLanguage") {
-        assert_eq!(
-            crate::language::same(&text(&case, "a"), &text(&case, "b")),
-            case["same"].as_bool().unwrap_or_default(),
-            "{} and {}",
-            text(&case, "a"),
-            text(&case, "b")
-        );
-    }
 }
 
 #[test]
