@@ -109,9 +109,16 @@ func (w *changeWorld) note(folders ...string) {
 			w.t.Fatal(err)
 		}
 	}
+	w.notePaths(folders...)
+}
+
+// The scan's note before a walk of the paths SCAN_PATHS names, each as the
+// webhook gave it, which can name a video file as well as a folder.
+func (w *changeWorld) notePaths(paths ...string) {
+	w.t.Helper()
 	w.agent.holdVersion(w.t, sqliteAgentActor, 5)
-	w.scan.scanPaths = folders
-	w.closing.scanPaths = folders
+	w.scan.scanPaths = paths
+	w.closing.scanPaths = paths
 	w.scan.noteVideosBefore(w.t.Context())
 	if log := w.scan.log.(*strings.Builder).String(); log != "" {
 		w.t.Fatalf("the scan noted nothing: %s", log)

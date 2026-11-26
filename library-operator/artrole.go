@@ -41,20 +41,34 @@ func (e *enricher) artGap(ctx context.Context, fact string, line *artLine) error
 	if err != nil {
 		return err
 	}
-	written := 0
+	written, outside := 0, 0
 	for _, gap := range gaps {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if !e.inScope(gap.key) {
+			outside++
 			continue
 		}
 		if e.artOne(ctx, line, artTypes[fact], gap) {
 			written++
 		}
 	}
-	e.logf("wrote %d of the %d %s files the library had none of", written, len(gaps), fact)
+	e.logArtWritten(fact, written, len(gaps)-outside, outside)
 	return nil
+}
+
+// The line counts only the gaps in the Job's folders, and gives the gaps
+// outside them as a count of their own. So the line of a Job of one title
+// shows that title's result, and a title with no gap does not read as a phase
+// that wrote nothing for every title of the library.
+func (e *enricher) logArtWritten(fact string, written, inside, outside int) {
+	if len(e.scopes) == 0 {
+		e.logf("wrote %d of the %d %s files the library had none of", written, inside, fact)
+		return
+	}
+	e.logf("wrote %d of the %d %s files the library had none of, and left %d outside this Job's folders",
+		written, inside, fact, outside)
 }
 
 // One gap. The volume is read before the provider is asked, because a file

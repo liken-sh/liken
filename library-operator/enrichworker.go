@@ -157,8 +157,15 @@ func writerName(job, container string) string {
 	return job + "-" + container
 }
 
+// Each scope is the title folder that holds a path of SCAN_PATHS, the folder
+// the scan's rescan reads for the same path. A webhook can name a video file,
+// and the title's art, its .nfo file, and its trailers are in the title folder
+// and not under the video. A scope of the video alone skips every one of them.
+//
 // A Job that names a folder the volume does not hold covers the whole library
-// and not nothing, because a folder that moved still has gaps somewhere.
+// and not nothing, because a folder that moved still has gaps somewhere. A path
+// that no title folder holds, such as the root, covers the whole library too,
+// because the scan walks the whole root for it.
 func (e *enricher) narrowedScopes() []string {
 	var scopes []string
 	for _, scanPath := range e.scanPaths {
@@ -167,11 +174,11 @@ func (e *enricher) narrowedScopes() []string {
 			e.logf("could not map %s onto the volume, working over the whole library", e.named(scanPath))
 			return nil
 		}
-		relative := relativePath(e.root, absolute)
-		if relative == "." {
+		folder, held := titleFolderOf(e.root, e.kind, absolute)
+		if !held {
 			return nil
 		}
-		scopes = append(scopes, relative)
+		scopes = append(scopes, relativePath(e.root, folder))
 	}
 	return scopes
 }

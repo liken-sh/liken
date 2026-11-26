@@ -33,11 +33,19 @@ found names the folder to rescan. A body with none of them, or no
 body at all, schedules a full walk. Every POST answers `204 No
 Content`.
 
-The operator holds the folder and starts one walk `Job` for it on its
-next pass. That `Job` walks the folder and runs every phase the
-`Library`'s sources serve over it, so the title gets its id, its `.nfo`
-file, its art, and its tiles in the same `Job`, as each phase before
-them finishes the title.
+Radarr and Sonarr usually send `movieFile.path` or `episodeFile.path`,
+which names a video file and not a folder. A path that names a video
+works the whole title folder that holds it: the movie's folder, also
+for a video in its `extras` folder, or the series folder for an
+episode. A path that is in no title folder, such as a video directly
+in the library's root, makes the walk a full walk.
+
+The operator holds the path and starts one walk `Job` for it on its
+next pass. That `Job` walks the title folder and runs every phase the
+`Library`'s sources serve over the same folder. So the title gets its
+id, its `.nfo` file, its art, and its tiles in the same `Job`, as each
+phase before them finishes the title. For an episode, the series art,
+the season art, and the series `.nfo` file are in that folder too.
 
 An upgrade imports a new file under the old name, and the download
 manager removes the old file's thumbnail and tiles. The rescan compares

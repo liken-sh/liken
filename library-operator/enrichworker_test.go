@@ -83,12 +83,15 @@ func TestAnEnricherWithNoEnvironmentTakesTheDefaults(t *testing.T) {
 func TestANarrowedJobWorksOverItsOwnFoldersAlone(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "Action", "The Long Survey (1982)", "survey.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Action", "The Long Survey (1982)", "extras", "making-of.mkv"), "video")
 	writeFile(t, filepath.Join(root, "Action", "Orbit (1979)", "orbit.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Signal Hill", "Season 01", "Signal Hill - S01E01.mkv"), "video")
 	survey := filepath.Join("Action", "The Long Survey (1982)")
 	orbit := filepath.Join("Action", "Orbit (1979)")
 
 	cases := []struct {
 		name       string
+		kind       string
 		scanPaths  []string
 		wantScopes []string
 		inScope    string
@@ -96,6 +99,7 @@ func TestANarrowedJobWorksOverItsOwnFoldersAlone(t *testing.T) {
 	}{
 		{
 			name:       "a relative folder under the root",
+			kind:       libraryKindMovies,
 			scanPaths:  []string{"Action/The Long Survey (1982)"},
 			wantScopes: []string{survey},
 			inScope:    filepath.Join(survey, "survey.mkv"),
@@ -103,6 +107,7 @@ func TestANarrowedJobWorksOverItsOwnFoldersAlone(t *testing.T) {
 		},
 		{
 			name:       "the media server's own absolute path",
+			kind:       libraryKindMovies,
 			scanPaths:  []string{"/data/media/Action/The Long Survey (1982)"},
 			wantScopes: []string{survey},
 			inScope:    filepath.Join(survey, "survey.mkv"),
@@ -110,6 +115,7 @@ func TestANarrowedJobWorksOverItsOwnFoldersAlone(t *testing.T) {
 		},
 		{
 			name:       "two folders",
+			kind:       libraryKindMovies,
 			scanPaths:  []string{"Action/The Long Survey (1982)", "Action/Orbit (1979)"},
 			wantScopes: []string{survey, orbit},
 			inScope:    filepath.Join(orbit, "orbit.mkv"),
@@ -117,22 +123,49 @@ func TestANarrowedJobWorksOverItsOwnFoldersAlone(t *testing.T) {
 		},
 		{
 			name:      "a folder the volume does not hold",
+			kind:      libraryKindMovies,
 			scanPaths: []string{"Action/The Long Survey (1982)", "Action/Not There"},
 			inScope:   "anything at all",
 		},
 		{
 			name:      "the root itself",
+			kind:      libraryKindMovies,
 			scanPaths: []string{"/"},
 			inScope:   "anything at all",
 		},
 		{
 			name:    "no folder at all",
+			kind:    libraryKindMovies,
 			inScope: "anything at all",
+		},
+		{
+			name:       "a film's video",
+			kind:       libraryKindMovies,
+			scanPaths:  []string{"/data/media/Action/The Long Survey (1982)/survey.mkv"},
+			wantScopes: []string{survey},
+			inScope:    filepath.Join(survey, "poster.jpg"),
+			outScope:   filepath.Join(orbit, "poster.jpg"),
+		},
+		{
+			name:       "a video in a film's extras folder",
+			kind:       libraryKindMovies,
+			scanPaths:  []string{"/data/media/Action/The Long Survey (1982)/extras/making-of.mkv"},
+			wantScopes: []string{survey},
+			inScope:    filepath.Join(survey, "poster.jpg"),
+			outScope:   filepath.Join(orbit, "poster.jpg"),
+		},
+		{
+			name:       "an episode's video",
+			kind:       libraryKindSeries,
+			scanPaths:  []string{"/tv/Signal Hill/Season 01/Signal Hill - S01E01.mkv"},
+			wantScopes: []string{"Signal Hill"},
+			inScope:    filepath.Join("Signal Hill", "season01-poster.jpg"),
+			outScope:   filepath.Join("Action", "poster.jpg"),
 		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			work, _ := testEnricher(t, libraryKindMovies, root, nil)
+			work, _ := testEnricher(t, test.kind, root, nil)
 			work.scanPaths = test.scanPaths
 			work.scopes = work.narrowedScopes()
 
