@@ -1,6 +1,6 @@
 ---
 name: webhooks
-description: "Connect Radarr, Sonarr, and Jellyfin to a Library's webhook so an import rescans one folder at once. Use when new titles should appear on the wall in seconds instead of on the hourly walk, or to rescan one folder by hand."
+description: "Connect Radarr, Sonarr, and Jellyfin to a Library's webhook so an import rescans one folder at once, and have each walk post the titles it added to a receiver of your own. Use when new titles should appear on the wall in seconds instead of on the hourly walk, to rescan one folder by hand, or to send a notification when a new title is ready to watch."
 ---
 
 This skill is the guide at https://liken.sh/library/docs/guides/webhooks/, emitted for agents. Before the first command that reaches a cluster, run `kubectl config current-context` and confirm that it names the cluster the person means. A `liken` command that takes a deployment directory reaches that directory's cluster, whatever the context is.
@@ -102,6 +102,99 @@ no longer holds. The [enrichment guide](https://liken.sh/library/docs/guides/enr
 gives the rule. A run that may not change an owner, such as one on a
 share that maps root to another user, writes each file as its own
 user.
+
+## Post each walk to a receiver
+
+A walk `Job` can post the titles it added or replaced to addresses that
+you name in `spec.webhooks`. The post arrives after the walk's phases
+have written each title's ids, its `.nfo` file, and its art, and after
+a catalog pod holds the rows. So a notifier that you connect here
+sends "ready to watch" when the title is on the wall. A notifier that
+Radarr or Sonarr calls directly sends it when the file lands, before
+the walk.
+
+    spec:
+      webhooks:
+        - url: http://notifier.example.svc/library
+          secretRef:
+            name: notifier-token
+            key: token
+
+The `Job`'s pod sends the request, so the address must be reachable
+from the `Library`'s namespace. When you name a `secretRef`, the
+request carries the value of that key as `Authorization: Bearer
+<value>`. `key` defaults to `token`.
+
+The close container of the walk `Job` sends one `POST` with a JSON
+body for the whole walk:
+
+    {
+      "namespace": "media",
+      "library": "movies",
+      "kind": "movies",
+      "job": "movies-walk-t3k1c9",
+      "walk": "folders",
+      "started": "2026-11-25T14:02:11Z",
+      "finished": "2026-11-25T14:03:40Z",
+      "titles": [
+        {
+          "change": "added",
+          "table": "movies",
+          "row": {"id": "movie:tmdb:1001", "title": "The Long Survey", "released": "1999", "body": {}},
+          "files": [
+            {"change": "added", "row": {"path": "The Long Survey (1999)/movie.mkv"}, "streams": [], "marks": []}
+          ],
+          "genres": [],
+          "credits": [{"row": {"billing": 0, "name": "Ada Example", "part": "actor"}, "contributor": {}}],
+          "trailers": [],
+          "set": null,
+          "franchises": []
+        }
+      ]
+    }
+
+- `walk` is `full` for a walk of the whole library, and `folders` for
+  a walk of the folders that webhooks named.
+- Each entry of `titles` is one movie or one series. `change` is
+  `added` when the catalog had no video of the title before the walk,
+  and `changed` when it had one, such as an upgrade or a new episode.
+- `row` is the title's row of the `movies` or `series` table, keyed by
+  the catalog's column names, so it has every column the catalog has.
+  `body` and `arts` are JSON values, not strings. A path is relative to
+  the library's root.
+- A movie has `files`. A series has `episodes`, with only the episodes
+  whose videos changed, and each episode has its own `row` and
+  `files`. A file has `change`, `added` or `replaced`, when the walk
+  changed it, its `row`, and its `streams` and `marks`.
+- `genres`, `credits`, and `trailers` are the title's rows of those
+  tables. Each credit has its `row`, and its `contributor`, the row of
+  the person, or `null` where the store has no entry. `set` is the row
+  of the movie's set. Each entry of `franchises` has the franchise
+  `member` row that names the title and the `franchise` row.
+
+A walk that adds or replaces no video posts nothing. The first walk of
+a `Library` also posts nothing, because it catalogs what the volume
+already held. A renamed file is a new path, so the title is `changed`
+with an `added` file.
+
+The close container retries each address that does not answer with a
+2xx status. It waits 1 second before the first retry and doubles the
+wait up to 30 seconds. It stops after 2 minutes, and when the receiver
+answers with a 4xx status other than 408 or 429. The `Library`'s next
+`Job` waits for those 2 minutes, because the `Job` that retries still
+holds the catalog claim. A delivery that fails does not fail the
+`Job`, and the close container does not send it again.
+
+The last delivery is the `webhooks` entry of `status.runs`. Its
+`failure` names each address that refused, by its position in
+`spec.webhooks` and its host:
+
+    $ kubectl -n media get library movies \
+        -o jsonpath='{.status.runs[?(@.worker=="webhooks")]}'
+
+The operator also posts a `WebhooksDelivered` `Event` on the `Library`
+for each delivery, or a `WebhooksFailed` warning when an address
+refused it.
 
 ## By hand
 

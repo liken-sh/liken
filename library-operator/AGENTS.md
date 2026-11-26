@@ -27,7 +27,9 @@ a video need heavy processing, such as its trickplay images. For each
 of those, the `Job` publishes a list of the videos that still need
 it, and the operator starts a worker `Job` for the list. A worker
 writes only files on the volume, and the next scan of the library
-reads them into the catalog.
+reads them into the catalog. After a walk `Job` hands off, its close
+container posts every title the walk added or replaced to the
+addresses in the `Library`'s `spec.webhooks` (plan 99).
 
 For each `Player` that hands its idle screen to this operator, a
 screen pod runs the media browser from `media-browser/`, beside one

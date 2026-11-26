@@ -89,6 +89,14 @@ func (c *Catalog) queryInt(ctx context.Context, sql string, params []any) (int, 
 // the agent streams back. It reads the body line by line, so it holds
 // one event at a time and never buffers the whole result.
 func (c *Catalog) stream(ctx context.Context, sql string, params []any, onRow func(cells []any) error) error {
+	return c.streamColumns(ctx, sql, params, nil, onRow)
+}
+
+// streamColumns is stream with the query's column names, which the agent
+// sends in one event before the first row. onColumns is nil for a caller that
+// reads its cells by position.
+func (c *Catalog) streamColumns(ctx context.Context, sql string, params []any,
+	onColumns func(columns []string), onRow func(cells []any) error) error {
 	var statement any = sql
 	if len(params) > 0 {
 		statement = []any{sql, params}
@@ -119,6 +127,12 @@ func (c *Catalog) stream(ctx context.Context, sql string, params []any, onRow fu
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
+		}
+		if onColumns != nil {
+			if columns, held := decodeColumnsEvent(line); held {
+				onColumns(columns)
+				continue
+			}
 		}
 		cells, isError, message, err := decodeQueryEvent(line)
 		if err != nil {
@@ -330,4 +344,35 @@ func decodeQueryEvent(line []byte) (cells []any, isError bool, message string, e
 		return nil, false, "", err
 	}
 	return cells, false, "", nil
+}
+
+// decodeColumnsEvent reads the event that names a query's columns, and false
+// for every other event.
+func decodeColumnsEvent(line []byte) ([]string, bool) {
+	var event struct {
+		Columns []string `json:"columns"`
+	}
+	if err := json.Unmarshal(line, &event); err != nil || event.Columns == nil {
+		return nil, false
+	}
+	return event.Columns, true
+}
+
+// namedRows runs a read query and returns each row as a map from column name
+// to cell. Every caller's query bounds its own answer, as queryStrings says.
+func (c *Catalog) namedRows(ctx context.Context, sql string, params []any) ([]map[string]any, error) {
+	var columns []string
+	var rows []map[string]any
+	err := c.streamColumns(ctx, sql, params, func(named []string) { columns = named },
+		func(cells []any) error {
+			row := make(map[string]any, len(columns))
+			for at, column := range columns {
+				if at < len(cells) {
+					row[column] = cells[at]
+				}
+			}
+			rows = append(rows, row)
+			return nil
+		})
+	return rows, err
 }

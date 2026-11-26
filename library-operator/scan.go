@@ -177,6 +177,12 @@ type scanner struct {
 	// The stale partial files the full walk found, which the scan hands to
 	// the close container before it writes its mark.
 	stalePartials []string
+
+	// Whether the Library posts webhooks, so the scan notes its videos
+	// before the walk, and the write its copy must hold before that read.
+	webhooks    bool
+	sync        syncTarget
+	syncTimeout time.Duration
 }
 
 // The scan role's whole program: read the environment, run the
@@ -210,6 +216,7 @@ func (s *scanner) runPhase(ctx context.Context) error {
 	if err := s.board.start(scanPhase); err != nil {
 		return err
 	}
+	s.noteVideosBefore(ctx)
 	walked := s.runJob(ctx)
 	if ctx.Err() != nil {
 		return walked
@@ -255,6 +262,9 @@ func newScanner(started time.Time, log io.Writer) *scanner {
 		scanPaths:      scanPathsOf(os.Getenv(scanPathsVariable), os.Getenv(scanPathVariable)),
 		handoffTimeout: handoffTimeout(os.Getenv(handoffTimeoutVariable)),
 		board:          boardOf(os.Getenv(libraryPhasesVariable)),
+		webhooks:       os.Getenv(libraryNoteVideosVariable) != "",
+		sync:           syncTargetOf(os.Getenv(syncActorVariable), os.Getenv(syncVersionVariable)),
+		syncTimeout:    syncTimeout(os.Getenv(syncTimeoutVariable)),
 	}
 }
 

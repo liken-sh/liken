@@ -13,7 +13,8 @@ package main
 // imdbcheck.go), and warningReasons below names the ones that post a
 // Warning. Each action that changes no condition posts an Event of its
 // own, with the reasons declared here: a Job created, a walk that ended,
-// a placing of the end titles that ended, a stranded copy deleted, and a
+// a placing of the end titles that ended, a delivery to the webhooks that
+// ended, a stranded copy deleted, and a
 // pod that the kubelet ended created again. Nothing else
 // posts one: a pass, a
 // provider call, and a webhook go to the log and the metrics.
@@ -48,6 +49,10 @@ const (
 	reasonEndTitlesPlaced = "EndTitlesPlaced"
 	// The placing Job of a Library could not place its end titles. Warning.
 	reasonEndTitlesPlacingFailed = "EndTitlesPlacingFailed"
+	// A walk Job posted its walk to every webhook of the Library. Normal.
+	reasonWebhooksDelivered = "WebhooksDelivered"
+	// A walk Job could not post its walk to one webhook or more. Warning.
+	reasonWebhooksFailed = "WebhooksFailed"
 	// The heal deleted a durable copy of a store, and its claim, from a
 	// node that stayed NotReady. Warning, because a node is down.
 	reasonStoreCopyHealed = "StoreCopyHealed"
@@ -144,6 +149,26 @@ func postWalkEnd(recorder *events.Recorder, object events.ObjectReference, befor
 	}
 	recorder.Normal(object, reasonScanCompleted,
 		fmt.Sprintf("the walk of the Job %s found %d titles in %d files", run.Job, after.Titles, after.Files))
+}
+
+// postWebhooksEnd posts the end of a delivery to the webhooks once, on the
+// status write whose webhooks run is new, as postWalkEnd does for a walk.
+func postWebhooksEnd(recorder *events.Recorder, object events.ObjectReference, before, after LibraryStatus) {
+	run, held := statusRunOf(after.Runs, workerWebhooks)
+	if !held || run.Finished.IsZero() {
+		return
+	}
+	if earlier, held := statusRunOf(before.Runs, workerWebhooks); held &&
+		earlier.Job == run.Job && earlier.Finished.Equal(run.Finished) {
+		return
+	}
+	if run.Failure != "" {
+		recorder.Warning(object, reasonWebhooksFailed,
+			fmt.Sprintf("the Job %s could not post its walk to every webhook: %s", run.Job, run.Failure))
+		return
+	}
+	recorder.Normal(object, reasonWebhooksDelivered,
+		fmt.Sprintf("the Job %s posted its walk to the webhooks", run.Job))
 }
 
 // postTitlesPlaced posts the end of a placing run once: on the status write

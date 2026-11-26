@@ -9,7 +9,8 @@ package main
 // the Library's set rows and mark estimates (markestimaterows.go), publishes the work list of each heavy fact the
 // Library runs (worklist.go), writes the one finished runs row, and waits for
 // a catalog pod to confirm it. Every container of the Job writes through the
-// one agent, so that confirmation covers every row the Job wrote.
+// one agent, so that confirmation covers every row the Job wrote. Last, it
+// posts the walk to the Library's webhooks (webhookpost.go).
 
 import (
 	"context"
@@ -47,6 +48,9 @@ type closeRun struct {
 	subtitleLanguages []string
 	base              string
 	dial              func(context.Context) (net.Conn, error)
+	// The addresses the Library posts its walks to, and none for a Library
+	// that names none.
+	webhooks webhookPoster
 }
 
 // The role's whole program. A Job no catalog pod confirms fails, so its rows
@@ -84,6 +88,7 @@ func newCloseRun(log io.Writer) (*closeRun, error) {
 		subtitleLanguages: commaNames(os.Getenv(librarySubtitleLanguagesVariable)),
 		base:              bus.base,
 		dial:              bus.dial,
+		webhooks:          newWebhookPoster(),
 	}, nil
 }
 
@@ -135,7 +140,11 @@ func (r *closeRun) runJob(ctx context.Context) error {
 	// The failure reaches the Library's log word for word, so a path in it
 	// turns opaque here, where the root is known.
 	run.Failure = opaqueText(strings.Join(failures, "; "), r.root)
-	return handOff(ctx, r.catalog, r.library, run, r.log, r.handoffTimeout)
+	if err := handOff(ctx, r.catalog, r.library, run, r.log, r.handoffTimeout); err != nil {
+		return err
+	}
+	r.postWebhooks(ctx, run)
+	return nil
 }
 
 // Waits until every phase of the Job has ended, and returns the failures the

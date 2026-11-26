@@ -471,6 +471,50 @@ spec:
                     deleted, and a fact this map does not name is untouched.
                     A time that has not come yet waits, and the work runs once
                     when it arrives.
+                webhooks:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 8
+                  description: >-
+                    The addresses that a walk `Job` of this library posts to
+                    after it adds or replaces a video. The `Job`'s close
+                    container sends one `POST` to each address, with one JSON
+                    document that lists every movie or series the walk changed
+                    and the catalog's rows of each one. It sends the request
+                    after a catalog pod holds those rows, so each title in the
+                    document is ready to play. A walk that changes no video
+                    sends nothing, and so does the first walk of a
+                    `Library`, which catalogs what the volume already held.
+                    The webhooks guide describes the document.
+                  items:
+                    type: object
+                    required: [url]
+                    properties:
+                      url:
+                        type: string
+                        minLength: 1
+                        maxLength: 2048
+                        pattern: ^https?://
+                        description: >-
+                          The address to post to, over `http` or `https`.
+                          The `Job`'s pod sends the request, so the address
+                          must be reachable from this namespace.
+                      secretRef:
+                        type: object
+                        required: [name]
+                        description: >-
+                          The key of a `Secret` in this namespace whose value
+                          the request carries as `Authorization: Bearer
+                          <value>`, for a receiver that checks who posts.
+                        properties:
+                          name:
+                            type: string
+                            minLength: 1
+                            description: "The name of the `Secret`."
+                          key:
+                            type: string
+                            default: token
+                            description: "The key inside the `Secret`."
             status:
               type: object
               description: >-
@@ -589,7 +633,7 @@ spec:
                     properties:
                       worker:
                         type: string
-                        description: "Which worker ran: scan for a full walk, rescan for a walk of the folders webhooks named, enrich for the phases of a Job and its hand-off, titles-place for the placing of the end titles, or cleanup."
+                        description: "Which worker ran: scan for a full walk, rescan for a walk of the folders webhooks named, enrich for the phases of a Job and its hand-off, webhooks for the post of a walk to spec.webhooks, titles-place for the placing of the end titles, or cleanup. The failure of a webhooks run names each address that refused, by its position in spec.webhooks and its host."
                       job:
                         type: string
                         description: "The name of the Job that ran, for kubectl describe and logs."

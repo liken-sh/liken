@@ -131,6 +131,48 @@ func TestTheEndOfAWalkPostsOneEvent(t *testing.T) {
 	}
 }
 
+// The operator reads the end of a delivery to the webhooks from its runs row,
+// and posts it once.
+func TestTheEndOfADeliveryPostsOneEvent(t *testing.T) {
+	delivered := libraryStatusRun{Worker: workerWebhooks, Job: "movies-walk-2",
+		Started: testNow.Add(-2 * time.Minute), Finished: testNow.Add(-time.Minute)}
+	refused := delivered
+	refused.Failure = "webhook 1 (receiver.test): the receiver answered 401 Unauthorized"
+	cases := []struct {
+		name   string
+		before []libraryStatusRun
+		after  []libraryStatusRun
+		want   []posted
+	}{
+		{name: "a delivery that succeeded", after: []libraryStatusRun{delivered},
+			want: []posted{{"Normal", reasonWebhooksDelivered, "the Job movies-walk-2 posted its walk to the webhooks"}}},
+		{name: "a delivery that an address refused", after: []libraryStatusRun{refused},
+			want: []posted{{"Warning", reasonWebhooksFailed, "the Job movies-walk-2 could not post its walk to " +
+				"every webhook: webhook 1 (receiver.test): the receiver answered 401 Unauthorized"}}},
+		{name: "a delivery the status already holds", before: []libraryStatusRun{delivered},
+			after: []libraryStatusRun{delivered}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cluster := newFakeCluster()
+				library := boundHouse(cluster)
+				library.Status.Runs = one.before
+				operator := testOperator(t, cluster)
+
+				err := writeLibraryStatus(t.Context(), operator.recorder, operator.client, nil, library, func(*Library) LibraryStatus {
+					return LibraryStatus{Titles: 412, Runs: one.after}
+				})
+
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertPosted(t, postedAbout(cluster, "Library", "movies"), one.want)
+			})
+		})
+	}
+}
+
 // A Job's pod that has not started posts a Warning with the words of the
 // kubelet's own Warning about the pod, which the operator lists from the
 // same events collection it posts to.

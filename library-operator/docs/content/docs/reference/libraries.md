@@ -65,6 +65,7 @@ The storage this library covers, the kind of media it holds, and the settings fo
 | <span id="spec--ignore"></span>`ignore` | []string | no | Path components to skip. The scanner leaves out any folder whose name matches an entry, and everything under it, so a volume's non-media folders such as a recycle bin or a staging directory stay out of the catalog. |
 | <span id="spec--refresh"></span>`refresh` | map[string]string | no | One time per refresh target. A key named for a fact, by the names status.gaps uses, makes that fact ask again: an attempt whose time is before the refresh does not count, so the title needs the fact again although its file and its rows are there, the fact asks a provider again, and it rewrites its own files and rows in place. The key scan asks for one full walk of the library, and a walk that starts at or after the time answers it. Nothing is deleted, and a target this map does not name is untouched. A time that has not come yet waits, and the work runs once when it arrives. |
 | <span id="spec--retry"></span>`retry` | map[string]string | no | One time per fact, by the names status.gaps uses. An attempt of that fact whose time is before the retry and whose result is not found does not count, so each title the fact missed or failed on needs the fact again, and the fact asks for it again. An attempt that found its answer still counts, so the retry does not reopen the titles the fact answered, and their files and rows stay. Use it after a fault that made a fact miss titles is fixed. Nothing is deleted, and a fact this map does not name is untouched. A time that has not come yet waits, and the work runs once when it arrives. |
+| <span id="spec--webhooks"></span>`webhooks` | [\[\]object](#specwebhooks) | no | The addresses that a walk `Job` of this library posts to after it adds or replaces a video. The `Job`'s close container sends one `POST` to each address, with one JSON document that lists every movie or series the walk changed and the catalog's rows of each one. It sends the request after a catalog pod holds those rows, so each title in the document is ready to play. A walk that changes no video sends nothing, and so does the first walk of a `Library`, which catalogs what the volume already held. The webhooks guide describes the document. |
 
 ### spec.storage
 
@@ -154,6 +155,24 @@ The text on screen in each second of the end of each video, written to .liken/ti
 | <span id="spectitles--gpuresourceclaimtemplate"></span>`gpuResourceClaimTemplate` | string | no | The name of a ResourceClaimTemplate in the Library's namespace. The titles worker's pod claims a render node from it, and ffmpeg decodes and scales on the node through VA-API. The text models run on the CPU. A file the render node will not decode is decoded again in software. The cluster owner writes the template, and the operator reads only whether it exists. While it does not exist, the operator starts no titles worker, and the GPUClaimTemplates condition names the template. Unset, the worker carries no claim and decodes in software. |
 | <span id="spectitles--parallelism"></span>`parallelism` | integer | no | How many videos the titles worker Job works at once, one pod each. A change reaches a titles worker that runs, and the Job controller starts or stops pods to match it. The worker is an Indexed Job with one index per video of the list, and the Job controller starts the next index when a pod ends. Each pod claims its own render node from the template that gpuResourceClaimTemplate names. The pods prefer different nodes and share a node when no other node can take them. A failed pod is retried on its own video, up to twice, and the other pods keep their work. The cap of 16 keeps one typing error from starting hundreds of pods at once. Default: `1`. |
 
+### spec.webhooks[]
+
+The addresses that a walk `Job` of this library posts to after it adds or replaces a video. The `Job`'s close container sends one `POST` to each address, with one JSON document that lists every movie or series the walk changed and the catalog's rows of each one. It sends the request after a catalog pod holds those rows, so each title in the document is ready to play. A walk that changes no video sends nothing, and so does the first walk of a `Library`, which catalogs what the volume already held. The webhooks guide describes the document.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specwebhooks--url"></span>`url` | string | yes | The address to post to, over `http` or `https`. The `Job`'s pod sends the request, so the address must be reachable from this namespace. Pattern: `^https?://`. |
+| <span id="specwebhooks--secretref"></span>`secretRef` | [object](#specwebhookssecretref) | no | The key of a `Secret` in this namespace whose value the request carries as `Authorization: Bearer <value>`, for a receiver that checks who posts. |
+
+#### spec.webhooks[].secretRef
+
+The key of a `Secret` in this namespace whose value the request carries as `Authorization: Bearer <value>`, for a receiver that checks who posts.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specwebhookssecretref--name"></span>`name` | string | yes | The name of the `Secret`. |
+| <span id="specwebhookssecretref--key"></span>`key` | string | no | The key inside the `Secret`. Default: `token`. |
+
 ## status
 
 What the volume resolved to and what the namespace's reporter says about this library, written only by the library operator. No pod it creates holds an API credential. The catalog pod publishes a retained report on the bus, and the operator folds that report in here.
@@ -197,7 +216,7 @@ The last run of each worker of this library, as the namespace's reporter publish
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusruns--worker"></span>`worker` | string | yes | Which worker ran: scan for a full walk, rescan for a walk of the folders webhooks named, enrich for the phases of a Job and its hand-off, titles-place for the placing of the end titles, or cleanup. |
+| <span id="statusruns--worker"></span>`worker` | string | yes | Which worker ran: scan for a full walk, rescan for a walk of the folders webhooks named, enrich for the phases of a Job and its hand-off, webhooks for the post of a walk to spec.webhooks, titles-place for the placing of the end titles, or cleanup. The failure of a webhooks run names each address that refused, by its position in spec.webhooks and its host. |
 | <span id="statusruns--job"></span>`job` | string | no | The name of the Job that ran, for kubectl describe and logs. |
 | <span id="statusruns--started"></span>`started` | string | no | When that Job started its work. |
 | <span id="statusruns--finished"></span>`finished` | string | no | When that Job wrote its last row, which is what a catalog pod confirms before the Job exits. |

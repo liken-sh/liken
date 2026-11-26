@@ -229,6 +229,17 @@ type LibrarySpec struct {
 	// Whether this library reads the text on screen in the last minutes of
 	// each video, which decodes those minutes of every video once.
 	Titles LibraryTitles `json:"titles,omitzero"`
+
+	// The addresses a walk Job posts to after it adds or replaces a video,
+	// with every title it changed (webhookpost.go).
+	Webhooks []LibraryWebhook `json:"webhooks,omitempty"`
+}
+
+// One address a Library posts its walks to, and the Secret key the request
+// carries as a bearer token, where the receiver checks one.
+type LibraryWebhook struct {
+	URL       string        `json:"url"`
+	SecretRef *SecretKeyRef `json:"secretRef,omitempty"`
 }
 
 // The trailers block of the spec, off unless the owner turns it on.

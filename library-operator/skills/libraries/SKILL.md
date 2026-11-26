@@ -179,6 +179,12 @@ last hour:
   titles that finished, and `EndTitlesPlacingFailed` (`Warning`) gives
   the reason of one that could not place. The operator posts each one
   when the placing `Job` publishes its result.
+* `WebhooksDelivered` (`Normal`) names the `Job` that posted its walk to
+  every address of `spec.webhooks`, and `WebhooksFailed` (`Warning`)
+  names each address that refused it. The operator posts each one when
+  the reporter publishes the delivery's run. The
+  [webhooks guide](https://liken.sh/library/docs/guides/webhooks/#post-each-walk-to-a-receiver)
+  describes the post.
 
 The API server deletes an `Event` an hour after its last write, so the
 conditions and the operator's log keep the facts after that.

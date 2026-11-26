@@ -386,6 +386,7 @@ func writeLibraryStatus(ctx context.Context, recorder *events.Recorder, c *apicl
 		object := libraryReference(library)
 		postTransitions(recorder, object, before.Conditions, library.Status.Conditions)
 		postWalkEnd(recorder, object, before, library.Status)
+		postWebhooksEnd(recorder, object, before, library.Status)
 		postTitlesPlaced(recorder, object, before, library.Status)
 	}
 	// A Library deleted during the pass is the state its departure

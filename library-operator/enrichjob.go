@@ -165,6 +165,7 @@ func libraryPodTemplate(library *Library, providers providerSet, languages []str
 		closing.Env = append(closing.Env, bus.env()...)
 	}
 	containers = append(containers, closing)
+	withWebhookEnv(library, plan, containers)
 
 	spec := PodSpec{
 		RestartPolicy:                 "Never",
