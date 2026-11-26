@@ -7,6 +7,7 @@ use askama::Template;
 
 use super::Item;
 use crate::map::KnownEntry as Entry;
+use crate::presents::{self, Presents};
 use transect_frame::frame::crumbs::Crumb;
 use transect_graph::edges::provenance::legend;
 use transect_graph::links::Reference;
@@ -173,6 +174,61 @@ pub struct KindObject {
     /// "Ready: issuing", or `None` when it reports no condition.
     pub condition: Option<String>,
     pub values: Vec<String>,
+    /// For each audience column after the printer columns, whether the
+    /// object's pod templates present the audience.
+    pub sockets: Vec<Socket>,
+}
+
+/// One cell of an audience column: a filled socket when the object's
+/// pod templates present the audience, and an empty one when they do
+/// not.
+#[derive(Debug, PartialEq)]
+pub struct Socket {
+    pub filled: bool,
+    pub title: String,
+    /// Whether a loaded program accepts the column's audience.  A column
+    /// that no knowledge explains is drawn muted, so a filled socket in
+    /// it does not read as a program that works.
+    pub known: bool,
+}
+
+impl Socket {
+    /// The sockets of an object whose templates present `presents`, for
+    /// `columns`. The cells do not judge: an object can have a reason
+    /// to present no audience that the page cannot see.
+    pub fn row(presents: &Presents, columns: &[presents::Column]) -> Vec<Self> {
+        let cell = |column: &presents::Column| {
+            let filled = presents.audiences.contains(&column.audience);
+            let title = match filled {
+                true => format!("its pod templates present a token for {}", column.audience),
+                false => format!("its pod templates present no token for {}", column.audience),
+            };
+            Socket {
+                filled,
+                title,
+                known: column.known,
+            }
+        };
+        columns.iter().map(cell).collect()
+    }
+
+    pub fn class(&self) -> &'static str {
+        match (self.filled, self.known) {
+            (true, true) => "kind-socket kind-socket-filled",
+            (false, true) => "kind-socket",
+            (true, false) => "kind-socket kind-socket-filled kind-socket-unknown",
+            (false, false) => "kind-socket kind-socket-unknown",
+        }
+    }
+}
+
+/// The header of an audience column: the programs that accept it, or
+/// the audience and "no knowledge" when no loaded knowledge accepts it.
+pub fn socket_header(column: &presents::Column) -> String {
+    match column.known {
+        true => column.label.clone(),
+        false => format!("{} (no knowledge)", column.label),
+    }
 }
 
 #[derive(Debug, PartialEq)]

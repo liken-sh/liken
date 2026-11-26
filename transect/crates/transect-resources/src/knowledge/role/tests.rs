@@ -136,11 +136,27 @@ fn reads_each_entry_of_shows_as_a_list_of_alternatives(
 )]
 #[case::both_a_reference_and_named_by(
     "{face: {reference: status.amp.name, namedBy: {kind: Amp, path: spec.kiosk}}}",
-    "roles.face: the role has both reference and namedBy"
+    "roles.face: the role has more than one of reference, namedBy, and controller"
+)]
+#[case::a_reference_and_the_controller(
+    "{face: {reference: status.amp.name, controller: true}}",
+    "roles.face: the role has more than one of reference, namedBy, and controller"
 )]
 #[case::neither_a_reference_nor_named_by(
     "{face: {shape: screen}}",
-    "roles.face: the role has neither reference nor namedBy"
+    "roles.face: the role has none of reference, namedBy, and controller"
+)]
+#[case::the_controller_through_a_reference(
+    "{face: {controller: true, through: spec.amp}}",
+    "roles.face: the role follows spec.amp from the controller, which names no kind"
+)]
+#[case::an_empty_owns(
+    "{face: {reference: status.amp.name, owns: ''}}",
+    "roles.face: owns is empty"
+)]
+#[case::owns_drawn_as_an_elevation(
+    "{face: {reference: status.amp.name, owns: Job, elevation: the amp}}",
+    "roles.face: the role draws each part as \"the amp\", and owns replaces each part with the Jobs it owns"
 )]
 #[case::named_by_with_no_kind(
     "{face: {namedBy: {path: spec.kiosk}}}",

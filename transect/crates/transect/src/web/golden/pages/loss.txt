@@ -5,7 +5,11 @@ access vulnerabilities kinds
 Search /
 esc
 apps
-1 namespace
+3 namespaces
+acme-garden
+down
+acme-greenhouse
+0 workloads
 acme-shop
 catalog down · storefront 1/2 · can't reach ledger-db
 data
@@ -13,11 +17,15 @@ data
 acme-ledger
 journal no primary · ledger-db down
 operators
-1 namespace
+2 namespaces
+acme-gardener
+gardener-operator down
 acme-promoter
 promoter down
 platform
-1 namespace
+2 namespaces
+acme-agents
+4 workloads
 acme-ops
 device-hub down
 Machines
@@ -29,19 +37,21 @@ control plane
 node-beta 1 alert
 cpu
 mem
-12 pods
+13 pods
 workers
 node-alpha if lost
-12 pods run here
+14 pods run here
 Ground
 1 volume
 The archive NAS ↗ intent · 1 NFS
 If node-alpha were lost
-12 pods run there.
+14 pods run there.
 transect cannot tell whether this loss stops alerts: a MetricsSource's alerts.service would name the Service of Alertmanager.
 Down until it returns
 acme-ledger : ledger-db , its only instance. It is a StatefulSet's pod, which is not replaced until node-alpha confirms it gone.
 Down until replaced elsewhere
+acme-garden : garden-tend , its only instance
+acme-gardener : gardener-operator , its only instance
 acme-ops : device-hub , its only instance
 acme-promoter : promoter , its only instance
 acme-shop : catalog , its only instance
@@ -52,6 +62,7 @@ acme-shop : storefront 1 of 2
 5 DaemonSets' pods are lost with it
 What else fails with it
 acme-shop : storefront can't reach acme-ledger/ledger-db ; catalog.example.test stops answering
+Until acme-gardener/gardener-operator returns, nothing reconciles Allowance garden-budget , 2 Duties , 2 Mandates , Session acme-garden/garden-prune , and 2 Signals .
 Until acme-promoter/promoter returns, nothing reconciles Ledger acme-ledger/receipts and 2 Promotions .
 What happens next
 now Its pods are evicted at once, then the replicas that can start elsewhere do.

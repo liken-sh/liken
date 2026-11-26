@@ -85,6 +85,7 @@ pub fn sort(snapshot: &mut Snapshot, yaml: &str) -> Vec<ResourceSlice> {
             ("apps/v1", "DaemonSet") => snapshot.daemon_sets.push(typed(document)),
             ("batch/v1", "CronJob") => snapshot.cron_jobs.push(typed(document)),
             ("apps/v1", "ReplicaSet") => snapshot.replica_sets.push(meta(document)),
+            ("batch/v1", "Job") => snapshot.jobs.push(meta(document)),
             ("networking.k8s.io/v1", "Ingress") => snapshot.ingresses.push(typed(document)),
             ("networking.k8s.io/v1", "NetworkPolicy") => {
                 snapshot.network_policies.push(typed(document))

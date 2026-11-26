@@ -23,8 +23,8 @@ pub use cluster::{ClusterMap, Selected, UNSORTED};
 pub use gitops::GitOpsPage;
 pub use gone::{Above, GonePage, Named as Gone};
 pub use known::{
-    Board, Entry as KnownEntry, KnownPage, Reading, Standing, Subject, Why, chips as known_chips,
-    every_chip,
+    Board, Body, Entry as KnownEntry, KnownPage, Reading, Standing, Subject, Why,
+    chips as known_chips, every_chip,
 };
 pub use machine::{
     DevicesRead, Driver, MachinePage, OwnLogs, Reads as MachineReads, Underneath, VolumeLine,
@@ -37,7 +37,7 @@ pub use sidebar::Sidebar;
 use transect_frame::frame::crumbs::Crumb;
 pub use workload::{
     Contents as WorkloadContents, WorkloadPage, card as workload_card, controller, find, has_page,
-    known_through,
+    known_through, program::ProgramRows,
 };
 
 use crate::cards::NamespaceCard;

@@ -16,7 +16,7 @@ type Parts = (Vec<(String, Option<String>, State)>, String);
 fn parts(roles: &str, sketch: &str, stock: &Stock, standing: Standing) -> Parts {
     let page = room_page(&room(roles, sketch), stock, standing);
     let sketch = page.sketch.unwrap();
-    let drawn = &sketch.plan.roles[0].drawn;
+    let drawn = &sketch.plan().unwrap().roles[0].drawn;
     let parts = drawn.parts.iter().map(|part| {
         let end = &part.end;
         (end.reference.text.clone(), end.under.clone(), part.state)
@@ -35,7 +35,8 @@ fn nothing(
     let page = room_page(&room(roles, sketch), stock, Standing::Plain);
     let sketch = page.sketch.unwrap();
     let role = sketch
-        .plan
+        .into_plan()
+        .unwrap()
         .roles
         .into_iter()
         .find(|role| role.area == area)?;
@@ -249,5 +250,5 @@ fn gives_no_width_to_a_column_of_roles_the_page_leaves_out(
     };
     let roles = format!("{SHELF}, keeper: {{namedBy: {{kind: Keeper, path: spec.room}}}}");
     let page = room_page(&room(&roles, sketch), &stock, Standing::Plain);
-    assert_eq!(page.sketch.unwrap().plan.columns, columns);
+    assert_eq!(page.sketch.unwrap().plan().unwrap().columns, columns);
 }

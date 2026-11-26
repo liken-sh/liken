@@ -1,7 +1,8 @@
 {#- The sketch of one elevation of a kind's knowledge, or of the
     pattern of the catalog that the kind fills: the head, which names the
     object, its elevations, the question, who states it, and the pattern,
-    then the grid that `plan.html` draws, the line that names the parts
+    then the grid that `plan.html` draws, the lanes that
+    `sequence.html` draws, or the table that `rows.html` draws, the line that names the parts
     that the elevation does not place, and what the pattern expects.  The grid scrolls sideways
     in its own frame when the frame is narrower than the grid's
     narrowest width, and the head and the line under it stay. -#}
@@ -37,6 +38,8 @@
 <p class="sketch-missing">{{ missing }}</p>
 {%- endif %}
 </header>
+{%- match sketch.body %}
+{%- when transect_map::map::Body::Grid(plan) %}
 {#- The arrow at the end of each wire, once on the page, for every plan
     that the sketch draws: plain, at rest, and marked, because an arrow
     takes the state of its line.  The SVG takes no room and no screen
@@ -45,8 +48,17 @@
 {%- for state in ["plain", "rests", "warm"] %}<marker id="sketch-arrow-{{ state }}" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path class="section-arrow sketch-arrow-{{ state }}" d="M0 0 L4 2 L0 4 Z"/></marker>{% endfor -%}
 </defs></svg>
 <div class="sketch-scroll">
-{{- sketch.plan|safe }}
+{{- plan|safe }}
 </div>
+{%- when transect_map::map::Body::Sequence(sequence) %}
+<div class="sketch-scroll">
+{{- sequence|safe }}
+</div>
+{%- when transect_map::map::Body::Rows(rows) %}
+<div class="sketch-scroll">
+{{- rows|safe }}
+</div>
+{%- endmatch %}
 {%- if let Some(unplaced) = sketch.unplaced %}
 <p class="sketch-unplaced">{% call links::sentence(unplaced.as_slice()) %}{% endcall %}</p>
 {%- endif %}

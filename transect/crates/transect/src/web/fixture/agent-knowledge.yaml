@@ -1,0 +1,112 @@
+# The knowledge that the projects of the agent system in `tokens.yaml`
+# ship: the kinds of each project, with the templates of the kinds whose
+# controller makes pods, and a `ProgramKnowledge` for each program.  The
+# loop of a `Mandate` is a sequence whose `duties` lane presents the
+# tokens of the templates, so the page adds a lane for each program
+# that accepts one, and the operator's own audience adds none because
+# the operator lane draws its workload.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: mandates.simmer.foo
+spec:
+  summary: The work that an agent owes in one namespace.
+  healthy: {condition: Ready}
+  controller: {image: guid.foo/simmer}
+  references:
+    - {path: status.serviceAccount, kind: ServiceAccount, label: runs as}
+  templates:
+    - {path: spec.template, use: turn, injects: [simmer], runsAs: status.serviceAccount}
+  roles:
+    operator: {controller: true, label: the simmer operator}
+    duties:   {namedBy: {kind: Duty, path: spec.mandate}, stack: true}
+  elevations:
+    - name: the loop
+      question: What does a turn of each Duty call?
+      sequence:
+        lanes: [operator, duties]
+        presents: duties
+        steps:
+          - {from: operator, to: duties, verb: runs the turns of each Duty, state: {role: duties, condition: Ready}}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: duties.simmer.foo
+spec:
+  summary: One skill that a Mandate runs.
+  healthy: {condition: Ready}
+  references:
+    - {path: spec.mandate, kind: Mandate, group: simmer.foo, label: duty of}
+  templates:
+    - {path: spec.template, use: turn, merge: spec.mandate, injects: [simmer]}
+    - {path: spec.hooks.before, use: hook, injects: [simmer]}
+    - {path: spec.hooks.after, use: hook, injects: [simmer]}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: browserprofiles.gofer.guid.foo
+spec:
+  summary: One identity on the web, the state of a browser kept between pods.
+  healthy: {condition: Ready}
+  references:
+    - {path: "spec.serviceAccounts[]", kind: ServiceAccount, label: used by pods of}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: badges.lanyard.guid.foo
+spec:
+  summary: What the pods of some ServiceAccounts may have.
+  healthy: {condition: Ready}
+  references:
+    - {path: "spec.serviceAccounts[]", kind: ServiceAccount, label: held by pods of}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: ProgramKnowledge
+metadata:
+  name: simmer
+spec:
+  summary: Starts an agent's turn as a Job when an event arrives.
+  image: guid.foo/simmer
+  accepts:
+    - {audience: simmer, verb: reads its events and its keys}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: ProgramKnowledge
+metadata:
+  name: lanyard
+spec:
+  summary: Gives a pod the credentials that a Badge names for its ServiceAccount.
+  image: guid.foo/lanyard
+  accepts:
+    - audience: lanyard
+      verb: asks for a credential
+      grants: {kind: Badge, group: lanyard.guid.foo, path: "spec.serviceAccounts[]"}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: ProgramKnowledge
+metadata:
+  name: gofer
+spec:
+  summary: Keeps a browser's logins from one pod to the next.
+  image: guid.foo/gofer
+  accepts:
+    - audience: gofer
+      verb: loads and saves the browser state of a BrowserProfile
+      grants: {kind: BrowserProfile, group: gofer.guid.foo, path: "spec.serviceAccounts[]"}
+  injects:
+    - podLabel: gofer.guid.foo/profile
+      audience: gofer
+      names: {kind: BrowserProfile, group: gofer.guid.foo}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: ProgramKnowledge
+metadata:
+  name: midden
+spec:
+  summary: Keeps the transcript of each turn.
+  image: guid.foo/midden
+  accepts:
+    - {audience: midden, verb: ships its transcript}

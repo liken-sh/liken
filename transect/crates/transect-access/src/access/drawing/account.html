@@ -28,6 +28,14 @@
 {%- else %}
 {% call switcher::switcher(false) %}{% endcall %}
 {%- endif %}
+{#- What a ServiceAccount can obtain besides its RBAC, each section
+    present only when its knowledge is loaded. -#}
+{%- for obtained in obtains %}
+<h2 class="section-subtitle">{{ obtained.title }}</h2>
+{%- for line in obtained.lines %}
+<p class="section-legend ax-legend">{% call links::sentence(line.clone()) %}{% endcall %}</p>
+{%- endfor %}
+{%- endfor %}
 <h2 class="section-subtitle">What it may do, and where</h2>
 <p class="section-legend ax-legend">Left to right: {% if namespace().is_some() %}what runs as it{% else %}who it is{% endif %}, the roles it is bound to, what they grant, and what follows. <span class="ax-key"><span class="ax-block ax-block-d ax-block-some"></span> one of the six that a binding grants it</span> <span class="ax-key"><span class="ax-block ax-block-f ax-block-some"></span> one that follows from a grant, and that no binding names.</span> Hover a box for its rules.</p>
 {% call drawings::drawing(drawing, "account", title) %}{% endcall %}

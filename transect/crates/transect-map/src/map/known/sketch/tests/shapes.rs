@@ -33,7 +33,7 @@ fn drawn(sketch: &str, amp: &str, hand: &str) -> Sketch {
 }
 
 fn areas(sketch: &Sketch) -> Vec<(&str, String)> {
-    let roles = sketch.plan.roles.iter();
+    let roles = sketch.plan().unwrap().roles.iter();
     roles
         .map(|role| (role.area.as_str(), role.area_class()))
         .collect()
@@ -66,7 +66,7 @@ fn closes_the_gap_between_rows_where_both_parts_join(
 ) {
     let sketch = drawn("amp\nhand", amp, hand);
     assert_eq!(
-        (sketch.plan.rows.as_str(), areas(&sketch)),
+        (sketch.plan().unwrap().rows.as_str(), areas(&sketch)),
         (
             rows,
             vec![("amp", classes[0].into()), ("hand", classes[1].into())]
@@ -88,7 +88,7 @@ fn lets_the_parts_of_a_shape_that_joins_its_sides_touch(#[case] hand: &str, #[ca
 #[case::a_tall_area("amp hand\namp hand", "--ratio: 164 / 273")]
 fn lays_a_shape_that_turns_on_its_side_in_a_wide_area(#[case] sketch: &str, #[case] ratio: &str) {
     let drawn = drawn(sketch, "speaker", "box");
-    let style = &drawn.plan.roles[0].drawn.drawing.style;
+    let style = &drawn.plan().unwrap().roles[0].drawn.drawing.style;
     assert!(style.contains(ratio), "{style}");
 }
 
@@ -96,8 +96,8 @@ fn lays_a_shape_that_turns_on_its_side_in_a_wide_area(#[case] sketch: &str, #[ca
 fn draws_a_role_whose_shape_is_unknown_as_a_box() {
     let sketch = drawn("amp\nhand", "kettle", "box");
     assert_eq!(
-        sketch.plan.roles[0].drawn.drawing,
-        sketch.plan.roles[1].drawn.drawing
+        sketch.plan().unwrap().roles[0].drawn.drawing,
+        sketch.plan().unwrap().roles[1].drawn.drawing
     );
 }
 
@@ -120,10 +120,10 @@ fn lamp(shape: &str) -> Sketch {
 #[rstest]
 fn draws_an_expected_role_with_no_part_in_the_shape_of_its_kind() {
     let (stated, of_kind) = (lamp(", shape: disc"), lamp(""));
-    let empty = of_kind.plan.roles[0].drawn.nothing.is_some();
+    let empty = of_kind.plan().unwrap().roles[0].drawn.nothing.is_some();
     assert_eq!(
-        (empty, &of_kind.plan.roles[0].drawn),
-        (true, &stated.plan.roles[0].drawn)
+        (empty, &of_kind.plan().unwrap().roles[0].drawn),
+        (true, &stated.plan().unwrap().roles[0].drawn)
     );
 }
 
@@ -145,7 +145,8 @@ fn row_with(shape: &str) -> Vec<String> {
     let spec = format!("{{{REFERENCES}, {roles}, {elevation}}}");
     let sketch = page_with(&spec, Standing::Plain, &shapes).sketch.unwrap();
     sketch
-        .plan
+        .plan()
+        .unwrap()
         .roles
         .iter()
         .map(SketchRole::area_class)

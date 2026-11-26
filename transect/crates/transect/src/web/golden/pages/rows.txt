@@ -1,0 +1,82 @@
+Session garden-tend · acme-garden · transect
+transect
+cluster / apps / acme-garden / Session garden-tend
+access vulnerabilities kinds
+Search /
+esc
+acme-garden Session garden-prune Session garden-tend Duties ×2 Mandates ×2 overview section logs
+Session
+garden-tend
+Ready: running
+its turns
+What did each turn do, and how did it end?
+described by gardener-operator
+phase
+Running
+waiting on
+turn
+pending events
+2
+#
+before hook
+turn
+Job
+started
+finished
+after hook
+why the Session ended
+cost
+1
+Succeeded
+Succeeded
+garden-tend-0
+Jan 1, 09:00 UTC
+Jan 1, 09:04 UTC
+Succeeded
+—
+$0.42
+2
+Succeeded
+—
+garden-tend-1
+Jan 1, 11:58 UTC
+—
+—
+—
+—
+Each row is an item of the object's status, as the Kubernetes API returns it. The columns are from the KindKnowledge sessions.agents.example.test.
+Belongs to
+controlled by Deployment acme-gardener/gardener-operator
+Referred to by
+managed by it Pod garden-tend-1-pod Job garden-tend-1 Job garden-tend-1-before
+Status
+Phase Running
+Waiting turn
+Turns 2
+Refers to
+depends on Mandate garden Duty tend
+Runs
+image
+repository
+version
+commit
+rolled
+example.test/agent:1
+not read
+none
+none
+—
+Session garden-tend 1 of 1 ready
+One run of an agent for a Mandate, over one or more turns. kind
+Depends on kind
+Duty tend Mandate garden
+Controlled by
+Deployment acme-gardener/gardener-operator kind
+If it goes down
+Nothing in the cluster depends on it.
+No NetworkPolicy selects its pods, so any pod may call them.
+no GitOps applier's label or annotation is on it
+Described by gardener-operator
+Healthy when its Ready condition is True.
+from the KindKnowledge sessions.agents.example.test
+Marked lines are stored text, not read from the cluster. kind: from the kind knowledge. Hover a mark for its source.

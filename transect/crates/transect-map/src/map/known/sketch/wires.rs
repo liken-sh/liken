@@ -23,7 +23,7 @@
 //! that names the parts as the drawing names them, and its source.
 
 use transect_graph::links::Reference;
-use transect_resources::knowledge::Elevation;
+use transect_resources::knowledge::elevation::Sketch;
 use transect_resources::shapes::Edge;
 
 /// Whether a role that a sketch places has parts on the page.
@@ -139,17 +139,13 @@ impl SketchWire {
     }
 }
 
-/// The wires of `elevation` that the page draws, where `placed` says how
+/// The wires of `sketch` that the page draws, where `placed` says how
 /// the page draws each role, and `states` names who states them, such
 /// as "the KindKnowledge k".
-pub fn wires(
-    elevation: &Elevation,
-    states: &str,
-    placed: impl Fn(&str) -> Placed,
-) -> Vec<SketchWire> {
-    let grid = &elevation.grid;
+pub fn wires(sketch: &Sketch, states: &str, placed: impl Fn(&str) -> Placed) -> Vec<SketchWire> {
+    let grid = &sketch.grid;
     let mut wires: Vec<SketchWire> = Vec::new();
-    for one in &elevation.wires {
+    for one in &sketch.wires {
         let (from, to) = (one.from.as_str(), one.to.as_str());
         let through = one
             .via
@@ -189,7 +185,7 @@ pub fn wires(
             runs,
         });
     }
-    spread(&mut wires, elevation);
+    spread(&mut wires, sketch);
     wires
 }
 
@@ -272,8 +268,8 @@ struct Meeting {
 /// Gives each end its place among the ends that meet the same edge of
 /// the same area, in the order of their other ends along that edge: by
 /// row for a side, and by column for the top or the bottom.
-fn spread(wires: &mut [SketchWire], elevation: &Elevation) {
-    let grid = &elevation.grid;
+fn spread(wires: &mut [SketchWire], sketch: &Sketch) {
+    let grid = &sketch.grid;
     let meeting = |end: &WireEnd, other: &WireEnd, at: (usize, usize), place: usize, from| {
         let rows = grid.rows_of(&other.area).unwrap_or_default();
         let columns = grid.columns_of(&other.area).unwrap_or_default();

@@ -21,7 +21,7 @@ fn nested(elevation: &str, standing: Standing) -> Vec<NestedPart> {
     };
     let roles = SHELVES.replace("ELEVATION", elevation);
     let page = room_page(&room(&roles, "shelves"), &stock, standing);
-    let mut roles = page.sketch.unwrap().plan.roles;
+    let mut roles = page.sketch.unwrap().into_plan().unwrap().roles;
     roles.remove(0).nested
 }
 
@@ -88,7 +88,7 @@ fn draws_each_part_in_its_shape_when_its_kind_states_no_such_elevation() {
     let roles = SHELVES.replace("ELEVATION", "the aisle");
     let page = room_page(&room(&roles, "shelves"), &stock, Standing::Plain);
     let sketch = page.sketch.unwrap();
-    let role = &sketch.plan.roles[0];
+    let role = &sketch.plan().unwrap().roles[0];
     let parts: Vec<&str> = role
         .drawn
         .parts
@@ -141,7 +141,8 @@ fn names_and_writes_every_part_that_a_nested_elevation_draws() {
     let page = room_page(&room(&roles, "shelves"), &stock, Standing::Plain);
     let sketch = page.sketch.as_ref().unwrap();
     let names: Vec<&str> = sketch
-        .plan
+        .plan()
+        .unwrap()
         .references()
         .iter()
         .map(|r| r.text.as_str())

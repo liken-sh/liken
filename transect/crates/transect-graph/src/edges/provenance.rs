@@ -23,6 +23,15 @@ pub enum Provenance {
         attribute: String,
         label: String,
     },
+    /// Read through a `ProgramKnowledge` that a project ships, and the
+    /// pod template whose tokens name one of the program's audiences.
+    /// `template` is the template's field, such as `spec.template`, and
+    /// it is empty for a fact of the program alone, such as its summary.
+    Program {
+        program: String,
+        audience: String,
+        template: String,
+    },
     /// Read from the description at the top of a custom kind's CRD
     /// schema.  The operator ships it with the kind, so it takes the
     /// same mark as kind knowledge.
@@ -88,7 +97,10 @@ impl Provenance {
         match self {
             Self::Kubernetes | Self::Package { .. } => None,
             Self::Intent(_) => Some(MARKS[0].0),
-            Self::Kinds { .. } | Self::Devices { .. } | Self::Definition { .. } => Some(MARKS[1].0),
+            Self::Kinds { .. }
+            | Self::Program { .. }
+            | Self::Devices { .. }
+            | Self::Definition { .. } => Some(MARKS[1].0),
             Self::Image(_) => Some(MARKS[2].0),
             Self::Guess { .. } => Some(MARKS[3].0),
         }
@@ -115,6 +127,18 @@ impl Provenance {
             Self::Kinds { knowledge, field } => {
                 format!("from {field} in the KindKnowledge {knowledge}")
             }
+            Self::Program {
+                program, template, ..
+            } if template.is_empty() => {
+                format!("from the ProgramKnowledge {program}")
+            }
+            Self::Program {
+                program,
+                audience,
+                template,
+            } => format!(
+                "from the ProgramKnowledge {program}, which accepts {audience}, and the template at {template}"
+            ),
             Self::Devices {
                 driver, attribute, ..
             } => {

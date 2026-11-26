@@ -16,6 +16,8 @@ mod lean;
 mod nested;
 mod part;
 mod plan;
+mod rows;
+mod sequence;
 mod stack;
 mod tracks;
 mod unplaced;
@@ -28,11 +30,23 @@ pub use head::{ElevationTab, Head, choose, href};
 pub use lean::Lean;
 pub use nested::NestedPart;
 pub use plan::Plan;
+pub use rows::{RowCell, Rows};
+pub use sequence::{Lane, Sequence, Step};
 pub use wires::SketchWire;
 
 use super::board::Board;
 use transect_graph::links::Reference;
 use transect_resources::knowledge::Stated;
+use transect_resources::knowledge::elevation::Form;
+
+/// The drawing of an elevation in its form.
+#[derive(Debug, PartialEq)]
+pub enum Body {
+    /// The grid of a sketch, with its roles and its wires.
+    Grid(Plan),
+    Sequence(Sequence),
+    Rows(Rows),
+}
 
 /// The drawing of one elevation of the page's object.
 #[derive(Debug, PartialEq)]
@@ -43,8 +57,8 @@ pub struct Sketch {
     /// The tabs of the kind's elevations, who states them, and the
     /// elevation that the URL named and the kind does not have.
     pub head: Head,
-    /// The grid of the elevation, with its roles and its wires.
-    pub plan: Plan,
+    /// The drawing of the elevation in its form.
+    pub body: Body,
     /// The line that names the parts of the roles that the elevation
     /// does not place, as words and links.
     pub unplaced: Option<Vec<Reference>>,
@@ -69,16 +83,59 @@ impl Sketch {
         let judged = board.judged.filter(|_| stated.pattern.is_some());
         let lines = judged.iter().flat_map(|judged| &judged.lines);
         let expected = lines.map(|line| Expected::of(line, board.page));
-        let plan = Plan::build(board, &board.subject, *stated, false);
-        let unplaced = unplaced::line(board, slug, *stated, all, &plan.references());
+        let body = match &elevation.form {
+            Form::Sketch(sketch) => {
+                Body::Grid(Plan::build(board, &board.subject, *stated, sketch, false))
+            }
+            Form::Sequence(sequence) => Body::Sequence(Sequence::build(board, *stated, sequence)),
+            Form::Rows(rows) => Body::Rows(Rows::build(board, rows)),
+        };
+        let drawn = match &body {
+            Body::Grid(plan) => plan.references(),
+            Body::Sequence(sequence) => sequence.references(),
+            Body::Rows(_) => Vec::new(),
+        };
+        // Rows draw the object's own status and place no role, so a line
+        // that names each role that they leave out would name them all.
+        let unplaced = match &body {
+            Body::Rows(_) => None,
+            _ => unplaced::line(board, slug, *stated, all, &drawn),
+        };
         Self {
             name: elevation.name.clone(),
             question: elevation.question.clone(),
             head,
-            plan,
+            body,
             unplaced,
             knowledge: board.subject.knowledge.name.clone(),
             expected: expected.collect(),
+        }
+    }
+
+    /// The grid of the elevation, when its form is a sketch.
+    pub fn plan(&self) -> Option<&Plan> {
+        match &self.body {
+            Body::Grid(plan) => Some(plan),
+            Body::Sequence(_) | Body::Rows(_) => None,
+        }
+    }
+
+    /// The grid of the elevation, for a test that takes its parts.
+    #[cfg(test)]
+    pub fn into_plan(self) -> Option<Plan> {
+        match self.body {
+            Body::Grid(plan) => Some(plan),
+            Body::Sequence(_) | Body::Rows(_) => None,
+        }
+    }
+
+    /// Each object or value that the drawing names, which the boxes
+    /// under the page leave out.
+    pub fn references(&self) -> Vec<&Reference> {
+        match &self.body {
+            Body::Grid(plan) => plan.references(),
+            Body::Sequence(sequence) => sequence.references(),
+            Body::Rows(rows) => rows.references(),
         }
     }
 
@@ -93,8 +150,19 @@ impl Sketch {
                 self.knowledge
             );
         }
+        match &self.body {
+            Body::Sequence(sequence) => return sequence.caption(&self.knowledge),
+            Body::Rows(_) => {
+                return format!(
+                    "Each row is an item of the object's status, as the Kubernetes API returns it. The columns are from the KindKnowledge {}.",
+                    self.knowledge
+                );
+            }
+            Body::Grid(_) => {}
+        }
         let mut nested: Vec<&str> = Vec::new();
-        let parts = self.plan.roles.iter().flat_map(|role| &role.nested);
+        let roles = self.plan().into_iter().flat_map(|plan| &plan.roles);
+        let parts = roles.flat_map(|role| &role.nested);
         for part in parts {
             if !nested.contains(&part.knowledge.as_str()) {
                 nested.push(&part.knowledge);

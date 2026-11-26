@@ -45,7 +45,7 @@ fn placed(name: &str, sifter: Presence, scoop: Presence) -> Placed {
 fn drawn(sifter: Presence, scoop: Presence) -> Vec<(Vec<String>, String)> {
     let known = knowledge("mills.widgets.example.com", MILL);
     let wires = wires(
-        &known.elevations[0],
+        known.elevations[0].sketch().unwrap(),
         "the KindKnowledge mills.widgets.example.com",
         |name| placed(name, sifter, scoop),
     );
@@ -122,7 +122,7 @@ fn draws_each_wire_by_the_parts_of_the_roles_it_joins(
 fn names_the_parts_and_the_source_of_a_wire() {
     let known = knowledge("mills.widgets.example.com", MILL);
     let wires = wires(
-        &known.elevations[0],
+        known.elevations[0].sketch().unwrap(),
         "the KindKnowledge mills.widgets.example.com",
         |name| placed(name, Presence::Parts, Presence::Parts),
     );

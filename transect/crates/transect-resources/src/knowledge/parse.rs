@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use super::{
     Disruptions, Duty, Healthy, KindKnowledge, Reference, ReferencedBy, Target, Through, catalog,
-    elevation, findings, gitops, role,
+    elevation, findings, gitops, role, templates,
 };
 use crate::resources::DocId;
 use transect_graph::edges::Kind;
@@ -62,6 +62,8 @@ struct Spec {
     roles: Option<serde_yaml_ng::Mapping>,
     #[serde(default)]
     elevations: Vec<elevation::Written>,
+    #[serde(default)]
+    templates: Vec<templates::Written>,
 }
 
 /// `healthy`, as written: a condition of the object's own, with the
@@ -141,6 +143,7 @@ pub fn parse(doc: DocId, value: serde_yaml_ng::Value) -> Result<KindKnowledge, S
         })
         .collect::<Result<Vec<_>, _>>()?;
     let roles = role::read(spec.roles, &references, group)?;
+    let templates = templates::read(spec.templates, &references)?;
     let pattern = spec
         .pattern
         .map(|written| catalog::fill(written, &references))
@@ -202,6 +205,7 @@ pub fn parse(doc: DocId, value: serde_yaml_ng::Value) -> Result<KindKnowledge, S
         roles,
         elevations,
         pattern,
+        templates,
     })
 }
 
@@ -275,6 +279,11 @@ fn reference(written: Written) -> Result<Reference, String> {
         }
         (None, None) => {
             return Err("the entry has neither path nor name, so it reads nothing".into());
+        }
+        (Some(path), None) if path.trim_end_matches("[keys]").contains("[keys]") => {
+            return Err(format!(
+                "path {path} has [keys] before its last segment, and [keys] reads the keys of a map only at the end"
+            ));
         }
         (Some(path), None) => (path, false),
         (None, Some(name)) => {

@@ -100,6 +100,12 @@ fn board(card: Option<WorkloadCard>) -> KnownPage {
         readings: &|_, _| Vec::new(),
         subjects: &|_| None,
         named_by: &|_, _| Vec::new(),
+        controller: &|_| None,
+        top: &|object| object.clone(),
+        owned: &|_, _| Vec::new(),
+        presents: &crate::presents::Presents::default(),
+        data: &serde_json::Value::Null,
+        logs: &|_| None,
         ends: &transect_resources::knowledge::fixtures::Nowhere,
         judged: None,
     };

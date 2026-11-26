@@ -88,6 +88,32 @@ fn database() -> Ownership {
 }
 
 #[rstest]
+#[case::what_it_controls(
+    object("db.example.io", "Database", "orders"),
+    ("apps", "StatefulSet"),
+    vec![object("apps", "StatefulSet", "db")]
+)]
+#[case::not_what_it_owns_through_another(
+    object("db.example.io", "Database", "orders"),
+    ("", "Pod"),
+    vec![]
+)]
+#[case::another_kind(object("db.example.io", "Database", "orders"), ("batch", "Job"), vec![])]
+#[case::a_kind_of_the_name_in_another_group(
+    object("db.example.io", "Database", "orders"),
+    ("example.io", "StatefulSet"),
+    vec![]
+)]
+#[case::nothing(object("", "Pod", "db-0"), ("", "Pod"), vec![])]
+fn lists_the_objects_of_a_kind_that_an_object_owns(
+    #[case] owner: Object,
+    #[case] kind: (&str, &str),
+    #[case] expected: Vec<Object>,
+) {
+    assert_eq!(database().owned(&owner, kind.0, kind.1), expected);
+}
+
+#[rstest]
 #[case::its_controller(object("apps", "StatefulSet", "db"), true)]
 #[case::its_top_owner(object("db.example.io", "Database", "orders"), true)]
 #[case::itself(object("", "Pod", "db-0"), false)]

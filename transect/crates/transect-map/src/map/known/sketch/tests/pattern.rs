@@ -32,7 +32,12 @@ fn primary(slug: Option<&str>) -> Option<State> {
     };
     let page = page_of_known(&known, Standing::Plain, slug, Some(&judged));
     let sketch = page.sketch.unwrap();
-    let parts = sketch.plan.roles.iter().flat_map(|role| &role.drawn.parts);
+    let parts = sketch
+        .plan()
+        .unwrap()
+        .roles
+        .iter()
+        .flat_map(|role| &role.drawn.parts);
     let mut named =
         parts.filter(|part| part.names().iter().any(|name| name.text.ends_with("amp-1")));
     named.next().map(|part| part.state)
@@ -63,7 +68,8 @@ fn promoter(derived: Derived) -> Option<(String, String, State)> {
     let page = page_of_known(&known, Standing::Plain, Some("the-store"), Some(&judged));
     let sketch = page.sketch.unwrap();
     let role = sketch
-        .plan
+        .plan()
+        .unwrap()
         .roles
         .iter()
         .find(|role| role.area == "promoter")?;

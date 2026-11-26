@@ -17,6 +17,7 @@ mod followed;
 mod holds;
 mod look;
 mod namespace;
+mod obtains;
 mod served;
 mod workload;
 

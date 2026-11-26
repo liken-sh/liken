@@ -263,3 +263,35 @@ fn resolves_the_elevation_that_draws_each_part_in_the_parts_kind(
     let (role, _) = room_role(role, Some(SHELF), Some(BIN));
     assert_eq!(role.unresolved.as_deref(), unresolved);
 }
+
+const MERGING_KIOSK: &str = "{references: [{path: spec.pad, kind: Pad, group: pads.example.com}], templates: [{path: spec.template, use: turn, merge: spec.pad}]}";
+
+/// The messages of the conditions that a kiosk's template `merge` of
+/// its pad gives, when the pad's knowledge is `pad`.
+#[rstest]
+#[case::a_pad_with_a_template_of_the_same_use(
+    Some("{templates: [{path: spec.template, use: turn}]}"),
+    vec![]
+)]
+#[case::a_pad_with_another_use(
+    Some("{templates: [{path: spec.template, use: hook}]}"),
+    vec!["templates[0] merges spec.pad, and the knowledge of Pad states no template for turn"]
+)]
+#[case::no_knowledge_of_a_pad(
+    None,
+    vec!["templates[0] merges spec.pad, and transect has no knowledge of Pad"]
+)]
+fn confirms_a_merge_against_the_merged_kind(
+    #[case] pad: Option<&str>,
+    #[case] expected: Vec<&str>,
+) {
+    let mut known = vec![knowledge("kiosks.pads.example.com", MERGING_KIOSK)];
+    known.extend(pad.map(|spec| knowledge("pads.pads.example.com", spec)));
+    let kinds = Kinds::resolve(&known, &plurals(), &[]);
+    let messages: Vec<String> = kinds
+        .conditions
+        .iter()
+        .map(|(_, condition)| condition.message.clone())
+        .collect();
+    assert_eq!(messages, expected);
+}

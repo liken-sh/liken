@@ -17,7 +17,7 @@ use transect_observe::usage;
 
 /// The crawl fails at this many pages, so links that keep generating
 /// new URLs fail the test instead of running forever.
-const MOST: usize = 400;
+const MOST: usize = 600;
 
 /// Renders `url` as a whole page from `model`, or `None` for a URL that
 /// no view serves.

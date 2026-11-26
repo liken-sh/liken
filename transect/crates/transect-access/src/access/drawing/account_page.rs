@@ -35,6 +35,24 @@ pub struct AccountPage {
     /// so the page shows the access lens's own card.
     pub card: Option<ObjectCard>,
     pub no_gitops: bool,
+    /// What a ServiceAccount can obtain besides its RBAC, from the
+    /// knowledge of the kinds that own it and the programs it calls.
+    pub obtains: Vec<Obtained>,
+}
+
+/// One section above the drawing of a ServiceAccount's RBAC, such as the
+/// object that owns the account or the tokens that its pods present.
+#[derive(Debug, PartialEq)]
+pub struct Obtained {
+    pub title: &'static str,
+    /// Each line, as a sentence with links.
+    pub lines: Vec<Vec<Part>>,
+}
+
+impl Obtained {
+    pub fn new(title: &'static str, lines: Vec<Vec<Part>>) -> Self {
+        Self { title, lines }
+    }
 }
 
 impl AccountPage {

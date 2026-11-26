@@ -102,9 +102,13 @@ mod tests {
             name: name.into(),
             slug: transect_resources::knowledge::elevation::slug(name),
             question: "What is it?".into(),
-            grid: transect_resources::knowledge::Grid { rows: Vec::new() },
-            wires: Vec::new(),
-            align: Default::default(),
+            form: transect_resources::knowledge::elevation::Form::Sketch(
+                transect_resources::knowledge::elevation::Sketch {
+                    grid: transect_resources::knowledge::Grid { rows: Vec::new() },
+                    wires: Vec::new(),
+                    align: Default::default(),
+                },
+            ),
         }
     }
 

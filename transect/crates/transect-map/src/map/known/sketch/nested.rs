@@ -39,7 +39,8 @@ pub struct NestedPart {
 impl NestedPart {
     /// `subject` drawn as its kind's elevation named `elevation`, or
     /// none when the knowledge of its kind states no elevation of that
-    /// name, so the part is drawn in its shape.
+    /// name, or one that is not a sketch, so the part is drawn in its
+    /// shape.
     pub fn build(
         board: &Board,
         subject: &Subject,
@@ -49,6 +50,7 @@ impl NestedPart {
         source: &str,
     ) -> Option<Self> {
         let stated = subject.knowledge.own_elevation(elevation)?;
+        let sketch = stated.elevation.sketch()?;
         let (state, why) = (board.standing)(&subject.object).state();
         Some(Self {
             label: label.into(),
@@ -56,7 +58,7 @@ impl NestedPart {
             source: source.into(),
             state,
             why,
-            plan: Plan::build(board, subject, stated, true),
+            plan: Plan::build(board, subject, stated, sketch, true),
             knowledge: subject.knowledge.name.clone(),
         })
     }

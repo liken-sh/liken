@@ -14,8 +14,9 @@ use super::pages::{
     Focus, Lens, ObjectAt, VolumeAt, WorkloadAt, access_page, accounts_page, changed_page,
     cluster_page, gitops_page, gone_page, ground_page, kind_page, kinds_page, known_page,
     logs_page, machine_page, manages, namespace_access_page, namespace_page, object_page,
-    objects_page, pod_page, resources_page, section_page, service_account_page, shapes_page,
-    subject_page, volume_page, vulnerabilities_page, ways_page, workload_at, workload_page,
+    objects_page, pod_page, programs, resources_page, section_page, service_account_page,
+    shapes_page, subject_page, volume_page, vulnerabilities_page, ways_page, workload_at,
+    workload_page,
 };
 use super::template::{Drawing, template};
 use super::view::Page;
@@ -241,9 +242,18 @@ pub fn draw(
                 let page = page.map(|page| {
                     let workload = workload_at(&model.snapshot, namespace, resource, name);
                     let manages = workload
-                        .map(|workload| manages(model, &workload, now))
+                        .as_ref()
+                        .map(|workload| manages(model, workload, now))
                         .unwrap_or_default();
-                    template(transect_map::map::WorkloadPage { manages, ..page }, part)
+                    let programs = workload
+                        .map(|workload| programs(model, &workload))
+                        .unwrap_or_default();
+                    let page = transect_map::map::WorkloadPage {
+                        manages,
+                        programs,
+                        ..page
+                    };
+                    template(page, part)
                 });
                 page.or_else(|| {
                     let object_at = ObjectAt {

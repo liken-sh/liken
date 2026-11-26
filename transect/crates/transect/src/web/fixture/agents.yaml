@@ -1,0 +1,311 @@
+# An agent system in the shape of a mandate operator's: a `Mandate`
+# answers the events of its `Signal`s, starts a `Session` for a `Duty`,
+# and runs each turn of a `Session` as a `Job`.  The `gardener` operator
+# controls every kind.  The `garden` `Mandate` hears two `Signal`s, and
+# the rain gauge is not connected.  Its `garden-tend` `Session` runs its
+# second turn, and the `Job` of its first turn is gone.  Its
+# `garden-prune` `Session` failed, and the cluster has none of its
+# `Job`s, so only its status records its turns.  The `orchard` `Mandate`
+# has no `Session`.  The template of `garden` mounts tokens for the
+# `keyring` and `notebook` programs and for `bell`, which no program
+# accepts.  The template of `orchard` mounts no `notebook` token, so its
+# transcripts are not kept.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: mandates.agents.example.test}
+spec:
+  group: agents.example.test
+  scope: Namespaced
+  names: {kind: Mandate, plural: mandates}
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - {name: Active, type: integer, jsonPath: .status.activeSessions}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: duties.agents.example.test}
+spec:
+  group: agents.example.test
+  scope: Namespaced
+  names: {kind: Duty, plural: duties}
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - {name: Skill, type: string, jsonPath: .spec.skill}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: sessions.agents.example.test}
+spec:
+  group: agents.example.test
+  scope: Namespaced
+  names: {kind: Session, plural: sessions}
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - {name: Phase, type: string, jsonPath: .status.phase}
+    - {name: Waiting, type: string, jsonPath: .status.waitingOn}
+    - {name: Turns, type: integer, jsonPath: .status.turnCount}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: signals.agents.example.test}
+spec:
+  group: agents.example.test
+  scope: Cluster
+  names: {kind: Signal, plural: signals}
+  versions: [{name: v1, served: true, storage: true}]
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: allowances.agents.example.test}
+spec:
+  group: agents.example.test
+  scope: Cluster
+  names: {kind: Allowance, plural: allowances}
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - {name: Balance, type: string, jsonPath: .status.balance}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: mcpservers.agents.example.test}
+spec:
+  group: agents.example.test
+  scope: Cluster
+  names: {kind: McpServer, plural: mcpservers}
+  versions: [{name: v1, served: true, storage: true}]
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: acme-garden, labels: {kubernetes.io/metadata.name: acme-garden}}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: acme-gardener, labels: {kubernetes.io/metadata.name: acme-gardener}}
+---
+# The operator, and two programs that the turns of a `Mandate` call
+# with a token for their audience: one gives out credentials and one
+# keeps transcripts.  The printer columns name no object, and each
+# `Deployment` has a name of its own apart from its program's, so every
+# name that the pages write is a link.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {namespace: acme-gardener, name: gardener-operator, uid: gardener-operator}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: gardener}}
+  template:
+    metadata: {labels: {app: gardener}}
+    spec:
+      containers: [{name: main, image: example.test/gardener:1}]
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1}
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  namespace: acme-gardener
+  name: gardener-rs
+  uid: gardener-rs
+  ownerReferences: [{apiVersion: apps/v1, kind: Deployment, name: gardener-operator, uid: gardener-operator, controller: true}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-gardener
+  name: gardener-rs-one
+  uid: gardener-rs-one
+  labels: {app: gardener}
+  ownerReferences: [{apiVersion: apps/v1, kind: ReplicaSet, name: gardener-rs, uid: gardener-rs, controller: true}]
+spec: {nodeName: node-alpha, containers: [{name: main, image: example.test/gardener:1}]}
+status:
+  phase: Running
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/gardener:1, imageID: '', state: {running: {}}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {namespace: acme-gardener, name: keyring-server, uid: keyring-server}
+spec:
+  replicas: 0
+  selector: {matchLabels: {app: keyring}}
+  template:
+    metadata: {labels: {app: keyring}}
+    spec:
+      containers: [{name: main, image: example.test/keyring:1}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {namespace: acme-gardener, name: notebook-server, uid: notebook-server}
+spec:
+  replicas: 0
+  selector: {matchLabels: {app: notebook}}
+  template:
+    metadata: {labels: {app: notebook}}
+    spec:
+      containers: [{name: main, image: example.test/notebook:1}]
+---
+apiVersion: agents.example.test/v1
+kind: Signal
+metadata: {name: doorbell}
+status:
+  conditions: [{type: Connected, status: 'True', reason: Subscribed}]
+---
+apiVersion: agents.example.test/v1
+kind: Signal
+metadata: {name: rain-gauge}
+status:
+  conditions: [{type: Connected, status: 'False', reason: Unreachable, message: the gauge's stream refused the connection}]
+---
+apiVersion: agents.example.test/v1
+kind: Allowance
+metadata: {name: garden-budget}
+status:
+  balance: '$3.20'
+  conditions:
+  - {type: Ready, status: 'True', reason: Funded}
+  - {type: Holding, status: 'False', reason: Funded}
+---
+apiVersion: agents.example.test/v1
+kind: McpServer
+metadata: {name: seed-catalog}
+spec: {url: 'http://seed-catalog.acme-gardener.svc/mcp'}
+status:
+  conditions: [{type: Ready, status: 'True'}]
+---
+apiVersion: agents.example.test/v1
+kind: Mandate
+metadata: {namespace: acme-garden, name: garden, creationTimestamp: '2026-01-01T00:00:00Z'}
+spec:
+  allowance: garden-budget
+  purview: {doorbell: [front], rain-gauge: []}
+  tools: {mcp: [seed-catalog]}
+  template:
+    spec:
+      volumes:
+      - name: bell
+        projected: {sources: [{serviceAccountToken: {path: token, audience: bell}}]}
+      - name: keyring
+        projected: {sources: [{serviceAccountToken: {path: token, audience: keyring}}]}
+      - name: notebook
+        projected: {sources: [{serviceAccountToken: {path: token, audience: notebook}}]}
+status:
+  activeSessions: 1
+  serviceAccount: agents-garden
+  conditions: [{type: Ready, status: 'True', reason: Admitted}]
+---
+apiVersion: agents.example.test/v1
+kind: Mandate
+metadata: {namespace: acme-garden, name: orchard, creationTimestamp: '2026-01-01T00:00:00Z'}
+spec:
+  allowance: garden-budget
+  purview: {doorbell: []}
+  template:
+    spec:
+      volumes:
+      - name: keyring
+        projected: {sources: [{serviceAccountToken: {path: token, audience: keyring}}]}
+status:
+  activeSessions: 0
+  serviceAccount: agents-orchard
+  conditions: [{type: Ready, status: 'True', reason: Admitted}]
+---
+apiVersion: agents.example.test/v1
+kind: Duty
+metadata: {namespace: acme-garden, name: tend}
+spec: {mandate: garden, skill: tend-the-beds}
+status:
+  conditions: [{type: Ready, status: 'True'}]
+---
+apiVersion: agents.example.test/v1
+kind: Duty
+metadata: {namespace: acme-garden, name: prune}
+spec: {mandate: garden, skill: prune-the-hedge}
+status:
+  conditions: [{type: Ready, status: 'True'}]
+---
+apiVersion: agents.example.test/v1
+kind: Session
+metadata: {namespace: acme-garden, name: garden-tend, uid: garden-tend, creationTimestamp: '2026-01-01T09:00:00Z'}
+spec: {mandate: garden, duty: tend}
+status:
+  phase: Running
+  waitingOn: turn
+  pendingEvents: 2
+  turnCount: 2
+  turns:
+  - job: garden-tend-0
+    startedAt: '2026-01-01T09:00:10Z'
+    finishedAt: '2026-01-01T09:04:00Z'
+    outcome: Succeeded
+    usage: {allowance: garden-budget, costUSD: 0.42}
+    before: {job: garden-tend-0-before, outcome: Succeeded}
+    after: {job: garden-tend-0-after, outcome: Succeeded}
+  - job: garden-tend-1
+    startedAt: '2026-01-01T11:58:00Z'
+    before: {job: garden-tend-1-before, outcome: Succeeded}
+  conditions: [{type: Ready, status: 'True', reason: Running}]
+---
+apiVersion: agents.example.test/v1
+kind: Session
+metadata: {namespace: acme-garden, name: garden-prune, uid: garden-prune, creationTimestamp: '2026-01-01T06:00:00Z'}
+spec: {mandate: garden, duty: prune}
+status:
+  phase: Failed
+  waitingOn: nothing
+  turnCount: 2
+  turns:
+  - job: garden-prune-0
+    outcome: Failed
+    usage: {allowance: garden-budget, costUSD: 0.18}
+    before: {job: garden-prune-0-before, outcome: Succeeded}
+  - job: garden-prune-1
+    outcome: Failed
+    usage: {allowance: garden-budget, costUSD: 0.09}
+    before: {job: garden-prune-1-before, outcome: Succeeded}
+    after: {job: garden-prune-1-after, outcome: Succeeded, reason: TurnsFailed}
+  conditions: [{type: Ready, status: 'False', reason: TurnsFailed, message: two turns in a row failed}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  namespace: acme-garden
+  name: garden-tend-1-before
+  uid: garden-tend-1-before
+  ownerReferences: [{apiVersion: agents.example.test/v1, kind: Session, name: garden-tend, uid: garden-tend, controller: true}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  namespace: acme-garden
+  name: garden-tend-1
+  uid: garden-tend-1
+  ownerReferences: [{apiVersion: agents.example.test/v1, kind: Session, name: garden-tend, uid: garden-tend, controller: true}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-garden
+  name: garden-tend-1-pod
+  uid: garden-tend-1-pod
+  ownerReferences: [{apiVersion: batch/v1, kind: Job, name: garden-tend-1, uid: garden-tend-1, controller: true}]
+spec:
+  nodeName: node-alpha
+  containers: [{name: turn, image: example.test/agent:1}]
+  volumes:
+  - name: keyring
+    projected: {sources: [{serviceAccountToken: {path: token, audience: keyring}}]}
+status:
+  phase: Running
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: turn, ready: true, restartCount: 0, image: example.test/agent:1, imageID: '', state: {running: {}}}]

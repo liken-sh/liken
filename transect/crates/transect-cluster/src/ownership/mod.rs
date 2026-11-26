@@ -69,6 +69,9 @@ pub struct Ownership {
     /// Each indexed object's controlling owner, which `is_owned_by`
     /// follows to find owners below the top.
     index: Index,
+    /// The objects that each indexed object controls, sorted, which
+    /// `owned` reads.
+    children: HashMap<Object, Vec<Object>>,
 }
 
 impl Ownership {
@@ -91,6 +94,15 @@ impl Ownership {
             index: Index { parents },
             ..Self::default()
         };
+        for (object, _) in &objects {
+            if let Some(parent) = ownership.index.parent(object) {
+                let children = ownership.children.entry(parent).or_default();
+                children.push(object.clone());
+            }
+        }
+        for children in ownership.children.values_mut() {
+            children.sort();
+        }
         for (object, member) in objects {
             let top = ownership.index.top(&object);
             if let (true, Some(namespace)) = (member, object.namespace.clone()) {
@@ -114,6 +126,21 @@ impl Ownership {
     /// owner.
     pub fn is_owned_by(&self, object: &Object, owner: &Object) -> bool {
         self.index.chain(object).skip(1).any(|link| &link == owner)
+    }
+
+    /// The objects of the kind `group`/`kind` whose controlling owner is
+    /// `owner`, in the order of their names. A `Session` owns the `Job`
+    /// of each turn, and a page draws the `Job`s as the parts that run.
+    pub fn owned(&self, owner: &Object, group: &str, kind: &str) -> Vec<Object> {
+        let children = self.children.get(owner).into_iter().flatten();
+        let owned = children.filter(|object| object.group == group && object.kind == kind);
+        owned.cloned().collect()
+    }
+
+    /// The object that controls `object`, when the index has its owner
+    /// reference.
+    pub fn owner(&self, object: &Object) -> Option<Object> {
+        self.index.parent(object)
     }
 
     /// `namespace`'s workloads, sorted by group, kind, and name. A

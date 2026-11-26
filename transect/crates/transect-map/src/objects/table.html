@@ -6,7 +6,8 @@
     A name wraps to fit the column, and a long value is cut with an
     ellipsis, with the whole value on hover.  A value not set is a gray
     dash, and the count shown in place of an object or a list is
-    gray. -#}
+    gray.  After the printer columns, a row's sockets say which
+    audiences its pod templates present. -#}
 {%- macro objects_table(columns, rows, namespaced, condition, most) -%}
 <table class="board-table board-objects">
 <thead><tr><th>Name</th>{% if namespaced %}<th>Namespace</th>{% endif %}{% if condition %}<th>Condition</th>{% endif %}{% for column in columns %}<th>{{ column }}</th>{% endfor %}</tr></thead>
@@ -21,10 +22,14 @@
 <td class="board-table-text">{% if let Some(condition) = row.condition %}{{ condition }}{% else %}<span class="board-unset" title="reports no condition">—</span>{% endif %}</td>
 {%- endif %}
 {%- for value in row.values %}<td class="board-table-value"{% if !value.is_empty() %} title="{{ value }}"{% endif %}>{% if value.is_empty() %}<span class="board-unset" title="not set">—</span>{% else if transect_resources::knowledge::jsonpath::counted_structure(value.as_str()) %}<span class="board-unset">{{ value }}</span>{% else %}{{ value }}{% endif %}</td>{% endfor %}
+{%- for socket in row.sockets %}<td class="board-table-value"><span class="{{ socket.class() }}" title="{{ socket.title }}" role="img" aria-label="{{ socket.title }}"></span></td>{% endfor %}
 </tr>
 {%- endfor %}
 </tbody>
 </table>
+{%- if let Some(first) = rows.first() %}{% if !first.sockets.is_empty() %}
+<p class="kind-socket-legend"><span class="kind-socket kind-socket-filled" aria-hidden="true"></span> its pod templates present this token <span class="kind-socket" aria-hidden="true"></span> they do not <span class="kind-socket kind-socket-unknown" aria-hidden="true"></span> a token that no loaded knowledge explains</p>
+{%- endif %}{% endif %}
 {%- if rows.len() > most %}
 <details class="board-fold board-table-fold"><summary>{{ rows.len() - most }} more <span class="board-fold-show">· show</span><span class="board-fold-hide">· hide</span></summary></details>
 {%- endif %}

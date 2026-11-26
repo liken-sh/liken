@@ -16,7 +16,7 @@ use transect_observe::logs::LogSource;
 use transect_observe::logs::patterns::{self, LogPattern};
 use transect_observe::metrics::MetricsSource;
 use transect_resources::intent::Intent;
-use transect_resources::knowledge::{self, KindKnowledge};
+use transect_resources::knowledge::{self, KindKnowledge, ProgramKnowledge};
 use transect_resources::layers::{self, Layers};
 use transect_resources::resources::{Condition, Directory, DocId, Sorts};
 use transect_resources::shapes::{self, Shape, Shapes};
@@ -30,6 +30,8 @@ pub struct Loaded {
     pub layers: Layers,
     pub intents: Vec<Intent>,
     pub kinds: Vec<KindKnowledge>,
+    /// The programs that projects ship, by the images they run from.
+    pub programs: Vec<ProgramKnowledge>,
     /// The authors' shapes. The library's are in the binary.
     pub shapes: Vec<Arc<Shape>>,
     pub devices: Vec<DeviceKnowledge>,
@@ -84,6 +86,12 @@ impl Sorts for Loaded {
                 knowledge::parse(doc, value),
                 |a, b| a.name == b.name,
                 |one| format!("{} is described twice", one.name),
+            ),
+            "ProgramKnowledge" => first(
+                &mut self.programs,
+                knowledge::program::parse(doc, value),
+                |a, b| a.name == b.name,
+                |one| format!("the program {} is described twice", one.name),
             ),
             "Shape" => first(
                 &mut self.shapes,

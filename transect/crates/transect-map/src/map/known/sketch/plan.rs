@@ -25,7 +25,7 @@ use crate::shapes::text::State;
 use transect_graph::edges::Object;
 use transect_graph::links::Reference;
 use transect_resources::knowledge::Stated;
-use transect_resources::knowledge::elevation::Align;
+use transect_resources::knowledge::elevation::{Align, Sketch};
 use transect_resources::knowledge::role::Role;
 use transect_resources::shapes::Edge;
 
@@ -67,16 +67,22 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// The grid of the elevation of `stated` for `subject`: the page's
+    /// The grid of `sketch`, the form of the elevation of `stated`, for `subject`: the page's
     /// own object, or, when `nested`, an object that a part of the page's
     /// sketch draws. The roles are those of the elevation's author: the
     /// kind's own, or the pattern's that the kind fills.
-    pub fn build(board: &Board, subject: &Subject, stated: Stated, nested: bool) -> Self {
+    pub fn build(
+        board: &Board,
+        subject: &Subject,
+        stated: Stated,
+        sketch: &Sketch,
+        nested: bool,
+    ) -> Self {
         let elevation = stated.elevation;
-        let grid = &elevation.grid;
+        let grid = &sketch.grid;
         let page = &board.subject.object;
         let wired = |name: &str| {
-            let mut pairs = elevation.wires.iter().flat_map(|w| w.pairs());
+            let mut pairs = sketch.wires.iter().flat_map(|w| w.pairs());
             pairs.any(|(a, b)| a == name || b == name)
         };
         let judged = board.judged.filter(|_| stated.pattern.is_some() && !nested);
@@ -117,12 +123,12 @@ impl Plan {
         }
         let placed = |name: &str| placed(board, subject, stated.roles, &drawn, name);
         let states = stated.states(&subject.knowledge.name);
-        let wires = wires::wires(elevation, &states, placed);
+        let wires = wires::wires(sketch, &states, placed);
         let footprint = |name: &str| {
             let found = drawn.iter().find(|(role, _)| role.area == name);
             found.map(|(_, footprint)| *footprint)
         };
-        let gap = match elevation.wires.is_empty() {
+        let gap = match sketch.wires.is_empty() {
             true => COLUMN_GAP,
             false => WIRED_COLUMN_GAP,
         };
@@ -140,7 +146,7 @@ impl Plan {
         if runs.into_iter().any(|run| upright(&run.from)) {
             class.push("sketch-wired-rows");
         }
-        class.push(match elevation.align {
+        class.push(match sketch.align {
             Align::Top => "sketch-align-top",
             Align::Bottom => "sketch-align-bottom",
         });

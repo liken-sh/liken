@@ -1,0 +1,223 @@
+# An agent system: an operator that starts an agent's turn as a `Job`,
+# and the programs that a turn calls with a `ServiceAccount` token for
+# each program's audience.  No turn runs, so no pod shows a token, and
+# the edges to the programs come from the templates of the `Mandate`
+# and its `Duty` objects alone.
+#
+# - The `Mandate` `greenhouse` mounts tokens for `lanyard`, `midden`, and
+#   `transom`.  No loaded knowledge accepts `transom`.
+# - The `Duty` `trim` adds the label that asks `gofer` for a browser
+#   profile, and runs as an account of its own, which it owns.
+# - The `Duty` `mist` has a before hook that asks `lanyard` for a
+#   credential, as the account `simmer-greenhouse--status`.  That
+#   account is named by a label, so the `Mandate` owns it, and a
+#   binding gives it `view` of the whole cluster.
+apiVersion: v1
+kind: Namespace
+metadata: {name: acme-greenhouse, labels: {kubernetes.io/metadata.name: acme-greenhouse}}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: acme-agents, labels: {kubernetes.io/metadata.name: acme-agents}}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: mandates.simmer.foo}
+spec:
+  group: simmer.foo
+  scope: Namespaced
+  names: {kind: Mandate, plural: mandates}
+  versions:
+  - {name: v1alpha1, served: true, storage: true}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: duties.simmer.foo}
+spec:
+  group: simmer.foo
+  scope: Namespaced
+  names: {kind: Duty, plural: duties}
+  versions:
+  - {name: v1alpha1, served: true, storage: true}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: browserprofiles.gofer.guid.foo}
+spec:
+  group: gofer.guid.foo
+  scope: Namespaced
+  names: {kind: BrowserProfile, plural: browserprofiles}
+  versions:
+  - {name: v1alpha1, served: true, storage: true}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: badges.lanyard.guid.foo}
+spec:
+  group: lanyard.guid.foo
+  scope: Namespaced
+  names: {kind: Badge, plural: badges}
+  versions:
+  - {name: v1alpha1, served: true, storage: true}
+---
+apiVersion: simmer.foo/v1alpha1
+kind: Mandate
+metadata: {namespace: acme-greenhouse, name: greenhouse, uid: greenhouse}
+spec:
+  template:
+    spec:
+      volumes:
+      - name: lanyard
+        projected: {sources: [{serviceAccountToken: {path: token, audience: lanyard}}]}
+      - name: midden
+        projected: {sources: [{serviceAccountToken: {path: token, audience: midden}}]}
+      - name: transom
+        projected: {sources: [{serviceAccountToken: {path: token, audience: transom}}]}
+status:
+  serviceAccount: simmer-greenhouse
+  conditions: [{type: Ready, status: 'True'}]
+---
+apiVersion: simmer.foo/v1alpha1
+kind: Duty
+metadata: {namespace: acme-greenhouse, name: trim, uid: trim}
+spec:
+  mandate: greenhouse
+  grants: {roles: [pruner]}
+  template:
+    metadata:
+      labels: {gofer.guid.foo/profile: greenhouse-browser}
+status:
+  conditions: [{type: Ready, status: 'True'}]
+---
+apiVersion: simmer.foo/v1alpha1
+kind: Duty
+metadata: {namespace: acme-greenhouse, name: mist, uid: mist}
+spec:
+  mandate: greenhouse
+  hooks:
+    serviceAccount: status
+    before:
+      spec:
+        volumes:
+        - name: forge
+          projected: {sources: [{serviceAccountToken: {path: token, audience: lanyard}}]}
+status:
+  conditions: [{type: Ready, status: 'True'}]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: acme-greenhouse
+  name: simmer-greenhouse
+  ownerReferences: [{apiVersion: simmer.foo/v1alpha1, kind: Mandate, name: greenhouse, uid: greenhouse, controller: true}]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: acme-greenhouse
+  name: simmer-greenhouse--status
+  ownerReferences: [{apiVersion: simmer.foo/v1alpha1, kind: Mandate, name: greenhouse, uid: greenhouse, controller: true}]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: acme-greenhouse
+  name: simmer-greenhouse--trim
+  ownerReferences: [{apiVersion: simmer.foo/v1alpha1, kind: Duty, name: trim, uid: trim, controller: true}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: view}
+rules: [{apiGroups: ['', apps], resources: [pods, deployments, services], verbs: [get, list, watch]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: simmer-greenhouse--status-view}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: view}
+subjects: [{kind: ServiceAccount, namespace: acme-greenhouse, name: simmer-greenhouse--status}]
+---
+apiVersion: gofer.guid.foo/v1alpha1
+kind: BrowserProfile
+metadata: {namespace: acme-greenhouse, name: greenhouse-browser, uid: greenhouse-browser}
+spec:
+  serviceAccounts: [simmer-greenhouse--trim]
+status:
+  conditions: [{type: Ready, status: 'True'}]
+---
+apiVersion: lanyard.guid.foo/v1alpha1
+kind: Badge
+metadata: {namespace: acme-greenhouse, name: greenhouse-badge, uid: greenhouse-badge}
+spec:
+  serviceAccounts: [simmer-greenhouse, simmer-greenhouse--status]
+status:
+  conditions: [{type: Ready, status: 'True'}]
+---
+# The programs, one `Deployment` each, with no pods.  `transect` finds
+# each program by the repository of its image.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {namespace: acme-agents, name: simmer-operator, uid: simmer-operator}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: simmer}}
+  template:
+    metadata: {labels: {app: simmer}}
+    spec: {containers: [{name: operator, image: 'atcr.io/guid.foo/simmer:2026.1'}]}
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1}
+---
+# The operator runs, so its pod's image says which workload controls
+# the `simmer.foo` kinds, and the operator lane of a `Mandate` draws it.
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  namespace: acme-agents
+  name: simmer-operator-rs
+  uid: simmer-operator-rs
+  ownerReferences: [{apiVersion: apps/v1, kind: Deployment, name: simmer-operator, uid: simmer-operator, controller: true}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-agents
+  name: simmer-operator-rs-one
+  uid: simmer-operator-rs-one
+  labels: {app: simmer}
+  ownerReferences: [{apiVersion: apps/v1, kind: ReplicaSet, name: simmer-operator-rs, uid: simmer-operator-rs, controller: true}]
+spec: {nodeName: node-beta, containers: [{name: operator, image: 'atcr.io/guid.foo/simmer:2026.1'}]}
+status:
+  phase: Running
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: operator, ready: true, restartCount: 0, image: 'atcr.io/guid.foo/simmer:2026.1', imageID: '', state: {running: {}}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {namespace: acme-agents, name: lanyard-api, uid: lanyard-api}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: lanyard}}
+  template:
+    metadata: {labels: {app: lanyard}}
+    spec: {containers: [{name: lanyard, image: 'atcr.io/guid.foo/lanyard:2026.1'}]}
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {namespace: acme-agents, name: gofer-api, uid: gofer-api}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: gofer}}
+  template:
+    metadata: {labels: {app: gofer}}
+    spec: {containers: [{name: gofer, image: 'atcr.io/guid.foo/gofer:2026.1'}]}
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {namespace: acme-agents, name: midden-api, uid: midden-api}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: midden}}
+  template:
+    metadata: {labels: {app: midden}}
+    spec: {containers: [{name: midden, image: 'atcr.io/guid.foo/midden:2026.1@sha256:0a1b2c'}]}
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1}

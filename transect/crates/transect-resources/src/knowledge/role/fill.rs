@@ -27,6 +27,10 @@ pub struct Fill {
     /// `Kinds::resolve` can confirm it, and it finds the kind of the
     /// parts there.
     pub through: Option<Through>,
+    /// The kind whose objects replace each part: the objects of that
+    /// kind that the part owns, by the ownership index. A `Session` owns
+    /// the `Job` of each turn, and the `Job`s are the parts that run.
+    pub owns: Option<String>,
 }
 
 /// The first step of a role's parts.
@@ -36,6 +40,9 @@ pub enum First {
     Reference(String),
     /// The objects of another kind whose field names the page's object.
     NamedBy(NamedBy),
+    /// The workload that controls the page's object, which the
+    /// knowledge of the object's kind finds by its controller's image.
+    Controller,
     /// The parts that a function of a pattern's module derives, such as
     /// the instances other than the primary. It holds the name that the
     /// catalog writes in `derive`.
@@ -55,6 +62,16 @@ pub struct NamedBy {
     pub path: String,
 }
 
+/// The fields of a role that say where its parts come from, as written.
+#[derive(Default)]
+pub struct Written {
+    pub reference: Option<String>,
+    pub named_by: Option<WrittenNamedBy>,
+    pub controller: bool,
+    pub through: Option<String>,
+    pub owns: Option<String>,
+}
+
 /// `namedBy`, as written. Each field is optional here so that the
 /// parser can name the one that is missing.
 #[derive(Deserialize)]
@@ -72,33 +89,36 @@ impl Fill {
         Self {
             first,
             through: None,
+            owns: None,
         }
     }
 
-    /// The fill of a role that writes `reference` or `named_by`, and
-    /// `through`, checked against `references`, the document's own. A
-    /// `namedBy` with no group takes `group`, the group of the
-    /// document's kind.
-    pub fn read(
-        reference: Option<String>,
-        named_by: Option<WrittenNamedBy>,
-        through: Option<String>,
-        references: &[Reference],
-        group: &str,
-    ) -> Result<Self, String> {
-        let first = match (reference, named_by) {
-            (Some(_), Some(_)) => {
+    /// The fill of a role that writes one of `reference`, `named_by`,
+    /// and `controller`, and `through` and `owns`, checked against
+    /// `references`, the document's own. A `namedBy` with no group takes
+    /// `group`, the group of the document's kind.
+    pub fn read(written: Written, references: &[Reference], group: &str) -> Result<Self, String> {
+        let Written {
+            reference,
+            named_by,
+            controller,
+            through,
+            owns,
+        } = written;
+        let first = match (reference, named_by, controller) {
+            (None, None, false) => {
                 return Err(
-                    "the role has both reference and namedBy, and its parts come from one of them"
+                    "the role has none of reference, namedBy, and controller, so nothing gives it parts".into(),
+                );
+            }
+            (Some(_), Some(_), _) | (Some(_), _, true) | (_, Some(_), true) => {
+                return Err(
+                    "the role has more than one of reference, namedBy, and controller, and its parts come from one of them"
                         .into(),
                 );
             }
-            (None, None) => {
-                return Err(
-                    "the role has neither reference nor namedBy, so nothing gives it parts".into(),
-                );
-            }
-            (Some(path), None) => {
+            (None, None, true) => First::Controller,
+            (Some(path), None, false) => {
                 if !references.iter().any(|r| r.path == path) {
                     return Err(format!(
                         "reference {path} is the path of no entry of references"
@@ -106,14 +126,21 @@ impl Fill {
                 }
                 First::Reference(path)
             }
-            (None, Some(written)) => First::NamedBy(NamedBy::read(written, group)?),
+            (None, Some(written), false) => First::NamedBy(NamedBy::read(written, group)?),
         };
         let through = match through {
             Some(path) if path.trim().is_empty() => return Err("through is empty".into()),
             Some(path) => Some(Through::new(path)),
             None => None,
         };
-        let fill = Self { first, through };
+        if owns.as_deref().is_some_and(|kind| kind.trim().is_empty()) {
+            return Err("owns is empty".into());
+        }
+        let fill = Self {
+            first,
+            through,
+            owns,
+        };
         if let (Some(through), None) = (&fill.through, fill.first_kind(references)) {
             return Err(format!(
                 "the role follows {} from {}, which names no kind",
@@ -130,14 +157,20 @@ impl Fill {
         match &self.first {
             First::Reference(path) => target_of(references, path),
             First::NamedBy(named) => Some((&named.group, &named.kind)),
-            First::Derived(_) | First::Unfilled => None,
+            First::Controller | First::Derived(_) | First::Unfilled => None,
         }
     }
 
-    /// The group and the kind of the role's parts: the kind at the end
-    /// of `through`, once `Kinds::resolve` has found it, or the kind of
-    /// the first step.
+    /// The group and the kind of the role's parts: none with `owns`, the
+    /// kind at the end of `through`, once `Kinds::resolve` has found it,
+    /// or the kind of the first step.
     pub fn parts_kind<'a>(&'a self, references: &'a [Reference]) -> Option<(&'a str, &'a str)> {
+        // `owns` names a kind by its name alone, as an owner reference's
+        // child is listed in the ownership index, so its group is not
+        // known here and no knowledge of the kind can be found.
+        if self.owns.is_some() {
+            return None;
+        }
         match &self.through {
             Some(through) => through
                 .target
@@ -152,7 +185,7 @@ impl Fill {
     pub fn reference(&self) -> Option<&str> {
         match &self.first {
             First::Reference(path) => Some(path),
-            First::NamedBy(_) | First::Derived(_) | First::Unfilled => None,
+            First::NamedBy(_) | First::Controller | First::Derived(_) | First::Unfilled => None,
         }
     }
 
@@ -176,10 +209,15 @@ impl Fill {
         self.then(first)
     }
 
-    /// `first`, followed by the reference that `through` follows.
+    /// `first`, followed by the reference that `through` follows and the
+    /// kind that `owns` takes.
     fn then(&self, first: String) -> String {
-        match &self.through {
+        let first = match &self.through {
             Some(through) => format!("{first}, then {}", through.path),
+            None => first,
+        };
+        match &self.owns {
+            Some(kind) => format!("{first}, then each {kind} it owns"),
             None => first,
         }
     }
@@ -192,6 +230,7 @@ impl First {
         match self {
             Self::Reference(path) => path.clone(),
             Self::NamedBy(named) => format!("{} {}", named.kind, named.path),
+            Self::Controller => "the controller".into(),
             Self::Derived(derive) => format!("{derive}, which transect derives"),
             Self::Unfilled => "no reference".into(),
         }

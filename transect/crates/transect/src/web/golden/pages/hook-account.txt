@@ -1,0 +1,38 @@
+ServiceAccount simmer-greenhouse--status · acme-greenhouse · transect
+transect
+cluster / apps / acme-greenhouse / ServiceAccounts / simmer-greenhouse--status
+access vulnerabilities kinds
+Search /
+esc
+acme-greenhouse ServiceAccount simmer-greenhouse--status
+Owned by
+Mandate greenhouse owns it.
+May run as it
+The hook pods from spec.hooks.before of Duty mist .
+The turn pods from spec.template of Duty mist , Duty trim .
+May present
+gofer: loads and saves the browser state of a BrowserProfile, to gofer, at acme-agents/gofer-api .
+lanyard: asks for a credential, to lanyard, at acme-agents/lanyard-api .
+midden: ships its transcript, to midden, at acme-agents/midden-api .
+simmer: reads its events and its keys, to simmer, at acme-agents/simmer-operator .
+transom: no knowledge is loaded for this audience.
+Granted by
+Badge greenhouse-badge names it for lanyard, and its Ready is True.
+What it may do, and where
+Left to right: what runs as it, the roles it is bound to, what they grant, and what follows. one of the six that a binding grants it one that follows from a grant, and that no binding names. Hover a box for its rules.
+runs as it
+the account
+bound to
+it may
+what follows
+read Pods, deployments, and 4 more kinds
+ClusterRole view in every namespace
+ServiceAccount simmer-greenhouse--status
+no pod runs as it
+nothing follows It may do none of the six in any namespace.
+Who may run as it
+A pod names any ServiceAccount in its own namespace, so the 3 other accounts that may run pods or change workloads in acme-greenhouse may run as it. The access of Namespace acme-greenhouse lists them.
+For the whole cluster: ways in · accounts
+ServiceAccount simmer-greenhouse--status
+kind ServiceAccount
+namespace acme-greenhouse

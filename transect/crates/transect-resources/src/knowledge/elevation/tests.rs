@@ -44,8 +44,8 @@ const KIOSK: &str = "
 fn reads_the_sketch_into_a_grid() {
     let known = read(KIOSK).unwrap();
     let elevation = &known.elevations[0];
-    let rows: Vec<Vec<Option<&str>>> = elevation
-        .grid
+    let grid = &elevation.sketch().unwrap().grid;
+    let rows: Vec<Vec<Option<&str>>> = grid
         .rows
         .iter()
         .map(|row| row.iter().map(Option::as_deref).collect())
@@ -54,7 +54,7 @@ fn reads_the_sketch_into_a_grid() {
         (
             elevation.name.as_str(),
             elevation.question.as_str(),
-            elevation.grid.columns(),
+            grid.columns(),
             rows,
         ),
         (
@@ -80,7 +80,7 @@ fn reads_the_slug_and_the_wires_of_each_elevation() {
         .elevations
         .iter()
         .map(|e| {
-            let wires = e.wires.iter();
+            let wires = e.sketch().unwrap().wires.iter();
             let wires = wires.map(|w| (w.from.as_str(), w.to.as_str(), w.carries.as_str()));
             (e.slug.as_str(), wires.collect())
         })
@@ -115,7 +115,7 @@ fn reads_the_columns_and_rows_that_an_area_spans(
     #[case] rows: Option<Range<usize>>,
 ) {
     let known = read(KIOSK).unwrap();
-    let grid = &known.elevations[0].grid;
+    let grid = &known.elevations[0].sketch().unwrap().grid;
     assert_eq!((grid.columns_of(name), grid.rows_of(name)), (columns, rows));
 }
 
@@ -128,14 +128,22 @@ fn reads_the_columns_and_rows_that_an_area_spans(
 fn poses_a_shape_that_turns_on_its_side_in_a_wide_area(#[case] sketch: &str, #[case] lies: bool) {
     let known = read(&one("a", sketch)).unwrap();
     let speaker = Shapes::default().resolve("speaker", "").unwrap().clone();
-    let posed = known.elevations[0].grid.posed("bell", &speaker);
+    let posed = known.elevations[0]
+        .sketch()
+        .unwrap()
+        .grid
+        .posed("bell", &speaker);
     assert_eq!(posed == speaker.turned(), lies);
 }
 
 #[rstest]
 fn poses_a_shape_that_does_not_turn_as_it_is() {
     let known = read(&one("a", "face face")).unwrap();
-    let posed = known.elevations[0].grid.posed("face", &library::default());
+    let posed = known.elevations[0]
+        .sketch()
+        .unwrap()
+        .grid
+        .posed("face", &library::default());
     assert_eq!(posed, *library::default());
 }
 
@@ -257,5 +265,11 @@ fn refuses_an_elevation_it_cannot_draw(#[case] elevations: String, #[case] error
 #[case::the_top(with("a", "face amp", "align: top"), Align::Top)]
 #[case::the_bottom(with("a", "face amp", "align: bottom"), Align::Bottom)]
 fn reads_the_edge_that_each_part_stands_against(#[case] elevations: String, #[case] align: Align) {
-    assert_eq!(read(&elevations).unwrap().elevations[0].align, align);
+    assert_eq!(
+        read(&elevations).unwrap().elevations[0]
+            .sketch()
+            .unwrap()
+            .align,
+        align
+    );
 }

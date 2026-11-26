@@ -5,7 +5,11 @@ access vulnerabilities kinds
 Search /
 esc
 apps
-1 namespace
+3 namespaces
+acme-garden
+1 workload
+acme-greenhouse
+0 workloads
 acme-shop
 6 workloads
 data
@@ -13,11 +17,15 @@ data
 acme-ledger
 6 workloads it needs
 operators
-1 namespace
+2 namespaces
+acme-gardener
+3 workloads
 acme-promoter
 2 workloads controls it
 platform
-1 namespace
+2 namespaces
+acme-agents
+4 workloads
 acme-ops
 5 workloads logs in via it +1
 Machines
@@ -29,13 +37,13 @@ control plane
 node-beta 1 alert
 cpu
 mem
-12 pods · 5 here
+13 pods · 5 here
 holds radio handset-one
 workers
 node-alpha
 cpu
 mem
-12 pods · 2 here
+14 pods · 2 here
 Ground
 1 volume
 The archive NAS ↗ intent

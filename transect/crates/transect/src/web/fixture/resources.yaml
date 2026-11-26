@@ -9,7 +9,7 @@ spec:
     - name: apps
       namespaceSelectors:
         - matchExpressions:
-            - {key: kubernetes.io/metadata.name, operator: In, values: [acme-shop]}
+            - {key: kubernetes.io/metadata.name, operator: In, values: [acme-shop, acme-garden, acme-greenhouse]}
     - name: data
       namespaceSelectors:
         - matchExpressions:
@@ -17,11 +17,11 @@ spec:
     - name: operators
       namespaceSelectors:
         - matchExpressions:
-            - {key: kubernetes.io/metadata.name, operator: In, values: [acme-promoter]}
+            - {key: kubernetes.io/metadata.name, operator: In, values: [acme-promoter, acme-gardener]}
     - name: platform
       namespaceSelectors:
         - matchExpressions:
-            - {key: kubernetes.io/metadata.name, operator: In, values: [acme-ops]}
+            - {key: kubernetes.io/metadata.name, operator: In, values: [acme-ops, acme-agents]}
 ---
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
@@ -473,3 +473,148 @@ spec:
       target:        {reference: status.target}
       write-service: {reference: '{name}-rw'}
       read-service:  {reference: '{name}-ro'}
+---
+# The knowledge of the agent system in `agents.yaml`.  A `Mandate`'s
+# loop is a sequence: an event of a `Signal` reaches the operator, which
+# wakes or starts a `Session` and runs its turns as `Job`s, and a turn
+# calls its tools.  The `Signal`s of a purview are the keys of a map.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: mandates.agents.example.test
+spec:
+  summary: The work that an agent owes in one namespace.
+  healthy: {condition: Ready}
+  controller: {image: example.test/gardener}
+  references:
+    - {path: "spec.purview[keys]", kind: Signal, group: agents.example.test, label: hears}
+    - {path: spec.allowance, kind: Allowance, group: agents.example.test, label: paid by}
+    - {path: "spec.tools.mcp[]", kind: McpServer, group: agents.example.test, label: uses tools of}
+  templates:
+    - {path: spec.template, use: turn, injects: [gardener], runsAs: status.serviceAccount}
+  roles:
+    signals:   {reference: "spec.purview[keys]", label: Signals, stack: true}
+    operator:  {controller: true, label: the operator}
+    duties:    {namedBy: {kind: Duty, path: spec.mandate}, stack: true}
+    sessions:  {namedBy: {kind: Session, path: spec.mandate}, stack: true}
+    turns:     {namedBy: {kind: Session, path: spec.mandate}, owns: Job, label: turn and hook Jobs, stack: true}
+    allowance: {reference: spec.allowance}
+    tools:     {reference: "spec.tools.mcp[]", label: MCP servers, stack: true}
+  elevations:
+    - name: the loop
+      question: How does an event become a turn, and what does a turn call?
+      sequence:
+        lanes: [signals, operator, sessions, turns, tools]
+        presents: turns
+        steps:
+          - {from: signals, to: operator, verb: delivers an event, state: {role: signals, condition: Connected}}
+          - {from: operator, to: sessions, verb: wakes the Session that holds the event's key, state: {role: sessions, columns: [Phase, Waiting]}}
+          - {from: operator, to: sessions, verb: or starts a Session for a Duty whose purview matches, state: {role: duties, condition: Ready}}
+          - {from: operator, to: operator, verb: holds the turn while the budget is spent, state: {role: allowance, condition: Holding, good: "False", said: has room}}
+          - {from: operator, to: turns, verb: "runs the before hook, the turn, and the after hook as Jobs"}
+          - {from: turns, to: tools, verb: calls tools, state: {role: tools, condition: Ready}}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: duties.agents.example.test
+spec:
+  summary: One skill that a Mandate runs when an event matches.
+  healthy: {condition: Ready}
+  controller: {image: example.test/gardener}
+  references:
+    - {path: spec.mandate, kind: Mandate, group: agents.example.test, label: duty of}
+  templates:
+    - {path: spec.template, use: turn, merge: spec.mandate, injects: [gardener]}
+---
+# A `Session` records each turn in `status.turns`, and the `Job`s of its
+# turns are deleted when their time to live ends, so its turns are rows
+# of its status.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: sessions.agents.example.test
+spec:
+  summary: One run of an agent for a Mandate, over one or more turns.
+  healthy: {condition: Ready}
+  controller: {image: example.test/gardener}
+  references:
+    - {path: spec.mandate, kind: Mandate, group: agents.example.test, label: works for}
+    - {path: spec.duty, kind: Duty, group: agents.example.test, label: runs}
+  elevations:
+    - name: its turns
+      question: What did each turn do, and how did it end?
+      rows:
+        from: "status.turns[]"
+        header:
+          - {label: phase, path: status.phase}
+          - {label: waiting on, path: status.waitingOn}
+          - {label: pending events, path: status.pendingEvents}
+        columns:
+          - {label: before hook, path: before.outcome, failed: [Failed]}
+          - {label: turn, path: outcome, failed: [Failed]}
+          - {label: Job, path: job, logs: true}
+          - {label: started, path: startedAt, format: time}
+          - {label: finished, path: finishedAt, format: time}
+          - {label: after hook, path: after.outcome, failed: [Failed]}
+          - {label: why the Session ended, path: after.reason}
+          - {label: cost, path: usage.costUSD, format: dollars}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: signals.agents.example.test
+spec:
+  summary: A source of events.
+  healthy: {condition: Connected}
+  controller: {image: example.test/gardener}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: allowances.agents.example.test
+spec:
+  summary: A budget in dollars per hour.
+  healthy: {condition: Ready}
+  controller: {image: example.test/gardener}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: mcpservers.agents.example.test
+spec:
+  summary: An MCP server that a Mandate names for its tools.
+  healthy: {condition: Ready}
+  references:
+    - {path: spec.url, address: true, label: serves at}
+---
+# The programs that the turns of the `garden` and `orchard` `Mandate`s
+# call: the operator's own, which serves the events of each turn, one
+# that gives out credentials, and one that keeps transcripts.  Each
+# names its image with the registry host `example.test` and no tag.
+apiVersion: transect.liken.sh/v1alpha1
+kind: ProgramKnowledge
+metadata:
+  name: gardener
+spec:
+  image: example.test/gardener
+  accepts:
+    - {audience: gardener, verb: "reads its events, its keys, and its transcript"}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: ProgramKnowledge
+metadata:
+  name: keyring
+spec:
+  image: example.test/keyring
+  accepts:
+    - {audience: keyring, verb: asks for a credential}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: ProgramKnowledge
+metadata:
+  name: notebook
+spec:
+  image: example.test/notebook
+  accepts:
+    - {audience: notebook, verb: ships its transcript}

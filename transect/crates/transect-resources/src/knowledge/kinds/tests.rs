@@ -185,7 +185,10 @@ fn leaves_out_a_wire_that_meets_no_port(
     kinds.find_shapes(&Shapes::default());
     let widget = kinds.of("widgets.example.com", "Widget").unwrap();
     assert_eq!(
-        (widget.elevations[0].wires.len(), reasons(&kinds)),
+        (
+            widget.elevations[0].sketch().unwrap().wires.len(),
+            reasons(&kinds)
+        ),
         (wires, expected)
     );
 }

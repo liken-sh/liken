@@ -5,7 +5,9 @@
 //! `ReferenceEnds` that the board gives, so a role follows a reference
 //! the way a reading and a health do. A role of a pattern of the catalog
 //! that the pattern derives reads the parts that `catalog::judge`
-//! derived when the page built its board.
+//! derived when the page built its board. A role can also be the
+//! controller of the page's object, and `owns` replaces each part with
+//! the objects of a kind that it owns.
 
 use super::super::board::Board;
 use super::super::board::Subject;
@@ -59,6 +61,10 @@ pub fn found<'s>(board: &Board, subject: &'s Subject, role: &Role) -> Vec<Found<
             let named = (board.named_by)(&subject.object, named);
             named.into_iter().map(Found::Object).collect()
         }
+        First::Controller => {
+            let controller = (board.controller)(&subject.object);
+            controller.into_iter().map(Found::Object).collect()
+        }
         First::Derived(_) => match derived(board, subject, role) {
             Some(Derived::Parts(parts)) => parts.iter().cloned().map(Found::Object).collect(),
             _ => Vec::new(),
@@ -71,6 +77,15 @@ pub fn found<'s>(board: &Board, subject: &'s Subject, role: &Role) -> Vec<Found<
             .iter()
             .filter_map(Found::object)
             .flat_map(|object| follow(board, object, through))
+            .collect(),
+    };
+    let found = match &role.fill.owns {
+        None => found,
+        Some(kind) => found
+            .iter()
+            .filter_map(Found::object)
+            .flat_map(|object| (board.owned)(object, kind))
+            .map(Found::Object)
             .collect(),
     };
     let mut once: Vec<Found<'s>> = Vec::new();

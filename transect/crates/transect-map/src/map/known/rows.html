@@ -1,0 +1,30 @@
+{#- An elevation of rows: the object's own values in a line above the
+    table, and a row for each item of the list, in the order of the
+    list.  A cell with no value is a gray dash, as in every table of the
+    pages. -#}
+{%- import "links/link.html" as links -%}
+<div class="rows">
+{%- if !header.is_empty() %}
+<dl class="rows-header">
+{%- for (label, value) in header %}
+<div class="rows-reading"><dt>{{ label }}</dt><dd>{% if value.is_empty() %}<span class="board-unset" title="not set">—</span>{% else %}{{ value }}{% endif %}</dd></div>
+{%- endfor %}
+</dl>
+{%- endif %}
+{%- if rows.is_empty() %}
+<p class="board-none">{{ from }} has no item now.</p>
+{%- else %}
+<table class="board-table rows-table">
+<thead><tr><th class="rows-at">#</th>{% for label in labels %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+<tbody>
+{%- for row in rows %}
+<tr><td class="rows-at">{{ loop.index }}</td>
+{%- for cell in row %}<td class="board-table-text{% if cell.failed %} rows-failed{% endif %}"{% if let Some(raw) = cell.raw %} title="{{ raw }}"{% endif %}>{% if cell.is_empty() %}<span class="board-unset" title="not set">—</span>{% else %}{% for value in cell.values %}{% if !loop.first %}, {% endif %}{% call links::object_link(value.text, value.href, "") %}{% endcall %}{% endfor %}{% endif %}</td>{% endfor %}</tr>
+{%- endfor %}
+</tbody>
+</table>
+{%- if more > 0 %}
+<p class="rows-more">and {{ more }} more {% if more == 1 %}item{% else %}items{% endif %} of {{ from }}, which the table leaves out</p>
+{%- endif %}
+{%- endif %}
+</div>

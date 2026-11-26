@@ -109,7 +109,9 @@ fn missing(subject: &Subject, role: &Role) -> String {
             None => format!("no {} names anything in {}", named.kind, through.path),
         },
         (First::Reference(_), Some(_)) => format!("{} names nothing now", fill.fields()),
-        (First::Derived(_) | First::Unfilled, _) => format!("{} has no part now", fill.fields()),
+        (First::Controller | First::Derived(_) | First::Unfilled, _) => {
+            format!("{} has no part now", fill.fields())
+        }
     }
 }
 

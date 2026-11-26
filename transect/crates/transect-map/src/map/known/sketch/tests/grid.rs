@@ -17,11 +17,17 @@ fn lays_the_roles_out_on_the_grid_of_the_sketch() {
         let shape = Shapes::default().resolve(name, "").unwrap().clone();
         crate::shapes::Drawing::of(&shape, crate::shapes::Pose::default())
     };
-    let drawings: Vec<&crate::shapes::Drawing> =
-        sketch.plan.roles.iter().map(|r| &r.drawn.drawing).collect();
+    let drawings: Vec<&crate::shapes::Drawing> = sketch
+        .plan()
+        .unwrap()
+        .roles
+        .iter()
+        .map(|r| &r.drawn.drawing)
+        .collect();
     let shapes = ["screen", "box", "handheld", "speaker", "box"].map(drawn_in);
     let areas: Vec<String> = sketch
-        .plan
+        .plan()
+        .unwrap()
         .roles
         .iter()
         .map(SketchRole::area_class)
@@ -30,12 +36,12 @@ fn lays_the_roles_out_on_the_grid_of_the_sketch() {
         (
             sketch.name.as_str(),
             sketch.question.as_str(),
-            sketch.plan.columns.as_str(),
-            sketch.plan.areas.as_str(),
-            sketch.plan.rows.as_str(),
+            sketch.plan().unwrap().columns.as_str(),
+            sketch.plan().unwrap().areas.as_str(),
+            sketch.plan().unwrap().rows.as_str(),
             drawings,
             areas,
-            sketch.plan.roles[0].drawn.source_text().as_str(),
+            sketch.plan().unwrap().roles[0].drawn.source_text().as_str(),
             sketch.caption(),
         ),
         (

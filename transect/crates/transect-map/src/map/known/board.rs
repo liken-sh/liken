@@ -6,6 +6,7 @@
 use super::Chip;
 use super::Entry;
 use crate::objects::Condition;
+use crate::presents::Presents;
 use crate::shapes::text::{Reading, State, Why};
 use transect_graph::edges::{Object, Plurals};
 use transect_observe::health::Level;
@@ -57,6 +58,25 @@ pub struct Board<'a> {
     /// The ends of the references of objects, for a role that follows
     /// one more reference.
     pub ends: &'a dyn ReferenceEnds,
+    /// The workload that controls an object, for a role with
+    /// `controller`.
+    pub controller: &'a dyn Fn(&Object) -> Option<Object>,
+    /// The top owner of an object, the workload that a reader knows it
+    /// by, so a lane's part and a program's workload compare as the
+    /// same kind of object.
+    pub top: &'a dyn Fn(&Object) -> Object,
+    /// The objects that an object owns whose kind has the name, for a
+    /// role with `owns`, in the order of their names.
+    pub owned: &'a dyn Fn(&Object, &str) -> Vec<Object>,
+    /// What the pod templates of the page's object present, for the
+    /// lanes that a sequence adds.
+    pub presents: &'a Presents,
+    /// The page's object as the API server returns it, for the rows of
+    /// a list in its status.
+    pub data: &'a serde_json::Value,
+    /// The page of the log lines of the `Job` of this name in the page's
+    /// namespace, when a `LogSource` can show them.
+    pub logs: &'a dyn Fn(&str) -> Option<String>,
     /// The pattern of the catalog that the kind of the page's object
     /// fills, as `catalog::judge` read it for that object: the parts of
     /// each derived role, what the pattern expects, and the parts that

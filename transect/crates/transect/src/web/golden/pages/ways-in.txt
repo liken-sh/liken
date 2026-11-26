@@ -59,7 +59,7 @@ node-alpha 's address on its machine's network
 8123
 Deployment acme-ops/device-hub
 3 hosts enter through DaemonSet acme-ops/edge-proxy , which answers on ports 80 and 443 through Service acme-ops/edge-proxy-lb .
-2 namespaces have pods and no NetworkPolicy that limits calls in: acme-shop , acme-promoter .
+5 namespaces have pods and no NetworkPolicy that limits calls in: acme-shop , acme-promoter , acme-garden , acme-gardener , acme-agents .
 Access
 Ways in : every port that answers from outside the cluster, and the gates on the way to it.
 Accounts : every account a binding names, and what it may do.

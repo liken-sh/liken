@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use super::elevation::Form;
 use super::{Elevation, Reference, role, wire};
 use crate::shapes::{Shape, Shapes, library};
 
@@ -36,12 +37,15 @@ impl Drawing<'_> {
         }
         let mut unported = Vec::new();
         for elevation in elevations {
-            let grid = &elevation.grid;
+            let Form::Sketch(sketch) = &mut elevation.form else {
+                continue;
+            };
+            let grid = &sketch.grid;
             let shape_of = |name: &str| {
                 let role = roles.iter().find(|role| role.name == name)?;
                 Some(grid.posed(name, &role.drawn))
             };
-            let faults = wire::leave_unported(&mut elevation.wires, grid, shape_of);
+            let faults = wire::leave_unported(&mut sketch.wires, grid, shape_of);
             let named = faults
                 .into_iter()
                 .map(|f| format!("elevation {:?}: {f}", elevation.name));

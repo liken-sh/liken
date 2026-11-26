@@ -5,7 +5,11 @@ access vulnerabilities kinds
 Search /
 esc
 apps
-1 namespace
+3 namespaces
+acme-garden
+1 workload
+acme-greenhouse
+0 workloads
 acme-shop
 6 workloads
 data
@@ -13,11 +17,15 @@ data
 acme-ledger
 6 workloads
 operators
-1 namespace
+2 namespaces
+acme-gardener
+3 workloads
 acme-promoter
 2 workloads
 platform
-1 namespace
+2 namespaces
+acme-agents
+4 workloads
 acme-ops
 5 workloads
 Machines
@@ -29,12 +37,12 @@ control plane
 node-beta 1 alert
 cpu
 mem
-12 pods
+13 pods
 workers
 node-alpha
 cpu
 mem
-12 pods
+14 pods
 Ground
 1 volume
 The archive NAS ↗ intent · 1 NFS
@@ -55,8 +63,8 @@ A certificate renews this week.
 acme-ledger
 ledger-exporter: none of 1 ready main in ledger-exporter-rs-one is crash looping after 14 restarts store in journal-4 is crash looping after 4 restarts
 Worth knowing
-24 pods request no memory
-5 of them each use 64 Mi or more, and all 24 use 2.1 Gi together. The scheduler places them as if they used no memory, and the kubelet evicts them first.
+27 pods request no memory
+5 of them each use 64 Mi or more, and all 27 use 2.1 Gi together. The scheduler places them as if they used no memory, and the kubelet evicts them first.
 2 replicated workloads behind a Service have no readiness probe
 acme-shop/storefront
 acme-ledger/journal

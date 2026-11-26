@@ -102,12 +102,22 @@ pub struct Show {
 struct WrittenFill {
     reference: Option<String>,
     named_by: Option<WrittenNamedBy>,
+    #[serde(default)]
+    controller: bool,
     through: Option<String>,
+    owns: Option<String>,
     elevation: Option<String>,
 }
 
 /// The keys of `WrittenFill`, as a document writes them.
-const FILL_KEYS: &[&str] = &["reference", "namedBy", "through", "elevation"];
+const FILL_KEYS: &[&str] = &[
+    "reference",
+    "namedBy",
+    "controller",
+    "through",
+    "owns",
+    "elevation",
+];
 
 /// The keys of a role of a pattern of the catalog, which says that the
 /// kind's `pattern` fills it or that the pattern derives its parts. A
@@ -135,13 +145,14 @@ pub fn read(
                 .map_err(|error| error.to_string())?;
             let look = look::read(written, references)?;
             let elevation = fill.elevation;
-            let fill = Fill::read(
-                fill.reference,
-                fill.named_by,
-                fill.through,
-                references,
-                group,
-            )?;
+            let written = fill::Written {
+                reference: fill.reference,
+                named_by: fill.named_by,
+                controller: fill.controller,
+                through: fill.through,
+                owns: fill.owns,
+            };
+            let fill = Fill::read(written, references, group)?;
             Role::new(name.clone(), fill, elevation, look, references)
         })()
         .map_err(|e| format!("roles.{name}: {e}"))?;
@@ -212,6 +223,11 @@ impl Role {
                 fill.first.fields()
             ));
         }
+        if let (Some(elevation), Some(owns)) = (&elevation, &fill.owns) {
+            return Err(format!(
+                "the role draws each part as {elevation:?}, and owns replaces each part with the {owns}s it owns, which have no elevation"
+            ));
+        }
         if let (Some(elevation), true) = (&elevation, look.stack) {
             return Err(format!(
                 "the role draws each part in full as {elevation:?}, so its parts cannot stack"
@@ -248,6 +264,9 @@ impl Role {
         if let Some(label) = &self.label {
             return label.clone();
         }
+        if let Some(owns) = &self.fill.owns {
+            return words(owns);
+        }
         match &self.fill.first {
             First::Reference(path) => {
                 let reference = references.iter().find(|r| r.path == *path);
@@ -255,6 +274,7 @@ impl Role {
                 label.unwrap_or_default().to_string()
             }
             First::NamedBy(named) => words(&named.kind),
+            First::Controller => "controller".into(),
             First::Derived(_) | First::Unfilled => String::new(),
         }
     }

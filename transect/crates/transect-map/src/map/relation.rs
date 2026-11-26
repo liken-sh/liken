@@ -88,6 +88,8 @@ impl Relation {
             (Kind::RunsOn, To) => "runs on it",
             (Kind::AllowedToCall, From) => "it may call",
             (Kind::AllowedToCall, To) => "may call it",
+            (Kind::Presents, From) => "it calls",
+            (Kind::Presents, To) => "calls it",
         }
     }
 

@@ -2604,6 +2604,7 @@ dependencies = [
  "k8s-openapi",
  "rstest",
  "serde",
+ "serde_json",
  "serde_yaml_ng",
 ]
 

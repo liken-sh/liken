@@ -37,7 +37,10 @@ fn shows_the_columns_of_the_pages_own_object(
     #[case] expected: Vec<(&str, &str)>,
 ) {
     let sketch = showing(shows, Standing::Plain);
-    assert_eq!(shown(&sketch.plan.roles[1].drawn.parts[0]), expected);
+    assert_eq!(
+        shown(&sketch.plan().unwrap().roles[1].drawn.parts[0]),
+        expected
+    );
 }
 
 #[rstest]
@@ -50,7 +53,7 @@ fn marks_a_column_that_is_not_the_first_of_its_entry_as_a_fallback(
     #[case] fallbacks: Vec<bool>,
 ) {
     let sketch = showing(shows, Standing::Plain);
-    let shown = sketch.plan.roles[1].drawn.parts[0].shows.iter();
+    let shown = sketch.plan().unwrap().roles[1].drawn.parts[0].shows.iter();
     assert_eq!(shown.map(|s| s.fallback).collect::<Vec<_>>(), fallbacks);
 }
 
@@ -62,11 +65,17 @@ fn shows_nothing_of_the_pages_own_object_on_a_value() {
     );
     let spec = format!("{{{REFERENCES}, {roles}, {ELEVATION}}}");
     let sketch = page_of(&spec, Standing::Plain).sketch.unwrap();
-    assert_eq!(shown(&sketch.plan.roles[0].drawn.parts[0]), vec![]);
+    assert_eq!(
+        shown(&sketch.plan().unwrap().roles[0].drawn.parts[0]),
+        vec![]
+    );
 }
 
 #[rstest]
 fn shows_nothing_of_the_pages_own_object_on_a_name_with_no_object() {
     let sketch = showing("[Mode]", Standing::Missing);
-    assert_eq!(shown(&sketch.plan.roles[1].drawn.parts[0]), vec![]);
+    assert_eq!(
+        shown(&sketch.plan().unwrap().roles[1].drawn.parts[0]),
+        vec![]
+    );
 }

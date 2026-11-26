@@ -1,8 +1,9 @@
 //! The checks of `Kinds::resolve` that need the knowledge of a second
 //! kind: each `through` that only the knowledge of the kind it starts
 //! from can confirm, each `namedBy` that only the knowledge of the
-//! naming kind can confirm, and each `elevation` that only the knowledge
-//! of the parts' kind states. One that does not resolve keeps the
+//! naming kind can confirm, each `elevation` that only the knowledge
+//! of the parts' kind states, and each template `merge` that only the
+//! knowledge of the merged kind can confirm. One that does not resolve keeps the
 //! reason, so the page shows the reason in place of what it leads to.
 
 use super::super::references::target_of;
@@ -69,7 +70,33 @@ impl Kinds {
                 messages.push(message);
             }
         }
+        messages.extend(self.merge_faults(&known));
         (known, messages)
+    }
+
+    /// The messages of the templates of `known` whose `merge` names a
+    /// kind whose knowledge states no template of the same `use`. The
+    /// page then reads such a template alone.
+    fn merge_faults(&self, known: &KindKnowledge) -> Vec<String> {
+        let mut messages = Vec::new();
+        for (at, template) in known.templates.iter().enumerate() {
+            let Some(merge) = &template.merge else {
+                continue;
+            };
+            let Some((group, kind)) = target_of(&known.references, merge) else {
+                continue;
+            };
+            let used = &template.used;
+            let fault = match self.of(group, kind) {
+                None => format!("transect has no knowledge of {kind}"),
+                Some(other) if !other.templates.iter().any(|t| &t.used == used) => {
+                    format!("the knowledge of {kind} states no template for {used}")
+                }
+                Some(_) => continue,
+            };
+            messages.push(format!("templates[{at}] merges {merge}, and {fault}"));
+        }
+        messages
     }
 
     /// The messages of the faults of `role`, a role of the kind `own`,

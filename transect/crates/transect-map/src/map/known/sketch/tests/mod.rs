@@ -169,6 +169,12 @@ pub(super) fn page_of_known(
         readings: &readings,
         subjects: &|_| None,
         named_by: &|_, _| Vec::new(),
+        controller: &|_| None,
+        top: &|object| object.clone(),
+        owned: &|_, _| Vec::new(),
+        presents: &crate::presents::Presents::default(),
+        data: &serde_json::Value::Null,
+        logs: &|_| None,
         ends: &knowledge::fixtures::Nowhere,
         judged,
     };
@@ -200,7 +206,8 @@ type Drawn<'a> = (&'a str, &'a str, Vec<(&'a str, Option<&'a str>)>);
 fn draws_each_role_with_a_part_for_each_value_and_leaves_an_unexpected_empty_role_out() {
     let sketch = sketch(Standing::Plain);
     let roles: Vec<Drawn> = sketch
-        .plan
+        .plan()
+        .unwrap()
         .roles
         .iter()
         .map(|role| {
@@ -252,7 +259,8 @@ fn draws_an_expected_role_with_no_part_as_nothing(
 ) {
     let sketch = sketch(Standing::Plain);
     let role = sketch
-        .plan
+        .plan()
+        .unwrap()
         .roles
         .iter()
         .find(|role| role.area == area)
@@ -284,7 +292,8 @@ fn takes_a_parts_state_and_its_reason_from_the_object_it_names(
 ) {
     let sketch = sketch(standing);
     let states: Vec<(&str, State, Option<Why>)> = sketch
-        .plan
+        .plan()
+        .unwrap()
         .roles
         .iter()
         .flat_map(|role| {
@@ -327,7 +336,8 @@ fn notes_and_reads_each_part(
 ) {
     let sketch = sketch(Standing::Plain);
     let role = sketch
-        .plan
+        .plan()
+        .unwrap()
         .roles
         .iter()
         .find(|role| role.area == area)
@@ -345,7 +355,8 @@ fn notes_and_reads_each_part(
 fn spells_out_a_part_that_is_not_an_object(#[case] area: &str, #[case] literal: bool) {
     let sketch = sketch(Standing::Plain);
     let role = sketch
-        .plan
+        .plan()
+        .unwrap()
         .roles
         .iter()
         .find(|role| role.area == area)
@@ -376,7 +387,7 @@ fn breaks_values_after_each_separator_and_escapes_them() {
 #[rstest]
 fn notes_a_name_the_cluster_has_no_object_for() {
     let sketch = sketch(Standing::Missing);
-    let amp = &sketch.plan.roles[1].drawn.parts[0];
+    let amp = &sketch.plan().unwrap().roles[1].drawn.parts[0];
     assert_eq!(
         (
             amp.end.under.as_deref(),

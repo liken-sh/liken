@@ -95,6 +95,13 @@ impl Snapshot {
         graph.add(guessed);
         graph.add(self.outsides.fold(referred));
         graph.add(between);
+        let presents = transect_access::access::presents::edges(
+            &self.presented,
+            &self.programs,
+            &self.runners,
+            |object| self.ownership.top_owner(object),
+        );
+        graph.add(presents);
         // The policy edges are numerous. Adding them last means the
         // queries that the sources above make do not scan them.
         graph.add(allowed.edges());

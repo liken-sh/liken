@@ -60,7 +60,7 @@ mod tests {
                 (ours, maps)
             })
             .unzip();
-        assert_eq!(ours.len(), 4, "the fixture has 4 namespaces");
+        assert_eq!(ours.len(), 8, "the fixture has 8 namespaces");
         assert_eq!(ours, maps);
     }
 

@@ -12,6 +12,7 @@ mod columns;
 mod find;
 mod lease;
 pub mod part_of;
+mod presents;
 mod rbac;
 mod reach;
 mod service;
@@ -253,6 +254,7 @@ pub fn sections(
     let mut sections = vec![about::about(snapshot, object, &found.meta, graph)];
     sections.extend(columns::columns(snapshot, object, found, now));
     sections.extend(kind_sections(snapshot, object, found, now));
+    sections.extend(presents::presents(snapshot, object, graph));
     sections.extend(reach::edges(snapshot, object, graph));
     sections
 }

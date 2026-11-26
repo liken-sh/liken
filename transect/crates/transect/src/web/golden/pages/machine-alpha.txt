@@ -5,12 +5,17 @@ access vulnerabilities kinds
 Search /
 esc
 cluster control plane node-beta workers node-alpha overview if lost
-node-alpha Worker, ready 12 pods in 4 namespaces run here.
+node-alpha Worker, ready 14 pods in 6 namespaces run here.
 cpu
 CPU 1.5 used · 0.0 requested of 4
 mem
 mem 6.0 used · 0.0 requested of 15.0 Gi
 apps
+acme-garden
+garden-tend-1-pod of Session garden-tend
+mem
+cpu
+no request or limit · 0 restarts
 acme-shop
 catalog-rs-one of Deployment catalog
 mem
@@ -35,6 +40,11 @@ mem
 cpu
 mem 1024Mi · cpu 500m · no request or limit · 0 restarts
 operators
+acme-gardener
+gardener-rs-one of Deployment gardener-operator
+mem
+cpu
+no request or limit · 0 restarts
 acme-promoter
 promoter-rs-one of Deployment promoter
 mem

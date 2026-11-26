@@ -1,0 +1,43 @@
+Mandate greenhouse · acme-greenhouse · transect
+transect
+cluster / apps / acme-greenhouse / Mandate greenhouse
+access vulnerabilities kinds
+Search /
+esc
+acme-greenhouse Mandate greenhouse BrowserProfiles ×1 Badges ×1 Duties ×2
+Mandate
+greenhouse
+Ready
+the loop
+What does a turn of each Duty call?
+described by simmer-operator
+the simmer operator
+acme-agents/simmer-operator
+duty
+mist
+trim
+gofer
+acme-agents/gofer-api
+lanyard
+acme-agents/lanyard-api
+midden
+acme-agents/midden-api
+transom
+no knowledge loaded for transom
+1 runs the turns of each Duty Ready 2/2
+2 loads and saves the browser state of a BrowserProfile, as gofer transect reads no state for this step
+3 asks for a credential, as lanyard transect reads no state for this step
+4 ships its transcript, as midden transect reads no state for this step
+5 presents a token for transom no knowledge loaded for transom
+Hover a step for the field its state was read from. The lanes and the order of the steps are from the KindKnowledge mandates.simmer.foo, and the parts and their states are from the Kubernetes API. A lane after the line is added for a program that accepts an audience of the object's pod templates, from that program's knowledge.
+Referred to by
+managed by it ServiceAccount simmer-greenhouse ServiceAccount simmer-greenhouse--status
+Presents tokens
+turn pods, from spec.template lanyard midden simmer transom
+presents a token with no knowledge loaded for it transom
+Mandate greenhouse healthy
+Controlled by
+Deployment acme-agents/simmer-operator
+Described by simmer-operator
+The work that an agent owes in one namespace. Healthy when its Ready condition is True.
+from the KindKnowledge mandates.simmer.foo

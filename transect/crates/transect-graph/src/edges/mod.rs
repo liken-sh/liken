@@ -77,6 +77,13 @@ pub enum Kind {
     /// its parts nested inside it.  Loops and a cascade ignore this edge,
     /// because a part keeps working when the larger object is deleted.
     PartOf,
+    /// A pod template mounts a `ServiceAccount` token for an audience
+    /// that a program accepts, so the pods made from it call the
+    /// workload that runs the program.  The edge leaves the object that
+    /// holds the template, because the pods of an agent's turn exist
+    /// only while the turn runs.  A program's knowledge states the
+    /// audiences that it accepts.
+    Presents,
 }
 
 impl Kind {
@@ -95,6 +102,7 @@ impl Kind {
             Self::Selects => "selects",
             Self::RoutesTo => "routes to",
             Self::PartOf => "part of",
+            Self::Presents => "presents a token to",
         }
     }
 
@@ -115,6 +123,7 @@ impl Kind {
             Self::Selects => "selects it",
             Self::RoutesTo => "routes to it",
             Self::PartOf => "its parts",
+            Self::Presents => "its callers",
         }
     }
 }

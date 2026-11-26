@@ -7,6 +7,7 @@
 //! usage bars.
 
 mod needs;
+pub mod program;
 pub(super) mod sentence;
 mod switches;
 mod tile_text;
@@ -93,6 +94,8 @@ pub struct WorkloadPage {
     /// The custom resources that the workload reconciles as a
     /// controller, with one table for each kind.
     pub manages: Vec<crate::objects::Manages>,
+    /// The programs that the workload's image runs, by their knowledge.
+    pub programs: Vec<program::ProgramRows>,
     /// Whether the workload serves a port, and so has an access tab.
     pub access: bool,
 }
@@ -256,6 +259,7 @@ impl WorkloadPage {
             // no link here.  The section view's card keeps the link.
             card: card(object, &contents).with_href(None),
             manages: Vec::new(),
+            programs: Vec::new(),
             tiles,
             path,
         })

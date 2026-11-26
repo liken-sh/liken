@@ -1,0 +1,39 @@
+{#- A sequence: a lane for each role, with its parts at the top, a
+    line down from each lane, and a row for each step, with its arrow
+    between two lanes and what the cluster says about it at the right.
+    Each step's row has its words over the arrow and what the cluster
+    says under it.  The rows are in the author's order, and the browser
+    places every cell by its column and row, so an arrow starts and ends
+    at the middle of its lanes' columns.  The lanes after a line are added
+    from the knowledge of other programs. -#}
+{%- import "links/link.html" as links -%}
+<div class="sequence" role="group" aria-label="{{ name }}" style="grid-template-columns: {{ columns() }}">
+{%- for lane in lanes %}
+<div class="{{ lane.class() }}" style="grid-column: {{ loop.index }}; grid-row: 1" title="{{ lane.source }}">
+<div class="sequence-label">{{ lane.label }}</div>
+{%- for part in lane.parts %}
+<div class="sequence-part">{% call links::object_link(part.text, part.href, "") %}{% endcall %}</div>
+{%- endfor %}
+{%- if let Some(note) = lane.note %}
+<div class="sequence-note">{{ note }}</div>
+{%- endif %}
+</div>
+{%- if !steps.is_empty() %}
+<div class="sequence-life{% if lane.unknown() %} sequence-life-unknown{% endif %}" style="grid-column: {{ loop.index }}; grid-row: 2 / {{ last_row() }}" aria-hidden="true"></div>
+{%- endif %}
+{%- endfor %}
+{%- if let Some(first) = first_added() %}
+<div class="sequence-divider" style="grid-column: {{ first + 1 }}; grid-row: 1 / {{ last_row() }}" aria-hidden="true"></div>
+{%- endif %}
+{%- for step in steps %}
+{%- let (start, end, span) = place(step) %}
+<div class="{{ step.class() }}" style="grid-column: {{ start }} / {{ end }}; grid-row: {{ loop.index + 1 }}; --span: {{ span }}" title="{{ step.source }}" tabindex="0">
+<span class="sequence-verb"><span class="sequence-number">{{ loop.index }}</span> {{ step.verb }}</span>
+<span class="sequence-line" aria-hidden="true"></span>
+<span class="{{ step.state_class() }}">{{ step.state }}</span>
+{%- for mark in step.marks %}
+<span class="sequence-mark">{% call links::object_link(mark.part.text, mark.part.href, "") %}{% endcall %}: {{ mark.said }}</span>
+{%- endfor %}
+</div>
+{%- endfor %}
+</div>

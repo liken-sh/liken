@@ -294,3 +294,20 @@ a.need:hover { text-decoration: underline; }
   border-radius: 5px;
   background: var(--panel);
 }
+
+/* A program's callers: one line for each object whose template other
+   callers merge, followed by those callers, and a last line for the
+   callers that merge nothing. */
+.callers {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.callers-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}

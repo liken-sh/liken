@@ -66,6 +66,7 @@ pub fn service_account_page(
         drawing: drawn::draw(scene(model, &account, runs.boxes, &look)),
         card: Some(card),
         no_gitops: model.access.gitops.is_empty(),
+        obtains: super::obtains::obtains(model, namespace, name, &look),
     })
 }
 
@@ -91,6 +92,7 @@ pub fn subject_page(model: &Model, kinds: &str, name: &str) -> Option<AccountPag
         drawing: drawn::draw(scene),
         card: None,
         no_gitops: model.access.gitops.is_empty(),
+        obtains: Vec::new(),
     })
 }
 

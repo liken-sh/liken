@@ -24,7 +24,7 @@ impl Cluster {
         let (pods, replica_sets, jobs) = (self.pods(), self.replica_sets(), self.jobs());
         let (deployments, stateful_sets) = (self.deployments(), self.stateful_sets());
         let (daemon_sets, cron_jobs) = (self.daemon_sets(), self.cron_jobs());
-        let services = self.services();
+        let (services, accounts) = (self.services(), self.service_accounts());
         let built_in = [
             entries("", "Pod", &pods),
             entries("apps", "ReplicaSet", &replica_sets),
@@ -38,6 +38,10 @@ impl Cluster {
             // `depends-on` treats an address of such a `Service` as an
             // address of the workload that owns it.
             entries("", "Service", &services),
+            // An operator that runs pods for its resources often makes a
+            // `ServiceAccount` for each, with an owner reference. Then the
+            // page of the account names the resource that it is for.
+            entries("", "ServiceAccount", &accounts),
         ];
         let custom = custom
             .iter()

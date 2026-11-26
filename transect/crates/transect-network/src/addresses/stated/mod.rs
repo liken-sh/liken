@@ -273,7 +273,10 @@ impl Reading<'_> {
     /// The ends on the map that an edge to `object` goes to: the machine
     /// for a `Node`, the workloads that a `Service` selects or the
     /// `Service` itself when it selects none, the top owner of a watched
-    /// object, and any other object itself. An object that
+    /// object, and any other object itself. A `ServiceAccount` is its
+    /// own end, though an operator's resource can own it, because what
+    /// names an account grants something to that account, and not to
+    /// the resource that made it. An object that
     /// transect does not watch still gets its own end, because a name
     /// that an operator writes in status refers to a real object.
     pub fn endpoints_of(&self, object: &Object) -> Vec<Endpoint> {
@@ -281,6 +284,7 @@ impl Reading<'_> {
         match (object.group.as_str(), object.kind.as_str()) {
             ("", "Node") => vec![Endpoint::Machine(object.name.clone())],
             ("", "Service") => behind(self.graph, &end),
+            ("", "ServiceAccount") => vec![end],
             _ if self.known.contains(object) => {
                 vec![Endpoint::Object(self.ownership.top_owner(object))]
             }

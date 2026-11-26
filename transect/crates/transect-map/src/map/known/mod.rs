@@ -27,7 +27,8 @@ pub use chips::{Chip, chips, every_chip};
 use layout::{Rect, places};
 use ring::{RelationBox, relation_box};
 pub use sketch::{
-    ElevationTab, Expected, Head, Lean, NestedPart, Plan, Sketch, SketchRole, SketchWire,
+    Body, ElevationTab, Expected, Head, Lane, Lean, NestedPart, Plan, RowCell, Rows, Sketch,
+    SketchRole, SketchWire, Step,
 };
 use transect_frame::frame::crumbs::Crumb;
 use transect_frame::frame::tabs::{Lens, Tabs};
@@ -219,10 +220,7 @@ impl KnownPage {
     fn draws(&self, value: &Reference) -> bool {
         let in_boxes = self.boxes.iter().flat_map(|relation| &relation.ends);
         let in_boxes = in_boxes.map(|end| &end.reference);
-        let in_sketch = self
-            .sketch
-            .iter()
-            .flat_map(|sketch| sketch.plan.references());
+        let in_sketch = self.sketch.iter().flat_map(|sketch| sketch.references());
         let mut drawn = in_boxes.chain(in_sketch);
         drawn.any(|end| end::same(end, value))
     }

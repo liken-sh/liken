@@ -3,5 +3,6 @@
 //! crates that this crate depends on cannot depend on it.
 
 mod gitops;
+mod tokens;
 mod vulnerabilities;
 mod vulnerabilities_pages;

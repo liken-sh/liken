@@ -3,7 +3,9 @@
 //! show the same card.
 
 mod core;
+mod head;
 mod judged;
+mod logs;
 mod readings;
 
 use super::super::model::Model;
@@ -15,7 +17,7 @@ use k8s_openapi::jiff::Timestamp;
 use transect_graph::edges::Graph;
 use transect_graph::edges::Object;
 use transect_map::map::{
-    Board, KnownEntry, KnownPage, Standing, Subject, Why, every_chip, has_page, known_chips,
+    Board, KnownPage, Standing, Subject, Why, controller, every_chip, has_page, known_chips,
     known_through, workload_card,
 };
 use transect_map::objects::{self, Center, ObjectCard};
@@ -77,18 +79,7 @@ pub fn known_page(
                         .map(|r| r.level())
                 }
             };
-            let siblings = snapshot.custom_objects().into_iter().filter(|other| {
-                (&other.group, &other.kind, other.namespace.as_deref())
-                    == (&object.group, &object.kind, Some(namespace))
-            });
-            let mut column: Vec<KnownEntry> = siblings
-                .map(|other| KnownEntry {
-                    text: transect_graph::edges::kind_and_name(&other.kind, &other.name),
-                    href: transect_graph::links::page(&other, plurals),
-                    current: other == object,
-                })
-                .collect();
-            column.sort_by(|a, b| a.text.cmp(&b.text));
+            let column = head::siblings(snapshot, &object, namespace);
             let own = plural_label(
                 &object.kind,
                 plurals
@@ -113,6 +104,12 @@ pub fn known_page(
             };
             let judged = catalog::judge(knowledge, &object, &facts);
             let named_by = |named: &Object, by: &NamedBy| named_by(snapshot, named, by);
+            let owned = |owner: &Object, kind: &str| {
+                let group = group_of(snapshot, kind, &owner.group);
+                snapshot.ownership.owned(owner, &group, kind)
+            };
+            let presents = snapshot.presents.get(&object).cloned().unwrap_or_default();
+            let logs = |job: &str| logs::of_job(snapshot, namespace, job);
             let board = Board {
                 subject: subject(snapshot, contents.graph, &object)?,
                 layer,
@@ -127,7 +124,8 @@ pub fn known_page(
                     snapshot,
                     &object,
                     found,
-                ),
+                )
+                .or_else(|| head::fault(snapshot, &object, &found.data)),
                 plurals,
                 page: &page_of,
                 ground: &|title| super::ground_link(model, title),
@@ -138,6 +136,12 @@ pub fn known_page(
                 },
                 subjects: &subjects,
                 named_by: &named_by,
+                controller: &|other| controller(contents.graph, other),
+                top: &|other| snapshot.ownership.top_owner(other),
+                owned: &owned,
+                presents: &presents,
+                data: &found.data,
+                logs: &logs,
                 ends: snapshot,
                 judged: judged.as_ref(),
             };
@@ -278,6 +282,28 @@ fn unwell(said: Reason) -> Standing {
         Level::Failing => Standing::Failing(why),
         _ => Standing::Warning(why),
     }
+}
+
+/// The group of the kind named `kind` that a role's `owns` means.  A
+/// role names the kind alone, as `owns: Job` does, so the group is the
+/// owner's own when it serves the kind, then the one group that serves
+/// it, then a built-in group, in the order core, `apps`, `batch`.
+fn group_of(snapshot: &Snapshot, kind: &str, near: &str) -> String {
+    let mut groups: Vec<&str> = snapshot
+        .plurals
+        .keys()
+        .filter(|(_, served)| served == kind)
+        .map(|(group, _)| group.as_str())
+        .collect();
+    groups.sort_unstable();
+    if groups.contains(&near) || groups.len() == 1 {
+        let one = groups.iter().find(|g| **g == near).or(groups.first());
+        return one.copied().unwrap_or_default().to_string();
+    }
+    let built_in = ["", "apps", "batch"]
+        .into_iter()
+        .find(|g| groups.contains(g));
+    built_in.unwrap_or_default().to_string()
 }
 
 #[cfg(test)]

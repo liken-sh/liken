@@ -32,7 +32,7 @@ pub fn line(
         text: text.into(),
         href: None,
     };
-    let placed = elevation.grid.names();
+    let placed = elevation.names();
     let subject = &board.subject;
     let mut roles = Vec::new();
     for role in stated.roles {
@@ -69,7 +69,7 @@ pub fn line(
     pieces.push(word("."));
     let author = |other: &Stated| other.pattern.map(|p| p.name.clone());
     let elevations = all.iter().filter(|(other_slug, other)| {
-        let names = other.elevation.grid.names();
+        let names = other.elevation.names();
         other_slug != slug
             && author(other) == author(&stated)
             && roles.iter().any(|(name, ..)| names.contains(name))

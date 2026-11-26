@@ -221,3 +221,28 @@ tbody th {
   .view-wider > main { padding-right: 32px; }
   .view-wider > .sidebar { width: auto; }
 }
+
+/* In a narrow window, a table or a drawing wider than the window
+   scrolls inside its own frame, and the page never scrolls sideways.
+   A shadow at an edge that has more to scroll to says that the frame
+   scrolls: the two gradients that cover the shadows move with the
+   content, so each shadow shows only while content is past its edge.
+   A wide window keeps the tables out of a scroll box, so their header
+   rows stick to the top of the window, as the rule above says. */
+@media (max-width: 700px) {
+  .board-table,
+  .runs-table,
+  .known-frame {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    background:
+      linear-gradient(to right, var(--table-ground, var(--row)) 30%, transparent) left / 28px 100% no-repeat local,
+      linear-gradient(to left, var(--table-ground, var(--row)) 30%, transparent) right / 28px 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%, rgb(0 0 0 / 30%), transparent) left / 12px 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, rgb(0 0 0 / 30%), transparent) right / 12px 100% no-repeat scroll,
+      var(--table-ground, var(--row));
+  }
+
+  .known-frame { display: flex; }
+}

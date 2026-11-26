@@ -4,6 +4,9 @@
 //! fields refer to other objects, which image its controller runs, and
 //! more. The project that owns the kind writes it.
 //!
+//! Program knowledge, in `program`, describes a program by its image in
+//! the same way, for a program that has no kind of its own.
+//!
 //! A kind knowledge resource has the name of its definition,
 //! `<plural>.<group>`, so `Kinds::resolve` matches it to a kind through
 //! the plurals that discovery returned.
@@ -26,11 +29,16 @@ mod layer;
 mod matches;
 mod parse;
 pub mod path;
+pub mod program;
+mod programs;
 mod reach;
 mod referenced;
 mod references;
 pub mod role;
+pub mod rows;
+pub mod sequence;
 mod stated;
+pub mod templates;
 pub mod through;
 pub mod wire;
 
@@ -47,6 +55,8 @@ pub use kinds::Kinds;
 pub use layer::{Named, named};
 pub use matches::{Key, Matches};
 pub use parse::{edge_kind, parse};
+pub use program::ProgramKnowledge;
+pub use programs::Programs;
 pub use reach::{Reached, edges};
 pub use referenced::{referrals, referred_edges};
 pub use references::{Names, Relation, relations, target_of, written_secret};
@@ -115,6 +125,8 @@ pub struct KindKnowledge {
     /// The pattern of `transect`'s catalog that the kind fills, whose
     /// elevations the page draws after the kind's own.
     pub pattern: Option<catalog::Pattern>,
+    /// The fields of the kind that hold pod templates.
+    pub templates: Vec<templates::Template>,
 }
 
 /// What says that an object of a kind works.
@@ -239,12 +251,17 @@ pub fn plural_label(kind: &str, plural: Option<&str>) -> String {
 impl KindKnowledge {
     /// Whether the knowledge reads fields that a trimmed watch drops. A
     /// trimmed watch keeps only the metadata, the conditions, and
-    /// `observedGeneration`, so `references`, `writes_secret`, and a
-    /// `node` path outside `metadata` need the whole object. Each role
-    /// of a `pattern` names an entry of `references`.
+    /// `observedGeneration`, so `references`, `writes_secret`, an
+    /// elevation of rows, and a `node` path outside `metadata` need the
+    /// whole object, and so do `templates`. Each role of a `pattern`
+    /// names an entry of `references`.
     pub fn reads_fields(&self) -> bool {
+        let rows = self.elevations.iter();
+        let mut rows = rows.filter(|e| matches!(e.form, elevation::Form::Rows(_)));
         !self.references.is_empty()
+            || !self.templates.is_empty()
             || self.writes_secret.is_some()
+            || rows.next().is_some()
             || self
                 .node
                 .as_deref()

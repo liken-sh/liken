@@ -2,7 +2,8 @@
 //! similar one: the ServiceAccount the pod runs as, whether it mounts
 //! that account's token, and the names of the Secrets it uses.
 
-use k8s_openapi::api::core::v1::{EnvFromSource, EnvVar, Pod, ServiceAccountTokenProjection};
+use k8s_openapi::api::core::v1::{EnvFromSource, EnvVar, Pod};
+use transect_graph::tokens::projects_for_the_api;
 
 /// One pod that has not finished, with the fields that `Access::build`
 /// reads.
@@ -46,7 +47,7 @@ impl Running {
                 token |= source
                     .service_account_token
                     .as_ref()
-                    .is_some_and(for_the_api);
+                    .is_some_and(projects_for_the_api);
                 if let Some(secret) = &source.secret {
                     secrets.push(secret.name.clone());
                 }
@@ -72,24 +73,6 @@ impl Running {
             token,
             secrets,
         })
-    }
-}
-
-/// The audiences that the API server accepts by default: the issuer
-/// URL that kubeadm and k3s configure, with and without
-/// `.cluster.local`.  A token for any other audience does not
-/// authenticate at the API server.  A projection with no audience gets
-/// the API server's own, so `for_the_api` accepts it too.
-const API_AUDIENCES: [&str; 2] = [
-    "https://kubernetes.default.svc",
-    "https://kubernetes.default.svc.cluster.local",
-];
-
-/// Whether the API server accepts the token `projection` mounts.
-fn for_the_api(projection: &ServiceAccountTokenProjection) -> bool {
-    match projection.audience.as_deref() {
-        None | Some("") => true,
-        Some(audience) => API_AUDIENCES.contains(&audience),
     }
 }
 

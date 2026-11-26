@@ -1,0 +1,30 @@
+lanyard-api · acme-agents · transect
+transect
+cluster / platform / acme-agents / lanyard-api
+access vulnerabilities kinds
+Search /
+esc
+acme-agents gofer-api lanyard-api midden-api simmer-operator overview section logs
+Pods
+No pods
+Runs
+image
+repository
+version
+commit
+rolled
+atcr.io/guid.foo/lanyard:2026.1
+not read
+none
+none
+—
+Program lanyard kind Gives a pod the credentials that a Badge names for its ServiceAccount.
+Callers
+asks for a credential, as lanyard
+Mandate acme-greenhouse/greenhouse and its Duties: mist trim
+Guards ✓ RollingUpdate no readiness probe no CPU limit
+Deployment lanyard-api 1 of 1 ready
+If it goes down
+Nothing in the cluster depends on it.
+No NetworkPolicy selects its pods, so any pod may call them.
+no GitOps applier's label or annotation is on it

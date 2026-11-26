@@ -137,6 +137,7 @@ impl Snapshot {
         let mut conditions = self.overlaid.unmatched();
         conditions.extend(self.intents.conditions.iter().cloned());
         conditions.extend(self.kinds.conditions.iter().cloned());
+        conditions.extend(self.programs.conditions.iter().cloned());
         conditions.extend(self.outsides.conditions.iter().cloned());
         conditions.extend(self.log_conditions());
         conditions.extend(self.ambiguous_matches());

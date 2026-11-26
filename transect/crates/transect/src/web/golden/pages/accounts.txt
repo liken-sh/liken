@@ -63,7 +63,8 @@ change what a GitOps tool applies
 through
 ServiceAccount acme-ops/batch-worker
 ClusterRole system:controller:job-runner → may run as acme-ops/gitops-controller
-1 ServiceAccount is named by no binding.
+1 account is bound to roles that grant none of the six.
+3 ServiceAccounts are named by no binding.
 Access
 Ways in : every port that answers from outside the cluster, and the gates on the way to it.
 Accounts : every account a binding names, and what it may do.

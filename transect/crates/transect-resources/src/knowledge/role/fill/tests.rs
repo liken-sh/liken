@@ -28,6 +28,11 @@ fn fill(role: &str) -> Fill {
     "{namedBy: {kind: Bin, path: spec.room}, through: spec.shelf}",
     "Bin spec.room, then spec.shelf"
 )]
+#[case::the_controller("{controller: true}", "the controller")]
+#[case::what_each_part_owns(
+    "{namedBy: {kind: Shelf, path: spec.room}, owns: Job}",
+    "Shelf spec.room, then each Job it owns"
+)]
 fn names_the_fields_that_its_parts_are_read_from(#[case] role: &str, #[case] fields: &str) {
     assert_eq!(fill(role).fields(), fields);
 }

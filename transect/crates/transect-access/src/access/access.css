@@ -317,6 +317,13 @@ span.ax-name { color: var(--ink); }
 /* A drawing uses the section view's boxes, lines, and labels, and adds
    gates as dots on the lines and ports on the workload's left edge. */
 .ax-drawing { margin-bottom: 8px; }
+
+/* The drawing of an account's access never zooms below its own size,
+   because its boxes hold rules that are unreadable smaller.  In a
+   narrow window it scrolls inside its frame. */
+@supports (zoom: calc(100cqw / 976px)) {
+  .section-drawing.ax-drawing { zoom: clamp(1, calc(100cqw / var(--section-width)), 1.33); }
+}
 .ax-drawing .section-box { padding: 8px 10px; }
 .ax-drawing .section-title { font-size: 12.5px; }
 /* The layout makes each box tall enough for all of its words, so the

@@ -1,0 +1,59 @@
+Mandate garden · acme-garden · transect
+transect
+cluster / apps / acme-garden / Mandate garden
+access vulnerabilities kinds
+Search /
+esc
+acme-garden Mandate garden Mandate orchard Duties ×2 Sessions ×1
+Mandate
+garden
+Ready: admitted
+the loop
+How does an event become a turn, and what does a turn call?
+described by gardener-operator
+Signals
+doorbell
+rain-gauge
+the operator
+acme-gardener/gardener-operator
+session
+garden-prune
+garden-tend
+turn and hook Jobs
+garden-tend-1
+garden-tend-1-before
+MCP servers
+seed-catalog
+bell
+no knowledge loaded for bell
+keyring
+acme-gardener/keyring-server
+notebook
+acme-gardener/notebook-server
+1 delivers an event Connected 1/2 rain-gauge : Connected is False, Unreachable
+2 wakes the Session that holds the event's key Phase Failed 1, Running 1; Waiting nothing 1, turn 1
+3 or starts a Session for a Duty whose purview matches Ready 2/2
+4 holds the turn while the budget is spent has room 1/1
+5 runs the before hook, the turn, and the after hook as Jobs transect reads no state for this step
+6 calls tools Ready 1/1
+7 presents a token for bell no knowledge loaded for bell
+8 asks for a credential, as keyring transect reads no state for this step
+9 ships its transcript, as notebook transect reads no state for this step
+Not in the loop: duty Duty prune and Duty tend and paid by Allowance garden-budget .
+Hover a step for the field its state was read from. The lanes and the order of the steps are from the KindKnowledge mandates.agents.example.test, and the parts and their states are from the Kubernetes API. A lane after the line is added for a program that accepts an audience of the object's pod templates, from that program's knowledge.
+Referred to by
+depends on it Duty prune Duty tend
+Status
+Active 1
+Presents tokens
+turn pods, from spec.template bell gardener keyring notebook
+presents a token with no knowledge loaded for it bell
+seen on Pod garden-tend-1-pod
+Refers to
+depends on Allowance garden-budget
+Mandate garden healthy
+Controlled by
+Deployment acme-gardener/gardener-operator
+Described by gardener-operator
+The work that an agent owes in one namespace. Healthy when its Ready condition is True.
+from the KindKnowledge mandates.agents.example.test

@@ -86,6 +86,7 @@ fn verb(kind: Kind) -> &'static str {
         Kind::Holds => "holds",
         Kind::AuthenticatesThrough => "authenticates through",
         Kind::PartOf => "is part of",
+        Kind::Presents => "presents a token to",
     }
 }
 

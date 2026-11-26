@@ -18,9 +18,14 @@
 //! - `ways.yaml`: the ways in besides the storefront's `Ingress`.
 //! - `scans.yaml`: a vulnerability scanner's reports, current and
 //!   stale.
+//! - `agents.yaml`: an agent system, whose `Mandate`s draw a sequence
+//!   and whose `Session`s draw their turns as rows.
 //! - `resources.yaml`: `transect`'s own resources for the cluster.
 //! - `gitops.yaml`: the knowledge the GitOps tool ships.
 //! - `signals.yaml`: the firing alerts and the Prometheus responses.
+//! - `tokens.yaml`: the agent system of the projects that ship
+//!   `transect` knowledge, whose templates present tokens to programs.
+//! - `agent-knowledge.yaml`: the knowledge that those projects ship.
 
 mod load;
 mod signals;
@@ -48,11 +53,14 @@ use transect_supply::gitops::{Applied, GitOps};
 pub const NOW: &str = "2026-01-01T12:00:00Z";
 
 /// The YAML of `transect`'s own resources for the fixture cluster,
-/// followed by the knowledge objects of its GitOps tool.
+/// followed by the knowledge objects of its GitOps tool and of its
+/// agent system.
 const RESOURCES: &str = concat!(
     include_str!("resources.yaml"),
     "---\n",
-    include_str!("gitops.yaml")
+    include_str!("gitops.yaml"),
+    "---\n",
+    include_str!("agent-knowledge.yaml")
 );
 
 fn resources() -> crate::web::loaded::Loaded {
@@ -112,7 +120,11 @@ fn snapshot_with(resources: crate::web::loaded::Loaded) -> Snapshot {
         "---\n",
         include_str!("ways.yaml"),
         "---\n",
-        include_str!("scans.yaml")
+        include_str!("scans.yaml"),
+        "---\n",
+        include_str!("agents.yaml"),
+        "---\n",
+        include_str!("tokens.yaml")
     );
     let slices = load::sort(&mut snapshot, yaml);
     let claims = snapshot.paged.resource_claims.iter().map(AsRef::as_ref);
@@ -270,8 +282,12 @@ fn ownership(snapshot: &Snapshot) -> (Ownership, Applied) {
     let daemons = daemons.map(|o| entry("apps", "DaemonSet", &o.metadata));
     let crons = snapshot.cron_jobs.iter();
     let crons = crons.map(|o| entry("batch", "CronJob", &o.metadata));
+    let jobs = snapshot.jobs.iter();
+    let jobs = jobs.map(|o| entry("batch", "Job", &o.metadata));
     let services = snapshot.services.iter();
     let services = services.map(|o| entry("", "Service", &o.metadata));
+    let accounts = snapshot.paged.service_accounts.iter();
+    let accounts = accounts.map(|o| entry("", "ServiceAccount", &o.metadata));
     let custom = snapshot.custom.iter().flat_map(|(resource, objects)| {
         let (group, kind) = (resource.group.as_str(), resource.kind.as_str());
         objects.iter().map(move |o| entry(group, kind, &o.metadata))
@@ -282,7 +298,9 @@ fn ownership(snapshot: &Snapshot) -> (Ownership, Applied) {
         .chain(stateful)
         .chain(daemons)
         .chain(crons)
+        .chain(jobs)
         .chain(services)
+        .chain(accounts)
         .chain(custom)
         .collect();
     let ownership = Ownership::build(entries.iter().copied());

@@ -1,0 +1,46 @@
+/*
+ * An elevation of rows.  The table is a board table, so it reads as the
+ * other tables of the pages, and the object's own values stand in one
+ * quiet line above it.
+ */
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: min-content;
+}
+
+.rows-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 28px;
+  margin: 0;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 14px;
+}
+
+.rows-reading { display: flex; gap: 8px; }
+
+.rows-reading dt { color: var(--ink-faint); }
+
+.rows-reading dd { margin: 0; color: var(--ink); }
+
+.rows-table td,
+.rows-table th { white-space: nowrap; }
+
+.rows-at {
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* A value that the knowledge names as a failure, such as a turn that
+   failed, in the color of a fault. */
+.rows-failed { color: var(--warm); font-weight: 600; }
+
+.rows-more {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-muted);
+}

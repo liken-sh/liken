@@ -1,0 +1,27 @@
+Mandates (agents.example.test) · transect
+transect
+cluster / kinds / Mandates (agents.example.test)
+access vulnerabilities kinds
+Search /
+esc
+kinds Allowances ×1 Duties (agents.example.test) ×2 Mandates (agents.example.test) ×2 McpServers ×1 Sessions ×2 Signals ×2
+Mandates (agents.example.test) in every namespace
+Name
+Namespace
+Active
+bell (no knowledge)
+gardener
+keyring
+notebook
+garden
+acme-garden
+1
+orchard
+acme-garden
+0
+its pod templates present this token they do not a token that no loaded knowledge explains
+Mandates (agents.example.test) 2 objects
+agents.example.test
+Controlled by
+Deployment acme-gardener/gardener-operator
+Matched by image: the KindKnowledge mandates.agents.example.test lists this workload's image as its controller.

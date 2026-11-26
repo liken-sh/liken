@@ -15,8 +15,10 @@ use transect_graph::edges::{Endpoint, Kind, Object};
 use transect_graph::links::Reference;
 use transect_map::map::KnownEntry;
 use transect_map::objects::{
-    self, ApiGroup, Item, KindCard, KindObject, KindPage, KindRow, KindsPage, first_sentence,
+    self, ApiGroup, Item, KindCard, KindObject, KindPage, KindRow, KindsPage, Socket,
+    first_sentence,
 };
+use transect_map::presents::Presents;
 use transect_observe::health::{Level, reported};
 use transect_resources::knowledge::{Column, ColumnRead, columns};
 
@@ -89,7 +91,8 @@ pub fn kinds_page(model: &Model) -> KindsPage {
 pub fn kind_page(model: &Model, resource: &str, now: Timestamp) -> Option<KindPage> {
     let snapshot = &model.snapshot;
     let (api, stored) = snapshot.custom_at(resource)?;
-    let (columns, rows) = table(snapshot, api, stored, |_| true, now);
+    let (mut columns, mut rows) = table(snapshot, api, stored, |_| true, now);
+    presented(snapshot, api, &mut columns, &mut rows);
     let labels = objects::labels(snapshot.custom.iter().map(|(api, _)| api));
     let siblings = snapshot.custom.iter().filter(|(other, found)| {
         other.group == api.group && (!found.is_empty() || other.kind == api.kind)
@@ -169,6 +172,37 @@ pub fn kind_card(
     }
 }
 
+/// Adds a column for each audience that the pod templates of any of
+/// `rows` present, and each row's socket in it, so the objects of a kind
+/// stand side by side by what their pods call.
+fn presented(
+    snapshot: &Snapshot,
+    api: &ApiResource,
+    columns: &mut Vec<String>,
+    rows: &mut [KindObject],
+) {
+    let empty = Presents::default();
+    let presents_of = |row: &KindObject| {
+        let object = Object::new(
+            &api.group,
+            &api.kind,
+            row.namespace.as_deref(),
+            &row.item.name,
+        );
+        snapshot.presents.get(&object).unwrap_or(&empty)
+    };
+    let each: Vec<&Presents> = rows.iter().map(presents_of).collect();
+    let audiences = transect_map::presents::columns(&each);
+    columns.extend(audiences.iter().map(objects::socket_header));
+    let sockets: Vec<Vec<Socket>> = each
+        .iter()
+        .map(|presents| Socket::row(presents, &audiences))
+        .collect();
+    for (row, sockets) in rows.iter_mut().zip(sockets) {
+        row.sockets = sockets;
+    }
+}
+
 /// The column names, and a row for each object in `found` that `keep`
 /// accepts. A printer column is left out when `transect` cannot read its
 /// JSONPath, or when `kubectl get` prints it only with `-o wide`.
@@ -214,6 +248,7 @@ pub fn table(
             },
             namespace: object.namespace.clone(),
             values: values.collect(),
+            sockets: Vec::new(),
         })
     });
     let mut rows: Vec<KindObject> = rows.collect();
@@ -261,6 +296,10 @@ mod tests {
         assert_eq!(
             shown,
             [
+                ("BrowserProfiles", 1, 0),
+                ("Badges", 1, 0),
+                ("Duties (simmer.foo)", 2, 0),
+                ("Mandates (simmer.foo)", 1, 0),
                 ("Certificates", 1, 0),
                 ("ClusterIssuers", 1, 0),
                 ("HelmReleases", 1, 0),
@@ -270,6 +309,12 @@ mod tests {
                 ("HelmRepositories", 1, 0),
                 ("OCIRepositories", 1, 0),
                 ("Machines", 1, 0),
+                ("Allowances", 1, 0),
+                ("Duties (agents.example.test)", 2, 0),
+                ("Mandates (agents.example.test)", 2, 0),
+                ("McpServers", 1, 0),
+                ("Sessions", 2, 1),
+                ("Signals", 2, 1),
                 ("Caches", 1, 0),
                 ("Gizmos", 2, 1),
                 ("Ledgers", 2, 0),

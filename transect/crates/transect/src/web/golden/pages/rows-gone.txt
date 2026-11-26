@@ -1,0 +1,62 @@
+Session garden-prune · acme-garden · transect
+transect
+cluster / apps / acme-garden / Session garden-prune
+access vulnerabilities kinds
+Search /
+esc
+acme-garden Session garden-prune Session garden-tend Duties ×2 Mandates ×2
+Session
+garden-prune
+TurnsFailed: two turns in a row failed
+Ready: turns failed
+its turns
+What did each turn do, and how did it end?
+described by gardener-operator
+phase
+Failed
+waiting on
+nothing
+pending events
+—
+#
+before hook
+turn
+Job
+started
+finished
+after hook
+why the Session ended
+cost
+1
+Succeeded
+Failed
+garden-prune-0
+—
+—
+—
+—
+$0.18
+2
+Succeeded
+Failed
+garden-prune-1
+—
+—
+Succeeded
+TurnsFailed
+$0.09
+Each row is an item of the object's status, as the Kubernetes API returns it. The columns are from the KindKnowledge sessions.agents.example.test.
+Belongs to
+controlled by Deployment acme-gardener/gardener-operator
+Status
+Phase Failed
+Waiting nothing
+Turns 2
+Refers to
+depends on Mandate garden Duty prune
+Session garden-prune failing
+Controlled by
+Deployment acme-gardener/gardener-operator
+Described by gardener-operator
+One run of an agent for a Mandate, over one or more turns. Healthy when its Ready condition is True.
+from the KindKnowledge sessions.agents.example.test

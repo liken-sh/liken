@@ -39,7 +39,7 @@ use transect_observe::health::{self, Health};
 use transect_observe::logs::Counted;
 use transect_observe::usage;
 use transect_resources::intent::Intents;
-use transect_resources::knowledge::{self, Definitions, Kinds, Named, Relation};
+use transect_resources::knowledge::{self, Definitions, Kinds, Named, Programs, Relation};
 use transect_resources::layers::Layers;
 use transect_resources::resources::Overlaid;
 use transect_supply::findings::{self, Linked, WorkloadFinding};
@@ -51,6 +51,8 @@ mod alerted;
 mod card;
 mod changed;
 mod described;
+#[cfg(any(test, debug_assertions))]
+mod empty;
 mod follow;
 mod graph;
 mod issuers;
@@ -59,11 +61,14 @@ mod layer;
 mod logged;
 mod matched;
 mod paged;
+mod presents;
 mod serving;
 mod underneath;
 
 pub use access::fingerprint;
 pub use paged::Paged;
+use transect_access::access::presents::{Presented, Runner};
+use transect_map::presents::Presents;
 
 /// The latest reading of each poller that `Snapshot::take` copies.
 /// Usage is not here, because only `Snapshot::machines` reads it, and
@@ -150,6 +155,8 @@ pub struct Snapshot {
     pub intents: Intents,
     /// The kind knowledge matched to the kinds the cluster serves.
     pub kinds: Kinds,
+    /// The program knowledge, with each grant confirmed against `kinds`.
+    pub programs: Programs,
     /// The kinds discovery found that are not namespaced.
     pub cluster_scoped: ClusterScoped,
     /// The objects that each custom resource of a known kind refers to,
@@ -169,6 +176,17 @@ pub struct Snapshot {
     pub paged: Paged,
     /// Every object that has a page, except `Secret`s.
     pub with_pages: HashSet<Object>,
+    /// What the pod templates of each object present, and the programs
+    /// that accept the audiences, for the lanes that a sequence adds and
+    /// the columns of the page of a kind. An object that is not here
+    /// presents nothing that `transect` knows of.
+    pub presents: BTreeMap<Object, Presents>,
+    /// Every pod template that a kind's knowledge states or that a
+    /// built-in workload has, with the audiences it presents.
+    pub presented: Vec<Presented>,
+    /// Each workload with the images that its pods run, for the
+    /// programs to match.
+    pub runners: Vec<Runner>,
 }
 
 impl Snapshot {
@@ -260,12 +278,16 @@ impl Snapshot {
             overlaid,
             intents: Intents::default(),
             kinds: Kinds::default(),
+            programs: Programs::default(),
             cluster_scoped: cluster.cluster_scoped(),
             relations: BTreeMap::new(),
             definitions: cluster.definitions(),
             issuers: Default::default(),
             paged,
             with_pages: HashSet::new(),
+            presents: BTreeMap::new(),
+            presented: Vec::new(),
+            runners: Vec::new(),
         };
         snapshot
             .derive(|on_machines| transect_ground::storage::Storage::read(cluster, on_machines));
@@ -282,6 +304,7 @@ impl Snapshot {
             &self.resources.layers.names().collect::<Vec<_>>(),
         );
         self.kinds.find_shapes(&self.resources.shapes());
+        self.programs = Programs::resolve(&self.resources.programs, &self.kinds);
         self.intents = Intents::read(
             &self.described(),
             &self.resources.intents,
@@ -295,6 +318,10 @@ impl Snapshot {
         self.relations = self.read_relations();
         self.with_pages = self.objects_with_pages();
         self.issuers = self.tls_issuers();
+        self.presented = self.read_presented();
+        let runners = self.read_runners(&self.workloads());
+        self.runners = runners;
+        self.presents = self.read_presents();
     }
 
     /// The inputs for the traffic numbers on each `Ingress`: the results
@@ -326,59 +353,6 @@ impl Snapshot {
             relations: &self.relations,
             gitops: &self.gitops,
             plurals: &self.plurals,
-        }
-    }
-
-    /// A snapshot of a cluster with nothing in it, for a test or the
-    /// fixture to fill.
-    #[cfg(any(test, debug_assertions))]
-    pub fn empty() -> Self {
-        Self {
-            namespaces: Vec::new(),
-            nodes: Vec::new(),
-            pods: Vec::new(),
-            deployments: Vec::new(),
-            stateful_sets: Vec::new(),
-            daemon_sets: Vec::new(),
-            cron_jobs: Vec::new(),
-            budgets: Vec::new(),
-            network_policies: Vec::new(),
-            services: Vec::new(),
-            ingresses: Vec::new(),
-            endpoint_slices: Vec::new(),
-            replica_sets: Vec::new(),
-            controller_revisions: Vec::new(),
-            jobs: Vec::new(),
-            config_maps: Vec::new(),
-            secrets: None,
-            ownership: Ownership::default(),
-            applied: Applied::default(),
-            gitops: GitOps::off(transect_supply::gitops::Off::NoKnowledge),
-            plurals: Plurals::default(),
-            storage: Storage::default(),
-            csi_drivers: Vec::new(),
-            outsides: Outsides::default(),
-            addresses: Addresses::default(),
-            grants: Grants::default(),
-            status_managers: StatusManagers::default(),
-            devices: Devices::default(),
-            images: Arc::default(),
-            logs: Counted::default(),
-            alerts: alerts::Reading::Off,
-            entry: Default::default(),
-            volumes_used: Default::default(),
-            prometheus_pod: None,
-            custom: Vec::new(),
-            resources: Arc::default(),
-            overlaid: Overlaid::default(),
-            intents: Intents::default(),
-            kinds: Kinds::default(),
-            cluster_scoped: ClusterScoped::default(),
-            relations: BTreeMap::new(),
-            definitions: Definitions::default(),
-            issuers: Default::default(),
-            paged: Paged::default(),
-            with_pages: HashSet::new(),
         }
     }
 

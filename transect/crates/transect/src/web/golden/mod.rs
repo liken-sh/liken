@@ -201,6 +201,32 @@ fn diff(then: &str, now: &str) -> String {
     "git-repository",
     "/namespaces/acme-ops/gitrepositories.source.toolkit.fluxcd.io/ledger-git"
 )]
+#[case::a_mandate(
+    "mandate",
+    "/namespaces/acme-greenhouse/mandates.simmer.foo/greenhouse"
+)]
+#[case::a_programs_workload("program", "/namespaces/acme-agents/deployments/lanyard-api")]
+#[case::a_hooks_account(
+    "hook-account",
+    "/namespaces/acme-greenhouse/serviceaccounts/simmer-greenhouse--status"
+)]
+#[case::a_dutys_account(
+    "duty-account",
+    "/namespaces/acme-greenhouse/serviceaccounts/simmer-greenhouse--trim"
+)]
+#[case::a_sequence(
+    "sequence",
+    "/namespaces/acme-garden/mandates.agents.example.test/garden"
+)]
+#[case::rows_of_a_running_session(
+    "rows",
+    "/namespaces/acme-garden/sessions.agents.example.test/garden-tend"
+)]
+#[case::rows_of_a_failed_session_whose_jobs_are_gone(
+    "rows-gone",
+    "/namespaces/acme-garden/sessions.agents.example.test/garden-prune"
+)]
+#[case::objects_of_a_kind_side_by_side("side-by-side", "/kinds/mandates.agents.example.test")]
 fn golden_text(#[case] name: &str, #[case] url: &str) {
     let now = text::visible(&render(url));
     let path = golden(name);

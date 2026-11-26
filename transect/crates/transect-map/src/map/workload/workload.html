@@ -46,7 +46,7 @@
 <span class="flow-faint flow-traffic">{% call off::line(note) %}{% endcall %}</span>
 {%- endif %}
 {%- if let Some(controller) = ingress.controller %}
-<span class="flow-faint"{% if ingress.controller_guessed %} title="A guess: no IngressController declares the controller its class names, and this workload takes the cluster's web traffic and is named for the class, or is the only one that takes it."{% endif %}>served by {% call links::object_link(controller.text, controller.href, "") %}{% endcall %}{% if ingress.controller_guessed %}?{% endif %}</span>
+<span class="flow-faint"{% if ingress.controller_guessed %} title="A guess: no IngressController declares the controller its class names, and this workload takes the cluster's web traffic and is named for the class, or is the only one that takes it."{% endif %}>served by {% call links::object_link(controller.text, controller.href, "") %}{% endcall %}{% if ingress.controller_guessed %}, a guess{% endif %}</span>
 {%- endif %}</div>
 {%- endfor %}
 </div>
@@ -126,6 +126,44 @@
 {%- let runs = card.runs() %}
 {%- include "images/runs.html" %}
 {% include "objects/manages.html" %}
+{#- What a program that the workload runs is for, each audience whose
+    tokens it accepts, and the objects whose pod templates present such
+    a token: its callers, whether or not a pod of theirs runs now. -#}
+{%- for program in programs %}
+<section class="needs program" aria-label="Program {{ program.name }}">
+<span class="row-label">Program</span>
+<span class="need"><b>{{ program.name }}</b></span>{% call provenance::mark(program.mark) %}{% endcall %}
+{%- if let Some(summary) = program.summary %}
+<span class="need-secrets">{{ summary }}</span>
+{%- endif %}
+</section>
+{%- for accepted in program.accepts %}
+<section class="needs program-callers" aria-label="Callers for {{ accepted.audience }}">
+<span class="row-label">Callers</span>
+<div class="callers">
+<span class="need-secrets">{{ accepted.verb }}, as <code>{{ accepted.audience }}</code></span>
+{%- for callers in accepted.groups %}
+<div class="callers-group">
+{%- if let Some(head) = callers.head %}
+{%- if let Some(href) = head.href %}<a class="need" href="{{ href }}" hx-get="{{ href }}">{{ head.text }}</a>{% else %}<span class="need">{{ head.text }}</span>{% endif %}
+{%- endif %}
+{%- if let Some(lead) = callers.lead %}<span class="need-secrets">{{ lead }}</span>{% endif %}
+{%- for calling in callers.members %}
+{%- if let Some(href) = calling.href %}
+<a class="need" href="{{ href }}" hx-get="{{ href }}">{{ calling.text }}</a>
+{%- else %}
+<span class="need">{{ calling.text }}</span>
+{%- endif %}
+{%- endfor %}
+</div>
+{%- endfor %}
+{%- if accepted.uncalled() %}
+<span class="need-secrets">no template presents it</span>
+{%- endif %}
+</div>
+</section>
+{%- endfor %}
+{%- endfor %}
 {%- if !guards.is_empty() %}
 <section class="guards" aria-label="Guards">
 <span class="row-label">Guards</span>

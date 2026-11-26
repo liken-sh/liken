@@ -178,6 +178,12 @@ pub fn room_page(room: &str, stock: &Stock, standing: Standing) -> KnownPage {
         readings: &|_, _| Vec::new(),
         subjects: &subject,
         named_by: &named_by,
+        controller: &|_| None,
+        top: &|object| object.clone(),
+        owned: &|_, _| Vec::new(),
+        presents: &crate::presents::Presents::default(),
+        data: &serde_json::Value::Null,
+        logs: &|_| None,
         ends: &ends,
         judged: None,
     };

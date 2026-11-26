@@ -6,7 +6,7 @@ Search /
 esc
 data acme-ledger overview access
 apps
-acme-shop
+acme-garden · acme-greenhouse · acme-shop
 data
 acme-ledger 6 workloads · 8 pods · 6 volumes
 Ledger journal
@@ -33,9 +33,9 @@ has not run yet
 Resources
 ImageReports statefulset-ledger-db-main
 operators
-acme-promoter
+acme-gardener · acme-promoter
 platform
-acme-ops
+acme-agents · acme-ops
 Machines
 node-beta · 5 pods node-alpha · 3 pods
 Ground

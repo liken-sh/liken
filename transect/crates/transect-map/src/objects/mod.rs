@@ -21,7 +21,8 @@ use kube::core::ApiResource;
 pub use board::{Center, Nesting, ObjectBoard, Part};
 pub use card::ObjectCard;
 pub use kind::{
-    ApiGroup, KindCard, KindObject, KindPage, KindRow, KindsPage, Manages, first_sentence,
+    ApiGroup, KindCard, KindObject, KindPage, KindRow, KindsPage, Manages, Socket, first_sentence,
+    socket_header,
 };
 pub use list::ListPage;
 pub use page::{Condition, ObjectPage, conditions};

@@ -386,3 +386,33 @@
 }
 
 .board-part-name { font-weight: 600; }
+
+/* A socket in an audience column of the objects of a kind: filled when
+   the object's pod templates present the audience, and an empty ring
+   when they do not.  Neither is a fault, so both are gray. */
+.kind-socket {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--ink-faint);
+  border-radius: 50%;
+  vertical-align: -1px;
+}
+
+.kind-socket-filled { background: var(--ink-muted); border-color: var(--ink-muted); }
+
+/* A column of an audience that no loaded knowledge explains: a dashed
+   ring, and a filled socket in the faint ink, so it does not read as a
+   program that works. */
+.kind-socket-unknown { border-style: dashed; border-color: var(--ink-faint); }
+.kind-socket-filled.kind-socket-unknown { background: var(--ink-faint); opacity: 0.6; }
+
+.kind-socket-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
