@@ -858,6 +858,32 @@ type PlayPresentation struct {
 	// probe, which media-operator's display reads to name the format of an
 	// audio track that mpv is not decoding. The operator carries it unread.
 	Audio []PlayAudio `json:"audio,omitempty"`
+	// Video is the frame and the active area of each video stream of the
+	// item's file, from the probe, which media-operator's display reads to
+	// put a subtitle cue of two or more lines in the black rows of a frame
+	// that has its letterbox bars in it. The operator carries it unread.
+	Video []PlayVideo `json:"video,omitempty"`
+}
+
+// PlayVideo is one video stream of a file, in media-operator's own field
+// names. Stream is the container's index of the stream, the index ffprobe
+// reports and mpv calls ff-index. Width and Height are the size of its
+// frame, in which ActiveArea is measured. ActiveArea is nil where the probe
+// has not measured the stream or its samples did not agree.
+type PlayVideo struct {
+	Stream     int             `json:"stream"`
+	Width      int             `json:"width,omitempty"`
+	Height     int             `json:"height,omitempty"`
+	ActiveArea *PlayActiveArea `json:"activeArea,omitempty"`
+}
+
+// PlayActiveArea is the rectangle of a video's frame that contains picture,
+// in pixels of the frame: its first column and row, and its size.
+type PlayActiveArea struct {
+	Left   int `json:"left"`
+	Top    int `json:"top"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
 }
 
 // PlayAudio is one audio stream of a file, in media-operator's own field

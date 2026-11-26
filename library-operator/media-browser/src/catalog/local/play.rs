@@ -112,8 +112,10 @@ fn logoed(
 // skip an intro and place the credits, with the spans of a file the
 // appearances fact found faces in, so the display can show who is on
 // screen when the film pauses, with the file's subtitle tracks and their
-// event counts, so the display can choose a track by its role, and with the
-// format of each audio stream, so the display can name each audio track.
+// event counts, so the display can choose a track by its role, with the
+// format of each audio stream, so the display can name each audio track, and
+// with the active area of each video stream, so the display can put a cue of
+// two lines in the black rows of a frame.
 fn marked(
     connection: &Connection,
     library: &str,
@@ -127,6 +129,7 @@ fn marked(
         item.presentation.marks = marks(connection, library, &item.path)?;
         item.presentation.subtitles = subtitles::subtitles(connection, library, &item.path)?;
         item.presentation.audio = streams::audio(connection, library, &item.path)?;
+        item.presentation.video = streams::video(connection, library, &item.path)?;
     }
     Ok(items)
 }

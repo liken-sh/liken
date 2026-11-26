@@ -1,0 +1,20 @@
+frame:0    pts:-5936   pts_time:-5.936
+lavfi.cropdetect.x1=0
+lavfi.cropdetect.x2=1919
+lavfi.cropdetect.y1=131
+lavfi.cropdetect.y2=947
+lavfi.cropdetect.w=1920
+lavfi.cropdetect.h=816
+lavfi.cropdetect.x=0
+lavfi.cropdetect.y=132
+lavfi.cropdetect.limit=0.094000
+frame:1    pts:-5894   pts_time:-5.894
+lavfi.cropdetect.x1=0
+lavfi.cropdetect.x2=1919
+lavfi.cropdetect.y1=131
+lavfi.cropdetect.y2=947
+lavfi.cropdetect.w=1920
+lavfi.cropdetect.h=816
+lavfi.cropdetect.x=0
+lavfi.cropdetect.y=132
+lavfi.cropdetect.limit=0.094000

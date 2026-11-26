@@ -5,6 +5,11 @@ has run on a cluster. A drill on `stick-1` has not checked the copy on
 a real screen, and nobody has measured how long the read of a film's
 cues takes over the cluster's network share.
 
+Changed on 2026-11-26: [plan 50](50-a-two-line-cue-goes-in-the-encoded-bar.md)
+adds to the bar the black rows inside a frame that has its letterbox
+bars in the encoded picture, from the active area that
+`library-operator`'s probe measures.
+
 [Plan 46](46-the-display-places-every-subtitle-track.md) ends the last
 line of every subtitle cue on the house row, and its "Limits" section
 records the problem that this plan solves for text tracks: a two-line

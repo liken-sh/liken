@@ -19,6 +19,7 @@ mod series;
 mod sorts;
 mod studios;
 mod subtitles;
+mod video;
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -59,6 +59,13 @@ type probedFile struct {
 	// be wrong. The probe writes measured: true beside the version, so a
 	// build that reads only measured still reads the record as measured.
 	Measurement int `yaml:"measurement,omitempty"`
+	// The version of the measurement of the active area of each video
+	// stream, activeAreaMeasurement in activearea.go. A record of a lower
+	// version that holds a video stream predates the measurement, so the
+	// walk opens the probe gap again for it. A video stream with no area in
+	// a record of the current version gave samples that did not agree, and
+	// the probe does not read it again.
+	ActiveAreaMeasurement int `yaml:"activeAreaMeasurement,omitempty"`
 	// The change time of the file when a probe found it at a size the record
 	// before it did not hold, which is when a new file took this path. An
 	// attempt of a file fact made before it, and a thumbnail or a tile
@@ -98,6 +105,10 @@ type probedStream struct {
 	// sample of its cues. It is absent on every other stream, and on an
 	// image stream that gave too few cues to measure.
 	Image *probedImage `yaml:"image,omitempty"`
+	// The rectangle of a video stream's frame that contains picture, in
+	// pixels of the frame. It is absent on every other stream, and on a
+	// video stream whose samples did not agree.
+	ActiveArea *probedActiveArea `yaml:"activeArea,omitempty"`
 }
 
 // The measurement of one image subtitle stream, in rows of the stream's own

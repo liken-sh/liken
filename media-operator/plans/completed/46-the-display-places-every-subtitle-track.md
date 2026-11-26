@@ -221,7 +221,11 @@ and within 2 rows for all of them. Every property took effect within
 - **An ASS cue on the left or the right uses the script's side
   margin**, which `force` does not replace.
 - **Bars that are part of the encoded picture** look like picture to
-  mpv, so nothing here moves a cue into them.
+  mpv, so nothing here moves a cue into them. On 2026-11-26
+  [plan 50](50-a-two-line-cue-goes-in-the-encoded-bar.md) moved a
+  two-line cue of a text track into them, from the active area that
+  `library-operator`'s probe measures. A two-line cue of an image track
+  still covers the foot of the picture.
 - **HDR.** The mock-up did not measure the brightness of the subtitle
   surface on an HDR title.
 

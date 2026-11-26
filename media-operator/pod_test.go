@@ -384,6 +384,27 @@ func TestBuildPodBakesTheFormatOfEachAudioStream(t *testing.T) {
 	mustMatch(t, got, want)
 }
 
+// The frame and the active area of each video stream reach the display as
+// the library wrote them, and a stream with no area carries none. The
+// operator copies the entries and does not read them.
+func TestBuildPodBakesTheActiveAreaOfEachVideoStream(t *testing.T) {
+	play := testPlay()
+	play.Spec.Items = []PlayItem{{
+		URI: "nfs://nas.example/export/films/film.mkv",
+		Presentation: &Presentation{Video: []PlayVideo{
+			{Stream: 0, Width: 1920, Height: 1080, ActiveArea: &PlayActiveArea{Left: 0, Top: 131, Width: 1920, Height: 817}},
+			{Stream: 1, Width: 1920, Height: 1080},
+		}},
+	}}
+	claim := buildClaim(play, testPlayer())
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, nil, "")
+
+	got := envValue(initContainer(t, pod, commandContainer), presentationsVariable)
+	want := `[{"video":[{"stream":0,"width":1920,"height":1080,"activeArea":{"left":0,"top":131,"width":1920,"height":817}},` +
+		`{"stream":1,"width":1920,"height":1080}]}]`
+	mustMatch(t, got, want)
+}
+
 // The marks reach the display as the library wrote them: every
 // candidate in order, a missing start or end still missing, and an
 // unknown kind still present. The display interprets the marks, and the

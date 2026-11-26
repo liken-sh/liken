@@ -46,6 +46,7 @@ fn streams() -> Streams {
             { "stream": 1, "codec": "eac3", "profile": "Dolby Digital Plus + Dolby Atmos",
               "channels": 6, "layout": "5.1(side)" },
         ])),
+        None,
     )
 }
 
@@ -132,6 +133,7 @@ fn with_subtitles_off_the_language_of_the_audio_comes_first() {
 fn an_empty_track_is_listed_only_while_it_plays() {
     let block = Streams::parse(
         Some(&json!([{ "stream": 1, "events": 0 }, { "stream": 2, "events": 0 }])),
+        None,
         None,
     );
     let mut film = Film::default();

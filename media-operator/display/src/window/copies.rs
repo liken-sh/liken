@@ -103,9 +103,9 @@ pub(super) struct Copies {
     ready: Option<(Original, Arc<Copy>)>,
     /// The original whose read or write failed, so it is not tried again.
     failed: Option<Original>,
-    /// The script of the ready copy for the screen it was built for, so a
-    /// tick of a fade does not build it again.
-    pub(super) script: Option<(Screen, Arc<String>)>,
+    /// The script of the ready copy for the screen and the encoded bar it
+    /// was built for, so a tick of a fade does not build it again.
+    pub(super) script: Option<(Bars, Arc<String>)>,
     writing: Option<Writing>,
     sent: Option<Sent>,
     /// The `track-list` count when the display last selected the copy.
@@ -160,6 +160,15 @@ impl Copies {
     }
 }
 
+/// The lower bar that a copy's margins are built for: mpv's
+/// `osd-dimensions`, and the share of the selected video track's frame that
+/// is black below its active area, from the item's `presentation.video`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Bars {
+    screen: Screen,
+    encoded: f64,
+}
+
 fn command(words: Vec<Value>) -> String {
     crate::ipc::line(&words)
 }
@@ -189,7 +198,11 @@ impl Display {
             && *ready == original
         {
             let copy = Arc::clone(copy);
-            tasks.push(self.give_copy(&track, &original, &copy, screen));
+            let bars = Bars {
+                screen,
+                encoded: self.encoded_bar(),
+            };
+            tasks.push(self.give_copy(&track, &original, &copy, bars));
             return Task::batch(tasks);
         }
         let copies = &mut self.copies;
@@ -272,21 +285,31 @@ impl Display {
         self.say(line);
     }
 
-    /// Writes the script of the copy for `screen`, gives mpv the file once
+    /// The share of the selected video track's frame that is black below
+    /// its active area, or 0 when the item's block has no area for it.
+    fn encoded_bar(&self) -> f64 {
+        let streams = self.presentation.streams(&self.film);
+        self.film
+            .tracks_of("video")
+            .find(|track| track.selected)
+            .map_or(0.0, |track| streams.encoded_bar(track))
+    }
+
+    /// Writes the script of the copy for `bars`, gives mpv the file once
     /// it is written, and selects the copy while mpv draws the original.
     fn give_copy(
         &mut self,
         track: &Track,
         original: &Original,
         copy: &Copy,
-        screen: Screen,
+        bars: Bars,
     ) -> Task<Message> {
         let copies = &mut self.copies;
         let script = match &copies.script {
-            Some((built, script)) if *built == screen => Arc::clone(script),
+            Some((built, script)) if *built == bars => Arc::clone(script),
             _ => {
-                let script = Arc::new(copy.script(Some(&screen)));
-                copies.script = Some((screen, Arc::clone(&script)));
+                let script = Arc::new(copy.script(Some(&bars.screen), bars.encoded));
+                copies.script = Some((bars, Arc::clone(&script)));
                 script
             }
         };

@@ -65,7 +65,11 @@ impl Presentation {
         self.second = crate::header::second_line(self);
         self.marks = Marks::parse(self.field("marks"));
         self.measured = measurement::parse(self.field("subtitles"));
-        self.streams = Streams::parse(self.field("subtitles"), self.field("audio"));
+        self.streams = Streams::parse(
+            self.field("subtitles"),
+            self.field("audio"),
+            self.field("video"),
+        );
     }
 
     /// Records the `playlist-pos` that mpv reported when the block

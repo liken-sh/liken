@@ -499,6 +499,36 @@ type Presentation struct {
 	// an entry to a track of mpv's `track-list` by `ff-index`. The operator
 	// copies the entries to the display and does not read them.
 	Audio []PlayAudio `json:"audio,omitempty"`
+
+	// Video is the frame and the active area of each video stream of the
+	// file, from the library's probe. A film stored with its letterbox bars
+	// in the frame has black rows that mpv draws as picture, and the display
+	// puts a subtitle cue of two or more lines in them. The display matches
+	// an entry to the selected video track of mpv's `track-list` by
+	// `ff-index`. The operator copies the entries to the display and does
+	// not read them.
+	Video []PlayVideo `json:"video,omitempty"`
+}
+
+// PlayVideo is one video stream. `stream` is the stream index in the
+// container, which ffprobe reports as the index and mpv as `ff-index`.
+// `width` and `height` are the size of its frame, in which `activeArea` is
+// measured. `activeArea` is nil where the library has no area for the
+// stream.
+type PlayVideo struct {
+	Stream     int             `json:"stream"`
+	Width      int             `json:"width,omitempty"`
+	Height     int             `json:"height,omitempty"`
+	ActiveArea *PlayActiveArea `json:"activeArea,omitempty"`
+}
+
+// PlayActiveArea is the rectangle of a video's frame that contains picture,
+// in pixels of the frame: its first column and row, and its size.
+type PlayActiveArea struct {
+	Left   int `json:"left"`
+	Top    int `json:"top"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
 }
 
 // PlayAudio is the format of one audio stream, in ffprobe's own values.

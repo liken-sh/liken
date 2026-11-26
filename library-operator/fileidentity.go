@@ -37,9 +37,10 @@ type fileIdentity struct {
 	// and no other fact does.
 	probeEarlier int64
 	// The record lacks a fact that the probe now writes: it holds a subtitle
-	// track and predates the event counts, or it holds an image subtitle
-	// stream and predates the current measurement. So the probe's found
-	// attempt at it no longer closes the probe gap.
+	// track and predates the event counts, it holds an image subtitle stream
+	// and predates the current measurement, or it holds a video stream and
+	// predates the current measurement of the active area. So the probe's
+	// found attempt at it no longer closes the probe gap.
 	incomplete bool
 }
 
@@ -51,7 +52,7 @@ type fileIdentity struct {
 // A record of size zero holds no size to compare, so it opens nothing. The
 // probe never writes one for a file with bytes in it.
 func identityOf(record probedFile, size, modified int64, changed func() int64) fileIdentity {
-	identity := fileIdentity{recorded: record.Size, found: size, incomplete: record.uncounted() || record.unmeasured()}
+	identity := fileIdentity{recorded: record.Size, found: size, incomplete: record.uncounted() || record.unmeasured() || record.lacksActiveArea()}
 	if !record.Replaced.IsZero() {
 		identity.earlier = record.Replaced.Unix()
 	}
@@ -158,6 +159,14 @@ func (p probedFile) unmeasured() bool {
 	return !p.Measured || p.earlierImages()
 }
 
+// Whether a record holds a video stream and predates the current measurement
+// of the active area. A record of a sound file or of a text subtitle file has
+// no frame to measure.
+func (p probedFile) lacksActiveArea() bool {
+	return p.ActiveAreaMeasurement < activeAreaMeasurement &&
+		slices.ContainsFunc(p.Streams, func(s probedStream) bool { return s.Kind == fileTypeVideo })
+}
+
 // Whether an earlier version of the measurement wrote an image block of the
 // record. A reader does not trust such a block, and the probe measures the
 // stream again. A record of an earlier version with no image block has
@@ -201,4 +210,36 @@ func (p probedFile) replacing(held probedFile, found bool, changed func() int64)
 		p.Replaced = time.Unix(changed(), 0).UTC()
 	}
 	return p
+}
+
+// keepCurrentMeasurements copies into a fresh record each measurement that
+// the held record has at its current version, when the held record describes
+// the same file, by its size and modified time, with the same streams. It
+// says which of the two measurements it kept: the image subtitle measurement
+// and the active areas. A record of another file, or of a file whose streams
+// changed, keeps nothing, and the probe measures it again.
+func (p *probedFile) keepCurrentMeasurements(held probedFile, found bool) (images, areas bool) {
+	if !found || held.Size != p.Size || held.Modified != p.Modified || len(held.Streams) != len(p.Streams) {
+		return false, false
+	}
+	for index, stream := range held.Streams {
+		if stream.Kind != p.Streams[index].Kind || stream.Codec != p.Streams[index].Codec {
+			return false, false
+		}
+	}
+	if held.Measured && held.Measurement == imageMeasurement {
+		for index, stream := range held.Streams {
+			p.Streams[index].Image = stream.Image
+		}
+		p.Measured, p.Measurement = true, imageMeasurement
+		images = true
+	}
+	if held.ActiveAreaMeasurement == activeAreaMeasurement {
+		for index, stream := range held.Streams {
+			p.Streams[index].ActiveArea = stream.ActiveArea
+		}
+		p.ActiveAreaMeasurement = activeAreaMeasurement
+		areas = true
+	}
+	return images, areas
 }

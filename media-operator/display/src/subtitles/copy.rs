@@ -124,8 +124,10 @@ impl Copy {
         }
     }
 
-    /// The script for `screen`.
-    pub fn script(&self, screen: Option<&Screen>) -> String {
+    /// The script for `screen`. `encoded` is the share of the frame's
+    /// height that is black below its active area, which adds to the
+    /// screen's lower bar.
+    pub fn script(&self, screen: Option<&Screen>, encoded: f64) -> String {
         let header = match self.converted {
             true => converted::header(screen),
             false => self.header.clone(),
@@ -155,7 +157,7 @@ impl Copy {
         for event in &self.events {
             let margin = match (screen, &rest, event.placed(&raised)) {
                 (Some(screen), Some(rest), false) => {
-                    cue::margin(rest, screen, cue::lines(&event.text))
+                    cue::margin(rest, screen, encoded, cue::lines(&event.text))
                 }
                 _ => 0,
             };
@@ -241,7 +243,7 @@ mod tests {
             Dialogue::text(500, 2000, "One line".to_string()),
             Dialogue::text(2500, 4000, "The first line\\Nand the second".to_string()),
         ]);
-        let script = copy.script(Some(&scope()));
+        let script = copy.script(Some(&scope()), 0.0);
         let events: Vec<&str> = script
             .lines()
             .filter(|line| line.starts_with("Dialogue:"))
@@ -260,7 +262,10 @@ mod tests {
     #[test]
     fn without_a_screen_every_cue_keeps_the_style_margin() {
         let copy = Copy::converted(vec![Dialogue::text(0, 1000, "Two\\Nlines".to_string())]);
-        assert!(copy.script(None).contains("Default,,0,0,0,,Two\\Nlines"));
+        assert!(
+            copy.script(None, 0.0)
+                .contains("Default,,0,0,0,,Two\\Nlines")
+        );
     }
 
     /// A script's own header and events are kept. Only an event at the foot
@@ -288,7 +293,7 @@ mod tests {
                 two("Default", "0", "{\\an8}Raised\\Nlines"),
             ],
         };
-        let script = copy.script(Some(&scope()));
+        let script = copy.script(Some(&scope()), 0.0);
         let margins: Vec<&str> = script
             .lines()
             .filter_map(|line| line.strip_prefix("Dialogue: "))

@@ -117,6 +117,7 @@ What the display shows about the item. A library that supplies the item sets the
 | <span id="specitemspresentation--marks"></span>`marks` | [\[\]object](#specitemspresentationmarks) | no | Where the intro, the recap, the credits, a scene after the credits, and a preview are in the file. The list can hold several spans of one kind, and the display merges spans that overlap into one, from their median start and median end. While the playhead is in an intro or a recap, the display shows a skip control. It shows over the bare video for the first 10 seconds of the span, and select there skips. After that it shows only with the OSD, which up or down opens with the control focused. Credits count only when they start in the second half of the item. A scene after the credits is a `post-credits` span or the gap between two `credits` spans, and during the credits before it the display offers to skip to the scene. Select takes that offer only while the OSD is visible. The marks also set when the up-next card appears, as the `next` field describes. |
 | <span id="specitemspresentation--subtitles"></span>`subtitles` | [\[\]object](#specitemspresentationsubtitles) | no | The number of subtitle events in each subtitle track of the item, which library-operator writes from its probe because mpv does not report it. The command sidecar uses the counts to choose a subtitle track when the file's flags are wrong. It never chooses a track with no events. It treats a track with fewer than a fifth as many events as the largest track in its language as forced, even when no flag or title says so. A track with no entry here is judged by its flags, title, and file name alone. An entry for an image track can also carry `image`, the measurement that the display uses to place the track. |
 | <span id="specitemspresentation--audio"></span>`audio` | [\[\]object](#specitemspresentationaudio) | no | The format of each audio stream of the item's file. library-operator's media browser writes it from what library-operator's probe read of the file. mpv reports the profile and the channel layout only of the audio track that it decodes, so the display reads this list to name the format of every other audio track, such as `E-AC3 Atmos 5.1`. A file that the probe has not read gets no list, and the display names each track from what mpv reports. |
+| <span id="specitemspresentation--video"></span>`video` | [\[\]object](#specitemspresentationvideo) | no | The frame and the active area of each video stream of the item's file. library-operator's media browser writes it from what library-operator's probe measured of the file. A film stored with its letterbox bars in the frame, such as a film of 2.39:1 in a 1920x1080 frame, has black rows that mpv draws as picture. The display adds the black rows below the active area of the selected video track to the screen's lower bar, and puts a subtitle cue of two or more lines in that bar when the bar can hold it. A file that the probe has not read gets no list, and the display uses the bar that mpv reports. |
 
 #### spec.items[].presentation.marks[]
 
@@ -161,6 +162,28 @@ The format of one audio stream, in ffprobe's own values.
 | <span id="specitemspresentationaudio--profile"></span>`profile` | string | no | ffprobe's profile, such as `Dolby Digital Plus + Dolby Atmos` or `DTS-HD MA`. Omit it when ffprobe reports none. |
 | <span id="specitemspresentationaudio--channels"></span>`channels` | integer | no | The number of channels. |
 | <span id="specitemspresentationaudio--layout"></span>`layout` | string | no | ffprobe's channel layout, such as `5.1(side)` or `stereo`. Omit it when ffprobe reports none. |
+
+#### spec.items[].presentation.video[]
+
+One video stream and the rectangle of its frame that contains picture.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specitemspresentationvideo--stream"></span>`stream` | integer | yes | The index of the stream in its container: the stream index from ffprobe, which is mpv's `ff-index`. |
+| <span id="specitemspresentationvideo--width"></span>`width` | integer | no | The width of the stream's frame, in pixels. |
+| <span id="specitemspresentationvideo--height"></span>`height` | integer | no | The height of the stream's frame, in pixels. The display needs it to use `activeArea`. |
+| <span id="specitemspresentationvideo--activearea"></span>`activeArea` | [object](#specitemspresentationvideoactivearea) | no | The rectangle of the frame that contains picture, in pixels of the frame. Each pixel outside it is black on every frame that library-operator sampled. Omit it when the stream is not measured, and the display uses the bar that mpv reports. |
+
+#### spec.items[].presentation.video[].activeArea
+
+The rectangle of the frame that contains picture, in pixels of the frame. Each pixel outside it is black on every frame that library-operator sampled. Omit it when the stream is not measured, and the display uses the bar that mpv reports.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specitemspresentationvideoactivearea--left"></span>`left` | integer | yes | The first column of the area. |
+| <span id="specitemspresentationvideoactivearea--top"></span>`top` | integer | yes | The first row of the area. |
+| <span id="specitemspresentationvideoactivearea--width"></span>`width` | integer | yes | The width of the area, in pixels. |
+| <span id="specitemspresentationvideoactivearea--height"></span>`height` | integer | yes | The height of the area, in pixels. |
 
 ### spec.next
 
@@ -307,6 +330,22 @@ no cue moves. A cue of one line of the copy is drawn on the same rows as
 the same cue of the original. The track panel shows the original track,
 and the copy has its title and language.
 
+Some films have their bars inside the encoded picture, such as a film of
+2.39:1 stored as a 1920x1080 frame. `mpv` draws those black rows as
+picture and reports no bar. `library-operator`'s probe measures the
+active area of each video once, the rectangle of the frame that
+contains picture, and the media browser sends it in
+`items[].presentation.video[].activeArea`. The display adds the black
+rows below the active area of the selected video track to the bar that
+`mpv` reports, and places a cue of two or more lines in that bar as
+above. A video with no `activeArea`, which the probe has not measured or
+whose samples did not agree, keeps the bar that `mpv` reports. A film
+whose shape changes, such as one with IMAX scenes, usually has the whole
+frame as its active area, so in its scenes of 2.39:1 a cue of two lines
+still crosses into the foot of the picture. When the probe's samples
+missed its IMAX scenes, the film has the area of its wider scenes, and
+in an IMAX scene a cue of two lines covers the foot of the picture.
+
 The display reads the cues of a SubRip, ASS, or WebVTT track in a
 Matroska file through the file's index, of a `mov_text` track in an MP4
 file through its sample table, and of a SubRip, ASS, SSA, WebVTT, or
@@ -349,8 +388,9 @@ These cases still differ from the house row:
   puts it somewhere else.
 - A script that places an ASS cue on the left or the right keeps its
   side margin.
-- Bars that are part of the encoded picture look like picture to
-  `mpv`, so no track moves a cue into them.
+- Bars that are part of the encoded picture take a cue of two or more
+  lines of a text track only when the item's `presentation.video` has
+  the frame's active area.
 
 ## Events
 

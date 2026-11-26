@@ -332,7 +332,7 @@ fn a_nul_in_the_header_ends_the_header() {
         copy.header,
         "[Script Info]\nPlayResY: 288\n\n[V4+ Styles]\nStyle: Default\n"
     );
-    let script = copy.script(None);
+    let script = copy.script(None, 0.0);
     assert!(!script.contains('\0'));
     assert!(script.contains("\n[Events]\nFormat: Layer,"));
 }

@@ -380,3 +380,38 @@ fn the_script_is_built_once_for_each_screen() {
     );
     assert_eq!(files(&dir.0), ["media-display-copy.ff-index-2.1.ass"]);
 }
+
+/// A 1920x1080 frame of a 2.39:1 film on a 1920x1080 screen. mpv reports no
+/// bar, and the item's block gives the frame's active area, so a cue of two
+/// lines gets the margin of the black rows below the area. Before the
+/// block arrives, the cue keeps the style's margin.
+#[test]
+fn a_cue_of_two_lines_takes_the_margin_of_the_black_rows_of_the_frame() {
+    let (mut display, mut receiver, _dir) = display_in("encoded");
+    let _ = display.update(property("path", json!(PATH)));
+    let _ = display.update(property("demuxer-start-time", json!(0.0)));
+    let _ = display.update(property(
+        "osd-dimensions",
+        json!({ "w": 1920, "h": 1080, "mt": 0, "mb": 0, "ml": 0, "mr": 0 }),
+    ));
+    let _ = display.update(property(
+        "track-list",
+        json!([
+            { "id": 1, "type": "video", "ff-index": 0, "selected": true },
+            { "id": 1, "type": "sub", "codec": "subrip", "ff-index": 2, "lang": "eng", "selected": true },
+        ]),
+    ));
+    copied(&mut display, 1, Ok(copy()));
+    let first = script(&added(&commands(sent(&mut receiver))));
+    assert!(first.contains(",Default,,0,0,0,,The first\\Nand the second\n"));
+
+    let _ = display.update(Message::Mpv(crate::ipc::Event::Message(vec![
+        "presentation".to_string(),
+        r#"{"video":[{"stream":0,"width":1920,"height":1080,
+            "activeArea":{"left":0,"top":138,"width":1920,"height":804}}]}"#
+            .to_string(),
+    ])));
+    let second = script(&added(&commands(sent(&mut receiver))));
+    assert!(second.contains(",Default,,0,0,4,,The first\\Nand the second\n"));
+    assert!(second.contains("Dialogue: 0,0:00:00.50,0:00:02.00,Default,,0,0,0,,One line\n"));
+}

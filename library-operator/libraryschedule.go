@@ -46,12 +46,14 @@ const (
 // liken-1 ran for 7 minutes 53 seconds: a full walk of a large movies
 // library onto an empty catalog claim, where the agent's first sync took
 // most of the time.
-// The trailer files start no title after phaseTimeLimit, 15 minutes, and
-// then finish the title they have, and one trailer file can take
-// trailerPullTimeout and then trailerRemuxTimeout, 20 minutes. So a healthy
-// Job ends in about 15 + 20 minutes after its phases start, plus the sync
-// before them and the hand-off after them. Two hours leaves room for all of
-// it, and for a probe of a slow volume. A Job that Kubernetes retries after a failed pod has less time for its
+// The trailer files and the probe start no title or file after
+// phaseTimeLimit, 15 minutes, and then finish the one they have. One trailer
+// file can take trailerPullTimeout and then trailerRemuxTimeout, 20 minutes,
+// and one probe of a file takes at most four minutes: a minute each for the
+// header read, for two subtitle windows, and for the samples. So a
+// healthy Job ends in about 15 + 20 minutes after its phases start, plus the
+// sync before them and the hand-off after them. Two hours leaves room for all
+// of it, and for a slow volume. A Job that Kubernetes retries after a failed pod has less time for its
 // last pod, because the deadline counts every pod of the Job.
 const libraryJobDeadline = 2 * time.Hour
 

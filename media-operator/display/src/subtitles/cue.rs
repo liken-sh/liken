@@ -5,6 +5,11 @@
 //! a margin of its own. libass reads the margin with the cue, so the cue is
 //! in its place from the first frame that draws it. `media-operator` plan
 //! 49 derives the rows.
+//!
+//! The lower bar is the bar that mpv draws below the frame and the black
+//! rows inside the frame below its active area, which a film stored with
+//! its letterbox bars in the frame has. `media-operator` plan 50 adds the
+//! black rows inside the frame.
 
 use super::placement::{SCREEN_ROWS, ass_rest};
 use super::script::Script;
@@ -67,22 +72,35 @@ impl Rest {
     }
 }
 
-/// The height of the picture in rows of a 1080-row screen.
+/// The height of the picture that mpv draws, the whole frame, in rows of a
+/// 1080-row screen. libass scales a margin by this height, so it includes
+/// the black rows inside the frame.
 fn picture(screen: &Screen) -> f64 {
     (screen.height - screen.top - screen.bottom) as f64 * SCREEN_ROWS / screen.height as f64
+}
+
+/// The lower bar in rows of a 1080-row screen: the bar that mpv draws below
+/// the frame, and `encoded`, the share of the frame's height that is black
+/// below its active area, in rows of the frame as mpv draws it.
+fn bar(screen: &Screen, encoded: f64) -> f64 {
+    screen.bottom as f64 * SCREEN_ROWS / screen.height as f64 + encoded * picture(screen)
 }
 
 /// The rows that a cue of `lines` lines moves down from its resting place
 /// on `screen`, where the ink of its last line ends at `ink_end`. It is 0
 /// for one line and on a picture with no lower bar. It centres the ink in
-/// a bar that can hold it, and otherwise ends the ink `SPACE` above the
-/// picture. A cue never moves down onto the picture, so a raise is never
-/// positive.
-fn moved(screen: &Screen, lines: usize, ink_end: f64) -> f64 {
-    if lines < 2 || screen.bottom <= 0 || screen.height <= 0 {
+/// a bar that can hold it, which moves the cue down into the bar, and
+/// otherwise ends the ink `SPACE` above the picture. A raise above the
+/// picture is never positive, so a cue that already ends higher stays
+/// where it is and never moves down onto the picture.
+fn moved(screen: &Screen, encoded: f64, lines: usize, ink_end: f64) -> f64 {
+    if lines < 2 || screen.height <= 0 {
         return 0.0;
     }
-    let bar = screen.bottom as f64 * SCREEN_ROWS / screen.height as f64;
+    let bar = bar(screen, encoded);
+    if bar <= 0.0 {
+        return 0.0;
+    }
     let edge = SCREEN_ROWS - bar;
     let ink = LINE_INK + LINE_PITCH * (lines - 1) as f64;
     match bar >= ink + 2.0 * SPACE {
@@ -92,17 +110,19 @@ fn moved(screen: &Screen, lines: usize, ink_end: f64) -> f64 {
 }
 
 /// The `MarginV` that places a cue of `lines` lines of a copy that rests
-/// as `rest`, or 0, the style's own margin, when the cue stays where a cue
-/// of one line ends.
+/// as `rest` on `screen`, or 0, the style's own margin, when the cue stays
+/// where a cue of one line ends. `encoded` is the share of the frame's
+/// height that is black below its active area, and 0 for a frame with no
+/// measured area.
 ///
 /// The margin is `Rest::row` solved for the row where the cue should end.
 /// An event's margin of 0 means the style's margin, so a cue that rounds
 /// to 0 takes 1 or −1. libass draws a negative margin below the foot of
 /// the frame, which a cue in a deep bar needs when the script's margin is
 /// large.
-pub fn margin(rest: &Rest, screen: &Screen, lines: usize) -> i32 {
+pub fn margin(rest: &Rest, screen: &Screen, encoded: f64, lines: usize) -> i32 {
     let resting = rest.row(screen, f64::from(rest.margin_v));
-    let moved = moved(screen, lines, resting - BOX_BELOW_INK);
+    let moved = moved(screen, encoded, lines, resting - BOX_BELOW_INK);
     if moved == 0.0 {
         return 0;
     }
@@ -175,7 +195,11 @@ mod tests {
         ];
         for (name, picture, lines, want) in cases {
             let screen = letterboxed(picture);
-            assert_eq!(margin(&converted(&screen), &screen, lines), want, "{name}");
+            assert_eq!(
+                margin(&converted(&screen), &screen, 0.0, lines),
+                want,
+                "{name}"
+            );
         }
     }
 
@@ -189,7 +213,94 @@ mod tests {
         for (name, picture, lines, want) in cases {
             let screen = letterboxed(picture);
             assert_eq!(
-                margin(&Rest::ass(&ASS, &screen), &screen, lines),
+                margin(&Rest::ass(&ASS, &screen), &screen, 0.0, lines),
+                want,
+                "{name}"
+            );
+        }
+    }
+
+    /// A screen of `width` by `height` that draws a frame of `frame` rows
+    /// between equal bars, at the screen's full width.
+    fn drawing(width: i64, height: i64, frame_width: i64, frame: i64) -> Screen {
+        let drawn = frame * width / frame_width;
+        let bar = (height - drawn) / 2;
+        Screen {
+            width,
+            height,
+            top: bar,
+            bottom: height - drawn - bar,
+            left: 0,
+            right: 0,
+        }
+    }
+
+    /// The share of a frame of `frame` rows that is black below an active
+    /// area of `height` rows from row `top`, as `streams` gives it.
+    fn below(frame: i64, top: i64, height: i64) -> f64 {
+        (frame - top - height) as f64 / frame as f64
+    }
+
+    /// The rows of plan 50. The black rows below the active area add to the
+    /// bar that mpv draws, so a bar of 132 or more rows holds two lines and
+    /// the cue is centred in it. A frame whose area is the whole frame, and
+    /// a frame with no area, keep the margins of plan 49.
+    #[test]
+    fn a_cue_of_two_lines_goes_in_the_black_rows_of_the_frame() {
+        let cases = [
+            (
+                "a 1920x804 area of a 1920x1080 frame on a 1920x1080 screen",
+                drawing(1920, 1080, 1920, 1080),
+                below(1080, 138, 804),
+                2,
+                4,
+            ),
+            (
+                "a 1920x804 area of a 1920x1080 frame on a 3840x2160 screen",
+                drawing(3840, 2160, 1920, 1080),
+                below(1080, 138, 804),
+                2,
+                4,
+            ),
+            (
+                "a 1920x817 area of a 1920x1080 frame on a 3840x2160 screen",
+                drawing(3840, 2160, 1920, 1080),
+                below(1080, 131, 817),
+                2,
+                3,
+            ),
+            (
+                "a 1920x800 area of a 1920x872 frame between bars",
+                drawing(1920, 1080, 1920, 872),
+                below(872, 36, 800),
+                2,
+                5,
+            ),
+            (
+                "an area that is the whole frame",
+                drawing(1920, 1080, 1920, 1080),
+                below(1080, 0, 1080),
+                2,
+                0,
+            ),
+            (
+                "a frame with no area",
+                drawing(1920, 1080, 1920, 1080),
+                0.0,
+                2,
+                0,
+            ),
+            (
+                "one line in the black rows of a frame",
+                drawing(3840, 2160, 1920, 1080),
+                below(1080, 131, 817),
+                1,
+                0,
+            ),
+        ];
+        for (name, screen, encoded, lines, want) in cases {
+            assert_eq!(
+                margin(&converted(&screen), &screen, encoded, lines),
                 want,
                 "{name}"
             );
@@ -208,6 +319,6 @@ mod tests {
             left: 0,
             right: 0,
         };
-        assert_eq!(margin(&converted(&screen), &screen, 2), 6);
+        assert_eq!(margin(&converted(&screen), &screen, 0.0, 2), 6);
     }
 }

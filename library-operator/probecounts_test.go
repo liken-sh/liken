@@ -140,7 +140,7 @@ func (e enrichedEpisode) probedWith(t *testing.T, counted bool, result string) {
 	writeFactLedger(t, e.season, factProbe, likenLedger{
 		Probes: []probedFile{{
 			Path: replacedEntry, At: e.made, Modified: e.written.Unix(), Size: int64(len("the first encode")),
-			Duration: 1500, Counted: counted,
+			Duration: 1500, Counted: counted, ActiveAreaMeasurement: activeAreaMeasurement,
 			Streams: []probedStream{{Kind: fileTypeVideo, Codec: "h264"}, {Kind: fileTypeSubtitle, Codec: "subrip"}},
 		}},
 		Attempts: []likenAttempt{{Path: replacedEntry, At: e.made, Result: result}},

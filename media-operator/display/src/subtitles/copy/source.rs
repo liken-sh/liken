@@ -112,7 +112,7 @@ pub fn read(path: &str, track: &Track, ask: &Ask) -> Result<Copy, Why> {
     if copy.events.is_empty() {
         return Err(Why::Empty);
     }
-    if !parses(&copy.script(None)) {
+    if !parses(&copy.script(None, 0.0)) {
         return Err(Why::Broken(
             "the copy's script has a NUL byte or no event format, so libass would read no event"
                 .to_string(),

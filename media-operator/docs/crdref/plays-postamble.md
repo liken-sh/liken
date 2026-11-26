@@ -94,6 +94,22 @@ no cue moves. A cue of one line of the copy is drawn on the same rows as
 the same cue of the original. The track panel shows the original track,
 and the copy has its title and language.
 
+Some films have their bars inside the encoded picture, such as a film of
+2.39:1 stored as a 1920x1080 frame. `mpv` draws those black rows as
+picture and reports no bar. `library-operator`'s probe measures the
+active area of each video once, the rectangle of the frame that
+contains picture, and the media browser sends it in
+`items[].presentation.video[].activeArea`. The display adds the black
+rows below the active area of the selected video track to the bar that
+`mpv` reports, and places a cue of two or more lines in that bar as
+above. A video with no `activeArea`, which the probe has not measured or
+whose samples did not agree, keeps the bar that `mpv` reports. A film
+whose shape changes, such as one with IMAX scenes, usually has the whole
+frame as its active area, so in its scenes of 2.39:1 a cue of two lines
+still crosses into the foot of the picture. When the probe's samples
+missed its IMAX scenes, the film has the area of its wider scenes, and
+in an IMAX scene a cue of two lines covers the foot of the picture.
+
 The display reads the cues of a SubRip, ASS, or WebVTT track in a
 Matroska file through the file's index, of a `mov_text` track in an MP4
 file through its sample table, and of a SubRip, ASS, SSA, WebVTT, or
@@ -136,8 +152,9 @@ These cases still differ from the house row:
   puts it somewhere else.
 - A script that places an ASS cue on the left or the right keeps its
   side margin.
-- Bars that are part of the encoded picture look like picture to
-  `mpv`, so no track moves a cue into them.
+- Bars that are part of the encoded picture take a cue of two or more
+  lines of a text track only when the item's `presentation.video` has
+  the frame's active area.
 
 ## Events
 

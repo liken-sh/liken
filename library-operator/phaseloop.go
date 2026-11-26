@@ -22,16 +22,19 @@ import (
 	"time"
 )
 
-// How long the trailer files work in one run. One trailer download takes up
-// to ten minutes, so a backlog would hold the Job for hours and a webhook's
-// folders would wait behind all of it. At the limit the phase finishes the
-// title it has, starts no other, and ends, and the rest stays as gaps for the
-// next Job. A variable, so a test reaches the limit in milliseconds.
+// How long the trailer files and the probe work in one run. One trailer
+// download takes up to ten minutes, and the probe of a library whose every
+// video it reads again for a new fact takes hours, so a backlog would hold
+// the Job past its deadline, and a webhook's folders would wait behind all
+// of it. At the limit the phase finishes the title or the file it has,
+// starts no other, and ends, so the Job closes, and the rest stays as gaps
+// for the next Job. A variable, so a test reaches the limit in milliseconds.
 var phaseTimeLimit = 15 * time.Minute
 
 // The phases whose run stops at the time limit, by container name.
 var timeLimitedPhases = map[string]bool{
 	trailerFileContainerName: true,
+	factProbe:                true,
 }
 
 // How long a phase waits after an event before its next pass, so a walk that

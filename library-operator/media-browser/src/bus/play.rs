@@ -6,7 +6,7 @@
 use serde_json::{Map, Value};
 
 use super::next;
-use crate::catalog::{Audio, Identity, Mark, PlayItem, Presentation, Subtitle, Track};
+use crate::catalog::{Audio, Identity, Mark, PlayItem, Presentation, Subtitle, Track, Video};
 use crate::screens::upnext::Next;
 
 /// The request as bytes. `library` is the catalog's library column,
@@ -142,6 +142,37 @@ fn presentation(presentation: &Presentation) -> Value {
             Value::Array(presentation.audio.iter().map(audio).collect()),
         );
     }
+    if !presentation.video.is_empty() {
+        object.insert(
+            "video".into(),
+            Value::Array(presentation.video.iter().map(video).collect()),
+        );
+    }
+    Value::Object(object)
+}
+
+// One video stream, in media-operator's own field names: `stream`, the size
+// of its frame, and `activeArea` only where the probe measured one. A size
+// the probe did not read is zero, so it is left out.
+fn video(video: &Video) -> Value {
+    let mut object = Map::new();
+    object.insert("stream".into(), Value::from(video.stream));
+    for (name, number) in [("width", video.width), ("height", video.height)] {
+        if number != 0 {
+            object.insert(name.into(), Value::from(number));
+        }
+    }
+    if let Some(area) = &video.active_area {
+        object.insert(
+            "activeArea".into(),
+            serde_json::json!({
+                "left": area.left,
+                "top": area.top,
+                "width": area.width,
+                "height": area.height,
+            }),
+        );
+    }
     Value::Object(object)
 }
 
@@ -212,7 +243,7 @@ fn mark(mark: &Mark) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::SubtitleImage;
+    use crate::catalog::{ActiveArea, SubtitleImage};
 
     fn movie() -> PlayItem {
         PlayItem {
@@ -431,6 +462,48 @@ mod tests {
                  "image": {"canvasHeight": 1080, "lineHeight": 61, "inkBottom": 918}},
             ])
         );
+    }
+
+    /// Each video stream travels by its stream index with its frame, and
+    /// with its active area where the probe measured one.
+    #[test]
+    fn a_request_carries_the_active_area_of_every_video_stream_of_the_file() {
+        let mut item = movie();
+        item.presentation.video = vec![
+            Video {
+                stream: 0,
+                width: 1920,
+                height: 1080,
+                active_area: Some(ActiveArea {
+                    left: 0,
+                    top: 131,
+                    width: 1920,
+                    height: 817,
+                }),
+            },
+            Video {
+                stream: 1,
+                width: 1920,
+                height: 1080,
+                active_area: None,
+            },
+        ];
+
+        assert_eq!(
+            decoded("default/films", &[item])["items"][0]["presentation"]["video"],
+            serde_json::json!([
+                {"stream": 0, "width": 1920, "height": 1080,
+                 "activeArea": {"left": 0, "top": 131, "width": 1920, "height": 817}},
+                {"stream": 1, "width": 1920, "height": 1080},
+            ])
+        );
+    }
+
+    /// An item with no video streams carries no `video` key.
+    #[test]
+    fn a_request_without_video_streams_leaves_the_list_out() {
+        let presentation = &decoded("default/films", &[movie()])["items"][0]["presentation"];
+        assert!(presentation.get("video").is_none(), "{presentation}");
     }
 
     /// Each audio stream travels by its stream index with the format facts

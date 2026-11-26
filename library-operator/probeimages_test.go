@@ -102,7 +102,7 @@ func (e enrichedEpisode) probedWithAnImageStream(t *testing.T, measured episodeM
 	t.Helper()
 	record := probedFile{
 		Path: replacedEntry, At: e.made, Modified: e.written.Unix(), Size: int64(len("the first encode")),
-		Duration: 1500, Counted: true,
+		Duration: 1500, Counted: true, ActiveAreaMeasurement: activeAreaMeasurement,
 		Streams: []probedStream{{Kind: fileTypeVideo, Codec: "h264"}, {Kind: fileTypeSubtitle, Codec: codecPGS}},
 	}
 	if measured != notMeasured {

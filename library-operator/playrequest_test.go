@@ -149,6 +149,27 @@ func TestTheAudioFormatsTravelThroughTheRequest(t *testing.T) {
 	}
 }
 
+// The frame and the active area of each video stream travel through the
+// request unread, and a stream with no area stays without one.
+func TestTheVideoStreamsTravelThroughTheRequest(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	video := `[{"stream":0,"width":1920,"height":1080,` +
+		`"activeArea":{"left":0,"top":131,"width":1920,"height":817}},{"stream":1,"width":1920,"height":1080}]`
+	payload := `{"library":"` + testLibraryKey + `","items":[{"path":"` + testFilmPath + `",` +
+		`"presentation":{"type":"video","video":` + video + `}}]}`
+	publishPlay(operator, []byte(payload))
+
+	operator.pass()
+
+	written, err := json.Marshal(cluster.heldPlays()[0].Spec.Items[0].Presentation.Video)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != video {
+		t.Errorf("video = %s, want %s", written, video)
+	}
+}
+
 func TestAPlayCarriesThePresentationTheBrowserResolved(t *testing.T) {
 	operator, cluster := playingHouse(t)
 	publishPlay(operator, filmRequest(film(testFilmPath)))

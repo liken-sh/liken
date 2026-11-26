@@ -6,8 +6,8 @@
 use rusqlite::Connection;
 
 use super::{collect, subtitles};
-use crate::catalog::Audio;
 use crate::catalog::stream::{Stream, Tracks};
+use crate::catalog::{ActiveArea, Audio, Video};
 
 /// Every stream of one file in container order, and the subtitle files
 /// beside it. The primary key of `streams` leads with the library and the
@@ -64,6 +64,36 @@ pub fn audio(connection: &Connection, library: &str, path: &str) -> rusqlite::Re
                 profile: row.get(2)?,
                 channels: row.get(3)?,
                 layout: row.get(4)?,
+            })
+        },
+    )
+}
+
+/// Every video stream of one file in container order, with its frame and
+/// its active area. The four area columns are null together where the
+/// probe has no area for the stream. A cover is an `image` stream, so it
+/// has no entry.
+pub fn video(connection: &Connection, library: &str, path: &str) -> rusqlite::Result<Vec<Video>> {
+    collect(
+        connection,
+        "SELECT ordinal, width, height, active_left, active_top, active_width, active_height \
+         FROM streams WHERE library = ? AND path = ? AND kind = 'video' ORDER BY ordinal",
+        &[&library, &path],
+        |row| {
+            let area: [Option<i64>; 4] = [row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?];
+            Ok(Video {
+                stream: row.get(0)?,
+                width: row.get(1)?,
+                height: row.get(2)?,
+                active_area: match area {
+                    [Some(left), Some(top), Some(width), Some(height)] => Some(ActiveArea {
+                        left,
+                        top,
+                        width,
+                        height,
+                    }),
+                    _ => None,
+                },
             })
         },
     )

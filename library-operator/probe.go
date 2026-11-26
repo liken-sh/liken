@@ -40,12 +40,15 @@ func (e *enricher) probeFact(ctx context.Context) error {
 // A catalog read that fails ends the container, because the gap list is the
 // work and there is nothing to do without it. A file that will not open
 // records an error attempt, and the run carries on to the next file. A
-// shutdown ends the run with its error, also during the last file.
+// shutdown ends the run with its error, also during the last file. At the
+// phase's time limit the run finishes the file it has and starts no other,
+// and the rest of the gap waits for the next Job.
 func (e *enricher) probeGap(ctx context.Context, probe mediaProbe) error {
 	paths, err := e.gaps(ctx, factProbe, time.Now().UTC())
 	if err != nil {
 		return err
 	}
+	paths = e.newFilesFirst(paths)
 	probed := 0
 	for _, path := range paths {
 		if err := ctx.Err(); err != nil {
@@ -53,6 +56,9 @@ func (e *enricher) probeGap(ctx context.Context, probe mediaProbe) error {
 		}
 		if !e.inScope(path) {
 			continue
+		}
+		if !e.mayStartTitle() {
+			break
 		}
 		if err := e.probeOne(ctx, probe, path); err != nil {
 			return err
@@ -84,22 +90,77 @@ func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) 
 	return nil
 }
 
+// newFilesFirst orders the gap so that each file that a record already
+// describes, at its size and modified time, comes after every other file.
+// Such a file is in the gap only because its record lacks a fact that the
+// probe now writes, and a library gains a new fact on every one of its
+// videos at once. A new or changed file then does not wait behind that
+// backlog. The order is otherwise the gap's own. A ledger or a file that
+// cannot be read leaves its file among the first, where the probe reads it
+// and records what it finds.
+func (e *enricher) newFilesFirst(paths []string) []string {
+	ledgers := map[string]likenLedger{}
+	var first, again []string
+	for _, path := range paths {
+		absolute := filepath.Join(e.root, path)
+		folder, entry := likenFolderFor(e.kind, absolute)
+		ledger, read := ledgers[folder]
+		if !read {
+			ledger, _ = readLikenLedger(folder, factProbe)
+			ledgers[folder] = ledger
+		}
+		if record, held := ledger.probeAt(entry); held && describes(record, absolute) {
+			again = append(again, path)
+			continue
+		}
+		first = append(first, path)
+	}
+	return append(first, again...)
+}
+
+// Whether a probe record describes the file as it is now: the same size and
+// the same modified time.
+func describes(record probedFile, absolute string) bool {
+	size, modified, err := statFile(absolute)
+	return err == nil && record.Size == size && record.Modified == modified
+}
+
 // The ledger record is the source of truth, so the probe writes it first
 // and then writes the .nfo file from it. An audio file gets a record and no
 // .nfo file, because no player reads an .nfo file beside a music file.
 // A video whose role is not the feature also gets a record and no .nfo file.
 //
 // A file with an image subtitle stream gets a second read, which measures
-// the stream. When that read fails, the probe still records what the header
-// read found, because it is true of the file, and the error makes the
-// attempt an error, unless a shutdown ended the read. The record is then
-// unmeasured, so the probe reads the file again.
+// the stream, and each video stream gets samples, which measure its active
+// area. When either read fails, the probe still records what the other reads
+// found, because it is true of the file, and the error makes the attempt an
+// error, unless a shutdown ended the read. The record then lacks that
+// measurement, so the probe reads the file again.
+//
+// A file whose record describes it is read again only for a fact that the
+// record lacks. A measurement the record has at its current version is still
+// true of the file, so the probe keeps it and does not measure it again. That
+// saves the reads, and a read that fails cannot take a good measurement away.
 func (e *enricher) recordProbe(ctx context.Context, probe mediaProbe, absolute string) error {
 	record, err := readProbeRecord(ctx, probe, absolute)
 	if err != nil {
 		return err
 	}
-	measured := measureImageSubtitles(ctx, readSubtitleWindow, absolute, &record)
+	images, areas := false, false
+	if size, modified, err := statFile(absolute); err == nil {
+		record.Size, record.Modified = size, modified
+		folder, entry := likenFolderFor(e.kind, absolute)
+		ledger, _ := readLikenLedger(folder, factProbe)
+		held, found := ledger.probeAt(entry)
+		images, areas = record.keepCurrentMeasurements(held, found)
+	}
+	var measured error
+	if !images {
+		measured = measureImageSubtitles(ctx, readSubtitleWindow, absolute, &record)
+	}
+	if !areas {
+		measured = errors.Join(measured, measureActiveAreas(ctx, readActiveAreaSample, absolute, &record))
+	}
 	if err := e.writeProbe(absolute, record); err != nil {
 		return err
 	}

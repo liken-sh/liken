@@ -1,11 +1,12 @@
 //! What `library-operator`'s probe recorded about the streams of the
 //! item's file, which the media browser sends in the item's
 //! `presentation`: the event count of each subtitle track, in
-//! `subtitles`, and the codec, the profile, and the channels of each
-//! audio track, in `audio`. mpv reports the profile and the channel
-//! layout only of the audio track it decodes, and it cannot count a
-//! subtitle track's events, so the display names a track from these
-//! facts when the block has them.
+//! `subtitles`, the codec, the profile, and the channels of each audio
+//! track, in `audio`, and the active area of each video track's frame, in
+//! `video`. mpv reports the profile and the channel layout only of the
+//! audio track it decodes, it cannot count a subtitle track's events, and
+//! it draws the black rows of a frame as picture, so the display reads
+//! these facts when the block has them.
 
 use serde_json::Value;
 
@@ -31,11 +32,37 @@ pub struct Sound {
     pub layout: String,
 }
 
+/// One entry of `presentation.video`: the height of the stream's frame,
+/// and the first row and the height of its `activeArea`, when the entry
+/// has one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Frame {
+    stream: Option<i64>,
+    height: Option<i64>,
+    area: Option<(i64, i64)>,
+}
+
+impl Frame {
+    /// The share of the frame's height that is black below its active
+    /// area, or 0 when the entry has no area that fits in its frame.
+    fn below(&self) -> f64 {
+        match (self.height, self.area) {
+            (Some(frame), Some((top, height)))
+                if frame > 0 && top >= 0 && height > 0 && top + height <= frame =>
+            {
+                (frame - top - height) as f64 / frame as f64
+            }
+            _ => 0.0,
+        }
+    }
+}
+
 /// The facts of one item's streams.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Streams {
     counted: Vec<Counted>,
     sounds: Vec<Sound>,
+    frames: Vec<Frame>,
 }
 
 /// No facts, for an item whose block has no lists or describes another
@@ -43,12 +70,13 @@ pub struct Streams {
 pub static NONE: Streams = Streams {
     counted: Vec::new(),
     sounds: Vec::new(),
+    frames: Vec::new(),
 };
 
 impl Streams {
-    /// Reads the block's `subtitles` and `audio` lists. An entry that is
-    /// not an object is left out.
-    pub fn parse(subtitles: Option<&Value>, audio: Option<&Value>) -> Self {
+    /// Reads the block's `subtitles`, `audio`, and `video` lists. An entry
+    /// that is not an object is left out.
+    pub fn parse(subtitles: Option<&Value>, audio: Option<&Value>, video: Option<&Value>) -> Self {
         let entries = |list: Option<&Value>| -> Vec<Value> {
             list.and_then(Value::as_array)
                 .into_iter()
@@ -83,7 +111,34 @@ impl Streams {
                     layout: text(entry, "layout"),
                 })
                 .collect(),
+            frames: entries(video)
+                .iter()
+                .map(|entry| {
+                    let number = |value: Option<&Value>, name: &str| {
+                        value
+                            .and_then(|value| value.get(name))
+                            .and_then(Value::as_i64)
+                    };
+                    let area = entry.get("activeArea");
+                    Frame {
+                        stream: number(Some(entry), "stream"),
+                        height: number(Some(entry), "height"),
+                        area: number(area, "top").zip(number(area, "height")),
+                    }
+                })
+                .collect(),
         }
+    }
+
+    /// The share of the frame of the video track `track` that is black
+    /// below the frame's active area, which adds to the lower bar of the
+    /// screen. It is 0 when no entry matches the track or its entry has no
+    /// area, so the bar is the one that mpv reports.
+    pub fn encoded_bar(&self, track: &Track) -> f64 {
+        self.frames
+            .iter()
+            .find(|entry| same_stream(entry.stream, None, track))
+            .map_or(0.0, Frame::below)
     }
 
     /// The event count of a subtitle track, or `None` when no entry
@@ -144,6 +199,7 @@ mod tests {
                   "channels": 6, "layout": "5.1(side)" },
                 { "stream": 5, "codec": "aac" },
             ])),
+            None,
         )
     }
 
@@ -223,8 +279,42 @@ mod tests {
 
     #[test]
     fn a_block_with_no_lists_has_no_facts() {
-        let empty = Streams::parse(None, Some(&json!({ "stream": 1 })));
+        let empty = Streams::parse(None, Some(&json!({ "stream": 1 })), None);
         assert_eq!(empty, Streams::default());
         assert_eq!(empty.events(&embedded("sub", 2)), None);
+        assert_eq!(empty.encoded_bar(&embedded("video", 0)), 0.0);
+    }
+
+    /// The video track finds its frame by stream, and the black rows below
+    /// its active area are a share of the frame's height. An entry with no
+    /// area, or an area that does not fit in its frame, adds nothing.
+    #[test]
+    fn a_video_track_finds_the_black_rows_below_its_active_area_by_stream() {
+        let streams = Streams::parse(
+            None,
+            None,
+            Some(&json!([
+                { "stream": 0, "width": 1920, "height": 1080,
+                  "activeArea": { "left": 0, "top": 131, "width": 1920, "height": 817 } },
+                { "stream": 1, "width": 1920, "height": 1080 },
+                { "stream": 2, "width": 1920, "height": 1080,
+                  "activeArea": { "left": 0, "top": 300, "width": 1920, "height": 900 } },
+                { "stream": 3, "activeArea": { "left": 0, "top": 0, "width": 1920, "height": 800 } },
+            ])),
+        );
+        let cases = [
+            ("a stream with an area", 0, 132.0 / 1080.0),
+            ("a stream with no area", 1, 0.0),
+            ("an area below the foot of its frame", 2, 0.0),
+            ("an entry with no frame height", 3, 0.0),
+            ("a stream with no entry", 9, 0.0),
+        ];
+        for (name, stream, want) in cases {
+            assert_eq!(
+                streams.encoded_bar(&embedded("video", stream)),
+                want,
+                "{name}"
+            );
+        }
     }
 }

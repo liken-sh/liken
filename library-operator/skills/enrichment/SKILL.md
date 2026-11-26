@@ -205,7 +205,8 @@ says when each one starts.
 
 The phases are `probe`, which reads each video's streams and chapters
 and the cue times of each text subtitle file, counts the events of
-each subtitle track, and measures each image subtitle track, `arrival`,
+each subtitle track, measures each image subtitle track, and measures
+the active area of each video, `arrival`,
 which records when a file was first seen, `identity`, which names each
 title, `nfo`, which fills the `.nfo` file, `art`, which downloads the
 images, `trailer`, which records where each title's trailers are,
@@ -1419,6 +1420,90 @@ because its streams had too few cues and still have too few. When the window rea
 what the header read found and an error, which lasts its day as any other
 error does, so you do not need to set `spec.refresh` for the
 measurements.
+
+### Active areas
+
+Some videos have their letterbox bars inside the frame. A film of
+2.39:1 can be stored as a 1920x1080 frame with black rows above and
+below its picture, and mpv draws those rows as picture.
+`media-operator`'s display puts a subtitle cue of two or more lines in a
+bar below the picture when the bar can hold it, so it needs to know
+where the picture ends. The probe measures the active area of each
+video stream once, the rectangle of the frame that contains picture,
+and the browser sends it with the video stream on each play request. A
+video with no area plays with the bar that mpv reports.
+
+The probe reads 8 samples of each video stream, at 1/9, 2/9, and up to
+8/9 of the duration, so no sample is in the opening titles or the end
+credits. Each sample is one run of `ffmpeg` with FFmpeg's `cropdetect`
+filter over one frame: the keyframe at or before the sample's time.
+`cropdetect` gives the smallest rectangle of the frame whose rows and
+columns are brighter than 0.094 of the pixel's range, the same share
+for 8-bit, 10-bit, and HDR video. A black frame gives no rectangle. The
+active area is the smallest rectangle that contains the rectangle of
+each sample, so a dark scene does not move an edge into the picture.
+Each of the four edges of the area must be within 2 pixels of the same
+edge of at least 2 samples. Otherwise the stream gets no area. A film
+with IMAX scenes gets the whole frame when at least 2 samples are in
+those scenes. When only 1 sample is, its top and bottom edges have no
+second sample, so the film gets no area. When none is, the film gets
+the area of its wider scenes, and in an IMAX scene a cue of two lines
+covers the foot of the picture. The samples of one file share the one-minute limit
+of the header read.
+
+`ffmpeg` decodes each frame on one thread, which bounds its memory, and
+reads about one keyframe of the file for each sample. Plan 102 in
+`library-operator/plans/completed/` records the rectangles and the
+times measured on a home library.
+
+Each video stream's entry in `probe.yaml` gets an `activeArea` block in
+pixels of its frame, and the file's record gets the version of the
+measurement, `activeAreaMeasurement: 1`:
+
+```yaml
+streams:
+  - kind: video
+    codec: hevc
+    width: 1920
+    height: 1080
+    activeArea:
+      left: 0
+      top: 131
+      width: 1920
+      height: 817
+counted: true
+activeAreaMeasurement: 1
+```
+
+The area is in the `active_left`, `active_top`, `active_width`, and
+`active_height` columns of the `streams` table. Each column holds null
+on a stream that is not a video stream, on a video stream that the probe
+has not measured, and on a video stream whose samples did not agree. A
+stream whose samples did not agree has no `activeArea` block in a record
+with `activeAreaMeasurement: 1`, and the probe does not read it again.
+
+A record that holds a video stream and has no `activeAreaMeasurement`
+was written before the probe measured active areas. The walk opens the
+probe gap for its file, and the next probe run reads the file again,
+once. A measurement that the record already has at its current version
+is kept, so the read of an older file is the header read and the
+samples. So when a build with this measurement first runs, every video
+of every `Library` is read again, and you do not need to set
+`spec.refresh`.
+
+The probe stops starting files 15 minutes after its phase starts, the
+same limit the trailer files have, and finishes the file it has. The rest of
+the gap waits for the next walk, so each `Job` closes before its
+deadline and posts its webhooks. Within each run the probe reads a new
+or changed file before a file that it reads again only for the active
+area, so a new download does not wait behind the backlog. At 2 to 3
+seconds a file, one walk reads about 300 to 450 videos, so a library of
+10,000 videos takes about 25 to 35 walks, a day or two at the default
+hourly schedule. Each `Library` has its own probe, so the libraries
+work through their videos at the same time. To start a walk at once,
+run `kubectl liken library rescan <name>`.
+When a sample fails, the probe records what the other reads found and
+an error, which lasts its day as any other error does.
 
 ### Trailer files
 

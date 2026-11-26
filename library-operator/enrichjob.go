@@ -389,8 +389,11 @@ func containerFactTimes(times map[string]time.Time) refreshTimes {
 	return facts
 }
 
-// ffprobe is a child process of the probe container, so its memory counts
-// against the container's limit. It holds about 60 MB on its own while it
-// reads one file, whatever the file's size, which is more than the scanner's
-// limit allows.
-const probeMemoryLimit = "256Mi"
+// ffprobe and ffmpeg are child processes of the probe container, so their
+// memory counts against the container's limit. ffprobe holds about 60 MB
+// while it reads one file, whatever the file's size. To measure a video's
+// active area, the probe runs ffmpeg once for each of 8 samples, one at a
+// time, and each run decodes one frame on one thread. The decoder of a
+// 3840x2160 HEVC frame allocates its reference frames, so the container
+// needs more than 256Mi. Plan 102 has the measurement.
+const probeMemoryLimit = "512Mi"

@@ -78,7 +78,7 @@ requests:
 |---|---|---|---|
 | the catalog agent | `64Mi` | `1Gi` | `10m` |
 | `scan`, in a walk | `32Mi` | `128Mi` | `10m` |
-| `probe` | `32Mi` | `256Mi` | `10m` |
+| `probe` | `32Mi` | `512Mi` | `10m` |
 | `art` | `32Mi` | `256Mi` | `10m` |
 | `trailer-files`, when enabled | `32Mi` | `256Mi` | `10m` |
 | every other phase, and `close` | `32Mi` | `64Mi` | `10m` |
@@ -103,7 +103,12 @@ A worker with `parallelism` above 1 runs that many such pods, and two
 of them can share a node, so a node can hold the limit more than once.
 
 The probe and trickplay limits are wide because `ffmpeg` and `ffprobe`
-hold a decoded stream, and the art limit because the art container holds an
+hold a decoded stream. To measure a video's active area, the probe runs
+`ffmpeg` once for each of 8 sampled frames, one run at a time, and each
+run decodes one frame on one thread. The decoder of one frame of a
+3840x2160 HEVC video allocates its reference frames, so the probe's
+limit leaves room for a 4K frame beside the probe itself. Plan 102 in
+`library-operator/plans/completed/` records the measurement. The art limit is wide because the art container holds an
 image while it writes it. The `scan` limit is wide because the walk reads
 eight title folders at once and holds each whole, so eight long series
 set its peak. A walk of a dozen synthetic series of 3,000 episodes each

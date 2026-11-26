@@ -71,7 +71,7 @@ func TestAFreshProbeFillsAVideosColumns(t *testing.T) {
 	writeFile(t, video, "video")
 	writeProbeLedger(t, folder, probedFile{
 		Path: "The Long Survey (1982) 720p.mkv", Modified: modifiedOf(t, video),
-		Container: "mkv", Duration: 6540.4567, Bitrate: 8000000,
+		Container: "mkv", Duration: 6540.4567, Bitrate: 8000000, ActiveAreaMeasurement: activeAreaMeasurement,
 		Streams: []probedStream{
 			{Kind: fileTypeVideo, Codec: "h264", Width: 1920, Height: 1080},
 			{Kind: fileTypeAudio, Codec: "ac3", Channels: 6},
@@ -234,7 +234,7 @@ func TestAnExtrasVideoReadsTheTitleFoldersProbeLedger(t *testing.T) {
 	writeFile(t, extra, "video")
 	writeProbeLedger(t, folder, probedFile{
 		Path: filepath.Join("Extras", "Deleted Scene.mkv"), Modified: modifiedOf(t, extra),
-		Duration: 61, Bitrate: 5000000,
+		Duration: 61, Bitrate: 5000000, ActiveAreaMeasurement: activeAreaMeasurement,
 		Streams: []probedStream{{Kind: fileTypeVideo, Codec: "h264", Width: 1280, Height: 720}},
 	})
 
@@ -258,7 +258,7 @@ func TestAnEpisodeReadsTheSeasonFoldersProbeLedger(t *testing.T) {
 	writeFile(t, episode, "video")
 	writeProbeLedger(t, season, probedFile{
 		Path: "Pine Hollow - S01E01.mkv", Modified: modifiedOf(t, episode),
-		Duration: 2760.25, Bitrate: 6000000,
+		Duration: 2760.25, Bitrate: 6000000, ActiveAreaMeasurement: activeAreaMeasurement,
 		Streams: []probedStream{
 			{Kind: fileTypeVideo, Codec: "mpeg2video", Width: 720, Height: 480},
 			{Kind: fileTypeAudio, Codec: "ac3", Channels: 2},
@@ -292,7 +292,7 @@ func TestAProbedLibraryLandsItsFilesAndStreamsInTheCatalog(t *testing.T) {
 	writeFile(t, video, "video")
 	writeProbeLedger(t, folder, probedFile{
 		Path: "The Long Survey (1982).mkv", Modified: modifiedOf(t, video),
-		Container: "mkv", Duration: 6540.5, Bitrate: 8000000,
+		Container: "mkv", Duration: 6540.5, Bitrate: 8000000, ActiveAreaMeasurement: activeAreaMeasurement,
 		Streams: []probedStream{
 			{Kind: fileTypeVideo, Codec: "h264", Width: 1920, Height: 1080, Depth: 8},
 			{Kind: fileTypeAudio, Codec: "ac3", Channels: 6, Language: "eng"},

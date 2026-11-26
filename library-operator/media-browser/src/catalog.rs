@@ -58,6 +58,10 @@ pub mod subtitle;
 // request carries to the display.
 pub mod audio;
 
+// The video module: one video stream of a file and its active area, which a
+// play request carries to the display.
+pub mod video;
+
 // The streams of one video file and the subtitle files beside it, which
 // a movie's page shows and chooses a play's tracks from.
 pub mod stream;
@@ -79,6 +83,7 @@ pub use progress::{Place, Played, Progress, Reach, Resume, Seen, Touched, Work};
 pub use query::{Answer, Counts, Fold, GenreSort, InSeries, Order, Query, Slot, Sort};
 pub use studio::Studio;
 pub use subtitle::{Subtitle, SubtitleImage, Track};
+pub use video::{ActiveArea, Video};
 
 /// How many posters the tile of a library or a genre draws, as a 2x2.
 pub const TILES: usize = 4;
@@ -818,6 +823,9 @@ pub struct Presentation {
     /// The main file's audio streams in container order. It is empty for a
     /// file that the probe has not read.
     pub audio: Vec<Audio>,
+    /// The main file's video streams in container order, with the active
+    /// area of each. It is empty for a file that the probe has not read.
+    pub video: Vec<Video>,
 }
 
 #[cfg(test)]

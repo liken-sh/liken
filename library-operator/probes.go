@@ -65,8 +65,9 @@ func (l *probeLedgers) of(dir string) (folderProbes, error) {
 // A record that lacks a fact the probe now writes fills every column and
 // stream row as a current record does, because what it holds is still true
 // of the file. Such a record holds a subtitle track and predates the event
-// counts, or holds an image subtitle stream and predates the current
-// measurement. Its probed column is zero, which opens the probe gap, and
+// counts, holds an image subtitle stream and predates the current
+// measurement, or holds a video stream and predates the measurement of its
+// active area. Its probed column is zero, which opens the probe gap, and
 // settleFacts drops its found attempt, so the next probe run reads the file
 // again and records the missing fact. The image blocks that an earlier
 // measurement wrote are the exception: they can be wrong, so the stream rows
@@ -160,6 +161,10 @@ func (s probedStream) row(library, path string, ordinal int) streamRow {
 		row.ImageCanvasHeight = &s.Image.CanvasHeight
 		row.ImageLineHeight = &s.Image.LineHeight
 		row.ImageInkBottom = &s.Image.InkBottom
+	}
+	if s.ActiveArea != nil {
+		row.ActiveLeft, row.ActiveTop = &s.ActiveArea.Left, &s.ActiveArea.Top
+		row.ActiveWidth, row.ActiveHeight = &s.ActiveArea.Width, &s.ActiveArea.Height
 	}
 	return row
 }

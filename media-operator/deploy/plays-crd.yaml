@@ -425,6 +425,81 @@ spec:
                                     ffprobe's channel layout, such as
                                     `5.1(side)` or `stereo`. Omit it when
                                     ffprobe reports none.
+                          video:
+                            type: array
+                            x-kubernetes-list-type: atomic
+                            description: >-
+                              The frame and the active area of each video
+                              stream of the item's file. library-operator's
+                              media browser writes it from what
+                              library-operator's probe measured of the file.
+                              A film stored with its letterbox bars in the
+                              frame, such as a film of 2.39:1 in a 1920x1080
+                              frame, has black rows that mpv draws as picture.
+                              The display adds the black rows below the active
+                              area of the selected video track to the screen's
+                              lower bar, and puts a subtitle cue of two or more
+                              lines in that bar when the bar can hold it. A
+                              file that the probe has not read gets no list,
+                              and the display uses the bar that mpv reports.
+                            items:
+                              type: object
+                              description: >-
+                                One video stream and the rectangle of its frame
+                                that contains picture.
+                              required: [stream]
+                              properties:
+                                stream:
+                                  type: integer
+                                  minimum: 0
+                                  description: >-
+                                    The index of the stream in its container:
+                                    the stream index from ffprobe, which is
+                                    mpv's `ff-index`.
+                                width:
+                                  type: integer
+                                  minimum: 1
+                                  description: >-
+                                    The width of the stream's frame, in
+                                    pixels.
+                                height:
+                                  type: integer
+                                  minimum: 1
+                                  description: >-
+                                    The height of the stream's frame, in
+                                    pixels. The display needs it to use
+                                    `activeArea`.
+                                activeArea:
+                                  type: object
+                                  description: >-
+                                    The rectangle of the frame that contains
+                                    picture, in pixels of the frame. Each
+                                    pixel outside it is black on every frame
+                                    that library-operator sampled. Omit it
+                                    when the stream is not measured, and the
+                                    display uses the bar that mpv reports.
+                                  required: [left, top, width, height]
+                                  properties:
+                                    left:
+                                      type: integer
+                                      minimum: 0
+                                      description: >-
+                                        The first column of the area.
+                                    top:
+                                      type: integer
+                                      minimum: 0
+                                      description: >-
+                                        The first row of the area.
+                                    width:
+                                      type: integer
+                                      minimum: 1
+                                      description: >-
+                                        The width of the area, in pixels.
+                                    height:
+                                      type: integer
+                                      minimum: 1
+                                      description: >-
+                                        The height of the area, in pixels.
                 start:
                   type: string
                   description: >-

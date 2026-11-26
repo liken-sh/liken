@@ -298,6 +298,15 @@ CREATE INDEX files_library_arrived ON files (library, arrived);
 -- subtitle stream, and on an image stream that the probe has not measured
 -- or that gave too few cues to measure.
 --
+-- The four active columns are the probe's measurement of a video stream's
+-- active area, the rectangle of its frame that contains picture, in pixels
+-- of the frame: active_left and active_top are its first column and row, and
+-- active_width and active_height its size. A film stored with its letterbox
+-- bars in the frame has an area smaller than the frame, and media-operator's
+-- display reads it to put a subtitle cue of two or more lines in those black
+-- rows. All four are null on every other kind, on a video stream that the
+-- probe has not measured, and on one whose samples did not agree.
+--
 -- The columns after present came later, and Corrosion adds a column to a
 -- table that exists at its end, so a new column always goes last here.
 --
@@ -331,6 +340,10 @@ CREATE TABLE streams (
     image_canvas_height INTEGER,
     image_line_height INTEGER,
     image_ink_bottom INTEGER,
+    active_left INTEGER,
+    active_top INTEGER,
+    active_width INTEGER,
+    active_height INTEGER,
     PRIMARY KEY (library, path, ordinal)
 );
 

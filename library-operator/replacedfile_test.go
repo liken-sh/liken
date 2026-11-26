@@ -92,7 +92,7 @@ func seedEnrichedEpisode(t *testing.T) enrichedEpisode {
 	writeFactLedger(t, episode.season, factProbe, likenLedger{
 		Probes: []probedFile{{
 			Path: replacedEntry, At: made, Modified: episode.written.Unix(), Size: int64(len("the first encode")),
-			Duration: 1500, Bitrate: 8000000,
+			Duration: 1500, Bitrate: 8000000, ActiveAreaMeasurement: activeAreaMeasurement,
 			Streams: []probedStream{{Kind: fileTypeVideo, Codec: "h264", Width: 1920, Height: 1080},
 				{Kind: fileTypeAudio, Codec: "aac", Channels: 2}},
 		}},
@@ -265,7 +265,7 @@ func TestAnAttemptBeforeTheReplacementDoesNotCount(t *testing.T) {
 	later := replaced.Add(10 * time.Minute)
 	writeFactLedger(t, episode.season, factProbe, likenLedger{
 		Probes: []probedFile{{Path: replacedEntry, At: replaced, Modified: modified, Size: size,
-			Duration: 1500, Replaced: replaced,
+			Duration: 1500, Replaced: replaced, ActiveAreaMeasurement: activeAreaMeasurement,
 			Streams: []probedStream{{Kind: fileTypeVideo, Codec: "h264", Width: 1920, Height: 1080}}}},
 		Attempts: []likenAttempt{{Path: replacedEntry, At: replaced, Result: attemptFound}},
 	})
