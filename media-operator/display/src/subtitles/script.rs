@@ -72,47 +72,7 @@ impl Script {
     /// cannot find, or else of the first style centred at the bottom, or
     /// else of the first style.
     pub fn parse(header: &str) -> Self {
-        let mut section = Section::Other;
-        let mut format: Option<Vec<String>> = None;
-        let mut play_res_x = None;
-        let mut play_res_y = None;
-        let mut styles = Vec::new();
-        for line in header.lines().map(str::trim) {
-            if line.starts_with('[') {
-                section = match line.to_ascii_lowercase().as_str() {
-                    "[script info]" => Section::Info,
-                    "[v4+ styles]" | "[v4 styles+]" => Section::AssStyles,
-                    "[v4 styles]" => Section::SsaStyles,
-                    _ => Section::Other,
-                };
-                format = None;
-                continue;
-            }
-            let Some((key, value)) = line.split_once(':') else {
-                continue;
-            };
-            let value = value.trim();
-            match (section, key.trim()) {
-                (Section::Info, "PlayResX") => {
-                    play_res_x = value.parse::<u32>().ok().filter(|columns| *columns > 0);
-                }
-                (Section::Info, "PlayResY") => {
-                    play_res_y = value.parse::<u32>().ok().filter(|rows| *rows > 0);
-                }
-                (Section::AssStyles | Section::SsaStyles, "Format") => {
-                    format = Some(fields(value));
-                }
-                (Section::AssStyles | Section::SsaStyles, "Style") => {
-                    let standard = match section {
-                        Section::SsaStyles => SSA_FORMAT,
-                        _ => ASS_FORMAT,
-                    };
-                    let names = format.get_or_insert_with(|| fields(standard));
-                    styles.push(style(names, value, section == Section::SsaStyles));
-                }
-                _ => {}
-            }
-        }
+        let (play_res_x, play_res_y, styles) = read(header);
         let dialogue = styles
             .iter()
             .find(|style| style.name.eq_ignore_ascii_case("Default"))
@@ -125,6 +85,64 @@ impl Script {
             margin_v: dialogue.map_or(DEFAULT_MARGIN_V, |style| style.margin_v),
         }
     }
+}
+
+/// The names of the styles in `header` that put their text at the top or
+/// in the middle of the frame. A cue in such a style is not at the foot of
+/// the frame, so its margin is not changed.
+pub fn raised_styles(header: &str) -> Vec<String> {
+    let (_, _, styles) = read(header);
+    styles
+        .into_iter()
+        .filter(|style| !(1..=3).contains(&style.alignment))
+        .map(|style| style.name)
+        .collect()
+}
+
+/// Reads `PlayResX`, `PlayResY`, and the styles of a header.
+fn read(header: &str) -> (Option<u32>, Option<u32>, Vec<Style>) {
+    let mut section = Section::Other;
+    let mut format: Option<Vec<String>> = None;
+    let mut play_res_x = None;
+    let mut play_res_y = None;
+    let mut styles = Vec::new();
+    for line in header.lines().map(str::trim) {
+        if line.starts_with('[') {
+            section = match line.to_ascii_lowercase().as_str() {
+                "[script info]" => Section::Info,
+                "[v4+ styles]" | "[v4 styles+]" => Section::AssStyles,
+                "[v4 styles]" => Section::SsaStyles,
+                _ => Section::Other,
+            };
+            format = None;
+            continue;
+        }
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value.trim();
+        match (section, key.trim()) {
+            (Section::Info, "PlayResX") => {
+                play_res_x = value.parse::<u32>().ok().filter(|columns| *columns > 0);
+            }
+            (Section::Info, "PlayResY") => {
+                play_res_y = value.parse::<u32>().ok().filter(|rows| *rows > 0);
+            }
+            (Section::AssStyles | Section::SsaStyles, "Format") => {
+                format = Some(fields(value));
+            }
+            (Section::AssStyles | Section::SsaStyles, "Style") => {
+                let standard = match section {
+                    Section::SsaStyles => SSA_FORMAT,
+                    _ => ASS_FORMAT,
+                };
+                let names = format.get_or_insert_with(|| fields(standard));
+                styles.push(style(names, value, section == Section::SsaStyles));
+            }
+            _ => {}
+        }
+    }
+    (play_res_x, play_res_y, styles)
 }
 
 /// The comma-separated field names of a `Format` line, in lowercase.
@@ -194,6 +212,22 @@ mod tests {
             "[Script Info]\nScriptType: v4.00+\n{info}\n\n[V4+ Styles]\n{FORMAT}\n{}\n\n[Events]\nFormat: Layer, Start, End, Style, Text\n",
             styles.join("\n")
         )
+    }
+
+    /// A cue in a style at the top or in the middle of the frame keeps
+    /// its margin in the copy of the track.
+    #[test]
+    fn the_styles_off_the_foot_of_the_frame_are_named() {
+        let header = script(
+            "PlayResY: 1080",
+            &[
+                style("Default", 2, 20),
+                style("Sign", 8, 10),
+                style("Note", 5, 0),
+                style("Left", 1, 20),
+            ],
+        );
+        assert_eq!(raised_styles(&header), ["Sign", "Note"]);
     }
 
     #[test]

@@ -32,8 +32,10 @@ pub const SOCKET_VARIABLE: &str = "MEDIA_MPV_SOCKET";
 ///
 /// mpv sends `osd-dimensions` again when its window changes size and
 /// when a new video starts, so the display knows the screen's shape and
-/// the bars around the picture that place a subtitle track.
-pub const OBSERVED: [&str; 15] = [
+/// the bars around the picture that place a subtitle track. The display
+/// makes a copy of a subtitle track only for a file whose
+/// `demuxer-start-time` is 0, because the copy has the file's own times.
+pub const OBSERVED: [&str; 16] = [
     "duration",
     "time-pos",
     "chapter",
@@ -49,6 +51,7 @@ pub const OBSERVED: [&str; 15] = [
     "audio-delay",
     "sub-delay",
     "osd-dimensions",
+    "demuxer-start-time",
 ];
 
 /// The header of the selected ASS track. It is not in `OBSERVED`, because
@@ -432,8 +435,8 @@ mod tests {
         assert_eq!(
             observe_script(),
             [
-                "{\"command\":[\"unobserve_property\",16],\"request_id\":0}\n",
-                "{\"command\":[\"observe_property\",16,\"sub-ass-extradata\"],\"request_id\":0}\n",
+                "{\"command\":[\"unobserve_property\",17],\"request_id\":0}\n",
+                "{\"command\":[\"observe_property\",17,\"sub-ass-extradata\"],\"request_id\":0}\n",
             ]
         );
     }

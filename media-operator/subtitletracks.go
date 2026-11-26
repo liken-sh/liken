@@ -94,12 +94,27 @@ type subtitleTrack struct {
 	commentary bool
 }
 
+// displayCopyPrefix starts the file name of the display's copy of a
+// subtitle track, media-display-copy.<identity>.<number>.ass, in the
+// directory of mpv's socket. The display adds the copy with the original's
+// language and title, and shows the original in its place, so the copy is
+// never a track to choose.
+const displayCopyPrefix = "media-display-copy."
+
+// isDisplayCopy reports whether the track is the display's copy of
+// another track.
+func isDisplayCopy(track mpvTrack) bool {
+	name := path.Base(track.ExternalFilename)
+	return track.External && strings.HasPrefix(name, displayCopyPrefix) && strings.HasSuffix(name, ".ass")
+}
+
 // classifySubtitleTracks returns the subtitle tracks of track-list in
 // order, each with its role. counts is the item's presentation.subtitles.
+// The display's copies of tracks are left out.
 func classifySubtitleTracks(tracks []mpvTrack, counts []PlaySubtitle) []subtitleTrack {
 	var subtitles []subtitleTrack
 	for _, track := range tracks {
-		if track.Type != trackTypeSub {
+		if track.Type != trackTypeSub || isDisplayCopy(track) {
 			continue
 		}
 		subtitles = append(subtitles, describeSubtitleTrack(track, counts))

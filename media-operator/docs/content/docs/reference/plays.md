@@ -292,6 +292,36 @@ How a track takes the style depends on its kind:
   display moves each cue to the house row and shrinks it so that a
   line is as tall as a line of house text.
 
+A cue of two or more lines of a text track would cross from the house
+row into the picture, because it grows up from that row. So the
+display gives `mpv` its own copy of the selected text track, in which
+each such cue has a bottom margin of its own. The copy is a file in the
+playback pod's own scratch volume, which is deleted with the pod. `mpv`
+then draws the cue in its place from its first frame. On a film with a
+lower bar, the cue is centred in the bar when the bar has room for the
+whole cue and 12 rows of black above and below it on a 1080-row
+screen. That is the case for two lines on a film of about 2.31:1 or
+wider, such as a 2.39:1 film. Otherwise the cue is raised until it ends
+just above the bottom of the picture. On a title that fills the screen,
+no cue moves. A cue of one line of the copy is drawn on the same rows as
+the same cue of the original. The track panel shows the original track,
+and the copy has its title and language.
+
+The display reads the cues of a SubRip, ASS, or WebVTT track in a
+Matroska file through the file's index, of a `mov_text` track in an MP4
+file through its sample table, and of a SubRip, ASS, SSA, WebVTT, or
+MicroDVD file beside the video by reading the file. Until the read
+finishes, which takes a moment at the start of play, the original is
+drawn and a cue of two lines crosses into the picture. The display
+makes a copy only when it reads every cue of the track, so a copy never
+drops a subtitle. A track in another container, a Matroska file whose
+index lists no cue of the track, a file with a cue that cannot be read,
+and a stream from the network
+keep the house row for every cue, and the display logs why. The display counts only the line breaks in a
+cue, so a long line that `mpv` wraps counts as one line. An ASS cue that
+the script places itself, at the top, in the middle, or at a fixed
+point, keeps its place.
+
 An image track needs a measurement to be placed. `library-operator`'s
 probe measures each image track once from a sample of its cues. The
 media browser sends the result in the track's `image` field in
@@ -312,9 +342,9 @@ These cases still differ from the house row:
 
 - A cue of two or more lines of an image track ends higher than the
   house row, because `mpv` shrinks each picture around its own centre.
-- On a film with bars, a cue of two lines covers the foot of the
-  picture, because two lines of house text are taller than the lower
-  bar.
+- On a film with bars, a cue of two lines of an image track covers
+  the foot of the picture, because the cue is a picture and the display
+  cannot give it a margin of its own.
 - A cue at the top of the frame has no common row. Each kind of track
   puts it somewhere else.
 - A script that places an ASS cue on the left or the right keeps its
@@ -424,8 +454,9 @@ while a panel is open.
 While the on-screen display is showing, it moves the subtitles up so
 that the last line of a cue stays just above whatever the display draws
 at the bottom of the frame. When the display hides, the subtitles
-return to the house row that [How subtitles look](#how-subtitles-look)
-describes. The move does not apply to an ASS sign that the track places
+return to the place that [How subtitles look](#how-subtitles-look)
+describes: the house row, or for a cue of two or more lines, the bar
+or the foot of the picture. The move does not apply to an ASS sign that the track places
 at a fixed point, or to an image cue in the upper half of the picture.
 
 `back` does the first of these that applies:

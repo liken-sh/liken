@@ -30,6 +30,8 @@
 //! subtitles move with the fade. When nothing changes, the display sends
 //! nothing.
 
+pub mod copy;
+pub mod cue;
 pub mod lift;
 pub mod measurement;
 pub mod placement;

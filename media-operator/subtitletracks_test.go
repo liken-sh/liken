@@ -222,3 +222,25 @@ func TestTheSharedCasesHoldEverySection(t *testing.T) {
 	mustMatch(t, len(cases.Classify) > 0 && len(cases.FileNames) > 0 &&
 		len(cases.SameLanguage) > 0 && len(cases.Choose) > 0, true)
 }
+
+// The display's copy of a track is a file beside mpv's socket. The copy
+// has the original's language and title, so a choice among the tracks
+// could pick it. The sidecar leaves it out, and the display keeps the copy
+// in the original's place.
+func TestADisplayCopyIsNoTrackToChoose(t *testing.T) {
+	index := 2
+	tracks := []mpvTrack{
+		{ID: 1, Type: trackTypeSub, Lang: "eng", Codec: "subrip", FFIndex: &index},
+		{ID: 2, Type: trackTypeSub, Lang: "eng", Codec: "ass", External: true,
+			ExternalFilename: "/ipc/media-display-copy.ff-index-2.1.ass"},
+		{ID: 3, Type: trackTypeSub, Lang: "eng", Codec: "subrip", External: true,
+			ExternalFilename: "/media/a-film.en.srt"},
+	}
+	var ids []int
+	for _, track := range classifySubtitleTracks(tracks, nil) {
+		ids = append(ids, track.track.ID)
+	}
+	if !slices.Equal(ids, []int{1, 3}) {
+		t.Fatalf("the tracks to choose from are %v, want [1 3] without the display's copy", ids)
+	}
+}

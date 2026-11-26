@@ -27,7 +27,8 @@ impl Override {
 }
 
 /// The value of each property that places a track. `rest` is the
-/// `sub-pos` while the display draws nothing at the foot of the frame.
+/// `sub-pos` of a cue of one line while the display draws nothing at the
+/// foot of the frame. `cue::rest` moves a cue of more lines from it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Values {
     pub ass_override: Override,
@@ -72,6 +73,21 @@ pub struct Placement {
     pub unplaced: Option<Reason>,
 }
 
+/// The placement of the display's copy of a text track that is not ASS.
+/// The copy's header has the style that mpv gives the original, so mpv
+/// draws the copy at the original's `sub-pos` of 100. `force` puts the
+/// house style on it, as mpv does for the original.
+pub fn converted_copy() -> Placement {
+    Placement {
+        values: Values {
+            ass_override: Override::Force,
+            ..PLAIN
+        },
+        lift: Lift::Share,
+        unplaced: None,
+    }
+}
+
 /// The kind of a track, from the `codec` that mpv reports for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Format {
@@ -102,10 +118,10 @@ pub fn is_ass(track: &Track) -> bool {
 /// `MarginV` 13 of a `PlayResY` of 288 before it scales it. So the box
 /// ends at row 1031.25 on a full-height picture and at row 1032.5 on a
 /// 1920x804 film, and the house row is between them.
-const HOUSE_ROW: f64 = 1032.0;
+pub(super) const HOUSE_ROW: f64 = 1032.0;
 
 /// The rows of the screen that the arithmetic is written for.
-const SCREEN_ROWS: f64 = 1080.0;
+pub(super) const SCREEN_ROWS: f64 = 1080.0;
 
 /// The house line is 45 rows tall on a 1080-row screen, and mpv's integer
 /// steps draw a shrunk line one row short, so the shrink aims one row
@@ -187,7 +203,7 @@ pub fn place(
 /// dialogue ends at `bottom`, and `sub-pos` moves it by the share of
 /// `bottom` that ends it on the house row. Both rows are in rows of a
 /// 1080-row screen, because only their ratio matters.
-fn ass_rest(script: &Script, screen: &Screen) -> f64 {
+pub(super) fn ass_rest(script: &Script, screen: &Screen) -> f64 {
     let picture = (screen.height - screen.top - screen.bottom) as f64 / screen.height as f64;
     let bottom = SCREEN_ROWS
         - f64::from(script.margin_v) * picture * SCREEN_ROWS / f64::from(script.play_res_y);
@@ -213,7 +229,7 @@ fn image(measurement: Measurement) -> (f64, f64) {
 
 /// Clamps a resting `sub-pos` to mpv's range and rounds it to a
 /// thousandth, about the precision of the float that mpv stores it in.
-fn position(rest: f64) -> f64 {
+pub(super) fn position(rest: f64) -> f64 {
     (rest.clamp(POSITION_RANGE.0, POSITION_RANGE.1) * 1000.0).round() / 1000.0
 }
 

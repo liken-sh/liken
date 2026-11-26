@@ -16,6 +16,7 @@ use jiff::ZonedDateTime;
 use tokio::sync::{broadcast, watch};
 
 mod arranging;
+mod copies;
 mod detaching;
 mod subtitles;
 
@@ -70,6 +71,10 @@ pub enum Message {
     Art(Answer),
     Attached(Result<Link, String>),
     Arranger(arrangement::Event),
+    /// The read of a subtitle track for the display's copy finished.
+    Copied(copies::Copied),
+    /// The write of the display's copy of a subtitle track finished.
+    Written(copies::Written),
     Close,
 }
 
@@ -147,6 +152,7 @@ pub struct Display {
     cast: Cast,
     art: Art,
     subtitles: crate::subtitles::Subtitles,
+    copies: copies::Copies,
     /// `link` is the Wayland binding that sends each arrangement to the
     /// compositor.
     arranger: Arranger,
@@ -222,6 +228,7 @@ impl Display {
             cast: Cast::default(),
             art: Art::default(),
             subtitles: crate::subtitles::Subtitles::default(),
+            copies: copies::Copies::beside(ipc.path()),
             arranger: Arranger::default(),
             link: None,
             detached: false,
@@ -248,13 +255,14 @@ impl Display {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
         self.follow_offer();
+        let copy = self.follow_copies();
         self.follow_subtitles();
         let jobs = self.sync_art();
         let _ = self.watching.send(Watching {
             canvas: self.canvas,
             visible: self.focus.visible(),
         });
-        Task::batch([task, decode(jobs)])
+        Task::batch([task, copy, decode(jobs)])
     }
 
     fn step(&mut self, message: Message) -> Task<Message> {
@@ -322,6 +330,8 @@ impl Display {
             }
             Message::Attached(link) => self.on_attached(link),
             Message::Arranger(event) => return self.on_arranger(event),
+            Message::Copied(copied) => self.on_copied(copied),
+            Message::Written(written) => self.on_written(written),
             Message::Close => return self.on_close(),
         }
         Task::none()

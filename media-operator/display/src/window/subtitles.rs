@@ -42,7 +42,7 @@ impl Display {
         }
         if self
             .subtitles
-            .reads_script(self.film.path.as_deref(), self.film.selected_subtitle())
+            .reads_script(self.film.path.as_deref(), self.film.drawn_subtitle())
         {
             self.film.forget_script();
             for line in crate::ipc::observe_script() {
@@ -51,7 +51,10 @@ impl Display {
         }
         let top = self.band_top();
         let film = &self.film;
-        let placed = film.selected_subtitle().and_then(|track| {
+        let placed = film.drawn_subtitle().and_then(|track| {
+            if film.is_converted_copy(track) {
+                return Some((track, placement::converted_copy()));
+            }
             let measured = measurement::find(self.presentation.measured(film), track);
             placement::place(track, film.script.as_ref(), film.screen.as_ref(), measured)
                 .map(|placement| (track, placement))

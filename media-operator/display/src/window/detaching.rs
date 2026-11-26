@@ -19,6 +19,8 @@ impl Display {
             return;
         }
         self.detached = true;
+        // mpv has exited, so no track reads the copies any more.
+        self.copies.remove_files();
         self.idle.cancel();
         self.card.cancel();
         self.row.cancel();

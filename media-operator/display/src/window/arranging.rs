@@ -95,6 +95,7 @@ impl Display {
     /// exits, so the link's thread ends before winit disconnects the Wayland
     /// connection that the thread reads.
     pub(super) fn on_close(&mut self) -> Task<Message> {
+        self.copies.remove_files();
         if let Some(link) = self.link.take() {
             let line = match link.close() {
                 true => "media-display: arranger destroyed, because the window closes",

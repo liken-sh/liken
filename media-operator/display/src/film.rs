@@ -4,6 +4,7 @@
 
 use serde_json::Value;
 
+use crate::subtitles::copy::{self, source};
 use crate::subtitles::script::Script;
 
 /// One entry of mpv's `chapter-list`.
@@ -46,6 +47,13 @@ pub struct Track {
     /// format that changed when a track was selected would move the
     /// columns of the track panel.
     pub channels: Option<i64>,
+    /// The frame rate of a video track, which times the cues of a MicroDVD
+    /// subtitle file.
+    pub fps: Option<f64>,
+    /// The id of the track in its container: the `TrackNumber` of a
+    /// Matroska track, which mpv's own demuxer reads, and the `track_ID` of
+    /// an MP4 track, which FFmpeg reports as the stream's id.
+    pub src_id: Option<i64>,
 }
 
 /// mpv's `osd-dimensions`: the size of the window that mpv draws into, in
@@ -90,6 +98,14 @@ pub struct Film {
     /// The header of the selected ASS track. `None` until mpv sends it,
     /// and again after `forget_script`.
     pub script: Option<Script>,
+    /// The display's copies of subtitle tracks, which `tracks` leaves out.
+    /// Each is the track that mpv reports and the identity of its original.
+    pub copies: Vec<(String, Track)>,
+    /// How many times mpv has sent `track-list`.
+    pub track_lists: u64,
+    /// The time of the first packet of the file, from
+    /// `demuxer-start-time`. mpv plays the file from that time as 0.
+    pub start_time: Option<f64>,
 }
 
 impl Film {
@@ -104,7 +120,10 @@ impl Film {
             "chapter-list" => self.chapters = chapters(value),
             "chapter-metadata/by-key/title" => self.chapter_title = text(value),
             "metadata" => self.metadata = pairs(value),
-            "track-list" => self.tracks = tracks(value),
+            "track-list" => {
+                (self.tracks, self.copies) = fold(tracks(value));
+                self.track_lists += 1;
+            }
             "media-title" => self.media_title = text(value),
             "path" => self.path = text(value),
             "playlist-pos" => self.playlist_pos = value.as_i64(),
@@ -113,6 +132,7 @@ impl Film {
             "audio-delay" => self.audio_delay = value.as_f64().unwrap_or(0.0),
             "sub-delay" => self.sub_delay = value.as_f64().unwrap_or(0.0),
             "osd-dimensions" => self.screen = screen(value),
+            "demuxer-start-time" => self.start_time = value.as_f64(),
             // mpv reads the header from the track's decoder, and an ASS
             // track always has one. So a value of null means that mpv read
             // the property before it opened the track, and the display keeps
@@ -122,9 +142,39 @@ impl Film {
         }
     }
 
-    /// The subtitle track that mpv draws, if any.
+    /// The subtitle track that a person chose, if any. When mpv draws the
+    /// display's copy of a track, this is the original, which the track
+    /// panel shows in its place.
     pub fn selected_subtitle(&self) -> Option<&Track> {
         self.tracks_of("sub").find(|track| track.selected)
+    }
+
+    /// The subtitle track that mpv draws, which is the copy when mpv draws
+    /// one.
+    pub fn drawn_subtitle(&self) -> Option<&Track> {
+        self.copies
+            .iter()
+            .map(|(_, copy)| copy)
+            .find(|copy| copy.selected)
+            .or_else(|| self.selected_subtitle())
+    }
+
+    /// Whether `track` is the display's copy of a text track that is not
+    /// ASS, such as SubRip.
+    pub fn is_converted_copy(&self, track: &Track) -> bool {
+        let Some((identity, _)) = self.copies.iter().find(|(_, copy)| copy.id == track.id) else {
+            return false;
+        };
+        self.tracks_of("sub")
+            .find(|original| source::identity(original) == *identity)
+            .is_some_and(|original| !matches!(original.codec.as_deref(), Some("ass" | "ssa")))
+    }
+
+    /// The frame rate of the selected video track.
+    pub fn fps(&self) -> Option<f64> {
+        self.tracks_of("video")
+            .find(|track| track.selected)
+            .and_then(|track| track.fps)
     }
 
     /// Marks the header as unknown. The display calls it when it observes
@@ -221,10 +271,43 @@ fn tracks(value: &Value) -> Vec<Track> {
                     hearing_impaired: flag(entry, "hearing-impaired"),
                     visual_impaired: flag(entry, "visual-impaired"),
                     channels: entry.get("demux-channel-count").and_then(Value::as_i64),
+                    fps: entry.get("demux-fps").and_then(Value::as_f64),
+                    src_id: entry.get("src-id").and_then(Value::as_i64),
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Splits the display's copies of subtitle tracks from the tracks of the
+/// file. The name of a copy's file names its original, and mpv reports the
+/// file as the copy's `external-filename`. When mpv
+/// draws a copy, the original counts as selected, so the track panel
+/// shows one entry for the two.
+fn fold(all: Vec<Track>) -> (Vec<Track>, Vec<(String, Track)>) {
+    let (copies, mut tracks): (Vec<Track>, Vec<Track>) =
+        all.into_iter().partition(|track| copy_of(track).is_some());
+    let copies: Vec<(String, Track)> = copies
+        .into_iter()
+        .filter_map(|copy| Some((copy_of(&copy)?.to_string(), copy)))
+        .collect();
+    for (identity, copy) in &copies {
+        if !copy.selected {
+            continue;
+        }
+        for track in tracks.iter_mut().filter(|track| track.kind == "sub") {
+            if source::identity(track) == *identity {
+                track.selected = true;
+            }
+        }
+    }
+    (tracks, copies)
+}
+
+/// The identity of the original of a copy, or `None` for a track that is
+/// not a copy.
+fn copy_of(track: &Track) -> Option<&str> {
+    copy::identity(track.external_filename.as_deref()?)
 }
 
 /// A boolean field of a `track-list` entry. A missing field is false.
@@ -490,6 +573,46 @@ mod tests {
         assert_eq!(film.script.map(|script| script.play_res_y), Some(804));
         film.forget_script();
         assert_eq!(film.script, None);
+    }
+
+    /// The track panel lists the original of a copy once, as selected
+    /// while mpv draws the copy, and the placement reads the copy.
+    #[test]
+    fn a_copy_takes_the_place_of_its_original() {
+        let mut film = Film::default();
+        film.apply(
+            "track-list",
+            &json!([
+                { "id": 1, "type": "sub", "codec": "subrip", "ff-index": 3, "lang": "eng" },
+                { "id": 2, "type": "sub", "codec": "subrip", "ff-index": 4 },
+                { "id": 3, "type": "sub", "codec": "ass", "ff-index": 0, "external": true,
+                  "external-filename": "/ipc/media-display-copy.ff-index-3.1.ass",
+                  "lang": "eng", "selected": true },
+            ]),
+        );
+        let listed: Vec<(i64, bool)> = film
+            .tracks_of("sub")
+            .map(|track| (track.id, track.selected))
+            .collect();
+        assert_eq!(listed, [(1, true), (2, false)]);
+        assert_eq!(film.selected_subtitle().map(|track| track.id), Some(1));
+        assert_eq!(film.drawn_subtitle().map(|track| track.id), Some(3));
+        assert_eq!(film.copies.len(), 1);
+        assert_eq!(film.track_lists, 1);
+    }
+
+    /// The `src-id` of a track and the file's start time come from mpv
+    /// 0.41.0's properties.
+    #[test]
+    fn a_track_keeps_its_id_in_the_container_and_the_file_its_start() {
+        let mut film = Film::default();
+        film.apply(
+            "track-list",
+            &json!([{ "id": 1, "type": "sub", "codec": "subrip", "src-id": 2, "ff-index": 1 }]),
+        );
+        film.apply("demuxer-start-time", &json!(0.0));
+        assert_eq!(film.tracks[0].src_id, Some(2));
+        assert_eq!(film.start_time, Some(0.0));
     }
 
     #[test]
