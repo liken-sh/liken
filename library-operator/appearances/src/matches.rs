@@ -1,6 +1,6 @@
 // The match command. It embeds the cast's headshots into the gallery,
-// writes the gallery to .liken/appearances/gallery.json, reads every
-// detections record in the title's .liken/appearances/, and names the
+// writes the gallery to .liken/appearances/gallery.json, reads the
+// detections record of each video in the title's folder, and names the
 // faces in two passes: from the headshots (matcher.rs), then from the faces
 // the headshots named (knn_guard.rs).
 //
@@ -17,8 +17,9 @@
 //
 // The matches file is one JSON document, as the spans file is, and not JSON
 // Lines: the title's .liken/appearances/ holds the detections records as
-// .jsonl files, and `records` reads every .jsonl file there as one. A film's
-// matches file is about 100 bytes per face named, under a megabyte.
+// .jsonl files, and `records` reads every .jsonl file there as one whose
+// video is in the folder. A film's matches file is about 100 bytes per face
+// named, under a megabyte.
 
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -184,6 +185,13 @@ pub fn gallery_path(title: &Path) -> PathBuf {
         .join("gallery.json")
 }
 
+// The detections record of each video in the title's folder. A record is
+// named for its video, <video>.jsonl, and a record whose video is gone is
+// left unread: a download manager that replaces a video deletes the old
+// file and leaves its record, and that record would get a matches file and
+// a spans file of its own, and a part in the summary, on every match. The
+// video file on the volume decides and not the catalog, because the
+// operator passes the match a folder alone, and review opens that file.
 pub fn records(title: &Path) -> Result<Vec<Record>, Error> {
     let directory = title.join(".liken").join("appearances");
     let mut paths: Vec<_> = fs::read_dir(&directory)
@@ -191,6 +199,10 @@ pub fn records(title: &Path) -> Result<Vec<Record>, Error> {
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|e| e == "jsonl"))
+        .filter(|path| {
+            path.file_stem()
+                .is_some_and(|video| title.join(video).is_file())
+        })
         .collect();
     paths.sort();
     paths
@@ -547,5 +559,38 @@ mod tests {
         let matches = matches(&gallery(), &[record(), other], RULE).unwrap();
         let videos: Vec<&str> = matches.iter().map(|m| m.video.as_str()).collect();
         assert_eq!(videos, ["film.mkv"]);
+    }
+
+    // A title's folder holding each video named, and a detections record
+    // of each recorded video in its .liken/appearances/.
+    fn title_folder(name: &str, videos: &[&str], recorded: &[&str]) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("appearances-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let title = root.join("Film [1999]");
+        let directory = title.join(".liken").join("appearances");
+        fs::create_dir_all(&directory).unwrap();
+        for video in videos {
+            fs::write(title.join(video), b"").unwrap();
+        }
+        for video in recorded {
+            let mut record = record();
+            record.header.video = (*video).into();
+            let mut out = File::create(directory.join(format!("{video}.jsonl"))).unwrap();
+            record::write_line(&mut out, &record.header).unwrap();
+            for sample in &record.samples {
+                record::write_line(&mut out, sample).unwrap();
+            }
+        }
+        title
+    }
+
+    // A download manager that replaces a film's video deletes the old file
+    // and leaves its record, and the match reads the new video's alone.
+    #[test]
+    fn records_leave_out_the_record_of_a_video_that_is_gone() {
+        let title = title_folder("gone", &["new.mkv"], &["new.mkv", "old.mkv"]);
+        let records = records(&title).unwrap();
+        let videos: Vec<&str> = records.iter().map(|r| r.header.video.as_str()).collect();
+        assert_eq!(videos, ["new.mkv"]);
     }
 }

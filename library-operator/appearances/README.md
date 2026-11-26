@@ -12,8 +12,9 @@ volume. The tool has three commands:
   expensive pass, and the only one that opens the video.
 - `appearances match <title folder>` embeds the cast's headshots from
   `.liken/credits.yaml` and `.contributors/`, writes the gallery to
-  `.liken/appearances/gallery.json`, and names the faces. For each video
-  it writes `.liken/appearances/<video>.matches.json`, with each face it
+  `.liken/appearances/gallery.json`, and names the faces. It reads the
+  detections record of each video in the folder, and leaves unread a
+  record whose video is gone. For each video it writes `.liken/appearances/<video>.matches.json`, with each face it
   named, and `.liken/appearances/<video>.spans.json`, the file the liken
   display reads when the film pauses. Then it prints one line of JSON on
   standard output, a summary of the title. It takes 1 to 5 seconds for a
@@ -216,7 +217,8 @@ A film's matches file is about 110 bytes per face named: from 390 KB to
 810 KB on the bench. It is one JSON document, as the spans file is. A
 JSON Lines file would let a reader stream the faces, but
 `.liken/appearances/` holds the detections records as `.jsonl` files,
-and `match` reads every `.jsonl` file there as a record.
+and `match` reads every `.jsonl` file there whose video is in the
+folder as a record.
 
 `match` then prints one summary for each title folder, on one line:
 
