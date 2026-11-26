@@ -9,8 +9,9 @@ package main
 // the trickplay map, the move and the remove a merge of two
 // .contributors/ entries makes, the remove of each file of the .liken
 // directory at the library root except the titles model (rootliken.go),
-// and the replace of a thumbnail or a tile
-// directory made from the file a path held before. Every name these doors
+// the replace of a thumbnail or a tile directory made from the file a path
+// held before, and the removes of the outputs of a gone video and of a stale
+// temporary beside the media (orphans.go). Every name these doors
 // land takes the owner of its folder (volumeowner.go). The edit of one element
 // in an .nfo file is in xmledit.go, and the door for a file a writer reads,
 // changes, and writes back is in volumeupdate.go.
@@ -21,6 +22,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -524,4 +526,111 @@ func (w *volumeWriter) replaceEarlierTree(target string, before int64) (bool, er
 		return false, err
 	}
 	return true, w.removeTemporaryTree(earlier)
+}
+
+// The remove of one tile directory of a gone video (plan 101). The path is
+// built here from the title and the entry, and the door refuses an entry that
+// names anything but a .trickplay directory in the title or in one folder of
+// it. It keeps the directory when a video of its directory derives its name,
+// for any extension and in any case, when the title has no video left, and
+// when the path is a symbolic link. The directory takes a temporary name
+// first, so a tree that is half removed is a temporary that the sweep
+// finishes, and no player reads it as tiles. The answer says whether this
+// call removed the directory.
+func (w *volumeWriter) removeOrphanTiles(root, kind, title, entry string) (bool, error) {
+	path, err := titleEntry(root, title, entry)
+	if err != nil {
+		return false, err
+	}
+	if !strings.EqualFold(filepath.Ext(path), trickplayExtension) {
+		return false, fmt.Errorf("refusing to remove %s: it is no %s directory", path, trickplayExtension)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, nil
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		return false, err
+	}
+	if !tilesOrphaned(videoBases(entries), filepath.Base(path)) ||
+		!titleHoldsVideo(kind, filepath.Join(root, title)) {
+		return false, nil
+	}
+	aside := w.temporary(path + ".orphan")
+	if err := os.Rename(path, aside); err != nil {
+		return false, err
+	}
+	return true, os.RemoveAll(aside)
+}
+
+// The remove of the records named for one gone video: its detections record
+// and the match's two files in .liken/appearances/, and its reading in
+// .liken/titles/ (plan 101). The entry is the video, relative to the title,
+// and the door builds each path from it, so no other file of .liken is in
+// reach. It keeps every record while the video is there, under its own name
+// or a name a move gave it, while the title has no video left, and a record
+// that is a symbolic link. The answer says whether this call removed any.
+func (w *volumeWriter) removeOrphanRecords(root, kind, title, entry string) (bool, error) {
+	video, err := titleEntry(root, title, entry)
+	if err != nil {
+		return false, err
+	}
+	if !videoExtensions[strings.ToLower(filepath.Ext(video))] {
+		return false, fmt.Errorf("refusing the records of %s: it is no video", video)
+	}
+	dir, name := filepath.Split(video)
+	if videoPresent(dir, name) || !titleHoldsVideo(kind, filepath.Join(root, title)) {
+		return false, nil
+	}
+	removed := false
+	for _, records := range []string{appearancesRecordsDirectory, titlesRecordsDirectory} {
+		for _, suffix := range videoRecordSuffixes[records] {
+			path := filepath.Join(dir, likenDirectory, records, name+suffix)
+			info, err := os.Lstat(path)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return removed, err
+			}
+			if !info.Mode().IsRegular() {
+				continue
+			}
+			if err := os.Remove(path); err != nil {
+				return removed, err
+			}
+			removed = true
+		}
+	}
+	return removed, nil
+}
+
+// The remove of a temporary beside the media that a stopped writer left: a
+// name with the temporary mark, outside every .liken directory, which has
+// gone unchanged for staleTemporaryAge. The aside tree of
+// replaceEarlierTree stays while its tile directory is missing, because it
+// is then the only copy of the tiles. The answer says whether this call
+// removed the temporary.
+func (w *volumeWriter) removeStaleTemporary(path string, now time.Time) (bool, error) {
+	if !strings.Contains(filepath.Base(path), likenTempMark) || slices.Contains(splitPath(path), likenDirectory) {
+		return false, fmt.Errorf("refusing to remove %s: it is no temporary beside the media", path)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&fs.ModeSymlink != 0 || !temporaryStale(path, now) {
+		return false, nil
+	}
+	if tiles, aside := asideTreeTiles(path); aside && !dirExists(tiles) {
+		return false, nil
+	}
+	if info.IsDir() {
+		return true, os.RemoveAll(path)
+	}
+	return true, os.Remove(path)
 }

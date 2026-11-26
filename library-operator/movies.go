@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 // walkMovies reads a whole movies root into one walkResult by collecting the
@@ -146,6 +147,9 @@ func scanMovieFolder(scan folderScan, dir string, result *walkResult) {
 	result.aliases = append(result.aliases, aliasRowsForItem(library, scopeMovie, meta.ProviderIDs, key, id)...)
 	alternates := readLikenDir(likenDir{root: root, dir: dir, library: library, item: id}, result)
 	result.movies[movie].Body.AlternateTitles = alternatesOf(alternates, title)
+	if scan.sweep {
+		result.swept = result.swept.add(scan.sweepTitle(dir, time.Now()))
+	}
 	result.titles++
 	if !identified {
 		result.unidentified++

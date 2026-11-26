@@ -4,8 +4,9 @@ package main
 // phases and does no work on titles. It writes the run's start first, so the
 // operator reads a run in flight from the moment the Job starts. It then waits
 // for the mark of every phase the Job includes, removes the stale partial
-// files the scan found and the ledgers of the .liken directory at the library
-// root (rootliken.go), derives
+// files the scan found, the outputs of gone videos and the stale temporaries
+// beside the media (orphans.go), and the ledgers of the .liken directory at
+// the library root (rootliken.go), derives
 // the Library's set rows and mark estimates (markestimaterows.go), publishes the work list of each heavy fact the
 // Library runs (worklist.go), writes the one finished runs row, and waits for
 // a catalog pod to confirm it. Every container of the Job writes through the
@@ -113,6 +114,7 @@ func (r *closeRun) runJob(ctx context.Context) error {
 		return err
 	}
 	r.sweepStalePartials(time.Now())
+	r.sweepOrphans(time.Now())
 	r.removeRootLiken()
 	if r.kind == libraryKindMovies {
 		if err := deriveLibrarySets(ctx, r.catalog, r.library); err != nil {

@@ -484,7 +484,10 @@ the new file and replaces the whole directory. The
 [scanning guide](https://liken.sh/library/docs/guides/scanning/#a-file-replaced-at-the-same-path)
 says how the walk finds a replaced file. To make the tiles of any
 title again, delete its `.trickplay` directory, and the next walk opens
-its gap, and the end of that `Job` starts a worker.
+its gap, and the end of that `Job` starts a worker. When a video leaves
+its folder, a full walk removes its `.trickplay` directory, as the
+[scanning guide](https://liken.sh/library/docs/guides/scanning/#the-outputs-of-a-video-that-left)
+says.
 
 ### Appearances
 
@@ -955,6 +958,15 @@ cannot use, such as one with no id or an unknown `type`, is skipped,
 and the walk logs one line that names the file and the reason.
 
 ### The write rule
+
+Each program that writes into a library is responsible for some kinds
+of file. The operator is responsible for the `.nfo` elements of its
+facts, its art, its `.trickplay` directories, and its `.liken/`
+records. The download managers are responsible for the videos and
+their extras, and they adopt and delete an episode's `-thumb.jpg`. The
+operator removes a `.trickplay` directory and the `.liken/` records of
+a video that left its folder, whoever wrote them, and it leaves the
+kinds that other programs own.
 
 Each fact owns a fixed group of elements in the `.nfo` file and writes
 nothing outside it. The `overview` fact owns the plot, the tagline,

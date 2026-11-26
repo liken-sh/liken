@@ -104,7 +104,8 @@ from its name, its folder, and one `stat`. It opens no file to
 classify it. A subtitle's language is the tag in its name, and `hi`
 after a language tag marks it hearing-impaired. Dot-named entries,
 `Thumbs.db`, `desktop.ini`, and the trash and service directories of
-common NAS systems are skipped.
+common NAS systems are skipped. A `.trickplay` directory with no video
+of its name in its folder gets no row, because it serves no video.
 
 ### .nfo files and art
 
@@ -159,6 +160,46 @@ read-only, so it hands those names to the `Job`'s close container, which
 removes each file and logs one line for it. The longest writer, the
 appearances tool's detect pass, stops after 6 hours and changes its file as
 it writes, so the walk never names a file that a live writer holds.
+
+### The outputs of a video that left
+
+A download manager that takes a better release writes the new video
+under a new name and deletes the old one. The operator removes what it
+derived from the old video: its `.trickplay` directory, whoever wrote
+it, and its records in `.liken/appearances/` and `.liken/titles/`.
+Each one is a cache that a decode makes again. The operator leaves the
+files that other programs are responsible for, such as an episode's
+`-thumb.jpg` and the `.nfo` file of a video.
+
+An output goes when all of these hold:
+
+- Its video is not in the folder, under its own name or with
+  `.backup~` or `.partial~`, the names a download manager gives a
+  file it moves.
+- No video in the folder has the same name with another extension or
+  in another case, because such a video shares the `.trickplay`
+  directory.
+- The title still has a video, in its folder or in an extras or
+  season folder. A folder that is still arriving, and a share that
+  hides its videos, keep every output.
+
+Only a full walk of a `Job` finds these outputs, and only when it
+reads the whole volume on a copy of the catalog that reached the
+`Job`'s write. A webhook rescan removes nothing. The scan hands the
+outputs to the close container, which checks each one again, removes
+it, and logs one line of counts:
+
+    removed 2 outputs of gone videos and 1 stale temporaries, kept 0, and could not remove 0
+
+The same line counts the temporaries that a stopped writer left beside
+the media, such as a trickplay staging named
+`.<video>.trickplay.liken-tmp-<writer>`. The walk names each name with
+`.liken-tmp-` in a title, season, extras, or `trailers/` folder, and
+the close container removes it once nothing in it has changed for 48
+hours. A staging that holds the earlier tiles of a replaced file stays
+while its tile directory is missing, because it is then the only copy
+of those tiles. A volume that refuses a remove adds to the last count
+and does not fail the `Job`.
 
 The library root holds no title, so no fact of a title writes a
 `.liken/` directory there. The close container of every `Library`

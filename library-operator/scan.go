@@ -177,6 +177,11 @@ type scanner struct {
 	// The stale partial files the full walk found, which the scan hands to
 	// the close container before it writes its mark.
 	stalePartials []string
+	// The outputs of gone videos and the stale temporaries the full walk
+	// found, which the scan hands to the close container only for a walk
+	// that counts (plan 101).
+	orphans          []orphanOutput
+	staleTemporaries []string
 
 	// Whether the Library posts webhooks, so the scan notes its videos
 	// before the walk, and the write its copy must hold before that read.
@@ -221,12 +226,16 @@ func (s *scanner) runPhase(ctx context.Context) error {
 		return err
 	}
 	s.noteVideosBefore(ctx)
+	synced := s.awaitSweepSync(ctx)
 	walked := s.runJob(ctx)
 	if ctx.Err() != nil {
 		return walked
 	}
 	s.noteWalkScope()
 	s.noteStalePartials()
+	if walked == nil && s.walkedWhole && synced {
+		s.noteOrphans()
+	}
 	return s.board.finish(scanPhase, walked)
 }
 
@@ -368,9 +377,9 @@ func (s *scanner) walkOnce(ctx context.Context) error {
 func (s *scanner) walkFolders(ctx context.Context) iter.Seq[*walkResult] {
 	switch s.kind {
 	case libraryKindMovies:
-		return walkTree(ctx, s.root, movieFolderRule(s.folderScan()))
+		return walkTree(ctx, s.root, movieFolderRule(s.sweepingScan()))
 	case libraryKindSeries:
-		return walkTree(ctx, s.root, seriesFolderRule(s.folderScan()))
+		return walkTree(ctx, s.root, seriesFolderRule(s.sweepingScan()))
 	}
 	return func(yield func(*walkResult) bool) {}
 }
@@ -379,6 +388,14 @@ func (s *scanner) walkFolders(ctx context.Context) iter.Seq[*walkResult] {
 // rescan share. Nothing here writes the volume.
 func (s *scanner) folderScan() folderScan {
 	return folderScan{root: s.root, library: s.library, kind: s.kind, ignore: s.ignore}
+}
+
+// The read of the full walk, which also sweeps each title where a Job has a
+// close container to hand the sweep to.
+func (s *scanner) sweepingScan() folderScan {
+	scan := s.folderScan()
+	scan.sweep = s.board != nil
+	return scan
 }
 
 // FullWalk is the walk's one collector. A pool of workers reads the
@@ -447,6 +464,8 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 		s.logReplaced(folder.reopened)
 		reopened = reopened.add(folder.reopened)
 		s.stalePartials = append(s.stalePartials, folder.stalePartials...)
+		s.orphans = append(s.orphans, folder.swept.outputs...)
+		s.staleTemporaries = append(s.staleTemporaries, folder.swept.temporaries...)
 		appendFolder(buffer, folder)
 		sets.add(folder.movies)
 		found := len(folder.movies) + len(folder.series) + len(folder.episodes)
@@ -724,6 +743,9 @@ type folderScan struct {
 	library string
 	kind    string
 	ignore  ignoreSet
+	// Whether the read also names the outputs of gone videos and the stale
+	// temporaries, which only a full walk of a Job does (plan 101).
+	sweep bool
 }
 
 // Reads one title or series folder into rows, upserts them, and prunes the

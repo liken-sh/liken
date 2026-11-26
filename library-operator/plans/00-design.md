@@ -163,8 +163,9 @@ concerns.
 
 The unit of enrichment is a concern: one gap in the catalog, filled by
 a `Job` that reads the gap through the catalog pod and writes only the
-volume. The enricher never writes the catalog, and it never removes or
-overwrites a file it did not write. [Plan 27](completed/27-enrichment.md) holds
+volume. The enricher never writes the catalog, and it removes or
+overwrites only the kinds of file it is responsible for
+([plan 101](completed/101-outputs-of-a-file-that-left.md)). [Plan 27](completed/27-enrichment.md) holds
 the contracts, and plans 28 to 31 build them.
 
 One program writes metadata files into a folder. A library that another tool

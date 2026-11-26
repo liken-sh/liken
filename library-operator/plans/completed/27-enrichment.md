@@ -2,6 +2,12 @@
 
 Plan 27. Complete on 2026-09-06: plans 28 to 31 and plan 25 are built.
 
+Status on 2026-11-26: [plan 101](101-outputs-of-a-file-that-left.md)
+replaces the rule that a stale file is left in place, for the outputs
+of a video that left its folder. The operator removes the kinds of
+output it is responsible for, its tile directories and its `.liken/`
+records, whoever wrote the file.
+
 The design for the operator's third responsibility, and the
 contracts that plans 28 to 31 build on. It replaces plan 11 and plan
 24, which are in [`rejected/`](../rejected/) with a note that says so.

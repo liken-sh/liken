@@ -112,6 +112,10 @@ type walkResult struct {
 	// has changed for stalePartialAge, by absolute path. The scan hands them
 	// to the close container, which removes them.
 	stalePartials []string
+	// The outputs of the folder's gone videos and its stale temporaries
+	// beside the media, which a full walk finds and the close container
+	// removes (plan 101).
+	swept titleSweep
 }
 
 // walkReadFailure is one directory the walk could not read: the path it

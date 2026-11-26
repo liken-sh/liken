@@ -47,6 +47,10 @@ func (f folderFiles) read() ([]fileRow, []streamRow, []string, error) {
 	var rows []fileRow
 	var streams []streamRow
 	var subdirectories []string
+	// A tile directory with no video of its base name serves no video, so
+	// it gets no row (plan 101). The player reads a video row's trickplay
+	// column and never the directory's own row.
+	bases := videoBases(entries)
 	for _, entry := range entries {
 		name := entry.Name()
 		if skipName(name) {
@@ -54,6 +58,9 @@ func (f folderFiles) read() ([]fileRow, []streamRow, []string, error) {
 		}
 		if entry.IsDir() {
 			if strings.EqualFold(filepath.Ext(name), trickplayExtension) {
+				if tilesOrphaned(bases, name) {
+					continue
+				}
 				row, _, err := f.row(name, fileClass{Type: fileTypeTrickplay, Role: fileRoleTiles})
 				if err != nil {
 					return rows, streams, subdirectories, err

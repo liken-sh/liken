@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // walkSeries reads a whole series root into one walkResult by collecting the
@@ -130,6 +131,9 @@ func scanSeriesFolder(scan folderScan, dir string, result *walkResult) {
 	}
 
 	scanSeriesFiles(root, dir, library, seriesID, ignore, folders, ledgers, folderShowsByName, result)
+	if scan.sweep {
+		result.swept = result.swept.add(scan.sweepTitle(dir, time.Now()))
+	}
 }
 
 // The arrival of every episode file, read from one ledger per folder that
