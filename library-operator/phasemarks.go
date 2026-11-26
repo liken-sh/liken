@@ -18,11 +18,13 @@ package main
 // a close after a write. So a phase wakes on both events and polls nothing.
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -136,6 +138,32 @@ func (b *phaseBoard) finish(phase string, failure error) error {
 func (b *phaseBoard) writeNote(name string, data []byte) error {
 	staged := filepath.Join(b.dir, "."+name)
 	if err := os.WriteFile(staged, data, 0o644); err != nil {
+		return fmt.Errorf("writing the note %s: %w", name, err)
+	}
+	if err := os.Rename(staged, filepath.Join(b.dir, name)); err != nil {
+		return fmt.Errorf("naming the note %s: %w", name, err)
+	}
+	return nil
+}
+
+// writeNoteWith writes a note as write produces it, through a buffer, so a
+// large note is never whole in memory. Like writeNote, it names the note only
+// once the whole note is on the volume.
+func (b *phaseBoard) writeNoteWith(name string, write func(io.Writer) error) error {
+	staged := filepath.Join(b.dir, "."+name)
+	file, err := os.Create(staged)
+	if err != nil {
+		return fmt.Errorf("writing the note %s: %w", name, err)
+	}
+	buffered := bufio.NewWriter(file)
+	err = write(buffered)
+	if err == nil {
+		err = buffered.Flush()
+	}
+	if closed := file.Close(); err == nil {
+		err = closed
+	}
+	if err != nil {
 		return fmt.Errorf("writing the note %s: %w", name, err)
 	}
 	if err := os.Rename(staged, filepath.Join(b.dir, name)); err != nil {

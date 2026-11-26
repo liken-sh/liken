@@ -1,7 +1,9 @@
 # 99, Webhooks after a walk
 
 Proposed and built on 2026-11-25. The operator's tests pass. No drill
-has run on a cluster.
+has run on a cluster. On 2026-11-26, plan 100 replaced the `change` of
+a movie with the change of each movie and episode, and added the
+videos that a walk took away.
 
 ## The problem
 

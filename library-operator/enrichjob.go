@@ -155,6 +155,7 @@ func libraryPodTemplate(library *Library, providers providerSet, languages []str
 			phaseNeedsOf(phase.name, included), images))
 	}
 	closing := enrichContainer(library, closeMode, closeMode, plan.paths, images.operator)
+	closing.Env = append(closing.Env, EnvVar{Name: goMemoryLimitVariable, Value: closeGoMemoryLimit})
 	withPhaseEnv(&closing, plan, included)
 	if len(plan.subtitleLanguages) > 0 {
 		closing.Env = append(closing.Env, EnvVar{Name: librarySubtitleLanguagesVariable,

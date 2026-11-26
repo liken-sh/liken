@@ -1,7 +1,7 @@
 ---
 title: Connect Radarr, Sonarr, and Jellyfin
 weight: 70
-description: "Connect Radarr, Sonarr, and Jellyfin to a Library's webhook so an import rescans one folder at once, and have each walk post the titles it added to a receiver of your own. Use when new titles should appear on the wall in seconds instead of on the hourly walk, to rescan one folder by hand, or to send a notification when a new title is ready to watch."
+description: "Connect Radarr, Sonarr, and Jellyfin to a Library's webhook so an import rescans one folder at once, and have each walk post the titles it added or replaced to a receiver of your own. Use when new titles should appear on the wall in seconds instead of on the hourly walk, to rescan one folder by hand, or to send a notification when a new title is ready to watch."
 ---
 
 # Connect Radarr, Sonarr, and Jellyfin
@@ -137,11 +137,14 @@ body for the whole walk:
       "finished": "2026-11-25T14:03:40Z",
       "titles": [
         {
-          "change": "added",
+          "change": "replaced",
           "table": "movies",
           "row": {"id": "movie:tmdb:1001", "title": "The Long Survey", "released": "1999", "body": {}},
           "files": [
-            {"change": "added", "row": {"path": "The Long Survey (1999)/movie.mkv"}, "streams": [], "marks": []}
+            {"change": "added", "row": {"path": "The Long Survey (1999)/webdl.mkv", "height": 2160}, "streams": [], "marks": []}
+          ],
+          "previous": [
+            {"row": {"path": "The Long Survey (1999)/bluray.mkv", "height": 1080}, "streams": [], "marks": []}
           ],
           "genres": [],
           "credits": [{"row": {"billing": 0, "name": "Ada Example", "part": "actor"}, "contributor": {}}],
@@ -153,28 +156,71 @@ body for the whole walk:
     }
 
 - `walk` is `full` for a walk of the whole library, and `folders` for
-  a walk of the folders that webhooks named.
-- Each entry of `titles` is one movie or one series. `change` is
-  `added` when the catalog had no video of the title before the walk,
-  and `changed` when it had one, such as an upgrade or a new episode.
-- `row` is the title's row of the `movies` or `series` table, keyed by
-  the catalog's column names, so it has every column the catalog has.
-  `body` and `arts` are JSON values, not strings. A path is relative to
-  the library's root.
-- A movie has `files`. A series has `episodes`, with only the episodes
-  whose videos changed, and each episode has its own `row` and
-  `files`. A file has `change`, `added` or `replaced`, when the walk
-  changed it, its `row`, and its `streams` and `marks`.
+  a walk of the folders that webhooks named. A walk of named folders
+  that read the whole library, because a folder it was given is not on
+  the volume, is `full`.
+- Each entry of `titles` is one movie or one series. `row` is the
+  title's row of the `movies` or `series` table, keyed by the catalog's
+  column names, so it has every column the catalog has. `body` and
+  `arts` are JSON values, not strings. A path is relative to the
+  library's root.
+- A movie has `change`, `files`, and `previous`. A series has
+  `episodes`, with only the episodes to which a video arrived, and each
+  episode has its own `change`, `row`, `files`, and `previous`.
+- The `change` of a movie or an episode is one of these:
+  - `added`: the catalog held no video of it before the walk.
+  - `replaced`: the walk took a video away from it, because the video
+    left or a new file was written at the same path, and a video
+    arrived. An upgrade that writes the new file under a new name is
+    `replaced`.
+  - `version-added`: it kept every video it had, and another video
+    arrived, such as a 2160p encoding beside a 1080p one.
+- The `change` of a series is `added` when the catalog held no video of
+  any of its episodes before the walk, and `changed` when it held one.
+- `files` lists every file of the movie or the episode after the walk.
+  A file has `change`, `added` for a new path or `replaced` for a path
+  whose size or modified time changed, when the walk changed it, its
+  `row`, and its `streams` and `marks`.
+- `previous` lists the videos that the walk took away from the movie or
+  the episode, with the values that the catalog held before the walk,
+  so you can compare them with `files`. It is empty for `added` and
+  `version-added`. An entry has the whole `row`, and its `streams` and
+  `marks`, when the walk kept the video's rows before it walked. A walk
+  of named folders keeps the rows of each video under the folders that
+  are on the volume, up to 4 MB of rows for the whole walk. For every
+  other video, `row` has only `path`, `size_bytes`, and `modified`, and
+  `streams` and `marks` are `null`. That is a video outside the named
+  folders, a video past the 4 MB, and each video of a walk that named
+  no folders. A walk of named folders that read the whole library is
+  `full`, and it still has the whole rows of the videos under the
+  folders that were on the volume.
 - `genres`, `credits`, and `trailers` are the title's rows of those
   tables. Each credit has its `row`, and its `contributor`, the row of
   the person, or `null` where the store has no entry. `set` is the row
   of the movie's set. Each entry of `franchises` has the franchise
   `member` row that names the title and the `franchise` row.
 
+The change of an item comes only from the catalog's videos and the
+items each video holds, and never from a file name. The walk can
+change an item's id. When identity writes a provider id in place of
+the folder's key, the operator finds the item's videos before the walk
+through the item's aliases, and an episode through the aliases of its
+series. Some changes of an id still read as `added`:
+
+- The id changes from a provider id to the folder's key, such as
+  `movie:tmdb:1001` to `movie:path:<key>`, and the video is renamed in
+  the same walk. That happens when the `.nfo` file is gone and identity
+  cannot write it again.
+- The new `.nfo` file names other provider ids than the old one, and
+  the folder is renamed in the same import.
+
+A walk that runs after the old video left and before the new one
+arrived takes the old video away and posts nothing, so the next walk
+reads the new video as `added`.
+
 A walk that adds or replaces no video posts nothing. The first walk of
 a `Library` also posts nothing, because it catalogs what the volume
-already held. A renamed file is a new path, so the title is `changed`
-with an `added` file.
+already held.
 
 The close container retries each address that does not answer with a
 2xx status. It waits 1 second before the first retry and doubles the

@@ -111,7 +111,7 @@ func (r *closeRun) postWebhooks(ctx context.Context, walk libraryRun) {
 		r.logf("posts no webhook: %v", err)
 		return
 	}
-	if len(changes) == 0 {
+	if len(changes.files) == 0 {
 		r.logf("posts no webhook: the walk added or replaced no video")
 		return
 	}
@@ -134,15 +134,20 @@ func (r *closeRun) postWebhooks(ctx context.Context, walk libraryRun) {
 }
 
 // The document of one walk.
-func (r *closeRun) walkBody(ctx context.Context, walk libraryRun, changes map[string]string) (walkBody, error) {
+func (r *closeRun) walkBody(ctx context.Context, walk libraryRun, changes walkChange) (walkBody, error) {
 	namespace, name, _ := strings.Cut(r.library, "/")
 	titles, err := walkTitles(ctx, r.catalog, r.library, r.kind, changes)
 	if err != nil {
 		return walkBody{}, err
 	}
-	scope := walkFull
-	if len(r.scanPaths) > 0 {
-		scope = walkFolders
+	// The scan notes the scope of the walk it ran. A Job whose scan wrote no
+	// note of it names the walk by the folders it was given.
+	scope := changes.scope
+	if scope == "" {
+		scope = walkFull
+		if len(r.scanPaths) > 0 {
+			scope = walkFolders
+		}
 	}
 	return walkBody{
 		Namespace: namespace, Library: name, Kind: r.kind, Job: r.job, Walk: scope,

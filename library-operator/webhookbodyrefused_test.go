@@ -43,7 +43,7 @@ func TestAMovieCarriesItsSetAndItsFranchises(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	changes := seedFullMovie(t, catalog, agent)
 
-	titles, err := walkTitles(t.Context(), catalog, "house/movies", libraryKindMovies, changes)
+	titles, err := walkTitles(t.Context(), catalog, "house/movies", libraryKindMovies, changeOf(t, catalog, changes))
 
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestAMovieCarriesItsSetAndItsFranchises(t *testing.T) {
 func readsOfABuild(t *testing.T, kind string, seed func(*testing.T, *Catalog, *sqliteAgent) map[string]string) int {
 	t.Helper()
 	catalog, agent := newSQLiteCatalog(t)
-	changes := seed(t, catalog, agent)
+	changes := changeOf(t, catalog, seed(t, catalog, agent))
 	const plenty = 1000
 	agent.queriesLeft = plenty
 	if _, err := walkTitles(t.Context(), catalog, "house/movies", kind, changes); err != nil {
@@ -111,7 +111,7 @@ func TestABuildWhoseCatalogRefusesAReadReturnsTheError(t *testing.T) {
 		for step := 1; step <= reads; step++ {
 			t.Run(fmt.Sprintf("%s, the read %d of %d", build.name, step, reads), func(t *testing.T) {
 				catalog, agent := newSQLiteCatalog(t)
-				changes := build.seed(t, catalog, agent)
+				changes := changeOf(t, catalog, build.seed(t, catalog, agent))
 				agent.queriesLeft = step
 
 				_, err := walkTitles(t.Context(), catalog, "house/movies", build.kind, changes)

@@ -150,6 +150,11 @@ const (
 	walkMemoryLimit   = "128Mi"
 	walkGoMemoryLimit = "96MiB"
 
+	// The close container of a library Job has the scanner's limit, and
+	// builds the whole document a walk posts to its webhooks. Its soft
+	// limit sits 32Mi under that limit, for the reasons below.
+	closeGoMemoryLimit = "32MiB"
+
 	catalogCPURequest    = "10m"
 	catalogMemoryRequest = "64Mi"
 	catalogMemoryLimit   = "512Mi"

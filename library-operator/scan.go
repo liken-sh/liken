@@ -183,6 +183,10 @@ type scanner struct {
 	webhooks    bool
 	sync        syncTarget
 	syncTimeout time.Duration
+	// Whether the scan noted the videos before the walk, and whether the walk
+	// read the whole root, so the scan notes the scope the body names.
+	noted       bool
+	walkedWhole bool
 }
 
 // The scan role's whole program: read the environment, run the
@@ -221,6 +225,7 @@ func (s *scanner) runPhase(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return walked
 	}
+	s.noteWalkScope()
 	s.noteStalePartials()
 	return s.board.finish(scanPhase, walked)
 }
@@ -390,6 +395,7 @@ func (s *scanner) folderScan() folderScan {
 func (s *scanner) fullWalk(ctx context.Context) error {
 	s.walkMutex.Lock()
 	defer s.walkMutex.Unlock()
+	s.walkedWhole = true
 
 	started := time.Now()
 	s.logf("walking %s", s.root)

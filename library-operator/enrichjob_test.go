@@ -646,3 +646,16 @@ func TestRefreshValueSendsTheFactsAlone(t *testing.T) {
 		t.Errorf("refreshValue sent %+v, want no walk", sent)
 	}
 }
+
+// The close container builds a walk's whole webhook body in memory, so its Go
+// runtime collects garbage before the heap reaches a soft limit under the
+// container's limit, as the scan container's does.
+func TestTheCloseContainerCollectsGarbageUnderItsLimit(t *testing.T) {
+	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"))
+
+	closing := jobContainer(job, closeMode)
+
+	if got := containerEnvironment(*closing)[goMemoryLimitVariable]; got != "32MiB" {
+		t.Errorf("%s = %q, want 32MiB under the limit of %s", goMemoryLimitVariable, got, closing.Resources.Limits["memory"])
+	}
+}

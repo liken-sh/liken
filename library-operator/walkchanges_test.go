@@ -95,7 +95,7 @@ func TestTheScanNotesTheVideosBeforeItWalks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(changes) != 1 || changes["Another Survey (2001)/movie.mkv"] != videoAdded {
+		if len(changes.files) != 1 || changes.files["Another Survey (2001)/movie.mkv"] != videoAdded {
 			t.Errorf("changes = %v, want the one video added after the note", changes)
 		}
 	})

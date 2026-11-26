@@ -11,6 +11,29 @@ import (
 	"testing/synctest"
 )
 
+// What a walk changed, from the change of each video named and the catalog as
+// it is now: a video named added was not in the catalog before the walk, and
+// one named replaced had another size.
+func changeOf(t *testing.T, catalog *Catalog, files map[string]string) walkChange {
+	t.Helper()
+	after, err := catalog.videoStates(t.Context(), "house/movies")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := videoStates{}
+	for path, state := range after {
+		switch files[path] {
+		case videoAdded:
+		case videoReplaced:
+			state.Size++
+			before[path] = state
+		default:
+			before[path] = state
+		}
+	}
+	return newWalkChange(before, after, nil)
+}
+
 // A movie's genres, its credits with the people they name, and its body
 // reach the document, and a JSON column is an object and not a string.
 func TestATitleCarriesItsRowsAndTheRowsThatBelongToIt(t *testing.T) {
@@ -42,7 +65,7 @@ func TestATitleCarriesItsRowsAndTheRowsThatBelongToIt(t *testing.T) {
 		}
 
 		titles, err := walkTitles(t.Context(), catalog, "house/movies", libraryKindMovies,
-			map[string]string{"Another Survey (2001)/movie.mkv": videoAdded})
+			changeOf(t, catalog, map[string]string{"Another Survey (2001)/movie.mkv": videoAdded}))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,15 +121,16 @@ func TestASeriesCarriesTheEpisodesWhoseVideosChanged(t *testing.T) {
 			seedVideo(t, catalog, "The Long Road/S01E0"+episode.Id[len(episode.Id)-1:]+".mkv", 100, episode.Id)
 		}
 
-		titles, err := walkTitles(t.Context(), catalog, "house/movies", libraryKindSeries, map[string]string{
-			"The Long Road/S01E03.mkv": videoAdded,
-			"The Long Road/S01E02.mkv": videoReplaced,
-		})
+		titles, err := walkTitles(t.Context(), catalog, "house/movies", libraryKindSeries, changeOf(t, catalog,
+			map[string]string{
+				"The Long Road/S01E03.mkv": videoAdded,
+				"The Long Road/S01E02.mkv": videoReplaced,
+			}))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if len(titles) != 1 || titles[0].Table != "series" || titles[0].Change != titleChanged {
+		if len(titles) != 1 || titles[0].Table != "series" || titles[0].Change != seriesChanged {
 			t.Fatalf("titles = %+v, want the one series, changed", titles)
 		}
 		var got []string

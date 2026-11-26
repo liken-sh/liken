@@ -115,7 +115,7 @@ func TestAWalkPostsEveryTitleItChangedWithTheToken(t *testing.T) {
 		for _, title := range body.Titles {
 			got = append(got, title.Row["id"].(string)+" "+title.Change+" "+title.Files[0].Change)
 		}
-		want := []string{"movie:tmdb:1001 changed replaced", "movie:tmdb:1002 added added"}
+		want := []string{"movie:tmdb:1001 replaced replaced", "movie:tmdb:1002 added added"}
 		if !slices.Equal(got, want) {
 			t.Errorf("titles = %v, want %v", got, want)
 		}

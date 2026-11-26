@@ -1,8 +1,10 @@
 package main
 
 // webhookbody.go builds the document a walk Job posts to its Library's
-// webhooks (plan 99): every title whose videos the walk added or replaced,
-// with the catalog's rows of the title keyed by column name. The rows are the
+// webhooks (plans 99 and 100): every title whose videos the walk added or
+// replaced, with the catalog's rows of the title keyed by column name, the
+// change of each movie and episode, and the videos the walk took away from
+// each one, as the catalog held them before the walk. The rows are the
 // catalog's own columns, so a column the schema gains reaches a receiver with
 // no change here. Corrosion refuses to drop or rename a column, so a receiver
 // that reads a column keeps reading it.
@@ -38,19 +40,30 @@ const (
 	walkFolders = "folders"
 )
 
-// The two changes a body reports of a title. A title is added when the
-// catalog held no video of it before the walk.
+// The changes a body reports of an item, a movie or an episode. An item is
+// added when the catalog held no video of it before the walk. It is replaced
+// when the walk took a video away from it, by a delete or by a new file at
+// the same path, and a video arrived. It gained a version when it kept every
+// video it had and another arrived.
 const (
-	titleAdded   = "added"
-	titleChanged = "changed"
+	itemAdded        = "added"
+	itemReplaced     = "replaced"
+	itemVersionAdded = "version-added"
 )
 
-// One movie or one series of a body.
+// The change of a series that held a video before the walk. A series that
+// held none is added.
+const seriesChanged = "changed"
+
+// One movie or one series of a body. Previous is a movie's own, and a series
+// carries it on each episode, so a series has none. It is a pointer so a
+// movie's empty list is in the document, and a series' is not.
 type walkTitle struct {
 	Change     string           `json:"change"`
 	Table      string           `json:"table"`
 	Row        map[string]any   `json:"row"`
 	Files      []walkFile       `json:"files,omitempty"`
+	Previous   *[]walkFile      `json:"previous,omitempty"`
 	Episodes   []walkEpisode    `json:"episodes,omitempty"`
 	Genres     []map[string]any `json:"genres"`
 	Credits    []walkCredit     `json:"credits"`
@@ -61,8 +74,10 @@ type walkTitle struct {
 
 // One episode of a series whose videos the walk changed.
 type walkEpisode struct {
-	Row   map[string]any `json:"row"`
-	Files []walkFile     `json:"files"`
+	Change   string         `json:"change"`
+	Row      map[string]any `json:"row"`
+	Files    []walkFile     `json:"files"`
+	Previous []walkFile     `json:"previous"`
 }
 
 // One file of a movie or an episode, with the rows that belong to it. Change
@@ -128,16 +143,11 @@ func (c *Catalog) bodyRow(ctx context.Context, sql string, params ...any) (map[s
 
 // The titles of the changed videos of one library, in the order of their ids.
 func walkTitles(ctx context.Context, catalog *Catalog, library, kind string,
-	changes map[string]string) ([]walkTitle, error) {
+	change walkChange) ([]walkTitle, error) {
 	// Each title, and for a series the episodes whose videos changed.
 	episodesOf := map[string][]string{}
-	for _, path := range changedPaths(changes) {
-		items, err := catalog.queryStrings(ctx,
-			`SELECT item FROM file_items WHERE library = ? AND path = ? ORDER BY item`, []any{library, path})
-		if err != nil {
-			return nil, fmt.Errorf("reading the items of a changed file: %w", err)
-		}
-		for _, item := range items {
+	for _, path := range changedPaths(change.files) {
+		for _, item := range change.after[path].Items {
 			title, episode, err := titleOfItem(ctx, catalog, library, kind, item)
 			if err != nil {
 				return nil, err
@@ -157,7 +167,7 @@ func walkTitles(ctx context.Context, catalog *Catalog, library, kind string,
 
 	titles := []walkTitle{}
 	for _, id := range slices.Sorted(maps.Keys(episodesOf)) {
-		title, err := buildWalkTitle(ctx, catalog, library, kind, id, episodesOf[id], changes)
+		title, err := buildWalkTitle(ctx, catalog, library, kind, id, episodesOf[id], change)
 		if err != nil {
 			return nil, err
 		}
@@ -196,7 +206,7 @@ func titleTable(kind string) string {
 
 // One title of a body, read from the catalog.
 func buildWalkTitle(ctx context.Context, catalog *Catalog, library, kind, id string,
-	episodes []string, changes map[string]string) (walkTitle, error) {
+	episodes []string, change walkChange) (walkTitle, error) {
 	table := titleTable(kind)
 	title := walkTitle{Table: table}
 	var err error
@@ -207,18 +217,32 @@ func buildWalkTitle(ctx context.Context, catalog *Catalog, library, kind, id str
 		return title, nil
 	}
 
-	videos, err := titleVideos(ctx, catalog, library, kind, id)
-	if err != nil {
-		return title, err
-	}
-	title.Change = titleChange(videos, changes)
-
 	if kind == libraryKindSeries {
-		if title.Episodes, err = walkEpisodes(ctx, catalog, library, episodes, changes); err != nil {
+		aliases, err := aliasesOf(ctx, catalog, library, id)
+		if err != nil {
 			return title, err
 		}
-	} else if title.Files, err = itemFiles(ctx, catalog, library, id, changes); err != nil {
-		return title, err
+		if title.Change, err = seriesChange(ctx, catalog, library, id, aliases, change); err != nil {
+			return title, err
+		}
+		if title.Episodes, err = walkEpisodes(ctx, catalog, library, episodes, aliases, change); err != nil {
+			return title, err
+		}
+	} else {
+		aliases, err := aliasesOf(ctx, catalog, library, id)
+		if err != nil {
+			return title, err
+		}
+		changed, previous := change.itemChange(id, append(aliases, id))
+		title.Change = changed
+		files, err := change.previousFiles(previous)
+		if err != nil {
+			return title, err
+		}
+		title.Previous = &files
+		if title.Files, err = itemFiles(ctx, catalog, library, id, change.files); err != nil {
+			return title, err
+		}
 	}
 
 	if title.Genres, err = catalog.bodyRows(ctx,
@@ -244,15 +268,121 @@ func buildWalkTitle(ctx context.Context, catalog *Catalog, library, kind, id str
 	return title, nil
 }
 
-// A title is added when every video it has now is a video the walk added, so
-// the catalog held none of them before the walk.
-func titleChange(videos []string, changes map[string]string) string {
-	for _, path := range videos {
-		if changes[path] != videoAdded {
-			return titleChanged
+// Every alias of one item. An alias maps each provider id of a movie or a
+// series, and its folder key, to the item's id now, so an id from before the
+// walk that the walk replaced, such as a folder key that identity replaced
+// with a provider id, is an alias of the item.
+func aliasesOf(ctx context.Context, catalog *Catalog, library, item string) ([]string, error) {
+	aliases, err := catalog.queryStrings(ctx,
+		`SELECT alias FROM aliases WHERE library = ? AND item = ?`, []any{library, item})
+	if err != nil {
+		return nil, fmt.Errorf("reading the names of a changed title: %w", err)
+	}
+	return aliases, nil
+}
+
+// The ids an episode can have had before the walk. An episode has no aliases
+// of its own: its id is built from its series' id, so an episode whose series
+// changed its id in the walk had the id built from that older series id. So
+// the names are the episode's id built from each alias of its series.
+func episodeNames(id string, seriesAliases []string, season, episode int) []string {
+	names := []string{id}
+	for _, alias := range seriesAliases {
+		names = append(names, episodeID(alias, season, episode))
+	}
+	return names
+}
+
+// The change of one item, and the paths of the videos the walk took away from
+// it, from the ids the item can have had before the walk.
+func (c walkChange) itemChange(item string, names []string) (string, []string) {
+	now := map[string]bool{}
+	for _, path := range c.afterItems[item] {
+		now[path] = true
+	}
+	prior := c.priorVideos(names, slices.Collect(maps.Keys(now)))
+	if len(prior) == 0 {
+		return itemAdded, nil
+	}
+	var previous []string
+	for _, path := range prior {
+		if !now[path] || c.files[path] == videoReplaced {
+			previous = append(previous, path)
 		}
 	}
-	return titleAdded
+	if len(previous) > 0 {
+		return itemReplaced, previous
+	}
+	return itemVersionAdded, nil
+}
+
+// A series is added when the catalog held no video of any of its episodes
+// before the walk, and changed when it held one. Its names are its own id and
+// aliases, for a file linked to the series itself, and the names of each of
+// its episodes.
+func seriesChange(ctx context.Context, catalog *Catalog, library, id string, aliases []string,
+	change walkChange) (string, error) {
+	names := append([]string{id}, aliases...)
+	if err := catalog.stream(ctx, `SELECT id, season, episode FROM episodes WHERE library = ? AND series = ?`,
+		[]any{library, id}, func(cells []any) error {
+			if len(cells) < 3 {
+				return nil
+			}
+			episode, _ := cells[0].(string)
+			names = append(names, episodeNames(episode, aliases, int(int64Cell(cells[1])), int(int64Cell(cells[2])))...)
+			return nil
+		}); err != nil {
+		return "", fmt.Errorf("reading the episodes of a changed series: %w", err)
+	}
+	now, err := titleVideos(ctx, catalog, library, libraryKindSeries, id)
+	if err != nil {
+		return "", err
+	}
+	if len(change.priorVideos(names, now)) == 0 {
+		return itemAdded, nil
+	}
+	return seriesChanged, nil
+}
+
+// The videos the catalog held of an item before the walk, in path order: each
+// video of the note that held one of the item's names, and each video the item
+// holds now that the note holds too.
+func (c walkChange) priorVideos(names []string, now []string) []string {
+	prior := map[string]bool{}
+	for _, name := range names {
+		for _, path := range c.beforeItems[name] {
+			prior[path] = true
+		}
+	}
+	for _, path := range now {
+		if _, held := c.before[path]; held {
+			prior[path] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(prior))
+}
+
+// The videos the walk took away from an item, with the rows the scan kept.
+// The scan keeps whole rows only of the videos under the folders a folders
+// walk names, up to its budget, so a video it kept none of carries the
+// columns of the note.
+func (c walkChange) previousFiles(paths []string) ([]walkFile, error) {
+	files := []walkFile{}
+	for _, path := range paths {
+		if encoded, held := c.rows[path]; held {
+			var file walkFile
+			if err := json.Unmarshal(encoded, &file); err != nil {
+				return nil, fmt.Errorf("reading the note %s: %w", rowsBeforeNote, err)
+			}
+			files = append(files, file)
+			continue
+		}
+		state := c.before[path]
+		files = append(files, walkFile{Row: map[string]any{
+			"path": path, "size_bytes": state.Size, "modified": state.Modified,
+		}})
+	}
+	return files, nil
 }
 
 // The paths of every video of one title: a movie's own, or every episode's of
@@ -272,9 +402,10 @@ func titleVideos(ctx context.Context, catalog *Catalog, library, kind, id string
 	return paths, nil
 }
 
-// The episodes whose videos changed, in the order a series draws them.
+// The episodes whose videos changed, in the order a series draws them, each
+// with its change and the videos the walk took away from it.
 func walkEpisodes(ctx context.Context, catalog *Catalog, library string, ids []string,
-	changes map[string]string) ([]walkEpisode, error) {
+	seriesAliases []string, change walkChange) ([]walkEpisode, error) {
 	episodes := []walkEpisode{}
 	for _, id := range ids {
 		row, err := catalog.bodyRow(ctx, `SELECT * FROM episodes WHERE library = ? AND id = ?`, library, id)
@@ -284,11 +415,17 @@ func walkEpisodes(ctx context.Context, catalog *Catalog, library string, ids []s
 		if row == nil {
 			continue
 		}
-		files, err := itemFiles(ctx, catalog, library, id, changes)
-		if err != nil {
+		episode := walkEpisode{Row: row}
+		names := episodeNames(id, seriesAliases, int(int64Cell(row["season"])), int(int64Cell(row["episode"])))
+		changed, previous := change.itemChange(id, names)
+		episode.Change = changed
+		if episode.Previous, err = change.previousFiles(previous); err != nil {
 			return nil, err
 		}
-		episodes = append(episodes, walkEpisode{Row: row, Files: files})
+		if episode.Files, err = itemFiles(ctx, catalog, library, id, change.files); err != nil {
+			return nil, err
+		}
+		episodes = append(episodes, episode)
 	}
 	slices.SortStableFunc(episodes, func(a, b walkEpisode) int {
 		if order := int64Cell(a.Row["season"]) - int64Cell(b.Row["season"]); order != 0 {
