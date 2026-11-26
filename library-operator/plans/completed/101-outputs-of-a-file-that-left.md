@@ -64,8 +64,12 @@ goes when all three of these hold:
 2. No video in the same directory derives the same output name. A tile
    directory is named for the video without its extension, so
    `The Long Survey (1961).mkv` and `The Long Survey (1961).mp4` share
-   one. The comparison takes any video extension and ignores case, and
-   a name with one of the two suffixes counts as its video.
+   one. The comparison ignores case, and a name with one of the two
+   suffixes counts as its video. A video here is a file with one of the
+   extensions of Jellyfin 12.4's own list, which is wider than the set
+   the walk catalogs, so a `.vob` or an `.iso` keeps its tiles. A file
+   of the same name with another kind of extension, such as the `.nfo`
+   that a download manager leaves, is not a video.
 3. The title still has a video. The title is the film's folder and its
    extras folders, or the series folder and its season folders. An
    upgrade always leaves a video. A folder that is still arriving, and
@@ -79,7 +83,9 @@ temporary name, and the temporary sweep removes what is left.
 
 **Only after a complete walk.** The scan writes its note of outputs for
 the close container only when `fullWalk` returned no error, and only
-after `awaitCatalogSync` against a target with an actor. A webhook
+after `awaitCatalogSync` against a target with an actor. The scan of
+every walk `Job` takes that target, whether or not the `Library` names
+webhooks, and a rescan does not wait for it. A webhook
 rescan, a failed walk, and a first walk write no note, so they remove
 nothing. The close container logs one line for each run with the counts
 of what it removed, what it kept, and what the volume refused. A
@@ -94,7 +100,8 @@ newest modified time or change time in the tree, because ffmpeg writes
 into the layout folder while it decodes, and a rename sets the change
 time. The aside tree of `replaceEarlierTree`,
 `.<video>.trickplay.earlier.liken-tmp-<writer>`, stays while its tile
-directory is missing, because it is then the only copy of the tiles.
+directory is missing and a video still derives that directory's name,
+because it is then the only copy of that video's tiles.
 The sweep under `.liken/` keeps its rule. The walk and the close
 container take the time as an argument, so a test outside a `synctest`
 bubble ages a change time that the kernel set.
@@ -123,8 +130,6 @@ removals at 2 in the morning. The three checks above are each one
 - The files of a title whose folder has no video left.
 - The ledger entries of a gone video, which the walk does not lift and
   which `dropGone` removes at the ledger's next write.
-- The appearances match, which reads every detections record of a
-  title. A separate fix changes it.
 
 ## Decisions
 

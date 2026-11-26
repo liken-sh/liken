@@ -244,7 +244,8 @@ func hostOf(address string) string {
 
 // The environment the walk's containers take for a Library that names
 // webhooks. The scan notes the videos before it walks, after its copy holds
-// the write the phases wait for. The close container takes the addresses, and
+// the write the phases wait for, which every walk's scan takes
+// (walkContainer). The close container takes the addresses, and
 // each token through a secretKeyRef. A Job that does not walk changes no
 // video, so it takes none of them.
 func withWebhookEnv(library *Library, plan libraryJob, containers []Container) {
@@ -255,11 +256,7 @@ func withWebhookEnv(library *Library, plan libraryJob, containers []Container) {
 		switch containers[at].Name {
 		case scanPhase:
 			containers[at].Env = append(containers[at].Env,
-				EnvVar{Name: libraryNoteVideosVariable, Value: "true"},
-				EnvVar{Name: syncActorVariable, Value: plan.sync.actor},
-				EnvVar{Name: syncVersionVariable, Value: strconv.FormatInt(plan.sync.version, 10)},
-				EnvVar{Name: syncTimeoutVariable, Value: defaultSyncTimeout.String()},
-			)
+				EnvVar{Name: libraryNoteVideosVariable, Value: "true"})
 		case closeMode:
 			containers[at].Env = append(containers[at].Env, webhookEnv(library.Spec.Webhooks)...)
 		}

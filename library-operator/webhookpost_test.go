@@ -282,6 +282,23 @@ func TestAWalkOfALibraryWithWebhooksTakesTheirEnvironment(t *testing.T) {
 	}
 }
 
+// Every walk's scan takes the write its copy must hold, because the sweep of
+// the outputs of gone videos waits for it, and a Library with no webhooks
+// still notes no videos.
+func TestAWalkOfALibraryWithoutWebhooksTakesTheSyncTarget(t *testing.T) {
+	plan := libraryJob{mode: jobModeWalk, sync: syncTarget{actor: "actor-1", version: 7}}
+
+	job := buildLibraryJob(studioMovies(), providerSet{}, nil, plan, testJobImages, testJobBus, testNow)
+
+	scan := envOf(*jobContainer(job, scanPhase))
+	if scan[syncActorVariable] != "actor-1" || scan[syncVersionVariable] != "7" || scan[syncTimeoutVariable] == "" {
+		t.Errorf("scan env = %v, want the sync target and its timeout", scan)
+	}
+	if got, held := scan[libraryNoteVideosVariable]; held {
+		t.Errorf("%s = %s, want none for a Library with no webhooks", libraryNoteVideosVariable, got)
+	}
+}
+
 // A Job that fills gaps walks nothing and changes no video, so it posts
 // nothing and takes no address.
 func TestAGapJobTakesNoWebhook(t *testing.T) {

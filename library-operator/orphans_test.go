@@ -66,6 +66,13 @@ func TestTheTileDoorRemovesOnlyTheTilesOfAGoneVideo(t *testing.T) {
 			files: []string{newVideo, oldSheet, "the long survey (1961) bluray-1080p.MKV"}, entry: oldTiles},
 		{name: "a title with no video left", kind: libraryKindMovies, title: upgradedFilm,
 			files: []string{"movie.nfo", oldSheet}, entry: oldTiles},
+		{name: "a video in a format the walk does not catalog", kind: libraryKindMovies, title: upgradedFilm,
+			files: []string{newVideo, oldSheet, "The Long Survey (1961) Bluray-1080p.vob"}, entry: oldTiles},
+		{name: "a file of the same name that is no video", kind: libraryKindMovies, title: upgradedFilm,
+			files: []string{newVideo, oldSheet, "The Long Survey (1961) Bluray-1080p.nfo"}, entry: oldTiles, removed: true},
+		{name: "a season that emptied in a series that has a video", kind: libraryKindSeries, title: "Tin Roof",
+			files: []string{"Season 02/Tin Roof S02E01.mkv", "Season 01/Tin Roof S01E01.trickplay/320 - 10x10/0.jpg"},
+			entry: "Season 01/Tin Roof S01E01.trickplay", removed: true},
 		{name: "the tiles of a gone extra", kind: libraryKindMovies, title: upgradedFilm,
 			files: []string{newVideo, "Extras/Making Of.trickplay/320 - 10x10/0.jpg"},
 			entry: "Extras/Making Of.trickplay", removed: true},
@@ -262,8 +269,10 @@ func TestTheTemporaryDoorRemovesOnlyAStaleTemporary(t *testing.T) {
 			path: staleStaging, later: time.Hour},
 		{name: "a name without the mark", files: []string{newVideo, ".hidden/0.jpg"},
 			path: ".hidden", later: staleTemporaryAge + time.Hour},
-		{name: "an aside tree whose tiles are missing", files: []string{newVideo, asideTree + "/320 - 10x10/0.jpg"},
-			path: asideTree, later: staleTemporaryAge + time.Hour},
+		{name: "an aside tree whose tiles are missing", path: asideTree, later: staleTemporaryAge + time.Hour,
+			files: []string{newVideo, asideTree + "/320 - 10x10/0.jpg"}},
+		{name: "an aside tree of a video that is gone", path: asideTree, later: staleTemporaryAge + time.Hour,
+			files: []string{"The Long Survey (1961) Bluray-1080p.mkv", asideTree + "/320 - 10x10/0.jpg"}, removed: true},
 		{name: "an aside tree beside its tiles", removed: true, later: staleTemporaryAge + time.Hour, path: asideTree,
 			files: []string{newVideo, asideTree + "/320 - 10x10/0.jpg",
 				"The Long Survey (1961) WEBDL-1080p.trickplay/320 - 10x10/0.jpg"}},
@@ -335,18 +344,23 @@ func TestTheWalkWritesNoRowForTheTilesOfAGoneVideo(t *testing.T) {
 }
 
 // The scan notes the outputs only after a full walk on a synced copy, and the
-// close container removes them. A webhook rescan of the same folder, and a
-// walk on a copy that never reached its write, remove nothing.
+// close container removes them. A webhook rescan of the same folder, a walk
+// on a copy that never reached its write, a first walk with no write to
+// reach, and a walk that could not read the whole volume remove nothing.
 func TestAFullWalkRemovesTheOutputsOfAGoneVideoAndARescanDoesNot(t *testing.T) {
 	cases := []struct {
-		name     string
-		scanPath string
-		version  int64
-		removed  bool
+		name       string
+		scanPath   string
+		actor      string
+		version    int64
+		unreadable bool
+		removed    bool
 	}{
-		{name: "a full walk", version: 5, removed: true},
-		{name: "a webhook rescan", scanPath: upgradedFilm, version: 5},
-		{name: "a copy that never syncs", version: 9},
+		{name: "a full walk", actor: sqliteAgentActor, version: 5, removed: true},
+		{name: "a webhook rescan", scanPath: upgradedFilm, actor: sqliteAgentActor, version: 5},
+		{name: "a copy that never syncs", actor: sqliteAgentActor, version: 9},
+		{name: "a first walk", version: 5},
+		{name: "an incomplete walk", actor: sqliteAgentActor, version: 5, unreadable: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -356,11 +370,14 @@ func TestAFullWalkRemovesTheOutputsOfAGoneVideoAndARescanDoesNot(t *testing.T) {
 				for _, name := range append([]string{newVideo, oldSheet}, oldRecords...) {
 					writeFile(t, filepath.Join(run.root, upgradedFilm, name), "bytes")
 				}
+				if c.unreadable {
+					unreadableFolder(t, run.root, "Orbit (1979)")
+				}
 				agent.holdVersion(t, sqliteAgentActor, 5)
 				scan, _, _ := scanJob(t, run.root, libraryKindMovies, c.scanPath)
 				scan.catalog = catalog
 				scan.board = newPhaseBoard(run.board.dir)
-				scan.sync, scan.syncTimeout = syncTarget{actor: sqliteAgentActor, version: c.version}, time.Minute
+				scan.sync, scan.syncTimeout = syncTarget{actor: c.actor, version: c.version}, time.Minute
 				if err := scan.runPhase(t.Context()); err != nil {
 					t.Fatal(err)
 				}
@@ -422,4 +439,99 @@ func TestTheCloseContainerCountsWhatEachDoorAnswered(t *testing.T) {
 	if !exists(filepath.Join(root, upgradedFilm, oldTiles)) {
 		t.Error("the tiles of the video that is there are gone")
 	}
+}
+
+// A remove that fails part of the way puts what is left back under the tile
+// directory's own name, so nothing stays hidden under a temporary name.
+func TestATileRemoveThatFailsPutsTheTreeBack(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root removes a file from a read-only directory")
+	}
+	root := outputsTree(t, upgradedFilm, newVideo, oldSheet)
+	layout := filepath.Join(root, upgradedFilm, oldTiles, "320 - 10x10")
+	if err := os.Chmod(layout, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, upgradedFilm, oldTiles, "320 - 10x10"), volumeDirectoryPerm) })
+
+	removed, err := newVolumeWriter("movies-walk").removeOrphanTiles(root, libraryKindMovies, upgradedFilm, oldTiles)
+
+	if removed || err == nil || !exists(filepath.Join(root, upgradedFilm, oldSheet)) {
+		t.Errorf("removed = %v, err = %v, want a failure and the sheet under its own name", removed, err)
+	}
+	if slices.ContainsFunc(namesIn(t, filepath.Join(root, upgradedFilm)), func(name string) bool {
+		return strings.Contains(name, likenTempMark)
+	}) {
+		t.Errorf("a temporary is left in %v", namesIn(t, filepath.Join(root, upgradedFilm)))
+	}
+}
+
+// The records door refuses a .liken directory, or a records directory under
+// it, that is a symbolic link, because a link could reach records outside the
+// title.
+func TestTheRecordsDoorRefusesALinkedRecordsDirectory(t *testing.T) {
+	for _, link := range []string{".liken", ".liken/appearances", ".liken/titles"} {
+		t.Run(link, func(t *testing.T) {
+			root := outputsTree(t, upgradedFilm, newVideo, "Elsewhere/appearances/"+oldVideo+".jsonl",
+				"Elsewhere/titles/"+oldVideo+".jsonl")
+			elsewhere := filepath.Join(root, upgradedFilm, "Elsewhere")
+			target := elsewhere
+			if link != ".liken" {
+				target = filepath.Join(elsewhere, filepath.Base(link))
+				if err := os.MkdirAll(filepath.Join(root, upgradedFilm, ".liken"), volumeDirectoryPerm); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Symlink(target, filepath.Join(root, upgradedFilm, link)); err != nil {
+				t.Fatal(err)
+			}
+
+			removed, err := newVolumeWriter("movies-walk").removeOrphanRecords(root, libraryKindMovies, upgradedFilm, oldVideo)
+
+			if removed || err == nil {
+				t.Errorf("removed = %v, err = %v, want a refusal", removed, err)
+			}
+			if !exists(filepath.Join(elsewhere, "appearances", oldVideo+".jsonl")) {
+				t.Error("a record outside the title is gone")
+			}
+		})
+	}
+}
+
+// A series whose first season emptied still has a video in its second, so
+// the walk names the tiles and the records the first season kept.
+func TestTheWalkOfASeriesNamesTheOutputsOfASeasonThatEmptied(t *testing.T) {
+	root := outputsTree(t, "Tin Roof",
+		"Season 01/Tin Roof S01E01.trickplay/320 - 10x10/0.jpg",
+		"Season 01/.liken/appearances/Tin Roof S01E01.mkv.jsonl",
+		"Season 02/Tin Roof S02E01.mkv",
+		"Season 02/Tin Roof S02E01.trickplay/320 - 10x10/0.jpg")
+	scan := folderScan{root: root, library: "house/series", kind: libraryKindSeries}
+
+	swept := scan.sweepTitle(filepath.Join(root, "Tin Roof"), time.Now())
+
+	want := []orphanOutput{
+		{Title: "Tin Roof", Entry: "Season 01/Tin Roof S01E01.trickplay", Kind: orphanTiles},
+		{Title: "Tin Roof", Entry: "Season 01/Tin Roof S01E01.mkv", Kind: orphanRecords},
+	}
+	if !slices.Equal(swept.outputs, want) {
+		t.Errorf("outputs = %v, want %v", swept.outputs, want)
+	}
+}
+
+// A webhook rescan names no output, so its scan does not wait for a copy that
+// is behind before it walks.
+func TestARescanDoesNotWaitForTheSweep(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		scan, _ := notingScanner(t, catalog, syncTarget{actor: sqliteAgentActor, version: 9})
+		scan.scanPaths = []string{upgradedFilm}
+		started := time.Now()
+
+		synced := scan.awaitSweepSync(t.Context())
+
+		if synced || time.Since(started) != 0 {
+			t.Errorf("synced = %v after %s, want false at once", synced, time.Since(started))
+		}
+	})
 }

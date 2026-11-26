@@ -148,7 +148,7 @@ func libraryPodTemplate(library *Library, providers providerSet, languages []str
 	included := plan.included()
 	var containers []Container
 	if plan.mode == jobModeWalk {
-		containers = append(containers, walkContainer(library, plan.paths, images.operator))
+		containers = append(containers, walkContainer(library, plan, images.operator))
 	}
 	for _, phase := range plan.phases {
 		containers = append(containers, phaseContainer(library, providers, languages, plan, phase,
@@ -243,10 +243,16 @@ func phaseVolumeOf(library *Library) string {
 }
 
 // The scan container of a walk: the scanner, with the phases volume where it
-// writes its mark.
-func walkContainer(library *Library, paths []string, image string) Container {
-	scan := scannerSidecar(library, paths, image)
-	scan.Env = append(scan.Env, EnvVar{Name: libraryPhasesVariable, Value: phasesMountPath})
+// writes its mark, and the write its copy must hold before it notes the
+// videos for the webhooks or names the outputs of gone videos (plan 101).
+func walkContainer(library *Library, plan libraryJob, image string) Container {
+	scan := scannerSidecar(library, plan.paths, image)
+	scan.Env = append(scan.Env,
+		EnvVar{Name: libraryPhasesVariable, Value: phasesMountPath},
+		EnvVar{Name: syncActorVariable, Value: plan.sync.actor},
+		EnvVar{Name: syncVersionVariable, Value: strconv.FormatInt(plan.sync.version, 10)},
+		EnvVar{Name: syncTimeoutVariable, Value: defaultSyncTimeout.String()},
+	)
 	scan.VolumeMounts = append(scan.VolumeMounts, VolumeMount{Name: phasesVolumeName, MountPath: phasesMountPath})
 	return scan
 }

@@ -534,9 +534,10 @@ func (w *volumeWriter) replaceEarlierTree(target string, before int64) (bool, er
 // it. It keeps the directory when a video of its directory derives its name,
 // for any extension and in any case, when the title has no video left, and
 // when the path is a symbolic link. The directory takes a temporary name
-// first, so a tree that is half removed is a temporary that the sweep
-// finishes, and no player reads it as tiles. The answer says whether this
-// call removed the directory.
+// first, so no player reads a tree that is half removed as tiles. A remove
+// that fails part of the way puts what is left back under its own name, so
+// nothing stays hidden, and the next full walk asks again. The answer says
+// whether this call removed the directory.
 func (w *volumeWriter) removeOrphanTiles(root, kind, title, entry string) (bool, error) {
 	path, err := titleEntry(root, title, entry)
 	if err != nil {
@@ -564,7 +565,11 @@ func (w *volumeWriter) removeOrphanTiles(root, kind, title, entry string) (bool,
 	if err := os.Rename(path, aside); err != nil {
 		return false, err
 	}
-	return true, os.RemoveAll(aside)
+	if err := os.RemoveAll(aside); err != nil {
+		_ = os.Rename(aside, path)
+		return false, err
+	}
+	return true, nil
 }
 
 // The remove of the records named for one gone video: its detections record
@@ -579,12 +584,18 @@ func (w *volumeWriter) removeOrphanRecords(root, kind, title, entry string) (boo
 	if err != nil {
 		return false, err
 	}
-	if !videoExtensions[strings.ToLower(filepath.Ext(video))] {
+	if !isPresentVideo(video) {
 		return false, fmt.Errorf("refusing the records of %s: it is no video", video)
 	}
 	dir, name := filepath.Split(video)
 	if videoPresent(dir, name) || !titleHoldsVideo(kind, filepath.Join(root, title)) {
 		return false, nil
+	}
+	for _, link := range []string{likenDirectory, filepath.Join(likenDirectory, appearancesRecordsDirectory),
+		filepath.Join(likenDirectory, titlesRecordsDirectory)} {
+		if info, err := os.Lstat(filepath.Join(dir, link)); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+			return false, fmt.Errorf("refusing the records of %s: %s is a symbolic link", video, link)
+		}
 	}
 	removed := false
 	for _, records := range []string{appearancesRecordsDirectory, titlesRecordsDirectory} {
@@ -612,9 +623,10 @@ func (w *volumeWriter) removeOrphanRecords(root, kind, title, entry string) (boo
 // The remove of a temporary beside the media that a stopped writer left: a
 // name with the temporary mark, outside every .liken directory, which has
 // gone unchanged for staleTemporaryAge. The aside tree of
-// replaceEarlierTree stays while its tile directory is missing, because it
-// is then the only copy of the tiles. The answer says whether this call
-// removed the temporary.
+// replaceEarlierTree stays while its tile directory is missing and a video
+// of the folder still derives that directory's name, because it is then the
+// only copy of that video's tiles. The answer says whether this call removed
+// the temporary.
 func (w *volumeWriter) removeStaleTemporary(path string, now time.Time) (bool, error) {
 	if !strings.Contains(filepath.Base(path), likenTempMark) || slices.Contains(splitPath(path), likenDirectory) {
 		return false, fmt.Errorf("refusing to remove %s: it is no temporary beside the media", path)
@@ -627,7 +639,10 @@ func (w *volumeWriter) removeStaleTemporary(path string, now time.Time) (bool, e
 		return false, nil
 	}
 	if tiles, aside := asideTreeTiles(path); aside && !dirExists(tiles) {
-		return false, nil
+		entries, err := os.ReadDir(filepath.Dir(path))
+		if err != nil || !tilesOrphaned(videoBases(entries), filepath.Base(tiles)) {
+			return false, err
+		}
 	}
 	if info.IsDir() {
 		return true, os.RemoveAll(path)

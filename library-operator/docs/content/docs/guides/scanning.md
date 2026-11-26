@@ -178,7 +178,17 @@ An output goes when all of these hold:
   file it moves.
 - No video in the folder has the same name with another extension or
   in another case, because such a video shares the `.trickplay`
-  directory.
+  directory. A video here is a file with an extension from Jellyfin's
+  list: `.001`, `.3g2`, `.3gp`, `.amv`, `.asf`, `.asx`, `.avi`, `.bin`,
+  `.bivx`, `.divx`, `.dv`, `.dvr-ms`, `.f4v`, `.fli`, `.flv`, `.ifo`,
+  `.img`, `.iso`, `.m2t`, `.m2ts`, `.m2v`, `.m4v`, `.mkv`, `.mk3d`,
+  `.mov`, `.mp4`, `.mpe`, `.mpeg`, `.mpg`, `.mts`, `.mxf`, `.nrg`,
+  `.nsv`, `.nuv`, `.ogm`, `.ogv`, `.pva`, `.qt`, `.rec`, `.rm`,
+  `.rmvb`, `.strm`, `.svq3`, `.tp`, `.ts`, `.ty`, `.viv`, `.vob`,
+  `.vp3`, `.webm`, `.wmv`, `.wtv`, or `.xvid`. The list is wider than
+  the formats the scanner catalogs, so a video in any format Jellyfin
+  plays keeps its tiles. Another file of the same name, such as an
+  `.nfo` file, does not.
 - The title still has a video, in its folder or in an extras or
   season folder. A folder that is still arriving, and a share that
   hides its videos, keep every output.
@@ -197,8 +207,8 @@ the media, such as a trickplay staging named
 `.liken-tmp-` in a title, season, extras, or `trailers/` folder, and
 the close container removes it once nothing in it has changed for 48
 hours. A staging that holds the earlier tiles of a replaced file stays
-while its tile directory is missing, because it is then the only copy
-of those tiles. A volume that refuses a remove adds to the last count
+while its tile directory is missing and its video is still there,
+because it is then the only copy of that video's tiles. A volume that refuses a remove adds to the last count
 and does not fail the `Job`.
 
 The library root holds no title, so no fact of a title writes a

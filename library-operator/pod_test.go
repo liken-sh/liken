@@ -201,6 +201,11 @@ func TestScannerContainerCarriesTheLibrarysEnvironment(t *testing.T) {
 		scanPathsVariable:        "",
 		jobNameVariable:          "",
 		libraryPhasesVariable:    phasesMountPath,
+		// Every walk's scan waits for the write its copy must hold before it
+		// names the outputs of gone videos, and a first walk has none.
+		syncActorVariable:   "",
+		syncVersionVariable: "0",
+		syncTimeoutVariable: defaultSyncTimeout.String(),
 		// The Go runtime collects garbage before the heap reaches this
 		// soft limit, which sits under the container's limit, so the
 		// kernel does not kill a walk for garbage the collector frees.

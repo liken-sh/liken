@@ -38,6 +38,28 @@ type orphanOutput struct {
 	Kind  string `json:"kind"`
 }
 
+// The extensions of a file that counts as a video when the sweep asks
+// whether a video is there: Jellyfin's own list (NamingOptions in Jellyfin
+// 12.4), which is wider than the set the walk catalogs. A wider set keeps
+// more tiles, never fewer, so a format the walk does not read still keeps
+// its tiles. Any file of the same name is not counted, because the .nfo file
+// a download manager leaves would keep every output.
+var presentVideoExtensions = map[string]bool{
+	".001": true, ".3g2": true, ".3gp": true, ".amv": true, ".asf": true, ".asx": true,
+	".avi": true, ".bin": true, ".bivx": true, ".divx": true, ".dv": true, ".dvr-ms": true,
+	".f4v": true, ".fli": true, ".flv": true, ".ifo": true, ".img": true, ".iso": true,
+	".m2t": true, ".m2ts": true, ".m2v": true, ".m4v": true, ".mkv": true, ".mk3d": true,
+	".mov": true, ".mp4": true, ".mpe": true, ".mpeg": true, ".mpg": true, ".mts": true,
+	".mxf": true, ".nrg": true, ".nsv": true, ".nuv": true, ".ogm": true, ".ogv": true,
+	".pva": true, ".qt": true, ".rec": true, ".rm": true, ".rmvb": true, ".strm": true,
+	".svq3": true, ".tp": true, ".ts": true, ".ty": true, ".viv": true, ".vob": true,
+	".vp3": true, ".webm": true, ".wmv": true, ".wtv": true, ".xvid": true,
+}
+
+func isPresentVideo(name string) bool {
+	return presentVideoExtensions[strings.ToLower(filepath.Ext(name))] || videoExtensions[strings.ToLower(filepath.Ext(name))]
+}
+
 // The suffixes a download manager gives a video while it moves the file. A
 // name with one of them is the video, still there.
 var videoMoveSuffixes = []string{".backup~", ".partial~"}
@@ -88,7 +110,7 @@ func videoName(name string) (string, bool) {
 	for _, suffix := range videoMoveSuffixes {
 		name = strings.TrimSuffix(name, suffix)
 	}
-	if skipName(name) || !videoExtensions[strings.ToLower(filepath.Ext(name))] {
+	if skipName(name) || !isPresentVideo(name) {
 		return "", false
 	}
 	return name, true
@@ -216,6 +238,9 @@ func (scan folderScan) sweepTitle(title string, now time.Time) titleSweep {
 					Entry: relativePath(title, filepath.Join(d.dir, name)), Kind: orphanTiles})
 			}
 		}
+		if !holdsLiken(d.entries) {
+			continue
+		}
 		for _, video := range recordedVideos(d.dir) {
 			if !videoPresent(d.dir, video) {
 				swept.outputs = append(swept.outputs, orphanOutput{Title: relativeTitle,
@@ -224,6 +249,17 @@ func (scan folderScan) sweepTitle(title string, now time.Time) titleSweep {
 		}
 	}
 	return swept
+}
+
+// Whether a directory's entries include its .liken directory, so a folder
+// with none costs no read of its records.
+func holdsLiken(entries []os.DirEntry) bool {
+	for _, entry := range entries {
+		if entry.Name() == likenDirectory {
+			return true
+		}
+	}
+	return false
 }
 
 // The videos a directory's records are named for, each once, in the order the
@@ -255,7 +291,7 @@ func recordVideo(records, name string) (string, bool) {
 	}
 	for _, suffix := range videoRecordSuffixes[records] {
 		video, cut := strings.CutSuffix(name, suffix)
-		if cut && videoExtensions[strings.ToLower(filepath.Ext(video))] {
+		if cut && isPresentVideo(video) {
 			return video, true
 		}
 	}
@@ -296,7 +332,8 @@ func newestChange(path string) (time.Time, error) {
 
 // The aside tree of replaceEarlierTree, and the tile directory it was moved
 // from. A worker that stopped between its two renames leaves the aside tree
-// as the only copy of the tiles, so it stays while that directory is missing.
+// as the only copy of the tiles, so it stays while that directory is missing
+// and its video is there.
 func asideTreeTiles(path string) (string, bool) {
 	name := filepath.Base(path)
 	tiles, _, found := strings.Cut(name, ".earlier"+likenTempMark)
@@ -333,9 +370,10 @@ func (s *scanner) noteOrphans() {
 }
 
 // Whether the walk this scan runs may name outputs to remove: the scan has a
-// write its copy must hold, and the copy reached it. A first walk has none.
+// write its copy must hold, and the copy reached it. A first walk has none. A
+// webhook rescan names nothing, so it waits for nothing.
 func (s *scanner) awaitSweepSync(ctx context.Context) bool {
-	if s.board == nil || s.sync.actor == "" {
+	if s.board == nil || s.sync.actor == "" || len(s.scanPaths) > 0 {
 		return false
 	}
 	if err := awaitCatalogSync(ctx, s.catalog, s.sync, s.syncTimeout); err != nil {
