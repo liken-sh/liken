@@ -60,12 +60,12 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# edk2-stable202608 is the upstream release that Debian's ovmf-generic
-# 2026.08+ds-2 packages, which the other FIRMWARE modes boot. The same
+# edk2-stable202611 is the upstream release that Debian's ovmf-generic
+# 2026.11+ds-1 packages, which the other FIRMWARE modes boot. The same
 # release keeps the variable store layout the same, so a guest keeps
 # its own store when it moves between the two firmware builds.
-edk2_tag="edk2-stable202608"
-edk2_commit="2970e5699ba6267f3384ffab20f96647578aebc8"
+edk2_tag="edk2-stable202611"
+edk2_commit="556dcfb466e9f05affeaff881d738807f8156d3c"
 
 edk2="$here/.cache/edk2"
 patch="$here/ovmf-capsule.patch"

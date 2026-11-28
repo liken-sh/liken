@@ -46,7 +46,7 @@ source "$here/../../../toolchains/pin.sh"
 require_tools sha256sum dpkg-deb python3
 
 version="$(cat "$here/VERSION")"
-digest="0ee404cbf543ce0077c159a946fa8012b779b94a8c158678dc94f290fbd67eea"
+digest="8b00822d65102b902e0473dbe6e2902c774233f49fb860c19336a9639ee606b9"
 
 cache="$here/cache"
 deb="$cache/ovmf-generic_${version}_all.deb"

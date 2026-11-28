@@ -37,7 +37,7 @@ source "$here/../../../../toolchains/pin.sh"
 edk2="$(var_of "$here/build.sh" edk2_tag)"
 edk2_latest="$(github_api repos/tianocore/edk2/releases/latest --max-time 20 | jq -r .tag_name)" || edk2_latest=""
 
-# ovmf-generic 2026.08+ds-2 packages edk2-stable202608.
+# ovmf-generic 2026.11+ds-1 packages edk2-stable202611.
 ovmf="$(cat "$here/../VERSION")"
 year="${ovmf%%.*}"
 month="${ovmf#*.}"

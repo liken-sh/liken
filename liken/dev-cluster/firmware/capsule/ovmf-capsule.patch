@@ -367,10 +367,10 @@ index 0000000..495a056
 +  DebugLib
 +  UefiRuntimeServicesTableLib
 diff --git a/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.c b/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.c
-index 3edb92f..fde1a1d 100644
+index f294ab9..05c8da7 100644
 --- a/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.c
 +++ b/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.c
-@@ -1675,6 +1675,25 @@ PlatformBootManagerAfterConsole (
+@@ -1695,6 +1695,25 @@ PlatformBootManagerAfterConsole (
      EfiBootManagerRefreshAllBootOption ();
    }
  
@@ -429,7 +429,7 @@ index 9675eb0..5baeaae 100644
    gEfiMdePkgTokenSpaceGuid.PcdUartDefaultBaudRate         ## CONSUMES
    gEfiMdePkgTokenSpaceGuid.PcdUartDefaultDataBits         ## CONSUMES
 diff --git a/OvmfPkg/OvmfPkgX64.dsc b/OvmfPkg/OvmfPkgX64.dsc
-index a12ea98..7408f7e 100644
+index 9b865a5..3b39c55 100644
 --- a/OvmfPkg/OvmfPkgX64.dsc
 +++ b/OvmfPkg/OvmfPkgX64.dsc
 @@ -37,6 +37,19 @@
@@ -470,7 +470,7 @@ index a12ea98..7408f7e 100644
  !if $(SMM_REQUIRE) == TRUE || $(QEMU_PV_VARS) == TRUE
    MmUnblockMemoryLib|MdePkg/Library/MmUnblockMemoryLib/MmUnblockMemoryLibNull.inf
  !endif
-@@ -584,6 +599,8 @@
+@@ -586,6 +601,8 @@
  
  [PcdsFixedAtBuild]
    gEfiMdeModulePkgTokenSpaceGuid.PcdStatusCodeMemorySize|1
@@ -479,8 +479,8 @@ index a12ea98..7408f7e 100644
  !if $(SMM_REQUIRE) == FALSE
    gEfiMdeModulePkgTokenSpaceGuid.PcdResetOnMemoryTypeInformationChange|FALSE
  !endif
-@@ -959,6 +976,35 @@
-   MdeModulePkg/Universal/WatchdogTimerDxe/WatchdogTimer.inf
+@@ -962,6 +979,35 @@
+   MdeModulePkg/Universal/TimestampDxe/TimestampDxe.inf
    MdeModulePkg/Universal/MonotonicCounterRuntimeDxe/MonotonicCounterRuntimeDxe.inf
    MdeModulePkg/Universal/CapsuleRuntimeDxe/CapsuleRuntimeDxe.inf
 +  MdeModulePkg/Universal/EsrtFmpDxe/EsrtFmpDxe.inf
@@ -516,11 +516,11 @@ index a12ea98..7408f7e 100644
    MdeModulePkg/Universal/Console/ConSplitterDxe/ConSplitterDxe.inf
    MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsoleDxe.inf {
 diff --git a/OvmfPkg/OvmfPkgX64.fdf b/OvmfPkg/OvmfPkgX64.fdf
-index 3d1d33e..c606705 100644
+index dd42cf0..48d18d8 100644
 --- a/OvmfPkg/OvmfPkgX64.fdf
 +++ b/OvmfPkg/OvmfPkgX64.fdf
-@@ -224,6 +224,8 @@ INF  OvmfPkg/VirtioInputDxe/VirtioInput.inf
- INF  MdeModulePkg/Universal/WatchdogTimerDxe/WatchdogTimer.inf
+@@ -225,6 +225,8 @@ INF  MdeModulePkg/Universal/WatchdogTimerDxe/WatchdogTimer.inf
+ INF  MdeModulePkg/Universal/TimestampDxe/TimestampDxe.inf
  INF  MdeModulePkg/Universal/MonotonicCounterRuntimeDxe/MonotonicCounterRuntimeDxe.inf
  INF  MdeModulePkg/Universal/CapsuleRuntimeDxe/CapsuleRuntimeDxe.inf
 +INF  MdeModulePkg/Universal/EsrtFmpDxe/EsrtFmpDxe.inf

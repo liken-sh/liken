@@ -78,7 +78,7 @@ cache="$here/cache/$version"
 # The sha512 digest of each pinned build's image, from the build's
 # SHA512SUMS file. storage/latest.sh --bump writes it.
 declare -A image_sha512=(
-    ["20261123-2671"]="25c89c6784ea7b79b963284a7942f7b23fac93a63e96ee231404cfefa9c9d280bcf7f9cd6993bfadcf79b965fe419e3511dba5773a012f6edfd371c72e1693fb"
+    ["20261128-2676"]="ab6dc433daa9b3362c397292884fd79a3d80f11346acce36b3360ab90b1870616e7f10f3b941db77afa5f7292360ed98b5e0401448dba06693739d1677c4af94"
 )
 
 # The cloud image is large, and a long stream sometimes breaks partway
