@@ -97,7 +97,7 @@ impl Engine {
             .core
             .read_model_from_file(&model.to_string_lossy(), "")?;
         network.reshape(&[(input, &PartialShape::new_static(4, shape)?)])?;
-        let mut compiled = self.core.compile_model(&network, self.device.openvino())?;
+        let compiled = self.core.compile_model(&network, self.device.openvino())?;
         Ok(compiled.create_infer_request()?)
     }
 }

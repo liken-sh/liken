@@ -45,7 +45,7 @@ iced = { version = "=0.14.0", default-features = false, features = [
 liken-iced = { path = "../../brand/iced" }
 # jiff reads the time zone that TZ names from /usr/share/zoneinfo in the
 # image, so the binary bundles no time zone database.
-jiff = { version = "=1.0.2", default-features = false, features = [
+jiff = { version = "=1.0.3", default-features = false, features = [
     "std",
     "tz-system",
     "tzdb-zoneinfo",

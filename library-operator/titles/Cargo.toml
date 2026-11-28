@@ -21,10 +21,10 @@ path = "src/main.rs"
 # runtime-linking opens libopenvino_c.so when the program starts, not when
 # it links. The build needs no OpenVINO installation, and train and place
 # run with no OpenVINO at all.
-openvino = { version = "=0.11.1", features = ["runtime-linking"] }
+openvino = { version = "=0.11.2", features = ["runtime-linking"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 # The credits fact writes .liken/credits.yaml, which names the people that
 # place looks for in the text.
 serde_yaml_ng = "=0.10.0"
-sha2 = "=0.11.1"
+sha2 = "=0.11.2"
