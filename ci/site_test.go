@@ -28,6 +28,7 @@ func TestAPushToMainDeploysTheSiteWhenAManualAReportOrItsBuildChanges(t *testing
 		{"a file that a coverage job reads", "lib/lib.go", "package lib // changed\n", Event{}, true},
 		{"the root Makefile, which builds the site", "Makefile", "site:\n", Event{}, true},
 		{"the site job", rootWorkflowFile, "jobs:\n  site:\n    runs-on: ubuntu-latest\n", Event{}, true},
+		{"the site's deploy job", rootWorkflowFile, "jobs:\n  site:\n    runs-on: ubuntu\n  site-deploy:\n    runs-on: ubuntu\n", Event{}, true},
 		{"a Rust file that no manual and no coverage job reads", "operator/ui/app.rs", "fn main() { }\n", Event{}, false},
 		{"any change when every job runs", "operator/ui/app.rs", "fn main() { }\n", Event{Unverified: "the API returned 403"}, true},
 		{"a push to a branch", "operator/docs/index.md", "an edit\n", Event{Ref: "refs/heads/topic"}, false},

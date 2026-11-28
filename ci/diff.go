@@ -43,7 +43,8 @@ type Diff struct {
 	// SharedBake is true when the bake file changed outside its targets,
 	// for example in a variable that every target reads.
 	SharedBake bool
-	// Site is true when the site job of the root workflow changed.
+	// Site is true when the site job or the site-deploy job of the root
+	// workflow changed.
 	Site bool
 	// GitHub is the first changed file under .github/, or "" when none
 	// changed. The CodeQL analysis of the Actions code reads those files.
@@ -156,9 +157,9 @@ func (g Git) checksOnly(from, to, file string) (bool, error) {
 
 // rootWorkflowDiff records each component whose checks call or publish
 // call in the root workflow differs between the two commits, and
-// whether the site job differs. A root workflow that is missing or does
-// not parse at either commit counts as a change to every component and
-// the site.
+// whether the site job or the site-deploy job differs. A root workflow
+// that is missing or does not parse at either commit counts as a change
+// to every component and the site.
 func (g Git) rootWorkflowDiff(components map[string]*Component, from, to string, d *Diff) error {
 	var calls [2]map[string][]byte
 	for i, rev := range []string{from, to} {
@@ -170,8 +171,10 @@ func (g Git) rootWorkflowDiff(components map[string]*Component, from, to string,
 			calls[i] = jobTexts(text)
 		}
 	}
-	if calls[0] == nil || calls[1] == nil || !bytes.Equal(calls[0]["site"], calls[1]["site"]) {
-		d.Site = true
+	for _, job := range []string{"site", "site-deploy"} {
+		if calls[0] == nil || calls[1] == nil || !bytes.Equal(calls[0][job], calls[1][job]) {
+			d.Site = true
+		}
 	}
 	for name := range components {
 		for _, job := range []string{name, name + "-publish"} {

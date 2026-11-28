@@ -76,3 +76,49 @@ func TestTheSiteWaitsForTheChecksAndTheRecordForThePublishes(t *testing.T) {
 		}
 	}
 }
+
+// deploy-pages lists the run's artifacts by name, and that listing can
+// miss an artifact that the same job uploaded moments before. So the
+// site job builds and uploads, and site-deploy deploys in a job of its
+// own, with the Pages permissions and the concurrency group.
+func TestTheSiteDeploysInAJobOfItsOwnAfterTheBuild(t *testing.T) {
+	files, err := Workflows(fluxTree(t), graphFixture(t))
+	if err != nil {
+		t.Fatalf("generating the workflows: %v", err)
+	}
+	jobs := workflowJobs(t, files[".github/workflows/ci.yaml"])
+	cases := []struct {
+		job, field string
+		want       any
+	}{
+		{"site", "permissions", map[string]any{"contents": "read"}},
+		{"site-deploy", "needs", "site"},
+		{"site-deploy", "permissions", map[string]any{"pages": "write", "id-token": "write"}},
+		{"site-deploy", "concurrency", map[string]any{"group": "site"}},
+	}
+	for _, c := range cases {
+		if got := jobs[c.job][c.field]; !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s has %s %v, want %v", c.job, c.field, got, c.want)
+		}
+	}
+}
+
+// A rerun of the failed deploy alone does not run the build again, so
+// the deploy takes the artifact's name from the build job's output and
+// not from its own attempt.
+func TestTheSiteDeployTakesTheArtifactThatTheBuildUploaded(t *testing.T) {
+	files, err := Workflows(fluxTree(t), graphFixture(t))
+	if err != nil {
+		t.Fatalf("generating the workflows: %v", err)
+	}
+	text := string(files[".github/workflows/ci.yaml"])
+	for _, want := range []string{
+		"    outputs:\n      artifact: github-pages-${{ github.run_attempt }}\n",
+		"          name: github-pages-${{ github.run_attempt }}\n",
+		"          artifact_name: ${{ needs.site.outputs.artifact }}\n",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the site jobs lack %q", want)
+		}
+	}
+}

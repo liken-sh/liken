@@ -325,7 +325,8 @@ jobs:
   #
   # The site reads only the tree and the coverage artifacts of the
   # check jobs. So it waits for the plan and each component's checks,
-  # and not for the publish jobs, and it deploys while they run.
+  # and not for the publish jobs, and it deploys while they run. This
+  # job builds the tree and uploads it, and site-deploy deploys it.
   site:
     needs: [plan{% range .Components %}, {% .Name %}{% end %}]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' && needs.plan.outputs.site == 'true' }}
@@ -333,12 +334,13 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      pages: write
-      id-token: write
-    # Two deploys in quick succession would race, and the check at the
-    # end needs nothing else to change while it runs.
-    concurrency:
-      group: site
+    # A rerun of a job that the site needs runs this job again in the
+    # same run, and deploy-pages refuses a run that has two artifacts of
+    # one name. So the artifact's name includes the attempt. A rerun of
+    # site-deploy alone does not run this job again, and it reads the
+    # name of the artifact that this job uploaded from this output.
+    outputs:
+      artifact: github-pages-${{ github.run_attempt }}
     steps:
       - uses: {% action "actions/checkout" %}
 {% template "go-restore" (goCache "liken/docs/go.mod" "**/docs/go.sum" "manuals" false) %}
@@ -377,18 +379,33 @@ jobs:
           path: ~/.cache/go-build
           key: ${{ steps.hugo-cache.outputs.cache-primary-key }}
 
-      # A rerun of a job that the site needs runs this job again in the
-      # same run, and deploy-pages refuses a run that holds two
-      # artifacts of one name. So the artifact's name carries the
-      # attempt.
       - uses: {% action "actions/upload-pages-artifact" %}
         with:
           path: dist/docs
           name: github-pages-${{ github.run_attempt }}
 
+  # The deploy runs in its own job because deploy-pages lists the run's
+  # artifacts by name, and that listing can miss an artifact that the
+  # same job uploaded moments before. The deploy then fails with "No
+  # artifacts named github-pages-1 were found", and a rerun passes.
+  # GitHub's Pages starter workflow also uploads in one job and deploys
+  # in the next. Only this job deploys to Pages, so only this job has
+  # the Pages permissions.
+  site-deploy:
+    needs: site
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      pages: write
+      id-token: write
+    # Two deploys in quick succession would race, and the check at the
+    # end needs nothing else to change while it runs.
+    concurrency:
+      group: site
+    steps:
       - uses: {% action "actions/deploy-pages" %}
         with:
-          artifact_name: github-pages-${{ github.run_attempt }}
+          artifact_name: ${{ needs.site.outputs.artifact }}
 
       # The deploy finishing does not mean the public name serves the
       # new tree yet: Pages is behind a CDN that caches pages for up to

@@ -17,7 +17,7 @@ const siteBuilder = "ci"
 // these is true:
 //
 //   - every job runs
-//   - the site job in the root workflow changed
+//   - the site job or the site-deploy job in the root workflow changed
 //   - a file that no component owns changed, other than a file under
 //     plans/
 //   - a file of the ci component changed that notOutputs does not
