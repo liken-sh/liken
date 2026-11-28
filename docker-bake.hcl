@@ -94,7 +94,7 @@ target "toolchains" {
     "buildkit" = "docker-image://moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c"
     "buildkit-syft-scanner" = "docker-image://docker/buildkit-syft-scanner:1.13.0@sha256:a190379321cf51fba8c284a1834555b55e7bf58d577d574db23370461defc430"
     "buildroot" = "docker-image://registry.gitlab.com/buildroot.org/buildroot/base:20250218.2110@sha256:340aa0de68e8e13e4eca70a00aaf94ec68d3a3891c28f3e7495d844829a8c958"
-    "corrosion" = "docker-image://ghcr.io/liken-sh/corrosion:2026.11.23-001@sha256:43cbed55c6fa72e65afe5cba3038cc6b097767ce75821636d205a38d3f0f5fb0"
+    "corrosion" = "docker-image://ghcr.io/liken-sh/corrosion:2026.11.28-001@sha256:5e6f02ba16735c3909452f2a865d8f7232567940d75b039fa9c826abf11c92fc"
     "cosign" = "docker-image://ghcr.io/sigstore/cosign/cosign:v3.1.6@sha256:7d08ec40d6f6fd9ced81a498c367ee6d4dd90d73218f58a791f78661bdbef769"
     "debian" = "docker-image://debian:sid-slim@sha256:221cb1673dc474811ff69c5d40750ad1c7043b45df553072709a58328b6a156e"
     "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5"
@@ -1141,7 +1141,7 @@ target "library-operator-corrosion" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "corrosion" = "docker-image://ghcr.io/liken-sh/corrosion:2026.11.23-001@sha256:43cbed55c6fa72e65afe5cba3038cc6b097767ce75821636d205a38d3f0f5fb0"
+    "corrosion" = "docker-image://ghcr.io/liken-sh/corrosion:2026.11.28-001@sha256:5e6f02ba16735c3909452f2a865d8f7232567940d75b039fa9c826abf11c92fc"
   }
   args = {
     VERSION = VERSION
