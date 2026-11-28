@@ -4,8 +4,8 @@
 name = "mpv"
 # The date of the snapshot.debian.org archive that the build installs
 # from, as YYYYMMDD. Every base on Debian uses the same date.
-version = "20261123"
-revision = 2
+version = "20261128"
+revision = 1
 license = "MIT"
 
 # The upstream releases that the image holds. Each one is a label of

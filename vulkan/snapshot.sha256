@@ -2,4 +2,4 @@
 # install from, by its name under /var/lib/apt/lists. snapshot.sh checks
 # them after apt-get update. A new snapshot date needs new lines here:
 # the names carry the date, so a date with no lines fails the build.
-3c6840386d80680ec7b4b586f55251d632317dd01d8480566c8c3ca7ff33de1c  snapshot.debian.org_archive_debian_20261123T000000Z_dists_sid_InRelease
+868a38823b5db7b5e922a8437f48bc03392d519168d4a5f8cda9a4bba88419be  snapshot.debian.org_archive_debian_20261128T000000Z_dists_sid_InRelease
