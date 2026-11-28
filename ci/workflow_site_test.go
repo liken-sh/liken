@@ -93,6 +93,7 @@ func TestTheSiteDeploysInAJobOfItsOwnAfterTheBuild(t *testing.T) {
 	}{
 		{"site", "permissions", map[string]any{"contents": "read"}},
 		{"site-deploy", "needs", "site"},
+		{"site-deploy", "if", "${{ !failure() && !cancelled() && needs.site.result == 'success' }}"},
 		{"site-deploy", "permissions", map[string]any{"pages": "write", "id-token": "write"}},
 		{"site-deploy", "concurrency", map[string]any{"group": "site"}},
 	}

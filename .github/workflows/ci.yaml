@@ -1748,8 +1748,14 @@ jobs:
   # GitHub's Pages starter workflow also uploads in one job and deploys
   # in the next. Only this job deploys to Pages, so only this job has
   # the Pages permissions.
+  #
+  # A job without an if runs only when every job above it in the chain
+  # of needs succeeded, and the site needs component jobs that a push
+  # skips. So the deploy states the same guard as the site, and runs
+  # when the site succeeded.
   site-deploy:
     needs: site
+    if: ${{ !failure() && !cancelled() && needs.site.result == 'success' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
