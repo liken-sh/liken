@@ -97,17 +97,17 @@ ADD --checksum=sha256:148fbc5c8f213718861a85e323b5c137c53674b878596413cb2b402dc4
 # and the graphics compiler release that the runtime's release names.
 # The sums are the ones the two releases publish. latest.sh beside this
 # file reports each pin and moves them.
-ADD --checksum=sha256:96046069e94680b761df6e83ddc64244721178b826e3e1f8af3ca104cfd0c7c2 \
-    https://github.com/intel/compute-runtime/releases/download/26.40.40196.8/intel-opencl-icd_26.40.40196.8-0_amd64.deb \
+ADD --checksum=sha256:9d54a23957cb695a9602d389e70d124b3734331a732e7e20074bb6894e221d22 \
+    https://github.com/intel/compute-runtime/releases/download/26.44.40734.8/intel-opencl-icd_26.44.40734.8-0_amd64.deb \
     /debs/
 ADD --checksum=sha256:053fceadb84a1d2f9a30a0d1bc9b16424b3f1a90cc49900fcd80aadcf25c8a4d \
-    https://github.com/intel/compute-runtime/releases/download/26.40.40196.8/libigdgmm12_22.10.2_amd64.deb \
+    https://github.com/intel/compute-runtime/releases/download/26.44.40734.8/libigdgmm12_22.10.2_amd64.deb \
     /debs/
-ADD --checksum=sha256:e20539632f2d99875d8f8b225d5da58b31f98baa54bb47c6328aa98ec473ab9d \
-    https://github.com/intel/intel-graphics-compiler/releases/download/v2.42.6/intel-igc-core-2_2.42.6+23070_amd64.deb \
+ADD --checksum=sha256:552916f771d8ec69a04e88f7c5a760f29c9cb2302dbf721ebde2144eae94817f \
+    https://github.com/intel/intel-graphics-compiler/releases/download/v2.43.9/intel-igc-core-2_2.43.9+23453_amd64.deb \
     /debs/
-ADD --checksum=sha256:7f5593cf828503ffb8450967768bde9209e22753bc576296e846b5a751011fa3 \
-    https://github.com/intel/intel-graphics-compiler/releases/download/v2.42.6/intel-igc-opencl-2_2.42.6+23070_amd64.deb \
+ADD --checksum=sha256:aec09bf2e1f30f6bfb79597a42b3f7d9935c5835c5cfbf863f28ceff48fc88d6 \
+    https://github.com/intel/intel-graphics-compiler/releases/download/v2.43.9/intel-igc-opencl-2_2.43.9+23453_amd64.deb \
     /debs/
 
 # The tree of the ffmpeg image, so the closure can check that every
