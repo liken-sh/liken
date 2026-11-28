@@ -52,8 +52,8 @@ FROM buildroot AS daemons
 # liken/userland/VERSION and liken/userland/fetch.sh.
 # liken/userland/latest.sh --bump writes the two lines below with them,
 # and `cd ci && go run . pins -root ..` fails when they differ.
-ARG BUILDROOT_COMMIT=cd21c00a15fa8c95acb1884d32eacc26d243a38b
-ARG BUILDROOT_SHA256=0ba07b33f9a3a9ae8550004ddc0ae3a9935dc95241b3d2a5e87f01ae649073ac
+ARG BUILDROOT_COMMIT=b7cf45d3cbfa91c5e4ee752d6b827331db8ed287
+ARG BUILDROOT_SHA256=b553dae9d8df2f43e6c97021165e4bf913829fdf84a06507644792501e44d6ca
 
 WORKDIR /home/br-user
 ADD --chown=br-user:br-user --checksum=sha256:${BUILDROOT_SHA256} \

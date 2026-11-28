@@ -8,7 +8,7 @@
 # only whether iscsi_tcp is loaded, and init loads the module before
 # k3s starts, so the build leaves out the tools and every compression
 # library: libkmod never reads a module file here.
-LIBKMOD_STATIC_VERSION = 34.3
+LIBKMOD_STATIC_VERSION = 34.4
 LIBKMOD_STATIC_SOURCE = kmod-$(LIBKMOD_STATIC_VERSION).tar.xz
 LIBKMOD_STATIC_SITE = $(BR2_KERNEL_MIRROR)/linux/utils/kernel/kmod
 LIBKMOD_STATIC_LICENSE = LGPL-2.1+
