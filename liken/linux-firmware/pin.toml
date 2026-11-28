@@ -9,10 +9,10 @@
 # the text of each one. No one SPDX expression names those terms, so
 # the SBOM names them with a LicenseRef.
 [linux-firmware]
-version = "20261019"
-url = "https://cdn.kernel.org/pub/linux/kernel/firmware/linux-firmware-20261019.tar.xz"
-sha256 = "a10d1ab5baf2c74ba92e8c7cf313e691696c26bddfa6df00db795e48d70cd4ca"
-purl = "pkg:generic/linux-firmware@20261019?download_url=https://cdn.kernel.org/pub/linux/kernel/firmware/linux-firmware-20261019.tar.xz&checksum=sha256:a10d1ab5baf2c74ba92e8c7cf313e691696c26bddfa6df00db795e48d70cd4ca"
+version = "20261124"
+url = "https://cdn.kernel.org/pub/linux/kernel/firmware/linux-firmware-20261124.tar.xz"
+sha256 = "2cabe10253005f55bf4bbc0ebb25c0964d66f7c4121ffa47853ff1e70ea1aa54"
+purl = "pkg:generic/linux-firmware@20261124?download_url=https://cdn.kernel.org/pub/linux/kernel/firmware/linux-firmware-20261124.tar.xz&checksum=sha256:2cabe10253005f55bf4bbc0ebb25c0964d66f7c4121ffa47853ff1e70ea1aa54"
 license = "LicenseRef-linux-firmware"
 type = "firmware"
 
