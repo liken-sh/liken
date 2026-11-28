@@ -96,8 +96,8 @@ jobs:
       # only the versions in its own table.
       - uses: j178/prek-action@7b101f8338a08d2bd6fdb3625e4e7692428763a3 # v3.1.1
         with:
-          prek-version: 0.5.11
-          sha256: a4ff4c70aef6f21925aa52b82d0746095fbd66893ac3b053e859f6d3454c16ae
+          prek-version: 0.5.12
+          sha256: 646c2172a9c8e3b4b33ec803fd027d679ee3319db35a20b53dd2a206f8a15763
           extra-args: --all-files ffmpeg/
 
   # Each image builds through docker-bake.hcl at the top of the
@@ -410,7 +410,7 @@ jobs:
       # failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/ffmpeg.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           sarif_file: trivy/ffmpeg.sarif
           category: trivy/ffmpeg

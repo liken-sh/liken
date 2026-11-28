@@ -302,7 +302,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
-      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+      - uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
         with:
           tool: cargo-llvm-cov
 
@@ -344,7 +344,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
-      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+      - uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
         with:
           tool: cargo-llvm-cov
 
@@ -377,7 +377,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
-      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+      - uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
         with:
           tool: cargo-llvm-cov
 
@@ -403,8 +403,8 @@ jobs:
         env:
           SKIP: gofmt,go-vet,go-mod-tidy,cargo-fmt-media-browser
         with:
-          prek-version: 0.5.11
-          sha256: a4ff4c70aef6f21925aa52b82d0746095fbd66893ac3b053e859f6d3454c16ae
+          prek-version: 0.5.12
+          sha256: 646c2172a9c8e3b4b33ec803fd027d679ee3319db35a20b53dd2a206f8a15763
           extra-args: --all-files library-operator/
 
   codeql-go:
@@ -463,7 +463,7 @@ jobs:
       # a module with a directory of another component, and that
       # component's own job analyzes it. CodeQL traces the build in the
       # next step and extracts each package that the build compiles.
-      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           languages: go
           build-mode: manual
@@ -476,7 +476,7 @@ jobs:
       # The category keeps this job's alerts apart from every other
       # analysis: code scanning closes an alert only when a later upload
       # in the same category no longer reports it.
-      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           category: codeql/library-operator/go
 
@@ -501,7 +501,7 @@ jobs:
       # analysis to this job's directory. A crate of another component
       # that this crate takes by path is analyzed in that component's own
       # job. The analysis reads the sources without a build.
-      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           languages: rust
           build-mode: none
@@ -512,7 +512,7 @@ jobs:
       # The category keeps this job's alerts apart from every other
       # analysis: code scanning closes an alert only when a later upload
       # in the same category no longer reports it.
-      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           category: codeql/library-operator/rust
 
@@ -537,7 +537,7 @@ jobs:
       # analysis to this job's directory. A crate of another component
       # that this crate takes by path is analyzed in that component's own
       # job. The analysis reads the sources without a build.
-      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           languages: rust
           build-mode: none
@@ -548,7 +548,7 @@ jobs:
       # The category keeps this job's alerts apart from every other
       # analysis: code scanning closes an alert only when a later upload
       # in the same category no longer reports it.
-      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           category: codeql/library-operator/rust-appearances
 
@@ -573,7 +573,7 @@ jobs:
       # analysis to this job's directory. A crate of another component
       # that this crate takes by path is analyzed in that component's own
       # job. The analysis reads the sources without a build.
-      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           languages: rust
           build-mode: none
@@ -584,7 +584,7 @@ jobs:
       # The category keeps this job's alerts apart from every other
       # analysis: code scanning closes an alert only when a later upload
       # in the same category no longer reports it.
-      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           category: codeql/library-operator/rust-titles
 
@@ -904,7 +904,7 @@ jobs:
       # failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/library-operator.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           sarif_file: trivy/library-operator.sarif
           category: trivy/library-operator
@@ -921,7 +921,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/library-operator-ffmpeg.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           sarif_file: trivy/library-operator-ffmpeg.sarif
           category: trivy/library-operator-ffmpeg
@@ -938,7 +938,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/library-operator-media-browser.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           sarif_file: trivy/library-operator-media-browser.sarif
           category: trivy/library-operator-media-browser
@@ -955,7 +955,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/library-operator-appearances.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           sarif_file: trivy/library-operator-appearances.sarif
           category: trivy/library-operator-appearances
@@ -972,7 +972,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/library-operator-titles.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           sarif_file: trivy/library-operator-titles.sarif
           category: trivy/library-operator-titles
@@ -989,7 +989,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/library-operator-corrosion.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           sarif_file: trivy/library-operator-corrosion.sarif
           category: trivy/library-operator-corrosion
@@ -1006,7 +1006,7 @@ jobs:
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/library-operator-cli.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           sarif_file: trivy/library-operator-cli.sarif
           category: trivy/library-operator-cli

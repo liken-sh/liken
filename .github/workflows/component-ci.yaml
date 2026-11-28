@@ -186,8 +186,8 @@ jobs:
         env:
           SKIP: gofmt,go-vet,go-mod-tidy
         with:
-          prek-version: 0.5.11
-          sha256: a4ff4c70aef6f21925aa52b82d0746095fbd66893ac3b053e859f6d3454c16ae
+          prek-version: 0.5.12
+          sha256: 646c2172a9c8e3b4b33ec803fd027d679ee3319db35a20b53dd2a206f8a15763
           extra-args: --all-files ci/
 
   codeql-go:
@@ -246,7 +246,7 @@ jobs:
       # a module with a directory of another component, and that
       # component's own job analyzes it. CodeQL traces the build in the
       # next step and extracts each package that the build compiles.
-      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           languages: go
           build-mode: manual
@@ -259,6 +259,6 @@ jobs:
       # The category keeps this job's alerts apart from every other
       # analysis: code scanning closes an alert only when a later upload
       # in the same category no longer reports it.
-      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           category: codeql/ci/go

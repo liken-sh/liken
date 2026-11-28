@@ -96,8 +96,8 @@ jobs:
       # only the versions in its own table.
       - uses: j178/prek-action@7b101f8338a08d2bd6fdb3625e4e7692428763a3 # v3.1.1
         with:
-          prek-version: 0.5.11
-          sha256: a4ff4c70aef6f21925aa52b82d0746095fbd66893ac3b053e859f6d3454c16ae
+          prek-version: 0.5.12
+          sha256: 646c2172a9c8e3b4b33ec803fd027d679ee3319db35a20b53dd2a206f8a15763
           extra-args: --all-files weston/
 
   codeql-c-cpp:
@@ -120,7 +120,7 @@ jobs:
       # configuration names paths, so the configuration limits the
       # analysis to this job's directory. The analysis reads the sources
       # without a build.
-      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           languages: c-cpp
           build-mode: none
@@ -131,7 +131,7 @@ jobs:
       # The category keeps this job's alerts apart from every other
       # analysis: code scanning closes an alert only when a later upload
       # in the same category no longer reports it.
-      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           category: codeql/weston/c-cpp
 
@@ -155,7 +155,7 @@ jobs:
       # configuration names paths, so the configuration limits the
       # analysis to this job's directory. The analysis reads the sources
       # without a build.
-      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           languages: python
           build-mode: none
@@ -166,7 +166,7 @@ jobs:
       # The category keeps this job's alerts apart from every other
       # analysis: code scanning closes an alert only when a later upload
       # in the same category no longer reports it.
-      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           category: codeql/weston/python
 
@@ -480,7 +480,7 @@ jobs:
       # failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/weston.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           sarif_file: trivy/weston.sarif
           category: trivy/weston

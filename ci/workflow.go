@@ -27,7 +27,7 @@ var templateFiles embed.FS
 
 // prekVersion is the version of prek that every prek job and the root
 // workflow's repository job run, so a hook behaves the same in each.
-const prekVersion = "0.5.11"
+const prekVersion = "0.5.12"
 
 // prekSHA256 is the SHA-256 digest of prek's x86_64-unknown-linux-gnu
 // archive at prekVersion, which prek-action downloads on the
@@ -37,7 +37,7 @@ const prekVersion = "0.5.11"
 // sha256 input, and the action fails on a mismatch.
 // `ci/latest.sh --bump prek` writes both constants, after it checks the
 // archive against the release's .sha256 file and its GitHub attestation.
-const prekSHA256 = "a4ff4c70aef6f21925aa52b82d0746095fbd66893ac3b053e859f6d3454c16ae"
+const prekSHA256 = "646c2172a9c8e3b4b33ec803fd027d679ee3319db35a20b53dd2a206f8a15763"
 
 // fluxVersionFile holds the flux release that the OS ships. The
 // publish job pushes each deploy artifact with the flux CLI of that
