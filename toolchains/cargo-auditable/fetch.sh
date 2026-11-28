@@ -33,8 +33,8 @@ source "$here/../pin.sh"
 
 require_tools tar xz sha256sum
 
-version="0.7.7"
-sha256="4c8d3b08c3c34e9f2333367224dbbfb4aab68067698b43de59fe19aded3416dd"
+version="0.7.8"
+sha256="b45933cd4e6ad7be0b70bf62de81efd7ff33c6d254bfba059137aa0a6a9b6783"
 
 (($# == 1)) || fail "usage: fetch.sh <dir>"
 out="$1"

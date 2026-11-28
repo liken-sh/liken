@@ -12,7 +12,7 @@
 # carries a digest, because a tag moves and the recipe of a pinned
 # component must not.
 [build]
-golang = "golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d"
+golang = "golang:1.27.4-trixie@sha256:430985542100b871e108ccc00e8dcc5eef08ca14ee5825e98ebf563d8ffec4ee"
 rust = "rust:1.100.0-trixie@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8"
 # The builder of the static programs in liken/userland and of the
 # daemons of the bluetoothd image. It is buildroot's own CI image, at
@@ -34,13 +34,13 @@ corrosion = "ghcr.io/liken-sh/corrosion:2026.11.23-001@sha256:43cbed55c6fa72e65a
 # component runs it to sign each image it pushes. Both read this line,
 # so cosign is pinned by digest like the builders; grep for cosign
 # under liken/ and ci/ to list the users.
-cosign = "ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c273506d52ca43edaa1d9e53e6510fa78a48f69c2d"
+cosign = "ghcr.io/sigstore/cosign/cosign:v3.1.6@sha256:7d08ec40d6f6fd9ced81a498c367ee6d4dd90d73218f58a791f78661bdbef769"
 # The SBOM generator that buildx runs on each image that a publish
 # pushes. No Dockerfile builds from it. Without this line, buildx pulls
 # its default generator by the moving tag stable-1, so the scanner
 # that writes each SBOM would change with no change to the tree.
 # ci/sign.go reads this line.
-buildkit-syft-scanner = "docker/buildkit-syft-scanner:1.12.1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315"
+buildkit-syft-scanner = "docker/buildkit-syft-scanner:1.13.0@sha256:a190379321cf51fba8c284a1834555b55e7bf58d577d574db23370461defc430"
 # The BuildKit daemon that builds every image in CI. No Dockerfile
 # builds from it. Each CI job that builds images creates a builder
 # with docker/setup-buildx-action, which runs BuildKit in a container.
@@ -70,8 +70,8 @@ grype = "anchore/grype:v0.122.1@sha256:661583704a253c0448ed63998b5ea2cd9d5a76ee7
 # from this table at another tag.
 [run]
 eclipse-mosquitto = "eclipse-mosquitto:2.1.4-alpine"
-csi-node-driver-registrar = "registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.18.0"
-csi-provisioner = "registry.k8s.io/sig-storage/csi-provisioner:v6.4.0"
-csi-resizer = "registry.k8s.io/sig-storage/csi-resizer:v2.3.0"
+csi-node-driver-registrar = "registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.18.1"
+csi-provisioner = "registry.k8s.io/sig-storage/csi-provisioner:v6.4.1"
+csi-resizer = "registry.k8s.io/sig-storage/csi-resizer:v2.3.1"
 curl = "curlimages/curl:8.23.0"
 busybox = "busybox:1.38.0"
