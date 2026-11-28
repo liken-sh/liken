@@ -3,10 +3,10 @@
 package drivers
 
 // Tag is the tag of the indi images, <version>-<revision> from indi/package.toml.
-const Tag = "20261123-1"
+const Tag = "20261128-1"
 
 // WestonTag is the tag of the weston image, <version>-<revision> from weston/package.toml.
-const WestonTag = "20261123-1"
+const WestonTag = "20261128-1"
 
 // families maps each third-party driver to the family of the image
 // that holds it, and to "" when no image holds it.
